@@ -1,0 +1,50 @@
+{
+  "name": "software-barbearia",
+  "version": "1.0.0",
+  "description": "Plataforma premium de gestao para barbearias",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:api": "prisma db push && tsx src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "test:db": "cross-env RUN_DB_TESTS=1 DATA_BACKEND=prisma vitest run tests/db.integration.spec.ts",
+    "smoke:api": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"
+  },
+  "keywords": [
+    "barbearia",
+    "gestao",
+    "saas",
+    "agenda",
+    "financeiro"
+  ],
+  "author": "Projeto Software Barbearia Premium",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "cross-env": "^10.1.0",
+    "prisma": "^6.16.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/static": "^9.1.3",
+    "@prisma/client": "^6.16.2",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.8.5",
+    "zod": "^4.3.6"
+  }
+}

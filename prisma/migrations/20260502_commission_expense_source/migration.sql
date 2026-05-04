@@ -1,0 +1,1 @@
+ALTER TYPE "public"."RevenueSource" ADD VALUE IF NOT EXISTS 'COMMISSION';

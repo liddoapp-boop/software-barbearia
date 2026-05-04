@@ -1,0 +1,12 @@
+ALTER TABLE "public"."FinancialEntry"
+ADD COLUMN "category" TEXT,
+ADD COLUMN "paymentMethod" TEXT,
+ADD COLUMN "professionalId" TEXT,
+ADD COLUMN "customerId" TEXT,
+ADD COLUMN "notes" TEXT,
+ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE "public"."CommissionEntry"
+ADD COLUMN "commissionRate" DECIMAL(8,4),
+ADD COLUMN "status" TEXT NOT NULL DEFAULT 'PENDING',
+ADD COLUMN "paidAt" TIMESTAMP(3);

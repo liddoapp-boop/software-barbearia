@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B0F14" />
+    <title>Barbearia Premium | Dashboard Operacional</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/styles/layout.css" />
+  </head>
+  <body class="theme-dark bg-gray-50 text-gray-900 overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
+    <div id="appShell">
+      <aside id="appSidebar" aria-label="Navegacao principal"></aside>
+
+      <div id="appMain">
+        <header id="appTopbar"></header>
+
+        <main id="appContent" class="min-w-0">
+          <section id="dashboardSection" data-section="dashboard" class="module-section space-y-4 min-w-0">
+            <section class="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white shadow-sm">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.18em] text-slate-300">Painel executivo</p>
+                  <h2 class="text-2xl font-extrabold mt-1">Visao rapida para decisao imediata</h2>
+                  <p class="text-sm text-slate-300 mt-1">Em 5 segundos: receita, ocupacao e prioridade de acao.</p>
+                </div>
+                <div class="rounded-xl border border-slate-600 bg-slate-900/50 px-3 py-2 text-xs text-slate-200">
+                  Menos ruido, mais clareza
+                </div>
+              </div>
+              <section id="kpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-4"></section>
+            </section>
+
+            <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-2">Meta mensal</h3>
+                <div id="goalBlock"></div>
+              </article>
+              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-red-700 mb-2">Alertas (max 3)</h3>
+                <div id="alertsList" class="space-y-2"></div>
+              </article>
+              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-emerald-700 mb-2">Performance</h3>
+                <div id="topProfessionalsList" class="space-y-2"></div>
+              </article>
+            </section>
+
+            <section class="grid grid-cols-1 gap-3">
+              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-indigo-700 mb-2">Insights</h3>
+                <div id="actionSuggestionsList" class="space-y-2"></div>
+              </article>
+            </section>
+
+            <div id="topsList" class="hidden"></div>
+            <div id="forecastList" class="hidden"></div>
+            <div id="smartAlertsList" class="hidden"></div>
+            <div id="dashboardLowStockList" class="hidden"></div>
+            <div id="dashboardPlaybookPanel" class="hidden"></div>
+            <div id="dashboardTelemetryPanel" class="hidden"></div>
+            <div id="dashboardAutomationSignals" class="hidden"></div>
+          </section>
+
+          <section id="agendaSection" data-section="agenda" class="module-section hidden min-w-0">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h2 class="text-2xl font-extrabold text-slate-900">Agenda</h2>
+              <div class="flex items-center gap-2">
+                <button id="agendaNewAppointmentBtn" type="button" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Novo agendamento</button>
+                <div class="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button id="viewListBtn" type="button" class="px-3 py-2 text-sm bg-white text-gray-700">Lista</button>
+                  <button id="viewGridBtn" type="button" class="px-3 py-2 text-sm bg-gray-900 text-white">Cards</button>
+                </div>
+              </div>
+            </div>
+
+            <article id="agendaSchedulePanel" class="ux-card mb-3">
+              <h2 class="text-lg font-bold text-gray-800 mb-3">Novo Agendamento</h2>
+              <form id="appointmentForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label class="text-sm font-semibold text-gray-700">Cliente
+                  <select id="clientId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                </label>
+                <label class="text-sm font-semibold text-gray-700">Profissional
+                  <select id="professionalId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                </label>
+                <label class="text-sm font-semibold text-gray-700">Servico
+                  <select id="serviceId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                </label>
+                <label class="text-sm font-semibold text-gray-700">Horario
+                  <input type="datetime-local" id="startsAt" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+                </label>
+                <div id="clientInsights" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
+                  Selecione um cliente para ver historico resumido e perfil.
+                </div>
+                <div id="serviceSuggestions" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
+                  Sugestoes de servicos relacionados aparecerao aqui.
+                </div>
+                <div id="appointmentFeedback" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
+                  Selecione cliente, profissional, servico e horario para validar disponibilidade.
+                </div>
+                <div id="alternativeSlots" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
+                  Horarios alternativos serao sugeridos aqui em caso de conflito.
+                </div>
+                <button type="submit" class="md:col-span-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 font-semibold transition-colors">Agendar</button>
+              </form>
+            </article>
+
+            <div id="agendaCardsMode">
+            <section id="agendaMetricsGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-3"></section>
+            <section class="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
+              <article class="ux-card min-w-0">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <h2 class="text-lg font-bold text-gray-800">Agenda Operacional (Cards)</h2>
+                  <button
+                    id="toggleAgendaFiltersBtn"
+                    type="button"
+                    class="agenda-filters-toggle rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700"
+                  >
+                    Mostrar filtros
+                  </button>
+                  <div id="agendaFiltersPanel" class="agenda-filters-panel flex flex-wrap gap-2">
+                    <input
+                      id="filterSearch"
+                      type="search"
+                      placeholder="Buscar cliente, servico ou profissional"
+                      class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]"
+                    />
+                    <select id="filterProfessional" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                      <option value="">Todos profissionais</option>
+                    </select>
+                    <select id="filterStatus" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                      <option value="">Todos status</option>
+                      <option value="SCHEDULED">Agendado</option>
+                      <option value="CONFIRMED">Confirmado</option>
+                      <option value="IN_SERVICE">Em atendimento</option>
+                      <option value="COMPLETED">Concluido</option>
+                      <option value="CANCELLED">Cancelado</option>
+                      <option value="NO_SHOW">Nao compareceu</option>
+                    </select>
+                    <select id="filterService" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                      <option value="">Todos servicos</option>
+                    </select>
+                    <select id="filterPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                      <option value="today">Hoje</option>
+                      <option value="week">Semana</option>
+                      <option value="month">Mes</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="agendaList" class="space-y-2"></div>
+              </article>
+
+              <aside class="space-y-3">
+                <article class="ux-card">
+                  <h2 class="text-lg font-bold text-gray-800 mb-3">Fila do Momento</h2>
+                  <div id="queueList" class="space-y-2"></div>
+                </article>
+                <article class="ux-card">
+                  <h2 class="text-lg font-bold text-gray-800 mb-3">Estoque Baixo</h2>
+                  <div id="lowStockList" class="space-y-2"></div>
+                </article>
+                <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+                  <h2 class="text-lg font-bold text-gray-800 mb-2">
+              </aside>
+            </section>
+            </div>
+          </section>
+
+          <div id="agendaListMode" class="hidden min-w-0 mt-3">
+            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Agenda - Visao Lista</h2>
+                  <p id="appointmentsHeaderDate" class="text-sm text-slate-500 mt-1"></p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <span id="appointmentsPeriodSummary">Resumo do periodo</span>
+                </div>
+              </div>
+
+              <section id="appointmentsSummaryGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-4"></section>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                  <label class="text-xs font-semibold text-slate-600">Data
+                    <input id="appointmentsFilterDate" type="date" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Periodo
+                    <select id="appointmentsFilterPeriod" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="today">Hoje</option>
+                      <option value="tomorrow">Amanha</option>
+                      <option value="week">Semana</option>
+                      <option value="month">Mes</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Status
+                    <select id="appointmentsFilterStatus" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="">Filtrando todos os agendamentos</option>
+                      <option value="SCHEDULED">Agendado</option>
+                      <option value="CONFIRMED">Confirmado</option>
+                      <option value="IN_SERVICE">Em atendimento</option>
+                      <option value="COMPLETED">Concluido</option>
+                      <option value="CANCELLED">Cancelado</option>
+                      <option value="NO_SHOW">Falta</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Profissional
+                    <select id="appointmentsFilterProfessional" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="">Todos os profissionais</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Servico
+                    <select id="appointmentsFilterService" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="">Todos os servicos</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Cliente
+                    <select id="appointmentsFilterClient" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="">Todos os clientes</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600 md:col-span-2">Busca por nome ou telefone
+                    <input
+                      id="appointmentsFilterSearch"
+                      type="search"
+                      placeholder="Ex.: Joao ou 11999990000"
+                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <div id="appointmentsFeedback" class="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 mt-4">
+                Painel operacional pronto para agir sobre os atendimentos do periodo.
+              </div>
+
+              <div id="appointmentsEmptyState" class="hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center mt-4">
+                <p class="text-base font-semibold text-slate-700">Nao ha agendamentos para este periodo.</p>
+                <p class="text-sm text-slate-500 mt-1">Crie um novo horario, volte para hoje ou limpe os filtros para ampliar a busca.</p>
+                <div class="mt-3 flex flex-wrap justify-center gap-2">
+                  <button type="button" id="appointmentsEmptyNew" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Criar novo agendamento</button>
+                  <button type="button" id="appointmentsEmptyToday" class="min-h-[44px] rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 px-4 py-2 text-sm font-semibold">Ver agenda de hoje</button>
+                  <button type="button" id="appointmentsEmptyClear" class="min-h-[44px] rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 px-4 py-2 text-sm font-semibold">Limpar filtros</button>
+                </div>
+              </div>
+
+              <section id="appointmentsTableWrap" class="grid grid-cols-1 xl:grid-cols-[1.65fr_1fr] gap-3 mt-4">
+                <div class="ux-table hidden xl:block">
+                  <table class="w-full border-collapse">
+                    <thead class="bg-slate-50">
+                      <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th class="px-3 py-3">Horario</th>
+                        <th class="px-3 py-3">Cliente</th>
+                        <th class="px-3 py-3">Servico</th>
+                        <th class="px-3 py-3">Profissional</th>
+                        <th class="px-3 py-3">Duracao</th>
+                        <th class="px-3 py-3">Valor</th>
+                        <th class="px-3 py-3">Status e sinais</th>
+                        <th class="px-3 py-3">Acoes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="appointmentsTableBody"></tbody>
+                  </table>
+                </div>
+                <div id="appointmentsMobileList" class="space-y-2 xl:hidden"></div>
+                <aside id="appointmentsDetailPanel" class="hidden rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between gap-2 mb-2">
+                    <h3 class="text-sm font-bold uppercase tracking-wide text-slate-600">Detalhe</h3>
+                    <button type="button" id="appointmentsDetailClose" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">Fechar</button>
+                  </div>
+                  <div id="appointmentsDetailContent" class="space-y-2 text-sm text-slate-700"></div>
+                </aside>
+              </section>
+            </article>
+          </div>
+
+          <section id="operationSection" data-section="operacao" class="module-section hidden min-w-0">
+            <section class="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-3">
+              <article class="bg-slate-900 rounded-xl border border-slate-700 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-white mb-1">PDV de Produtos</h2>
+                <p class="text-sm text-slate-300 mb-4">Fluxo direto para venda: item, carrinho e fechamento.</p>
+                <form id="saleForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label class="text-sm font-semibold text-slate-200">Produto
+                    <select id="saleProductId" required class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
+                  </label>
+                  <label class="text-sm font-semibold text-slate-200">Quantidade
+                    <input type="number" id="saleQty" min="1" value="1" required class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm" />
+                  </label>
+                  <button type="button" id="saleAddItemBtn" class="md:col-span-2 min-h-[48px] rounded-lg border border-slate-500 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 font-semibold transition-colors">
+                    Adicionar ao carrinho
+                  </button>
+                  <label class="text-sm font-semibold text-slate-200">Cliente (opcional)
+                    <select id="saleClientId" class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
+                  </label>
+                  <label class="text-sm font-semibold text-slate-200">Profissional (opcional)
+                    <select id="saleProfessionalId" class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
+                  </label>
+                  <div class="md:col-span-2">
+                    <div id="saleCartList" class="space-y-2"></div>
+                  </div>
+                  <div id="saleTotal" class="md:col-span-2 flex justify-between items-center border border-emerald-400 bg-emerald-950 p-3 rounded-lg mb-4">
+                    <span class="text-emerald-200">
+                      Total
+                      <span id="saleTotalItems" class="block text-xs text-emerald-300">0 item(ns)</span>
+                    </span>
+                    <span id="saleTotalValue" class="text-2xl font-extrabold text-emerald-100">R$ 0,00</span>
+                  </div>
+                  <div class="md:col-span-2 flex flex-wrap gap-2">
+                    <button type="button" id="saleClearCartBtn" class="min-h-[48px] rounded-lg border border-slate-500 bg-slate-950 hover:bg-slate-800 text-slate-100 px-4 py-2 font-semibold transition-colors">
+                      Limpar carrinho
+                    </button>
+                    <button type="submit" id="saleCheckoutBtn" class="min-h-[48px] rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-2 font-extrabold transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+                    Registrar Venda
+                    </button>
+                  </div>
+                </form>
+                <div id="saleFeedback" class="mt-2"></div>
+              </article>
+              <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-gray-800 mb-3">Vendas recentes e historico</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                  <input id="saleHistorySearch" type="search" placeholder="Buscar cliente, produto ou venda" class="min-h-[40px] rounded-lg border border-gray-200 px-3 py-2 text-sm sm:col-span-2" />
+                  <input id="saleHistoryStart" type="date" class="min-h-[40px] rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+                  <input id="saleHistoryEnd" type="date" class="min-h-[40px] rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+                  <button type="button" id="saleHistoryRefreshBtn" class="min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700 sm:col-span-2">
+                    Atualizar historico
+                  </button>
+                </div>
+                <div id="saleRecentList" class="space-y-2">
+                  <p class="text-sm text-gray-500">Carregando vendas...</p>
+                </div>
+              </article>
+            </section>
+
+            <section class="mt-3">
+              <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+                <h2 class="text-lg font-bold text-gray-800">Caixa operacional no modulo Financeiro</h2>
+                <p class="text-sm text-gray-600 mt-2">
+                  O detalhamento completo de receita, despesas, lucro, comissoes e fluxo de caixa fica centralizado na aba Financeiro.
+                </p>
+              </article>
+            </section>
+          </section>
+
+          <section id="financeiroSection" data-section="financeiro" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Financeiro</h2>
+                  <p class="text-sm text-slate-500 mt-1">Visao gerencial consolidada: receita total, despesas, lucro e fluxo de caixa.</p>
+                </div>
+                
+              </div>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <select id="financialPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="today">Hoje</option>
+                    <option value="week">Semana</option>
+                    <option value="month" selected>Mes</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+                  <input id="financialCustomStart" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />
+                  <input id="financialCustomEnd" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />
+                  <input id="financialSearch" type="search" placeholder="Buscar descricao ou observacao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm md:col-span-2" />
+                  <select id="financialTypeFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="">Todos os tipos</option>
+                    <option value="INCOME">Receita</option>
+                    <option value="EXPENSE">Despesa</option>
+                  </select>
+                </div>
+              </section>
+
+              <div id="financialFeedback" class="mt-3"></div>
+              <section id="financialSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 mt-4"></section>
+              <section id="financialCashflow" class="mt-4"></section>
+
+              <section class="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-4">
+                <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 class="text-base font-bold text-slate-900 mb-2">Lancamentos financeiros</h3>
+                  <div id="financialEntriesList" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 class="text-base font-bold text-slate-900 mb-2">Comissoes</h3>
+                  <div id="financialCommissionsList" class="space-y-2"></div>
+                </article>
+              </section>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-4 mt-4">
+                <h3 class="text-base font-bold text-slate-900 mb-2">Relatorios financeiros</h3>
+                <div id="financialReports" class="space-y-2"></div>
+              </section>
+
+              <div id="financialTransactionModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-slate-900/50 p-4">
+                <div class="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <h3 id="financialTransactionModalTitle" class="text-lg font-bold text-slate-900">Adicionar lancamento</h3>
+                    <button type="button" id="financialTransactionModalClose" class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700">Fechar</button>
+                  </div>
+                  <form id="financialTransactionForm" class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                    <input type="hidden" id="financialTransactionId" />
+                    <label class="text-sm font-semibold text-slate-700">Tipo
+                      <select id="financialTransactionType" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <option value="INCOME">Receita</option>
+                        <option value="EXPENSE">Despesa</option>
+                      </select>
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Categoria
+                      <input id="financialTransactionCategory" type="text" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700 md:col-span-2">Descricao
+                      <input id="financialTransactionDescription" type="text" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Valor
+                      <input id="financialTransactionAmount" type="number" step="0.01" min="0.01" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Data
+                      <input id="financialTransactionDate" type="date" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Metodo de pagamento
+                      <input id="financialTransactionPaymentMethod" type="text" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="PIX, Cartao, Dinheiro..." />
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Profissional
+                      <select id="financialTransactionProfessional" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <option value="">Nao vincular</option>
+                      </select>
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">Cliente
+                      <select id="financialTransactionCustomer" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                        <option value="">Nao vincular</option>
+                      </select>
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700 md:col-span-2">Observacao
+                      <textarea id="financialTransactionNotes" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+                    </label>
+                    <div class="md:col-span-2 flex flex-wrap justify-end gap-2 mt-2">
+                      <button type="button" id="financialTransactionModalCancel" class="min-h-[42px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+                      <button type="submit" id="financialTransactionSubmit" class="min-h-[42px] rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Salvar lancamento</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section id="estoqueSection" data-section="estoque" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Estoque</h2>
+                  <p class="text-sm text-slate-500 mt-1">Controle operacional de produtos, saldo e alertas de ruptura.</p>
+                </div>
+                <button
+                  id="inventoryAddBtn"
+                  type="button"
+                  class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold"
+                >
+                  Adicionar Produto
+                </button>
+              </div>
+
+              <section id="inventorySummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mt-4"></section>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <input
+                    id="inventorySearch"
+                    type="search"
+                    placeholder="Buscar por nome do produto"
+                    class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  />
+                  <select id="inventoryCategoryFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="">Todas categorias</option>
+                  </select>
+                  <select id="inventoryStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <option value="ALL">Todos status</option>
+                    <option value="LOW_STOCK">Estoque baixo</option>
+                    <option value="OUT_OF_STOCK">Sem estoque</option>
+                  </select>
+                </div>
+              </section>
+
+              <div id="inventoryFeedback" class="mt-3"></div>
+
+              <section id="inventoryEmptyState" class="hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center mt-4">
+                <p class="text-base font-semibold text-slate-700">Voce ainda nao cadastrou produtos no estoque.</p>
+                <button
+                  type="button"
+                  id="inventoryEmptyAddBtn"
+                  class="mt-3 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold"
+                >
+                  Adicionar primeiro produto
+                </button>
+              </section>
+
+              <section id="inventoryTableWrap" class="mt-4 ux-table hidden xl:block">
+                <table class="w-full border-collapse">
+                  <thead class="bg-slate-50">
+                    <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th class="px-3 py-3">Produto</th>
+                      <th class="px-3 py-3">Quantidade</th>
+                      <th class="px-3 py-3">Precos</th>
+                      <th class="px-3 py-3">Status</th>
+                      <th class="px-3 py-3">Acoes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inventoryTableBody"></tbody>
+                </table>
+              </section>
+
+              <div id="inventoryMobileList" class="space-y-2 mt-4 xl:hidden"></div>
+            </article>
+          </section>
+
+          <section id="clientsSection" data-section="clientes" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 class="text-lg font-bold text-gray-800">Clientes</h2>
+                  <p class="text-xs text-gray-500 mt-1">Cadastro rapido para operacao diaria.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    id="clientsAddBtn"
+                    type="button"
+                    class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold"
+                  >
+                    Novo cliente
+                  </button>
+                  <input
+                    id="clientsSearch"
+                    type="search"
+                    placeholder="Buscar cliente, telefone ou tag"
+                    class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]"
+                  />
+                  <select id="clientsStatusFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todos status</option>
+                    <option value="ACTIVE">Ativo</option>
+                    <option value="AT_RISK">Em risco</option>
+                    <option value="INACTIVE">Inativo</option>
+                    <option value="VIP">VIP</option>
+                  </select>
+                  <select id="clientsSegmentFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todos segmentos</option>
+                    <option value="VALUE_HIGH">Valor alto</option>
+                    <option value="VALUE_MEDIUM">Valor medio</option>
+                    <option value="VALUE_LOW">Valor baixo</option>
+                  </select>
+                  <select id="clientsPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="month">Mes</option>
+                    <option value="week">Semana</option>
+                    <option value="today">Hoje</option>
+                  </select>
+                </div>
+              </div>
+              <div id="clientsFeedback" class="mb-3"></div>
+              <div id="clientsSummary" class="mb-3"></div>
+              <div id="clientsReactivationQueue" class="mb-3"></div>
+              <div id="clientsAutomationSignals" class="mb-3"></div>
+              <div id="clientsTable" class="space-y-2"></div>
+            </article>
+          </section>
+
+          <section id="professionalsSection" data-section="profissionais" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h2 class="text-lg font-bold text-gray-800">Profissionais e Performance</h2>
+                <div class="flex flex-wrap gap-2">
+                  <select id="professionalsFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todos profissionais</option>
+                  </select>
+                  <select id="professionalsPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="month">Mes</option>
+                    <option value="week">Semana</option>
+                    <option value="today">Hoje</option>
+                  </select>
+                </div>
+              </div>
+              <div id="professionalsSummary" class="mb-3"></div>
+              <div id="professionalsTable" class="space-y-2"></div>
+            </article>
+          </section>
+
+          <section id="servicesSection" data-section="servicos" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Servicos</h2>
+                  <p class="text-sm text-slate-500 mt-1">Centro oficial para cadastro, rentabilidade e governanca dos servicos da operacao.</p>
+                </div>
+                <button id="servicesAddBtn" type="button" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">
+                  Adicionar Servico
+                </button>
+              </div>
+
+              <section id="servicesSummaryGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 mt-4"></section>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+                  <label class="text-xs font-semibold text-slate-600 xl:col-span-2">Busca por nome ou descricao
+                    <input id="servicesSearch" type="search" placeholder="Ex.: Corte, Barba, Sobrancelha..." class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Categoria
+                    <select id="servicesCategoryFilter" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="">Todas categorias</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Status
+                    <select id="servicesStatusFilter" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="ALL">Todos</option>
+                      <option value="ACTIVE">Ativos</option>
+                      <option value="INACTIVE">Inativos</option>
+                    </select>
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Faixa de preco
+                    <div class="mt-1 flex gap-2">
+                      <input id="servicesMinPrice" type="number" min="0" step="0.01" placeholder="Min" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                      <input id="servicesMaxPrice" type="number" min="0" step="0.01" placeholder="Max" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                    </div>
+                  </label>
+                </div>
+              </section>
+
+              <div id="servicesFeedback" class="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 mt-4">
+                Ajuste o catalogo de servicos para refletir a operacao real de agenda, PDV, financeiro e comissoes.
+              </div>
+
+              <div id="servicesEmptyState" class="hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center mt-4">
+                <p class="text-base font-semibold text-slate-700">Voce ainda nao cadastrou nenhum servico.</p>
+                <p class="text-sm text-slate-500 mt-1">Cadastre seus servicos para comecar a criar agendamentos, calcular receitas e controlar comissoes.</p>
+                <button type="button" id="servicesEmptyAddBtn" class="mt-3 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">
+                  Adicionar primeiro servico
+                </button>
+              </div>
+
+              <section id="servicesTableWrap" class="grid grid-cols-1 xl:grid-cols-[1.65fr_1fr] gap-3 mt-4">
+                <div class="rounded-xl border border-slate-200 overflow-hidden hidden xl:block">
+                  <table class="w-full border-collapse">
+                    <thead class="bg-slate-50">
+                      <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th class="px-3 py-3">Nome</th>
+                        <th class="px-3 py-3">Categoria</th>
+                        <th class="px-3 py-3">Preco</th>
+                        <th class="px-3 py-3">Duracao</th>
+                        <th class="px-3 py-3">Comissao</th>
+                        <th class="px-3 py-3">Custo</th>
+                        <th class="px-3 py-3">Margem</th>
+                        <th class="px-3 py-3">Status</th>
+                        <th class="px-3 py-3">Profissionais</th>
+                        <th class="px-3 py-3">Vendas/Receita</th>
+                        <th class="px-3 py-3">Acoes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="servicesTableBody"></tbody>
+                  </table>
+                </div>
+                <div id="servicesMobileList" class="space-y-2 xl:hidden"></div>
+                <aside id="servicesDetailPanel" class="hidden rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-center justify-between gap-2 mb-2">
+                    <h3 class="text-sm font-bold uppercase tracking-wide text-slate-600">Detalhe do servico</h3>
+                    <button type="button" id="servicesDetailClose" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">Fechar</button>
+                  </div>
+                  <div id="servicesDetailContent" class="space-y-2 text-sm text-slate-700"></div>
+                </aside>
+              </section>
+            </article>
+          </section>
+
+          <section id="commissionsSection" data-section="comissoes" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h2 class="text-lg font-bold text-gray-800">Comissoes e Extrato</h2>
+                <div class="flex flex-wrap gap-2">
+                  <select id="commissionsProfessionalFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todos profissionais</option>
+                  </select>
+                  <select id="commissionsAppliesToFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todos tipos</option>
+                    <option value="SERVICE">Servico</option>
+                    <option value="PRODUCT">Produto</option>
+                  </select>
+                  <select id="commissionsPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="month">Mes</option>
+                    <option value="week">Semana</option>
+                    <option value="today">Hoje</option>
+                  </select>
+                </div>
+              </div>
+              <div id="commissionsFeedback" class="mb-3"></div>
+              <div id="commissionsSummary" class="mb-3"></div>
+              <div id="commissionsTable" class="space-y-2"></div>
+            </article>
+          </section>
+
+          <section id="auditSection" data-section="auditoria" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Auditoria</h2>
+                  <p class="text-sm text-slate-500 mt-1">Trilha operacional append-only para acoes criticas do sistema.</p>
+                </div>
+              </div>
+
+              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2">
+                  <label class="text-xs font-semibold text-slate-600">Entidade
+                    <input id="auditEntityFilter" type="text" placeholder="Ex.: product_sale_refund" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Acao
+                    <input id="auditActionFilter" type="text" placeholder="Ex.: PRODUCT_SALE_REFUNDED" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Ator
+                    <input id="auditActorFilter" type="search" placeholder="actorId" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Inicio
+                    <input id="auditStartFilter" type="date" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Fim
+                    <input id="auditEndFilter" type="date" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">Limite
+                    <select id="auditLimitFilter" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <option value="50">50 eventos</option>
+                      <option value="100">100 eventos</option>
+                      <option value="200">200 eventos</option>
+                      <option value="500">500 eventos</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
+
+              <div id="auditFeedback" class="mt-3"></div>
+              <section id="auditEventsList" class="mt-4 space-y-3"></section>
+            </article>
+          </section>
+
+          <section id="fidelizacaoSection" data-section="fidelizacao" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h2 class="text-lg font-bold text-gray-800">Fidelizacao, Assinaturas e Multiunidade</h2>
+                <div class="flex flex-wrap gap-2">
+                  <select id="fidelizacaoPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="month">Mes</option>
+                    <option value="week">Semana</option>
+                    <option value="today">Hoje</option>
+                  </select>
+                  <select id="retentionRiskFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Risco (todos)</option>
+                    <option value="HIGH">Alto</option>
+                    <option value="MEDIUM">Medio</option>
+                    <option value="LOW">Baixo</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="fidelizacaoSummary" class="mb-3"></div>
+
+              <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                <article class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Ajuste de Fidelidade</h3>
+                  <form id="loyaltyAdjustForm" class="grid grid-cols-1 md:grid-cols-5 gap-2">
+                    <select id="loyaltyClientId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm md:col-span-2"></select>
+                    <input id="loyaltyDelta" type="number" step="0.01" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="+/- pontos" />
+                    <select id="loyaltySourceType" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                      <option value="ADJUSTMENT">Ajuste</option>
+                      <option value="REDEEM">Resgate</option>
+                    </select>
+                    <button type="submit" class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold">Aplicar</button>
+                  </form>
+                  <div id="loyaltyFeedback" class="mt-2"></div>
+                </article>
+
+                <article class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Pacotes e Assinaturas</h3>
+                  <form id="premiumActionsForm" class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <select id="premiumClientId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                    <select id="packageId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                    <select id="subscriptionPlanId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
+                    <button type="submit" class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold">Executar acoes</button>
+                  </form>
+                  <p class="mt-2 text-xs text-gray-500">Ao enviar: compra pacote e ativa assinatura para o cliente selecionado.</p>
+                  <div id="premiumFeedback" class="mt-1"></div>
+                </article>
+              </section>
+
+              <section class="grid grid-cols-1 xl:grid-cols-4 gap-3 mt-3">
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Pacotes Ativos</h3>
+                  <div id="fidelizacaoPackages" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Assinaturas</h3>
+                  <div id="fidelizacaoSubscriptions" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Retencao de Inativos</h3>
+                  <div id="fidelizacaoRetention" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Multiunidade</h3>
+                  <div id="fidelizacaoMultiunit" class="space-y-2"></div>
+                </article>
+              </section>
+            </article>
+          </section>
+
+          <section id="automacoesSection" data-section="automacoes" class="module-section hidden min-w-0">
+            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+              <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h2 class="text-lg font-bold text-gray-800">Automacoes, IA e Integracoes</h2>
+                <div class="flex flex-wrap gap-2">
+                  <select id="automacoesPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="month">Mes</option>
+                    <option value="week">Semana</option>
+                    <option value="today">Hoje</option>
+                  </select>
+                  <select id="automacoesStatusFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Execucoes (todos)</option>
+                    <option value="SUCCESS">Sucesso</option>
+                    <option value="FAILED">Falha</option>
+                    <option value="PENDING">Pendente</option>
+                  </select>
+                  <select id="automacoesRiskFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Risco (todos)</option>
+                    <option value="HIGH">Alto</option>
+                    <option value="MEDIUM">Medio</option>
+                    <option value="LOW">Baixo</option>
+                  </select>
+                  <select id="automacoesProviderFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Provedor (todos)</option>
+                    <option value="whatsapp-cloud">whatsapp-cloud</option>
+                    <option value="billing-gateway">billing-gateway</option>
+                  </select>
+                </div>
+              </div>
+              <div id="automacoesFeedback" class="mb-3"></div>
+
+              <section class="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <h3 class="text-sm font-bold text-gray-700">Regras de Automacao</h3>
+                  <select id="automacoesRulesFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <option value="">Todas regras</option>
+                    <option value="true">Somente ativas</option>
+                    <option value="false">Somente inativas</option>
+                  </select>
+                </div>
+                <form id="automationRuleForm" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2">
+                  <input id="automationRuleId" type="hidden" />
+                  <input
+                    id="automationRuleName"
+                    type="text"
+                    maxlength="120"
+                    placeholder="Nome da regra"
+                    class="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    required
+                  />
+                  <select id="automationRuleTriggerType" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                    <option value="INACTIVITY">Inatividade</option>
+                    <option value="BIRTHDAY">Aniversario</option>
+                    <option value="HIGH_RISK">Risco alto</option>
+                  </select>
+                  <select id="automationRuleChannel" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                    <option value="WHATSAPP">WhatsApp</option>
+                    <option value="SMS">SMS</option>
+                    <option value="EMAIL">E-mail</option>
+                    <option value="MANUAL">Manual</option>
+                  </select>
+                  <select id="automationRuleTarget" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                    <option value="SEGMENT">Segmento</option>
+                    <option value="CLIENT">Cliente</option>
+                  </select>
+                  <input
+                    id="automationRuleMessageTemplate"
+                    type="text"
+                    maxlength="500"
+                    placeholder="Template da mensagem"
+                    class="rounded-lg border border-gray-200 px-3 py-2 text-sm xl:col-span-2"
+                    required
+                  />
+                  <div class="md:col-span-2 xl:col-span-6 flex flex-wrap gap-2">
+                    <button
+                      id="automationRuleSubmitBtn"
+                      type="submit"
+                      class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold"
+                    >
+                      Salvar regra
+                    </button>
+                    <button
+                      id="automationRuleCancelBtn"
+                      type="button"
+                      class="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-800 px-4 py-2 text-sm font-semibold"
+                    >
+                      Cancelar edicao
+                    </button>
+                  </div>
+                </form>
+                <div id="automacoesRulesList" class="space-y-2 mt-3"></div>
+              </section>
+
+              <div id="automacoesSummary" class="mb-3"></div>
+
+              <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Execucoes de Automacao</h3>
+                  <div id="automacoesExecutions" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Clientes com Score de Risco</h3>
+                  <div id="automacoesScoring" class="space-y-2"></div>
+                </article>
+                <article class="rounded-xl border border-gray-200 bg-white p-4">
+                  <h3 class="text-sm font-bold text-gray-700 mb-2">Logs de Integracoes</h3>
+                  <div id="automacoesWebhookLogs" class="space-y-2"></div>
+                </article>
+              </section>
+            </article>
+          </section>
+
+          <section id="metasSection" data-section="metas" class="module-section hidden min-w-0 space-y-3">
+            <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Metas e Performance</h2>
+                  <p class="mt-1 text-sm text-slate-600">Acompanhe progresso da meta mensal, ritmo da empresa e ranking de resultado por profissional e servico.</p>
+                </div>
+                <button id="metasDefineGoalBtn" type="button" data-metas-action="open-goal-modal" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">
+                  Definir Meta
+                </button>
+              </div>
+              <div id="metasFeedback" class="mt-4"></div>
+            </article>
+
+            <section id="metasSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
+
+            <section class="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-3">
+              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Progresso da Meta</h3>
+                <div id="metasProgressBlock"></div>
+              </article>
+              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Insights Acionaveis</h3>
+                <div id="metasInsights"></div>
+              </article>
+            </section>
+
+            <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Ranking de Profissionais</h3>
+                <div id="metasProfessionalsRanking" class="space-y-2"></div>
+              </article>
+              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Ranking de Servicos</h3>
+                <div id="metasServicesRanking" class="space-y-2"></div>
+              </article>
+            </section>
+          </section>
+
+          <section id="settingsSection" data-section="configuracoes" class="module-section hidden min-w-0">
+            <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 class="text-2xl font-extrabold text-slate-900">Configuracoes</h2>
+                  <p class="mt-1 text-sm text-slate-600">Gerencie os dados, regras e preferencias da operacao.</p>
+                </div>
+              </div>
+              <div id="settingsFeedback" class="mt-4"></div>
+              <div id="settingsRoot" class="mt-4 space-y-4"></div>
+            </article>
+          </section>
+
+          <section id="placeholderSection" class="module-section hidden"></section>
+        </main>
+      </div>
+    </div>
+
+    <div id="inventoryProductModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
+      <article class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h3 id="inventoryProductModalTitle" class="text-base font-bold text-slate-900">Adicionar produto</h3>
+          <button id="inventoryProductModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        </div>
+        <form id="inventoryProductForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <input type="hidden" id="inventoryProductId" />
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Nome do produto
+            <input id="inventoryProductName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Preco de venda
+            <input id="inventoryProductSalePrice" type="number" min="0" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Quantidade atual
+            <input id="inventoryProductQuantity" type="number" min="0" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Custo do produto
+            <input id="inventoryProductCostPrice" type="number" min="0" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Estoque minimo
+            <input id="inventoryProductMinimumStock" type="number" min="0" step="1" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Categoria
+            <input id="inventoryProductCategory" type="text" maxlength="80" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacao
+            <textarea id="inventoryProductNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          </label>
+          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
+            <button type="button" id="inventoryProductModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" id="inventoryProductSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar produto</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div id="inventoryStockModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
+      <article class="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h3 id="inventoryStockModalTitle" class="text-base font-bold text-slate-900">Ajustar estoque</h3>
+          <button id="inventoryStockModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        </div>
+        <form id="inventoryStockForm" class="grid grid-cols-1 gap-3 p-4">
+          <input type="hidden" id="inventoryStockProductId" />
+          <input type="hidden" id="inventoryStockType" />
+          <label class="text-sm font-semibold text-slate-700">Quantidade
+            <input id="inventoryStockQuantity" type="number" min="0" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Motivo
+            <input id="inventoryStockReason" type="text" maxlength="240" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" id="inventoryStockModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" id="inventoryStockSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Confirmar</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div id="servicesModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
+      <article class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h3 id="servicesModalTitle" class="text-base font-bold text-slate-900">Adicionar servico</h3>
+          <button id="servicesModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        </div>
+        <form id="servicesForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <input type="hidden" id="servicesId" />
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Nome do servico
+            <input id="servicesName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Preco
+            <input id="servicesPrice" type="number" min="0" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Duracao (min)
+            <input id="servicesDurationMinutes" type="number" min="1" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Categoria
+            <input id="servicesCategory" type="text" maxlength="120" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Comissao padrao (%)
+            <input id="servicesDefaultCommissionRate" type="number" min="0" max="100" step="0.1" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Custo estimado
+            <input id="servicesEstimatedCost" type="number" min="0" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Status
+            <select id="servicesIsActive" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="true">Ativo</option>
+              <option value="false">Inativo</option>
+            </select>
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Descricao
+            <textarea id="servicesDescription" maxlength="1000" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Profissionais habilitados
+            <select id="servicesProfessionalIds" multiple class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm h-28"></select>
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
+            <textarea id="servicesNotes" maxlength="1000" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          </label>
+          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
+            <button type="button" id="servicesModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" id="servicesSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar servico</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div id="clientsModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
+      <article class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h3 id="clientsModalTitle" class="text-base font-bold text-slate-900">Novo cliente</h3>
+          <button id="clientsModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        </div>
+        <form id="clientsForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <label class="text-sm font-semibold text-slate-700">Nome do cliente
+            <input id="clientsName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Telefone
+            <input id="clientsPhone" type="tel" maxlength="20" required placeholder="(11) 99999-9999" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">E-mail
+            <input id="clientsEmail" type="email" maxlength="120" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Data de nascimento
+            <input id="clientsBirthDate" type="date" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Status do cliente
+            <select id="clientsStatus" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="NEW">Novo</option>
+              <option value="ACTIVE">Ativo</option>
+              <option value="VIP">VIP</option>
+              <option value="INACTIVE">Inativo</option>
+            </select>
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Tags (separadas por virgula)
+            <input id="clientsTags" type="text" maxlength="200" placeholder="NEW, VIP" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
+            <textarea id="clientsNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          </label>
+          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
+            <button type="button" id="clientsModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" id="clientsSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar cliente</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div id="metasGoalModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
+      <article class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <h3 id="metasGoalModalTitle" class="text-base font-bold text-slate-900">Definir meta mensal</h3>
+          <button id="metasGoalModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        </div>
+        <form id="metasGoalForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <input type="hidden" id="metasGoalId" />
+          <label class="text-sm font-semibold text-slate-700">Mes/Ano
+            <input id="metasGoalMonth" type="month" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Meta de faturamento
+            <input id="metasRevenueTarget" type="number" min="0.01" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Meta de atendimentos
+            <input id="metasAppointmentsTarget" type="number" min="1" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700">Meta de ticket medio (opcional)
+            <input id="metasAverageTicketTarget" type="number" min="0.01" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
+            <textarea id="metasNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          </label>
+          <div id="metasGoalFormFeedback" class="sm:col-span-2"></div>
+          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
+            <button type="button" id="metasGoalModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+            <button type="submit" id="metasGoalSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar meta</button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div id="mobileOperationActions" class="mobile-operation-actions hidden">
+      <button type="button" id="mobileFocusSaleBtn" class="mobile-operation-btn mobile-operation-btn-primary">
+        Ir para Venda
+      </button>
+    </div>
+
+    <nav id="appMobileTabs" aria-label="Navegacao mobile"></nav>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
+
