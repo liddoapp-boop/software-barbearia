@@ -1,6 +1,141 @@
 ﻿# Implementation Log - Fase Maturidade
 
 Data: 2026-05-04
+Escopo: Fase 0.9.3 - execucao real do checklist visual e ambiente alvo.
+
+## Entregas executadas
+1. Criado `.planning/97_EXECUCAO_CHECKLIST_AMBIENTE_ALVO.md` com bloqueios herdados, ambiente, Git, `.env`, CORS, backup, smoke, checklist visual desktop/mobile, fluxos operacionais, validacoes automatizadas, bugs e decisao final.
+2. Registrado estado real do Git: branch `main`, ahead de `origin/main` por 1 commit, worktree com alteracoes modificadas e arquivos `.planning` nao rastreados.
+3. Confirmado que `.env` esta ignorado por `.gitignore:8:.env` e nao aparece no `git status`.
+4. Validado de forma segura que o `.env` local ainda nao representa ambiente alvo real pronto: `DATA_BACKEND` nao esta como Prisma, `AUTH_SECRET` nao tem formato forte, `CORS_ORIGIN` nao esta presente e `NODE_ENV` nao esta como production.
+5. Confirmado que `CORS_ORIGIN` esta implementado/documentado, mas ainda nao confirmado em ambiente alvo real.
+6. Rodadas validacoes automatizadas locais: build, test, smoke local e test DB.
+
+## Arquivos alterados
+- `.planning/97_EXECUCAO_CHECKLIST_AMBIENTE_ALVO.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por engine Prisma/rede; passou fora do sandbox com `SMOKE_BASE_URL=http://127.0.0.1:3333`.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`10 passed`).
+- `git diff --check`: passou sem erro; apenas avisos de CRLF do Git no Windows.
+
+## Resultado
+- Decisao da Fase 0.9.3: BLOQUEADO para deploy real controlado.
+- Nao foi identificado bug novo de codigo nos fluxos criticos cobertos por build/test/smoke/test DB.
+- Deploy real continua bloqueado por falta de checklist visual humano desktop/mobile, backup do banco alvo real, smoke remoto, `.env` alvo validado, `CORS_ORIGIN` alvo confirmado e worktree limpo/commitado.
+
+Documento: `.planning/97_EXECUCAO_CHECKLIST_AMBIENTE_ALVO.md`.
+
+---
+
+Data: 2026-05-04
+Escopo: Fase 0.9.2 - correcoes/preparacao pre-deploy.
+
+## Entregas executadas
+1. Criado `.planning/96_CORRECOES_PRE_DEPLOY.md` com objetivo, bloqueios herdados, evidencias, checklist visual desktop/mobile, validacao de `.env`, CORS, backup, smoke alvo, git status e decisao final.
+2. Confirmado que `CORS_ORIGIN` segue documentado no `.env.example` e implementado em `src/http/app.ts` sem bug simples encontrado.
+3. Confirmado que `scripts/smoke-api-flow.ps1` aceita `SMOKE_BASE_URL`, `SMOKE_UNIT_ID`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD`.
+4. Confirmado que `.env` esta ignorado pelo Git e nao aparece no status, sem imprimir valores sensiveis.
+5. Validado de forma segura que o `.env` local atual nao deve ser tratado como ambiente alvo real: falta perfil de producao controlada completo (`DATA_BACKEND=prisma`, `AUTH_SECRET` forte e `CORS_ORIGIN`).
+6. Confirmado novamente que `prisma/seed.ts` limpa dados operacionais e nao deve ser executado em banco real.
+
+## Arquivos alterados
+- `.planning/96_CORRECOES_PRE_DEPLOY.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Checagem de sintaxe ES module de `public/app.js`, `public/modules/*.js` e `public/components/*.js`: passou usando `node --input-type=module --check` via stdin.
+- `npm.cmd run build`: passou.
+- `git check-ignore -v .env`: passou.
+- `git status --short --branch`: worktree segue com alteracoes nao commitadas e branch `main` ahead 1.
+
+## Resultado
+- Decisao da Fase 0.9.2: BLOQUEADO para deploy real controlado.
+- Nao foi identificado novo bug simples de CORS ou smoke parametrizado.
+- Deploy real continua bloqueado por ausencia de checklist visual humano desktop/mobile, backup do banco alvo real, smoke contra alvo real, validacao do `.env` do host alvo e worktree limpo.
+
+Documento: `.planning/96_CORRECOES_PRE_DEPLOY.md`.
+
+---
+
+Data: 2026-05-04
+Escopo: Fase 0.9.1 - checklist visual final e pre-deploy controlado.
+
+## Entregas executadas
+1. Criado `.planning/95_CHECKLIST_VISUAL_PRE_DEPLOY.md` com objetivo, ambiente, URL, backend, banco, data/hora, perfis, resultado por area, bugs, severidade, comandos e decisao final.
+2. Revisado CORS em `src/http/app.ts`; antes estava permissivo com `origin: true`.
+3. Implementado suporte opcional a `CORS_ORIGIN`, mantendo desenvolvimento local permissivo quando a variavel nao existe e permitindo restringir homologacao/producao por origem ou lista separada por virgula.
+4. Atualizado `.env.example` com orientacao de `CORS_ORIGIN` para ambiente controlado.
+5. Confirmado que `.env` real esta ignorado pelo Git, sem ler nem registrar segredos.
+6. Confirmado por inspecao que `prisma/seed.ts` e destrutivo e nao foi executado.
+7. Executadas validacoes automatizadas: build, sintaxe frontend, test, smoke API e test DB.
+
+## Arquivos alterados
+- `.planning/95_CHECKLIST_VISUAL_PRE_DEPLOY.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `.env.example`
+- `src/http/app.ts`
+
+## Validacao
+- Checagem de sintaxe ES module de `public/app.js`: passou.
+- Checagem de sintaxe ES module de `public/modules/*.js`: passou.
+- Checagem de sintaxe ES module de `public/components/*.js`: passou.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vite/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por verificacao/download da engine Prisma; passou fora do sandbox.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`10 passed`).
+
+## Resultado
+- Decisao da Fase 0.9.1: BLOQUEADO para deploy real.
+- Nao ha falha automatizada aberta nos fluxos criticos testados.
+- Deploy real permanece bloqueado porque a passada visual humana desktop/mobile nao foi executada nesta rodada, o backup do banco alvo real nao foi confirmado e o smoke contra o alvo real nao foi rodado.
+- Proxima prioridade recomendada: Fase 0.9.2 - Correcoes/preparacao pre-deploy focada em evidencia visual humana, configuracao de ambiente alvo, backup e smoke remoto.
+
+Documento: `.planning/95_CHECKLIST_VISUAL_PRE_DEPLOY.md`.
+
+---
+
+Data: 2026-05-04
+Escopo: Fase 0.9 - deploy/producao controlada.
+
+## Entregas executadas
+1. Criado `.planning/94_DEPLOY_PRODUCAO_CONTROLADA.md` com objetivo, pre-requisitos, variaveis de ambiente, checklist pre-deploy, passo a passo, smoke pos-deploy, checklist visual, rollback, criterios de bloqueio e decisao.
+2. Revisado `.env.example` para reforcar `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `AUTH_SECRET` forte, ausencia de `DATABASE_URL` real no Git e configuracao opcional de billing/webhooks.
+3. Ajustado `scripts/smoke-api-flow.ps1` para aceitar `SMOKE_BASE_URL`, `SMOKE_UNIT_ID`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD`, preservando defaults locais.
+4. Adicionado bloqueio de `AUTH_SECRET` fraco/dev em `NODE_ENV=production`.
+5. Adicionado bloqueio de `BILLING_WEBHOOK_SECRET` dev em `NODE_ENV=production` quando webhook de billing for usado.
+6. Confirmado por inspecao que `GET /users` e `GET /audit/events` seguem owner-only, `POST /auth/login` nao retorna `passwordHash`, e logs HTTP nao registram senha/token.
+
+## Arquivos alterados
+- `.planning/94_DEPLOY_PRODUCAO_CONTROLADA.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `.env.example`
+- `scripts/smoke-api-flow.ps1`
+- `src/http/security.ts`
+
+## Validacao
+- Checagem sintatica de `scripts/smoke-api-flow.ps1`: passou.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vite/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por verificacao/download da engine Prisma; passou fora do sandbox.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM` do Vite/Rolldown; passou fora do sandbox (`10 passed`).
+
+## Resultado
+- Decisao preliminar da Fase 0.9: aprovado com ressalvas.
+- Deploy real continua condicionado a backup, smoke no alvo e ultima passada visual humana desktop/mobile.
+
+Documento: `.planning/94_DEPLOY_PRODUCAO_CONTROLADA.md`.
+
+---
+
+Data: 2026-05-04
 Escopo: Fase 0.8 - execucao da validacao manual real no navegador.
 
 ## Entregas executadas

@@ -1,5 +1,69 @@
 ﻿# Next Priorities
 
+## Atualizacao 2026-05-04 (Fase 0.9.3 execucao checklist/ambiente alvo)
+- Criado `.planning/97_EXECUCAO_CHECKLIST_AMBIENTE_ALVO.md` com decisao final `BLOQUEADO`.
+- Build, testes, smoke local e testes DB passaram fora das limitacoes conhecidas do sandbox.
+- Smoke local passou com `SMOKE_BASE_URL=http://127.0.0.1:3333`, cobrindo agenda, checkout, venda, historico, devolucao, financeiro, comissoes consultaveis, dashboard e auditoria.
+- `.env` segue fora do Git, mas o `.env` local atual nao representa alvo real pronto: falta perfil completo de producao controlada.
+- CORS esta implementado/documentado, mas `CORS_ORIGIN` no ambiente alvo ainda nao foi confirmado.
+- Backup do banco alvo real e smoke remoto ainda nao foram executados.
+- Checklist visual humano desktop/mobile ainda nao foi executado.
+- Worktree segue sujo e branch `main` esta ahead de `origin/main` por 1 commit.
+
+Prioridade imediata:
+1. Preparar ambiente alvo real: URL, banco PostgreSQL, `.env` de producao controlada, `CORS_ORIGIN` restrito e owner persistente.
+2. Confirmar backup do banco alvo com data/hora, responsavel e local seguro antes de schema change.
+3. Rodar smoke remoto com `SMOKE_BASE_URL` do alvo.
+4. Executar checklist visual humano desktop/mobile.
+5. Revisar worktree e criar commits pequenos sem `git add .`; depois executar `git push`.
+6. Se qualquer P0/P1 aparecer, abrir Fase 0.9.4 - Correcoes bloqueadoras de release.
+
+## Atualizacao 2026-05-04 (Fase 0.9.2 correcoes/preparacao pre-deploy)
+- Criado `.planning/96_CORRECOES_PRE_DEPLOY.md` com a decisao conservadora da Fase 0.9.2.
+- CORS foi revalidado: `.env.example` documenta `CORS_ORIGIN`, `src/http/app.ts` restringe quando a variavel existe e mantem dev/local permissivo quando ausente.
+- Smoke remoto esta tecnicamente preparado porque `scripts/smoke-api-flow.ps1` aceita `SMOKE_BASE_URL`, unidade e credenciais por variaveis de ambiente.
+- `.env` segue ignorado pelo Git e nao aparece no status, mas o `.env` local atual nao representa alvo real pronto: ainda falta perfil completo de producao controlada.
+- Checklist visual humano desktop/mobile, backup do banco alvo real e smoke contra o alvo real continuam sem evidencia final.
+- Worktree segue com alteracoes nao commitadas; release limpa ainda exige revisao/commit sem segredos.
+
+Prioridade imediata:
+1. Executar checklist visual humano desktop/mobile em browser real e registrar resultados no `.planning/96_CORRECOES_PRE_DEPLOY.md`.
+2. Validar `.env` no host alvo com `NODE_ENV=production`, `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `AUTH_SECRET` forte, `DATABASE_URL` correta e `CORS_ORIGIN` restrito.
+3. Confirmar backup do banco alvo real antes de qualquer `db:push`/migration.
+4. Rodar `npm.cmd run smoke:api` contra `SMOKE_BASE_URL` do ambiente alvo.
+5. Revisar worktree, commitar somente arquivos permitidos e manter `.env`/segredos fora do Git.
+
+## Atualizacao 2026-05-04 (Fase 0.9.1 checklist visual/pre-deploy)
+- Criado `.planning/95_CHECKLIST_VISUAL_PRE_DEPLOY.md` com checklist de desktop, mobile, fluxos operacionais, pre-deploy tecnico, riscos, comandos e decisao.
+- CORS foi revisado e deixou de ficar fixo em `origin: true`: `src/http/app.ts` agora aceita `CORS_ORIGIN` opcional para restringir homologacao/producao controlada.
+- `.env.example` documenta `CORS_ORIGIN` sem incluir segredo real.
+- `.env` real foi confirmado como ignorado pelo Git, sem leitura de valores sensiveis.
+- `prisma/seed.ts` foi confirmado como destrutivo e segue proibido em base real.
+- `npm.cmd run build`, `npm.cmd run test`, `npm.cmd run smoke:api` e `npm.cmd run test:db` passaram fora do sandbox quando necessario.
+- A passada visual humana desktop/mobile nao foi executada nesta rodada; backup do banco alvo real e smoke contra alvo real tambem nao foram confirmados.
+
+Prioridade imediata:
+1. Fase 0.9.2 - Correcoes/preparacao pre-deploy: executar evidencia visual humana desktop/mobile, configurar `CORS_ORIGIN`, confirmar backup e rodar smoke contra o ambiente alvo.
+2. Liberar deploy controlado real somente depois de checklist visual PASSOU/PARCIAL sem P0/P1, backup confirmado, `.env` real validado fora do Git e smoke remoto aprovado.
+3. Se a passada visual encontrar bug P0/P1, corrigir antes de qualquer deploy real.
+4. Depois da estabilizacao, priorizar CRUD operacional de usuarios/equipe e vinculo `User -> Professional`.
+5. IA/WhatsApp continuam fora da fila ate producao controlada estabilizada.
+
+## Atualizacao 2026-05-04 (Fase 0.9 deploy/producao controlada)
+- Criado `.planning/94_DEPLOY_PRODUCAO_CONTROLADA.md` com checklist completo de ambiente, seguranca, banco, build, smoke, visual final, rollback e criterios de bloqueio.
+- `.env.example` foi revisado para orientar producao controlada com `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `AUTH_SECRET` forte e sem segredos reais versionados.
+- `scripts/smoke-api-flow.ps1` agora aceita URL, unidade e credenciais owner por variaveis `SMOKE_*`, permitindo smoke local ou pos-deploy sem alterar o script.
+- `src/http/security.ts` bloqueia `AUTH_SECRET` fraco/dev em `NODE_ENV=production`; webhook de billing tambem bloqueia segredo dev em producao quando usado.
+- `prisma/seed.ts` permanece local/dev e deve ser evitado em base real porque limpa dados operacionais.
+- `docker-compose.yml` nao existe no workspace atual, embora existam scripts `db:up`/`db:down`.
+
+Prioridade imediata:
+1. Executar a ultima passada visual humana desktop/mobile da Fase 0.8.
+2. Executar deploy controlado real somente com backup, `.env` real fora do Git, smoke no alvo e confirmacao humana.
+3. Se houver bug pos-checklist/deploy, abrir Fase 0.9.1 - Correcoes pos-checklist/deploy.
+4. Depois da estabilizacao, priorizar CRUD operacional de usuarios/equipe, vinculo `User -> Professional` e refinamento mobile/UX.
+5. IA/WhatsApp continuam fora da fila ate producao controlada estabilizada.
+
 ## Atualizacao 2026-05-04 (Fase 0.8 validacao executada parcialmente)
 - Criado `.planning/93_VALIDACAO_MANUAL_EXECUCAO.md` com checklist de execucao, evidencias, bugs, severidade e decisao final.
 - Encontrado bug P1 no frontend: seletor visual de perfil nao renovava a sessao autenticada real e mantinha token owner.

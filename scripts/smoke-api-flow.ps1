@@ -1,4 +1,24 @@
+param(
+  [string]$BaseUrl = $env:SMOKE_BASE_URL,
+  [string]$UnitId = $env:SMOKE_UNIT_ID,
+  [string]$OwnerEmail = $env:SMOKE_OWNER_EMAIL,
+  [string]$OwnerPassword = $env:SMOKE_OWNER_PASSWORD
+)
+
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
+  $BaseUrl = "http://127.0.0.1:3333"
+}
+if ([string]::IsNullOrWhiteSpace($UnitId)) {
+  $UnitId = "unit-01"
+}
+if ([string]::IsNullOrWhiteSpace($OwnerEmail)) {
+  $OwnerEmail = "owner@barbearia.local"
+}
+if ([string]::IsNullOrWhiteSpace($OwnerPassword)) {
+  $OwnerPassword = "owner123"
+}
 
 function Step($message) {
   Write-Host ""
@@ -88,7 +108,13 @@ function Ensure-ApiReady($projectRoot, $url) {
   $stamp = [Guid]::NewGuid().ToString("N")
   $outLog = Join-Path $env:TEMP "smoke-api-$stamp-out.log"
   $errLog = Join-Path $env:TEMP "smoke-api-$stamp-err.log"
-  $process = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev:api" -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+  $previousPort = $env:PORT
+  $env:PORT = [string]$port
+  try {
+    $process = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev:api" -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+  } finally {
+    $env:PORT = $previousPort
+  }
 
   for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 500
@@ -119,8 +145,8 @@ function Ensure-ApiReady($projectRoot, $url) {
   throw "API nao ficou pronta para smoke dentro do tempo esperado."
 }
 
-$baseUrl = "http://127.0.0.1:3333"
-$unitId = "unit-01"
+$baseUrl = $BaseUrl.TrimEnd("/")
+$unitId = $UnitId
 $correlationId = [Guid]::NewGuid().ToString()
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $apiRuntime = $null
@@ -134,8 +160,8 @@ try {
 
   Step "Autenticando sessao"
   $loginPayload = @{
-    email = "owner@barbearia.local"
-    password = "owner123"
+    email = $OwnerEmail
+    password = $OwnerPassword
     activeUnitId = $unitId
   } | ConvertTo-Json
 

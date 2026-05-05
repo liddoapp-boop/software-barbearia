@@ -67,6 +67,16 @@ function getIdempotencyPayloadHash(payload: unknown) {
   return hashIdempotencyPayload(payload);
 }
 
+function getAllowedCorsOrigins() {
+  const raw = process.env.CORS_ORIGIN?.trim();
+  if (!raw) return true;
+  const values = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return values.length > 0 ? values : true;
+}
+
 function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/health" || route === "/" || route === "/catalog" || route === "/*") {
     return { isPublic: true };
@@ -322,7 +332,7 @@ export function createApp() {
       : false,
   });
 
-  app.register(cors, { origin: true });
+  app.register(cors, { origin: getAllowedCorsOrigins() });
   app.register(fastifyStatic, {
     root: path.join(process.cwd(), "public"),
     prefix: "/",

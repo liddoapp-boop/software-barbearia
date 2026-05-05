@@ -106,7 +106,13 @@ export function verifyPassword(password: string, stored: string) {
 }
 
 export function getAuthSecret() {
-  return process.env.AUTH_SECRET?.trim() || "dev-secret-change-me";
+  const secret = process.env.AUTH_SECRET?.trim() || "dev-secret-change-me";
+  const isProduction = process.env.NODE_ENV === "production";
+  const isWeakDevSecret = secret === "dev-secret-change-me" || secret.length < 32;
+  if (isProduction && isWeakDevSecret) {
+    throw new Error("AUTH_SECRET forte e obrigatorio em producao");
+  }
+  return secret;
 }
 
 export function getBillingWebhookSecret(provider?: string) {
@@ -117,7 +123,11 @@ export function getBillingWebhookSecret(provider?: string) {
   const providerKey = normalized
     ? process.env[`BILLING_WEBHOOK_SECRET_${normalized}`]?.trim()
     : undefined;
-  return providerKey || process.env.BILLING_WEBHOOK_SECRET?.trim() || "billing-dev-secret";
+  const secret = providerKey || process.env.BILLING_WEBHOOK_SECRET?.trim() || "billing-dev-secret";
+  if (process.env.NODE_ENV === "production" && secret === "billing-dev-secret") {
+    throw new Error("BILLING_WEBHOOK_SECRET forte e obrigatorio em producao");
+  }
+  return secret;
 }
 
 export function computeBillingWebhookSignature(payload: string, secret: string) {
