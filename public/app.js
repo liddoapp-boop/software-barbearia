@@ -116,8 +116,20 @@ const STORAGE_ACTIVE_MODULE = "sb.activeModule";
 const STORAGE_SIDEBAR_COLLAPSED = "sb.sidebarCollapsed";
 const STORAGE_ACTIVE_ROLE = "sb.activeRole";
 const STORAGE_AUTH_SESSION = "sb.authSession";
-const FRONTEND_AUTH_EMAIL = "owner@barbearia.local";
-const FRONTEND_AUTH_PASSWORD = "owner123";
+const FRONTEND_AUTH_CREDENTIALS = {
+  owner: {
+    email: "owner@barbearia.local",
+    password: "owner123",
+  },
+  recepcao: {
+    email: "recepcao@barbearia.local",
+    password: "recepcao123",
+  },
+  profissional: {
+    email: "profissional@barbearia.local",
+    password: "profissional123",
+  },
+};
 
 const appShell = document.getElementById("appShell");
 const appSidebar = document.getElementById("appSidebar");
@@ -665,6 +677,7 @@ function isAuthSessionValid(session = authSession) {
   if (!session?.accessToken || !session?.expiresAt) return false;
   const expiresAtMs = new Date(session.expiresAt).getTime();
   if (!Number.isFinite(expiresAtMs)) return false;
+  if (session.user?.role && session.user.role !== state.role) return false;
   return expiresAtMs > Date.now() + 30_000;
 }
 
@@ -695,6 +708,7 @@ function getCurrentActorId() {
 
 async function ensureAuthSession(forceRefresh = false) {
   if (!forceRefresh && isAuthSessionValid()) return authSession;
+  const credentials = FRONTEND_AUTH_CREDENTIALS[state.role] || FRONTEND_AUTH_CREDENTIALS.owner;
 
   const response = await window.fetch(`${API}/auth/login`, {
     method: "POST",
@@ -703,8 +717,8 @@ async function ensureAuthSession(forceRefresh = false) {
       "x-correlation-id": buildCorrelationId(),
     },
     body: JSON.stringify({
-      email: FRONTEND_AUTH_EMAIL,
-      password: FRONTEND_AUTH_PASSWORD,
+      email: credentials.email,
+      password: credentials.password,
       activeUnitId: unitId,
     }),
   });
@@ -862,6 +876,8 @@ function bindShellEvents() {
       state.mobileTab = mapModuleToMobileTab(state.activeModule);
       state.mobileMoreOpen = false;
       state.agendaFiltersOpen = false;
+      authSession = null;
+      localStorage.removeItem(STORAGE_AUTH_SESSION);
       persistNavigationState();
       renderShell();
       applySectionVisibility();

@@ -1,6 +1,38 @@
 ﻿# Implementation Log - Fase Maturidade
 
 Data: 2026-05-04
+Escopo: Fase 0.8 - execucao da validacao manual real no navegador.
+
+## Entregas executadas
+1. Criado `.planning/93_VALIDACAO_MANUAL_EXECUCAO.md` com ambiente, backend, URL local, usuarios esperados, checklist por area, bugs, severidade, evidencias e decisao final.
+2. Identificado bug P1 no frontend: seletor visual de perfil nao trocava a sessao autenticada real, mantendo token owner em chamadas HTTP.
+3. Corrigido `public/app.js` para usar credenciais dev por perfil, invalidar `sb.authSession` na troca de perfil e rejeitar cache quando a role da sessao nao bate com a role visual.
+4. Executado smoke operacional via API cobrindo agenda, checkout, venda, historico, devolucao, financeiro, comissoes consultaveis e auditoria.
+5. Registrada limitacao real: automacao visual de navegador nao esteve disponivel nesta sessao, entao mobile/responsivo e cliques em modais ficaram como evidencia visual pendente.
+
+## Arquivos alterados
+- `public/app.js`
+- `.planning/93_VALIDACAO_MANUAL_EXECUCAO.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Checagem de sintaxe ES module de `public/app.js`: passou.
+- `npm.cmd run build`: passou.
+- `npm.cmd run smoke:api`: falhou no sandbox por verificacao/download da engine Prisma; passou fora do sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vite/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM` do Vite/Rolldown; passou fora do sandbox (`10 passed`).
+
+## Resultado
+- Nao ha bug P0/P1 aberto apos a correcao localizada.
+- Decisao da Fase 0.8: aprovado com ressalvas.
+- Proxima etapa recomendada: Fase 0.9 - Deploy/producao controlada, condicionada a uma ultima passada visual humana no navegador. Se essa passada revelar P0/P1, abrir Fase 0.8.1.
+
+Documento: `.planning/93_VALIDACAO_MANUAL_EXECUCAO.md`.
+
+---
+
+Data: 2026-05-04
 Escopo: Fase 0.7 - validacao manual no navegador e checklist de producao controlada.
 
 ## Entregas executadas
