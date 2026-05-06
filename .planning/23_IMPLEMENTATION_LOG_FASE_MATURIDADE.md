@@ -890,3 +890,459 @@ Esta etapa corrige as ressalvas da auditoria pos-idempotencia e transforma `idem
 ## Observacao operacional
 - Em PowerShell, `npm run ...` pode falhar por Execution Policy (`npm.ps1`); usar `npm.cmd run ...`.
 - EPERM em Windows/OneDrive permanece documentado como risco operacional local. Procedimento: fechar dev server/processos Node/watchers, remover `node_modules/.prisma` se necessario, rodar `npm.cmd run db:generate` e mover o projeto para fora do OneDrive se persistir.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.7 - Comissoes em funil operacional limpo.
+
+## Entregas executadas
+1. Criado `.planning/107_COMISSOES_FUNIL_OPERACIONAL_LIMPO.md`.
+2. Comissoes passou a usar `PageHeader` com contexto de funil operacional.
+3. Filtros essenciais ficaram visiveis: periodo, profissional e origem humanizada.
+4. Filtro de status ficou avancado e recolhido.
+5. Superficie principal foi reduzida para pendente, pago no periodo, profissionais pendentes, antigas/vencidas e fila por profissional.
+6. Origem da comissao foi humanizada para atendimento finalizado, venda de produto, ajuste manual ou comissao operacional.
+7. Status passaram a usar `StatusChip`: pendente, paga e cancelada.
+8. Lista principal deixou de expor IDs, referencias, `source` cru, `idempotencyKey` e detalhes financeiros tecnicos.
+9. Detalhe da comissao passou a usar `EntityDrawer` com resumo, calculo, vinculo operacional, acoes e `TechnicalTrace`.
+10. Pagamento foi preservado com mesma rota, `idempotencyKey`, confirmacao humana, mensagens operacionais e bloqueio owner-only.
+11. `TechnicalTrace` foi ampliado com `ruleId` e `status`.
+12. Mobile recebeu cards por profissional/comissao e acoes responsivas.
+13. Nenhuma regra de dominio, backend, schema Prisma, financeiro, checkout, PDV, estoque, auditoria, permissao, tenant guard ou idempotencia foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/comissoes.js`
+- `public/styles/layout.css`
+- `.planning/107_COMISSOES_FUNIL_OPERACIONAL_LIMPO.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados de Comissoes/componentes: passou via `node --input-type=module --check`.
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; reexecucao fora do sandbox foi bloqueada por limite da aprovacao automatica.
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma em `binaries.prisma.sh`; reexecucao fora do sandbox foi bloqueada por limite da aprovacao automatica.
+
+## Resultado
+- Comissoes agora funciona como fila operacional limpa para owner, com detalhe tecnico preservado e recolhido.
+- Rastreabilidade, idempotencia, pagamento reconciliavel e permissoes foram mantidos.
+- Proxima fase recomendada: Fase 1.8 - Clientes em historico progressivo e acao comercial limpa.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.0 - Mapeamento frontend x backend + arquitetura de funil UX.
+
+## Entregas executadas
+1. Criado o documento `.planning/100_MAPEAMENTO_FRONTEND_BACKEND_FUNIL_UX.md`.
+2. Mapeados backend, rotas, contratos, services, tipos de dominio, modulos frontend e documentos `.planning` recentes.
+3. Criada matriz frontend x backend por modulo.
+4. Criada matriz de camadas de informacao: principal, secundaria, detalhe sob demanda e tecnica/auditoria.
+5. Diagnosticados pontos de poluicao visual e exposicao excessiva de complexidade tecnica.
+6. Definido funil ideal para Dashboard, Agenda, Checkout, PDV, Historico de vendas, Estoque, Financeiro, Comissoes, Clientes, Auditoria, Configuracoes e Mobile.
+7. Registrada proposta de arquitetura SaaS reaproveitavel para clinicas, esteticas, saloes, pet shops, consultorios e negocios com agenda/cliente/servico/financeiro/estoque.
+
+## Diagnostico principal
+- O backend esta mais maduro que a camada visual e ja oferece rastreabilidade, idempotencia, permissoes, tenant guard e auditoria.
+- O frontend consome boa parte desses recursos, mas ainda mistura camadas de decisao operacional com rastreabilidade tecnica.
+- Financeiro, Auditoria, Comissoes, Automacoes e Central de agendamentos sao os maiores riscos de poluicao visual.
+- A prioridade de UX passa a ser esconder complexidade sem remover rastreabilidade.
+
+## Arquivos alterados
+- `.planning/100_MAPEAMENTO_FRONTEND_BACKEND_FUNIL_UX.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: PASSOU.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Vite; PASSOU fora do sandbox com `63 passed | 10 skipped`.
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao de engine Prisma em `binaries.prisma.sh`; PASSOU fora do sandbox.
+- Smoke local concluiu agenda -> checkout, PDV -> venda -> devolucao, financeiro, comissoes, dashboard e auditoria.
+
+## Proxima etapa recomendada
+Fase 1.1 - Design system e contratos de camada para impedir poluicao visual: `PageHeader`, `PrimaryAction`, `FilterBar`, `EntityDrawer`, `TechnicalTrace`, `EmptyState`, `StatusChip` e regras de uso por modulo.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.1 - Design System Operacional e Contratos UX.
+
+## Entregas executadas
+1. Criado o documento `.planning/101_DESIGN_SYSTEM_CONTRATOS_UX.md`.
+2. Criado o modulo `public/components/operational-ui.js` com componentes reutilizaveis para funil operacional.
+3. Componentes obrigatorios disponiveis: `PageHeader`, `PrimaryAction`, `FilterBar`, `EntityDrawer`, `TechnicalTrace`, `EmptyState` e `StatusChip`.
+4. Adicionados estilos em `public/styles/layout.css` para header operacional, acao primaria, filtros recolhiveis, empty state, chips de status, drawer responsivo e rastreabilidade tecnica recolhida.
+5. Avaliados componentes adicionais (`MetricCard`, `SectionCard`, `ActionList`, `ConfirmationModal`, `LoadingState`, `PermissionGate`) e mantidos fora desta fase para evitar duplicidade com `ux-card`, `ux-kpi`, modais existentes e permissoes ja protegidas por menu/backend.
+6. Nenhuma tela critica foi removida ou redesenhada nesta fase.
+7. Nenhuma regra de negocio, auditoria, idempotencia, tenant guard ou permissao foi alterada.
+
+## Arquivos alterados
+- `public/components/operational-ui.js`
+- `public/styles/layout.css`
+- `.planning/101_DESIGN_SYSTEM_CONTRATOS_UX.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Checagem sintatica ES module de `public/components/operational-ui.js`: passou.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Vite; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma em `binaries.prisma.sh`; passou fora do sandbox.
+- Smoke local concluiu agenda -> checkout, PDV -> venda -> historico -> devolucao, financeiro, comissoes, dashboard e auditoria.
+
+## Resultado
+- A base de UX agora tem contratos explicitos para evoluir Agenda, Checkout, PDV, Financeiro, Estoque, Clientes e Auditoria sem expor complexidade tecnica na superficie principal.
+- Proxima fase recomendada: Fase 1.2 - Agenda e Checkout em funil operacional premium.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.2 - Agenda e Checkout em funil operacional premium.
+
+## Entregas executadas
+1. Criado `.planning/102_AGENDA_CHECKOUT_FUNIL_PREMIUM.md`.
+2. Agenda passou a montar `PageHeader`, `PrimaryAction` e `FilterBar` a partir de `public/components/operational-ui.js`.
+3. Filtros essenciais da Agenda ficaram visiveis; filtros avancados foram recolhidos.
+4. Superficie da Agenda foi reduzida para proximo atendimento, agenda do periodo, fluxo atual, lista do dia, status e proxima acao.
+5. Cards/listas de agendamento passaram a usar `StatusChip` e `EmptyState`.
+6. Detalhe de agendamento passou a usar `EntityDrawer` com resumo, detalhes operacionais, historico e `TechnicalTrace` recolhido.
+7. Checkout foi reorganizado como funil: cliente, servico, profissional, valor, produtos adicionais, total, pagamento e finalizar.
+8. Produtos adicionais no checkout ficaram recolhiveis, com quantidade e subtotal.
+9. `idempotencyKey` continua sendo enviada no checkout, sem aparecer na superficie principal.
+10. Mensagens de sucesso/erro de checkout e idempotencia foram humanizadas.
+11. Nenhuma regra de dominio, schema Prisma, permissao, tenant guard, estoque, comissao, financeiro ou auditoria foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/modules/agenda.js`
+- `public/modules/agendamentos.js`
+- `public/components/operational-ui.js`
+- `public/styles/layout.css`
+- `.planning/102_AGENDA_CHECKOUT_FUNIL_PREMIUM.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados: passou.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma; passou fora do sandbox.
+
+## Resultado
+- Agenda e Checkout agora seguem o funil operacional premium da macrofase UX.
+- A rastreabilidade tecnica foi preservada, mas retirada da superficie principal.
+- Proxima fase recomendada: Fase 1.3 - PDV, Historico de Vendas e Devolucoes em funil operacional premium.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.3 - PDV, Historico de Vendas e Devolucoes em funil operacional premium.
+
+## Entregas executadas
+1. Criado `.planning/103_PDV_HISTORICO_DEVOLUCOES_FUNIL_PREMIUM.md`.
+2. PDV passou a usar `PageHeader` para contextualizar o funil operacional.
+3. Acao principal do PDV passou a ser `PrimaryAction` com o texto "Cobrar venda".
+4. Carrinho foi simplificado para produto, quantidade, subtotal, remocao/ajuste e total final.
+5. Historico de vendas foi reduzido na superficie para data, cliente, total, status e acoes.
+6. Filtros do historico passaram para `FilterBar`, com periodo recolhido.
+7. Status de devolucao passaram a usar `StatusChip`, incluindo `NOT_REFUNDED`.
+8. Estado vazio do historico passou a usar `EmptyState`.
+9. Detalhe da venda passou a abrir em `EntityDrawer` com resumo, itens, impactos financeiro/estoque, historico e `TechnicalTrace` recolhido.
+10. Fluxo de devolucao foi humanizado: sem ID tecnico na superficie, com quantidades vendida/devolvida/disponivel e mensagem "Produto devolvido com sucesso.".
+11. `idempotencyKey` segue sendo gerada/enviada em venda e devolucao, sem exposicao para usuario comum.
+12. Nenhuma regra de dominio, schema Prisma, financeiro, estoque, comissao, auditoria, permissao ou tenant guard foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/pdv.js`
+- `public/styles/layout.css`
+- `.planning/103_PDV_HISTORICO_DEVOLUCOES_FUNIL_PREMIUM.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados do PDV/componentes: passou com `vm.SourceTextModule`.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma; passou fora do sandbox.
+
+## Resultado
+- PDV, historico e devolucoes agora seguem funil operacional premium.
+- Historico nao domina a tela principal e detalhe tecnico fica recolhido.
+- Proxima fase recomendada: Fase 1.4 - Estoque rastreavel sem poluicao visual.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.4 - Estoque rastreavel sem poluicao visual.
+
+## Entregas executadas
+1. Criado `.planning/104_ESTOQUE_RASTREAVEL_SEM_POLUICAO_VISUAL.md`.
+2. Estoque passou a usar `PageHeader` com acao principal "Novo produto".
+3. Busca/status ficaram em `FilterBar`; categoria ficou como filtro avancado recolhido.
+4. Superficie principal foi reduzida para produto, categoria, quantidade atual, estoque minimo, status, sugestao e acoes.
+5. Produtos passaram a ser ordenados por atencao: sem estoque, criticos, estoque baixo e normais.
+6. Status de estoque passaram a usar `StatusChip`, incluindo `OUT_OF_STOCK`, `CRITICAL`, `LOW_STOCK` e `IN_STOCK`.
+7. Estado vazio passou a usar `EmptyState`.
+8. Detalhe do produto passou a usar `EntityDrawer` com resumo, acoes, movimentacoes e `TechnicalTrace`.
+9. Movimentacoes foram humanizadas para venda, devolucao, ajuste manual, perda, consumo interno e consumo por servico.
+10. `TechnicalTrace` foi ampliado com `productId` e `stockMovementId`.
+11. Ajuste de estoque ficou mais claro para entrada, saida e ajuste de saldo final, com mensagem de quantidade invalida.
+12. Nenhuma regra de dominio, schema Prisma, financeiro, comissao, auditoria, permissao, tenant guard ou idempotencia foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/estoque.js`
+- `public/styles/layout.css`
+- `.planning/104_ESTOQUE_RASTREAVEL_SEM_POLUICAO_VISUAL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados do Estoque/componentes: passou com `vm.SourceTextModule`.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; tentativa fora do sandbox foi bloqueada por limite da aprovacao automatica.
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma em `binaries.prisma.sh`; tentativa fora do sandbox foi bloqueada por limite da aprovacao automatica.
+
+## Resultado
+- Estoque agora segue funil operacional premium e prioriza produtos que exigem acao.
+- IDs e referencias tecnicas sairam da superficie principal e ficaram recolhidos no drawer.
+- Proxima fase recomendada: Fase 1.5 - Financeiro conciliado e limpo.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.5 - Financeiro conciliado e limpo.
+
+## Entregas executadas
+1. Criado `.planning/105_FINANCEIRO_CONCILIADO_LIMPO.md`.
+2. Financeiro passou a usar `PageHeader` com acao primaria "Novo lancamento".
+3. Filtros essenciais ficaram em `FilterBar`; periodo personalizado ficou recolhido.
+4. Superficie principal foi reduzida para Entradas, Saidas, Saldo, Resultado, principais origens e lista resumida.
+5. Origens financeiras foram humanizadas para atendimento finalizado, venda de produto, comissao paga, estorno, devolucao e lancamento manual.
+6. Lista principal deixou de exibir `source`, `referenceType`, `referenceId`, `professionalId`, `customerId`, `appointmentId`, `productSaleId` e `idempotencyKey`.
+7. Detalhe do lancamento passou a usar `EntityDrawer` com resumo, vinculo operacional, impacto e `TechnicalTrace`.
+8. `TechnicalTrace` foi ampliado com campos financeiros como `financialEntryId`, `source`, `appointmentId`, `commissionId`, `professionalId` e `customerId`.
+9. Lancamento manual manteve idempotencia e ganhou mensagens humanas de sucesso, valor invalido, replay idempotente e falha generica.
+10. Comissoes e relatorios deixaram de competir visualmente na superficie do Financeiro, sem remover endpoints ou fluxos.
+11. Nenhuma regra de dominio, backend, schema Prisma, checkout, PDV, estoque, comissao, auditoria, permissao, tenant guard ou idempotencia foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/financeiro.js`
+- `public/styles/layout.css`
+- `.planning/105_FINANCEIRO_CONCILIADO_LIMPO.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados do Financeiro/componentes: passou com `vm.SourceTextModule`.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma em `binaries.prisma.sh`; passou fora do sandbox.
+
+## Resultado
+- Financeiro agora segue funil operacional premium e fica conciliado com Agenda/Checkout, PDV, devolucoes, Estoque, Comissoes e Auditoria.
+- Rastreabilidade tecnica foi preservada sem poluir a leitura principal.
+- Proxima fase recomendada: Fase 1.6 - Auditoria em timeline legivel e nao tecnica.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.6 - Auditoria em timeline legivel e nao tecnica.
+
+## Entregas executadas
+1. Criado `.planning/106_AUDITORIA_TIMELINE_LEGIVEL.md`.
+2. Auditoria passou a usar `PageHeader` com contexto owner-only.
+3. Filtros essenciais ficaram visiveis: periodo, modulo/entidade, ator e acao.
+4. Filtros avancados ficaram recolhidos: `requestId`, `idempotencyKey`, `entityId`, rota, metodo e limite.
+5. A superficie principal virou timeline agrupada por Hoje, Ontem ou data.
+6. Cards da timeline mostram horario, ator, perfil, acao humanizada, modulo, impacto, sensibilidade e "Ver detalhes".
+7. `eventId`, `entityId`, `requestId`, `correlationId`, `idempotencyKey`, rota, metodo, before/after e metadata sairam da superficie principal.
+8. Actions tecnicas foram humanizadas com fallback conservador.
+9. Detalhe do evento passou a usar `EntityDrawer` com resumo, contexto operacional, antes/depois e `TechnicalTrace`.
+10. `TechnicalTrace` foi ampliado para campos de auditoria e JSONs recolhidos.
+11. Mobile recebeu timeline em cards e drawer/bottom sheet responsivo.
+12. Nenhuma regra de dominio, backend, schema Prisma, financeiro, checkout, PDV, estoque, comissao, permissao, tenant guard ou idempotencia foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/auditoria.js`
+- `public/styles/layout.css`
+- `.planning/106_AUDITORIA_TIMELINE_LEGIVEL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados de Auditoria/componentes: passou com `vm.SourceTextModule`.
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por acesso/verificacao do binario Prisma; passou fora do sandbox.
+
+## Resultado
+- Auditoria agora e uma linha do tempo legivel para owner nao tecnico.
+- Rastreabilidade tecnica continua completa, mas recolhida no detalhe progressivo.
+- Proxima fase recomendada: Fase 1.7 - Comissoes em funil operacional limpo.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.8 - Clientes em historico progressivo e acao comercial limpa.
+
+## Entregas executadas
+1. Criado `.planning/108_CLIENTES_HISTORICO_PROGRESSIVO_ACAO_COMERCIAL.md`.
+2. Clientes passou a usar `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+3. A superficie principal virou central de relacionamento com ativos, em risco, inativos, VIP, ticket medio, potencial de reativacao e decisao sugerida.
+4. Cards de cliente mostram nome, telefone/WhatsApp, status humanizado, ultima visita, valor resumido, sinal comercial e proxima acao.
+5. `clientId`, `customerId`, `businessId`, IDs tecnicos, score bruto, payload, JSON e historico completo ficaram fora da superficie principal.
+6. O detalhe do cliente passou a usar drawer progressivo com resumo, historico operacional, relacionamento, acoes e rastreabilidade tecnica recolhida.
+7. WhatsApp foi mantido como atalho manual; nenhuma automacao real ou disparo automatico foi criado.
+8. Cadastro de cliente preservou o fluxo existente e recebeu mensagens humanas para telefone invalido, duplicidade e falha generica.
+9. `operational-ui.js` foi ampliado com `NEW`, `RECURRING` e campos tecnicos de cliente para `TechnicalTrace`.
+10. Nenhuma regra de dominio, backend, schema Prisma, agenda, checkout, PDV, financeiro, auditoria, permissao, idempotencia ou tenant guard foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/clientes.js`
+- `public/styles/layout.css`
+- `.planning/108_CLIENTES_HISTORICO_PROGRESSIVO_ACAO_COMERCIAL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module de `public/modules/clientes.js`, `public/components/operational-ui.js` e `public/app.js`: passou via stdin com `node --input-type=module --check`.
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: passou no sandbox.
+
+## Resultado
+- Clientes agora funciona como central operacional de relacionamento, com acao comercial limpa e historico preservado sob demanda.
+- Rastreabilidade tecnica continua disponivel, mas escondida em `TechnicalTrace`.
+- Proxima fase recomendada: Fase 1.9 - Servicos e Profissionais em catalogo operacional limpo.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.9 - Servicos e Profissionais em catalogo operacional limpo.
+
+## Entregas executadas
+1. Criado `.planning/109_SERVICOS_PROFISSIONAIS_CATALOGO_OPERACIONAL.md`.
+2. Servicos passou a usar `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+3. A superficie principal de Servicos deixou de ser tabela densa e virou catalogo operacional com nome, categoria, preco, duracao, status, custo, margem, executantes e acoes.
+4. Drawer de Servico passou a organizar resumo, operacao, uso/impacto, atendimentos recentes, acoes e rastreabilidade tecnica.
+5. Profissionais passou a usar `PageHeader`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+6. A superficie principal de Profissionais deixou de expor `professionalId` e passou a mostrar status, servicos que pode atender, producao, ticket, ocupacao e comissao pendente.
+7. Drawer de Profissional passou a organizar resumo, operacao, agenda recente, performance, acoes e rastreabilidade tecnica.
+8. Relacao servico-profissional foi apresentada por nomes e capacidade operacional, mantendo IDs crus recolhidos.
+9. `TechnicalTrace` foi ampliado com `serviceId`, `enabledProfessionalIds`, `userId`, `commissionRuleIds` e `serviceIds`.
+10. Nenhuma regra de dominio, backend, schema Prisma, agenda, checkout, financeiro, comissoes, auditoria, permissao, idempotencia ou tenant guard foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/servicos.js`
+- `public/modules/profissionais.js`
+- `public/styles/layout.css`
+- `.planning/109_SERVICOS_PROFISSIONAIS_CATALOGO_OPERACIONAL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados: passou com `node_modules\.bin\tsc.cmd --ignoreConfig --allowJs --checkJs false --noEmit --module esnext --target es2022 --skipLibCheck public/app.js public/modules/servicos.js public/modules/profissionais.js public/components/operational-ui.js`.
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: passou no sandbox.
+
+## Resultado
+- Servicos e Profissionais agora funcionam como catalogos operacionais limpos, reutilizaveis e com rastreabilidade recolhida.
+- Fluxos existentes de Servicos foram preservados.
+- Proxima fase recomendada: Fase 1.10 - Configuracoes em hub limpo e reaproveitavel.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.10 - Configuracoes em hub limpo e reaproveitavel.
+
+## Entregas executadas
+1. Criado `.planning/110_CONFIGURACOES_HUB_LIMPO_REAPROVEITAVEL.md`.
+2. Configuracoes deixou de renderizar um formulario gigante e virou hub por temas.
+3. A superficie principal agora mostra Empresa, Horarios, Pagamentos, Equipe, Comissoes, Agenda, Seguranca, Aparencia e Parametros.
+4. Cada bloco mostra resumo curto, status humanizado, aviso quando necessario e acao "Editar e revisar".
+5. Edicao e listas detalhadas foram movidas para `EntityDrawer`, preservando os formularios e handlers existentes.
+6. Pagamentos, Equipe e Comissoes passaram a usar listas compactas com `StatusChip` e `EmptyState`.
+7. Horarios passaram a ser editados por linhas legiveis por dia, sem tabela larga.
+8. Seguranca nao promete troca de senha: exibe indisponibilidade profissional quando o backend informa que nao ha suporte.
+9. `TechnicalTrace` foi ampliado com `businessSettingsId`, `paymentMethodId`, `teamMemberId` e `commissionRuleId`.
+10. Nenhuma regra de dominio, backend, schema Prisma, agenda, checkout, PDV, financeiro, comissoes, auditoria, permissao, idempotencia ou tenant guard foi alterada.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/modules/configuracoes.js`
+- `public/styles/layout.css`
+- `.planning/110_CONFIGURACOES_HUB_LIMPO_REAPROVEITAVEL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- Sintaxe ES module dos arquivos alterados: passou com `node_modules\.bin\tsc.cmd --ignoreConfig --allowJs --checkJs false --noEmit --module esnext --target es2022 --skipLibCheck public\app.js public\modules\configuracoes.js public\components\operational-ui.js`.
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM` do Vitest/Rolldown; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: passou no sandbox.
+
+## Resultado
+- Configuracoes agora funciona como hub operacional limpo, reaproveitavel e protegido contra poluicao tecnica na superficie.
+- Fluxos existentes de salvar configuracoes foram preservados.
+- Proxima fase recomendada: Fase 1.11 - Auditoria visual real do frontend renderizado e polimento premium.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.11 - Validacao completa do produto, frontend renderizado e lacunas restantes.
+
+## Entregas executadas
+1. Criado `.planning/111_VALIDACAO_COMPLETA_PRODUTO_FRONTEND_LACUNAS.md`.
+2. Revisados planejamento, implementation log, next priorities, frontend publico, backend HTTP/security, application services, testes, scripts e `.env.example`.
+3. Validado uso real dos componentes de `public/components/operational-ui.js`.
+4. Validado por codigo que Agenda, Checkout, PDV, Historico de Vendas, Estoque, Financeiro, Auditoria, Comissoes, Clientes, Servicos, Profissionais e Configuracoes usam a camada operacional.
+5. Identificado que Dashboard, Automacoes, Fidelizacao e Metas ainda nao aderem plenamente ao contrato visual da Fase 1.1.
+6. Identificado que Metas existia no HTML/app/modulo, mas nao estava visivel no menu nem no mobile "Mais".
+7. Corrigida a conexao visual de Metas em `public/components/menu-config.js`.
+8. Validada idempotencia frontend/backend para checkout, venda, devolucao, lancamento financeiro e pagamento de comissao.
+9. Validada rastreabilidade tecnica recolhida via `TechnicalTrace`, com ressalva para filtros tecnicos de Auditoria.
+10. Registrada decisao final: aprovado com ressalvas.
+
+## Arquivos alterados
+- `.planning/111_VALIDACAO_COMPLETA_PRODUTO_FRONTEND_LACUNAS.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `public/components/menu-config.js`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: passou no sandbox.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`10 passed`).
+- Sintaxe JS publica relevante: passou com `tsc --allowJs --noEmit`.
+
+## Resultado
+- Produto aprovado com ressalvas: funcionalmente consistente, mas visualmente ainda parcial.
+- A percepcao de que "nao mudou" e explicavel por mudancas estruturais pouco esteticas, tema escuro global, Dashboard ainda antigo e modulos avancados fora do novo contrato.
+- Proxima fase recomendada: Fase 1.12 - Checklist visual real desktop/mobile e correcao de percepcao premium.

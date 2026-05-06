@@ -1,3 +1,11 @@
+import {
+  bindEntityDrawers,
+  renderEmptyState,
+  renderEntityDrawer,
+  renderStatusChip,
+  renderTechnicalTrace,
+} from "../components/operational-ui.js";
+
 function asDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -139,6 +147,14 @@ function actionsForStatus(status) {
   return ["DETAIL", "WHATSAPP"];
 }
 
+function primaryActionForStatus(status) {
+  if (status === "SCHEDULED") return "CONFIRMED";
+  if (status === "CONFIRMED") return "IN_SERVICE";
+  if (status === "IN_SERVICE") return "COMPLETE";
+  if (status === "COMPLETED") return "REFUND";
+  return "DETAIL";
+}
+
 function actionLabel(action) {
   if (action === "CONFIRMED") return "Confirmar";
   if (action === "IN_SERVICE") return "Iniciar";
@@ -248,83 +264,47 @@ export function renderAppointmentsData(elements, items, options = {}) {
   const scheduled = items.filter((item) => item.status === "SCHEDULED").length;
   const inService = items.filter((item) => item.status === "IN_SERVICE").length;
   const completed = items.filter((item) => item.status === "COMPLETED").length;
-  const cancelled = items.filter((item) => item.status === "CANCELLED").length;
-  const noShow = items.filter((item) => item.status === "NO_SHOW").length;
-  const revenueForecast = items
-    .filter((item) => item.status !== "CANCELLED" && item.status !== "NO_SHOW")
-    .reduce((acc, item) => acc + item.servicePrice, 0);
   const lateCount = items.filter(
     (item) =>
       (item.status === "SCHEDULED" || item.status === "CONFIRMED") && item.startsAt.getTime() < now.getTime(),
   ).length;
-  const upcomingCount = items.filter((item) => {
-    const diffMs = item.startsAt.getTime() - now.getTime();
-    return diffMs >= 0 && diffMs <= 60 * 60 * 1000;
-  }).length;
-  const vipCount = items.filter((item) => Array.isArray(item.clientTags) && item.clientTags.includes("VIP")).length;
-  const freeSlotsEstimate = Math.max(0, Math.round((items.length * 0.35 + cancelled + noShow) / 2));
+  const next = [...items]
+    .filter((item) => ["SCHEDULED", "CONFIRMED", "IN_SERVICE"].includes(item.status))
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+    .find((item) => item.status === "IN_SERVICE" || item.startsAt.getTime() >= now.getTime());
 
   elements.periodSummary.textContent = `${periodLabel} | ${filterSummary}`;
   elements.summary.innerHTML = `
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Agendamentos do dia</div>
-      <div class="text-2xl font-bold text-slate-900 mt-1">${todayTotal}</div>
-      <div class="text-xs text-slate-500 mt-1">${todayTotal} no dia atual do recorte</div>
+    <article class="ux-kpi agenda-next-card">
+      <div class="ux-label">Proximo atendimento</div>
+      <div class="ux-value-sm">${next ? `${formatTime(next.startsAt)} - ${next.client}` : "Sem proximo atendimento"}</div>
+      <div class="ux-hint">${next ? `${next.service} com ${next.professional}` : "Nenhuma acao imediata no recorte."}</div>
     </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Confirmados</div>
-      <div class="text-2xl font-bold text-blue-700 mt-1">${confirmed}</div>
-      <div class="text-xs text-slate-500 mt-1">${scheduled} clientes ainda nao confirmaram presenca</div>
+    <article class="ux-kpi">
+      <div class="ux-label">Agenda do periodo</div>
+      <div class="ux-value-sm">${todayTotal || items.length}</div>
+      <div class="ux-hint">${confirmed} confirmados, ${scheduled} aguardando confirmacao</div>
     </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Em andamento</div>
-      <div class="text-2xl font-bold text-amber-700 mt-1">${inService}</div>
-      <div class="text-xs text-slate-500 mt-1">Atendimentos em execucao agora</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Concluidos</div>
-      <div class="text-2xl font-bold text-emerald-700 mt-1">${completed}</div>
-      <div class="text-xs text-slate-500 mt-1">Atendimentos finalizados no recorte</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Cancelados</div>
-      <div class="text-2xl font-bold text-red-700 mt-1">${cancelled}</div>
-      <div class="text-xs text-slate-500 mt-1">Reavaliar reativacao e remarcacao</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">No-show</div>
-      <div class="text-2xl font-bold text-rose-700 mt-1">${noShow}</div>
-      <div class="text-xs text-slate-500 mt-1">${noShow} faltas registradas hoje - considere reativar ou remarcar</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Atrasados</div>
-      <div class="text-2xl font-bold ${lateCount > 0 ? "text-amber-700" : "text-slate-900"} mt-1">${lateCount}</div>
-      <div class="text-xs text-slate-500 mt-1">Agendados/confirmados fora do horario previsto</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Proximos 60 min</div>
-      <div class="text-2xl font-bold text-indigo-700 mt-1">${upcomingCount}</div>
-      <div class="text-xs text-slate-500 mt-1">Atendimentos que exigem acao imediata da recepcao</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Clientes VIP</div>
-      <div class="text-2xl font-bold text-yellow-700 mt-1">${vipCount}</div>
-      <div class="text-xs text-slate-500 mt-1">Priorize experiencia, pontualidade e finalizacao impecavel</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Horarios livres</div>
-      <div class="text-2xl font-bold text-sky-700 mt-1">${freeSlotsEstimate}</div>
-      <div class="text-xs text-slate-500 mt-1">Estimativa para encaixes e recuperacao de cancelamentos</div>
-    </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3 col-span-1 sm:col-span-2">
-      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Receita prevista</div>
-      <div class="text-2xl font-bold text-emerald-700 mt-1">${money(revenueForecast)}</div>
-      <div class="text-xs text-slate-500 mt-1">Projecao com base em agendamentos ativos no periodo</div>
+    <article class="ux-kpi">
+      <div class="ux-label">Fluxo atual</div>
+      <div class="ux-value-sm">${inService}</div>
+      <div class="ux-hint">${completed} concluidos, ${lateCount} atrasados</div>
     </article>
   `;
 
   if (!items.length) {
     elements.empty.classList.remove("hidden");
+    elements.empty.innerHTML = renderEmptyState({
+      title: "Nao ha agendamentos para este periodo.",
+      description: "Crie um novo horario, volte para hoje ou limpe os filtros para ampliar a busca.",
+      action: `
+        <div class="flex flex-wrap justify-center gap-2">
+          <button type="button" id="appointmentsEmptyNew" class="ux-btn ux-btn-primary">Criar novo agendamento</button>
+          <button type="button" id="appointmentsEmptyToday" class="ux-btn ux-btn-muted">Ver agenda de hoje</button>
+          <button type="button" id="appointmentsEmptyClear" class="ux-btn ux-btn-muted">Limpar filtros</button>
+        </div>
+      `,
+    });
     elements.tableWrap.classList.add("hidden");
     elements.mobileList.innerHTML = "";
     elements.tableBody.innerHTML = "";
@@ -338,6 +318,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
       const actions = actionsForStatus(item.status);
+      const primaryAction = primaryActionForStatus(item.status);
       return `
         <tr class="${late ? "bg-amber-50" : "bg-white"} border-b border-slate-100">
           <td class="px-3 py-3 text-sm font-semibold text-slate-800">${formatTime(item.startsAt)}</td>
@@ -356,7 +337,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
           <td class="px-3 py-3 text-sm text-slate-700">${money(item.servicePrice)}</td>
           <td class="px-3 py-3">
             <div class="flex flex-wrap gap-1">
-              <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusClass(item.status)}">${statusLabel(item.status)}</span>
+              ${renderStatusChip(item.status)}
               <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${profileClass(profile)}">${profileLabel(profile)}</span>
               ${flags.map((flag) => `<span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${flag.className}">${flag.label}</span>`).join("")}
             </div>
@@ -366,7 +347,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
               ${actions
                 .map(
                   (action) =>
-                    `<button data-action="${action}" data-id="${item.id}" class="min-h-[36px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)}">${actionLabel(action)}</button>`,
+                    `<button data-action="${action}" data-id="${item.id}" class="min-h-[36px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
                 )
                 .join("")}
             </div>
@@ -380,6 +361,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
       const actions = actionsForStatus(item.status);
+      const primaryAction = primaryActionForStatus(item.status);
       return `
         <article class="rounded-xl border ${late ? "border-amber-300" : "border-slate-200"} bg-white p-3">
           <div class="flex items-start justify-between gap-2">
@@ -387,7 +369,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
               <div class="text-sm font-bold text-slate-900">${formatTime(item.startsAt)} - ${item.client}</div>
               <div class="text-xs text-slate-500">${item.service} | ${item.professional}</div>
             </div>
-            <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusClass(item.status)}">${statusLabel(item.status)}</span>
+            ${renderStatusChip(item.status)}
           </div>
           <div class="mt-2 flex flex-wrap gap-1">
             <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${profileClass(profile)}">${profileLabel(profile)}</span>
@@ -403,7 +385,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
             ${actions
               .map(
                 (action) =>
-                  `<button data-action="${action}" data-id="${item.id}" class="min-h-[40px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)}">${actionLabel(action)}</button>`,
+                  `<button data-action="${action}" data-id="${item.id}" class="min-h-[40px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
               )
               .join("")}
           </div>
@@ -426,8 +408,9 @@ export function renderAppointmentsData(elements, items, options = {}) {
   bindActions(elements.mobileList);
 }
 
-export function renderAppointmentDetail(elements, item, allItems) {
+export function renderAppointmentDetail(elements, item, allItems, options = {}) {
   if (!item) {
+    elements.panel.innerHTML = "";
     elements.panel.classList.add("hidden");
     return;
   }
@@ -438,24 +421,81 @@ export function renderAppointmentDetail(elements, item, allItems) {
   const cancelledCount = fromClient.filter((row) => row.status === "CANCELLED").length;
   const profile = computeClientProfile(item, allItems);
 
-  elements.content.innerHTML = `
-    <div class="space-y-2">
-      <h3 class="text-lg font-extrabold text-slate-900">Detalhe do agendamento</h3>
-      <div class="text-sm text-slate-600">Cliente: <strong>${item.client}</strong> (${item.clientPhone || "sem telefone"})</div>
-      <div class="text-sm text-slate-600">Perfil: <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${profileClass(profile)}">${profileLabel(profile)}</span></div>
-      <div class="text-sm text-slate-600">Historico resumido: ${completedCount} concluidos, ${noShowCount} faltas, ${cancelledCount} cancelados</div>
-      <div class="text-sm text-slate-600">Servico: <strong>${item.service}</strong></div>
-      <div class="text-sm text-slate-600">Profissional: <strong>${item.professional}</strong></div>
-      <div class="text-sm text-slate-600">Horario: <strong>${formatDateTime(item.startsAt)} - ${formatTime(item.endsAt)}</strong></div>
-      <div class="text-sm text-slate-600">Valor: <strong>${money(item.servicePrice)}</strong></div>
-      <div class="text-sm text-slate-600">Status: <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusClass(item.status)}">${statusLabel(item.status)}</span></div>
-      <div class="text-sm text-slate-600">Venda de produtos: <strong>${item.hasProductSale ? `Sim (${item.productItemsSoldCount} item(ns))` : "Nao registrada"}</strong></div>
-      <div class="text-sm text-slate-600">Origem: <strong>${safeText(item.origin, "MANUAL")}</strong></div>
-      <div class="text-sm text-slate-600">Observacoes: ${item.notes || "Sem observacoes"}</div>
-      <div class="text-sm text-slate-600">Criado em: ${formatDateTime(item.createdAt)}</div>
-      <div class="text-sm text-slate-600">Atualizado em: ${formatDateTime(item.updatedAt)}</div>
-    </div>
-  `;
-
+  const actions = actionsForStatus(item.status).filter((action) => action !== "DETAIL" && action !== "WHATSAPP");
+  const historyEntries = Array.isArray(item.history) && item.history.length
+    ? item.history
+    : [
+        { label: "Criado", at: item.createdAt },
+        { label: "Ultima atualizacao", at: item.updatedAt },
+      ];
+  elements.panel.className = "";
+  elements.panel.innerHTML = renderEntityDrawer({
+    id: "appointmentEntityDrawer",
+    open: true,
+    title: item.client,
+    subtitle: `${item.service} com ${item.professional}`,
+    status: item.status,
+    summary: `
+      <dl class="op-summary-grid">
+        <div><dt>Cliente</dt><dd>${item.client}</dd></div>
+        <div><dt>Servico</dt><dd>${item.service}</dd></div>
+        <div><dt>Profissional</dt><dd>${item.professional}</dd></div>
+        <div><dt>Horario</dt><dd>${formatDateTime(item.startsAt)} - ${formatTime(item.endsAt)}</dd></div>
+        <div><dt>Status</dt><dd>${renderStatusChip(item.status)}</dd></div>
+        <div><dt>Valor</dt><dd>${money(item.servicePrice)}</dd></div>
+      </dl>
+    `,
+    details: `
+      <div class="op-detail-list">
+        <p>Perfil: <strong>${profileLabel(profile)}</strong></p>
+        <p>Historico do cliente no recorte: ${completedCount} concluidos, ${noShowCount} faltas, ${cancelledCount} cancelados.</p>
+        <p>Produtos adicionais: <strong>${item.hasProductSale ? `sim (${item.productItemsSoldCount} item(ns))` : "nao registrados"}</strong></p>
+        <p>Origem: <strong>${safeText(item.origin, "MANUAL")}</strong></p>
+        <p>Observacoes: ${item.notes || "Sem observacoes"}</p>
+      </div>
+    `,
+    history: `
+      <ol class="op-history-list">
+        ${historyEntries
+          .map((entry) => {
+            const label = safeText(entry.label || entry.action || entry.status || entry.type, "Movimento");
+            const at = asDate(entry.at || entry.createdAt || entry.timestamp || entry.date);
+            return `<li><strong>${label}</strong><span>${at ? formatDateTime(at) : "Sem data registrada"}</span></li>`;
+          })
+          .join("")}
+      </ol>
+    `,
+    technicalTrace: renderTechnicalTrace({
+      id: item.id,
+      referenceType: "APPOINTMENT",
+      referenceId: item.id,
+      auditEntity: "Appointment",
+      auditAction: item.status,
+    }),
+    actions: `
+      ${actions
+        .map(
+          (action) =>
+            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status) ? "ux-btn-primary" : actionButtonTone(action)}">${actionLabel(action)}</button>`,
+        )
+        .join("")}
+    `,
+  });
+  elements.panel
+    .querySelectorAll("[data-drawer-appointment-action]")
+    .forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (typeof options.onAction === "function") {
+          await options.onAction(button.dataset.id, button.dataset.drawerAppointmentAction);
+        }
+      });
+    });
+  bindEntityDrawers(elements.panel);
   elements.panel.classList.remove("hidden");
+}
+
+function actionButtonTone(action) {
+  if (action === "CANCELLED" || action === "NO_SHOW" || action === "REFUND") return "ux-btn-danger";
+  if (action === "COMPLETE") return "ux-btn-success";
+  return "ux-btn-muted";
 }

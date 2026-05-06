@@ -55,20 +55,24 @@ import {
 } from "./modules/phone.js";
 import {
   renderFinancialData,
+  renderFinancialEntryDrawer,
   renderFinancialError,
   renderFinancialLoading,
 } from "./modules/financeiro.js";
 import {
+  renderStockProductDrawer,
   renderStockData,
   renderStockError,
   renderStockLoading,
 } from "./modules/estoque.js";
 import {
+  renderClientDrawer,
   renderClientsData,
   renderClientsError,
   renderClientsLoading,
 } from "./modules/clientes.js";
 import {
+  renderProfessionalDrawer,
   renderProfessionalsData,
   renderProfessionalsError,
   renderProfessionalsLoading,
@@ -80,6 +84,7 @@ import {
   renderServicesLoading,
 } from "./modules/servicos.js";
 import {
+  renderCommissionDrawer,
   renderCommissionsData,
   renderCommissionsError,
   renderCommissionsLoading,
@@ -98,6 +103,7 @@ import {
   renderSettingsData,
   renderSettingsError,
   renderSettingsLoading,
+  renderSettingsSectionDrawer,
 } from "./modules/configuracoes.js";
 import {
   renderMetasData,
@@ -107,8 +113,20 @@ import {
 import {
   renderAuditData,
   renderAuditError,
+  renderAuditEventDrawer,
   renderAuditLoading,
 } from "./modules/auditoria.js";
+import {
+  bindEntityDrawers,
+  bindFilterBars,
+  renderEmptyState,
+  renderEntityDrawer,
+  renderFilterBar,
+  renderPageHeader,
+  renderPrimaryAction,
+  renderStatusChip,
+  renderTechnicalTrace,
+} from "./components/operational-ui.js";
 
 const API = "";
 const unitId = "unit-01";
@@ -131,10 +149,375 @@ const FRONTEND_AUTH_CREDENTIALS = {
   },
 };
 
+function renderOperationalChrome() {
+  const agendaHeaderMount = document.getElementById("agendaHeaderMount");
+  if (agendaHeaderMount) {
+    agendaHeaderMount.innerHTML = renderPageHeader({
+      context: "Funil operacional",
+      title: "Agenda",
+      subtitle: "Agenda do dia, proximo atendimento e acoes principais sem expor dados tecnicos.",
+      action: renderPrimaryAction({
+        label: "Novo agendamento",
+        id: "agendaNewAppointmentBtn",
+        type: "button",
+      }),
+    });
+  }
+
+  const agendaFilterMount = document.getElementById("agendaFilterMount");
+  if (agendaFilterMount) {
+    agendaFilterMount.innerHTML = renderFilterBar({
+      id: "agendaOperationalFilters",
+      essential: [
+        `<input id="filterSearch" type="search" placeholder="Buscar cliente, servico ou profissional" class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]" />`,
+        `<select id="filterPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          <option value="today">Hoje</option>
+          <option value="week">Semana</option>
+          <option value="month">Mes</option>
+        </select>`,
+        `<select id="filterProfessional" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          <option value="">Todos profissionais</option>
+        </select>`,
+      ],
+      advanced: [
+        `<select id="filterStatus" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          <option value="">Todos status</option>
+          <option value="SCHEDULED">Agendado</option>
+          <option value="CONFIRMED">Confirmado</option>
+          <option value="IN_SERVICE">Em atendimento</option>
+          <option value="COMPLETED">Concluido</option>
+          <option value="CANCELLED">Cancelado</option>
+          <option value="NO_SHOW">Nao compareceu</option>
+        </select>`,
+        `<select id="filterService" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          <option value="">Todos servicos</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(agendaFilterMount);
+  }
+
+  const saleHeaderMount = document.getElementById("saleHeaderMount");
+  if (saleHeaderMount) {
+    saleHeaderMount.innerHTML = renderPageHeader({
+      context: "Funil operacional",
+      title: "PDV de produtos",
+      subtitle: "Busque o produto, monte o carrinho, confira o total e cobre a venda sem expor rastros tecnicos.",
+    });
+  }
+
+  const saleCheckoutActionMount = document.getElementById("saleCheckoutActionMount");
+  if (saleCheckoutActionMount) {
+    saleCheckoutActionMount.innerHTML = renderPrimaryAction({
+      label: "Cobrar venda",
+      id: "saleCheckoutBtn",
+      type: "submit",
+      disabled: true,
+    });
+  }
+
+  const saleHistoryFilterMount = document.getElementById("saleHistoryFilterMount");
+  if (saleHistoryFilterMount) {
+    saleHistoryFilterMount.innerHTML = renderFilterBar({
+      id: "saleHistoryFilters",
+      essential: [
+        `<input id="saleHistorySearch" type="search" placeholder="Buscar cliente ou produto" class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]" />`,
+        `<button type="button" id="saleHistoryRefreshBtn" class="min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700">Atualizar</button>`,
+      ],
+      advanced: [
+        `<input id="saleHistoryStart" type="date" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" />`,
+        `<input id="saleHistoryEnd" type="date" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" />`,
+      ],
+      advancedLabel: "Periodo do historico",
+    });
+    bindFilterBars(saleHistoryFilterMount);
+  }
+
+  const inventoryHeaderMount = document.getElementById("inventoryHeaderMount");
+  if (inventoryHeaderMount) {
+    inventoryHeaderMount.innerHTML = renderPageHeader({
+      context: "Funil operacional",
+      title: "Estoque",
+      subtitle: "Produtos criticos primeiro, reposicao clara e rastreabilidade tecnica apenas no detalhe.",
+      action: renderPrimaryAction({
+        label: "Novo produto",
+        id: "inventoryAddBtn",
+        type: "button",
+      }),
+    });
+  }
+
+  const inventoryFilterMount = document.getElementById("inventoryFilterMount");
+  if (inventoryFilterMount) {
+    inventoryFilterMount.innerHTML = renderFilterBar({
+      id: "inventoryOperationalFilters",
+      essential: [
+        `<input id="inventorySearch" type="search" placeholder="Buscar produto" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
+        `<select id="inventoryStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="ALL">Todos status</option>
+          <option value="OUT_OF_STOCK">Sem estoque</option>
+          <option value="LOW_STOCK">Estoque baixo</option>
+        </select>`,
+      ],
+      advanced: [
+        `<select id="inventoryCategoryFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todas categorias</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(inventoryFilterMount);
+  }
+
+  const financialHeaderMount = document.getElementById("financialHeaderMount");
+  if (financialHeaderMount) {
+    financialHeaderMount.innerHTML = renderPageHeader({
+      context: "Financeiro conciliado",
+      title: "Financeiro",
+      subtitle: "Resultado do periodo, entradas, saidas, saldo e origens operacionais sem expor rastros tecnicos.",
+      action: renderPrimaryAction({
+        label: "Novo lancamento",
+        id: "financialAddTransactionBtn",
+        type: "button",
+      }),
+    });
+  }
+
+  const financialFilterMount = document.getElementById("financialFilterMount");
+  if (financialFilterMount) {
+    financialFilterMount.innerHTML = renderFilterBar({
+      id: "financialOperationalFilters",
+      essential: [
+        `<select id="financialPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="today">Hoje</option>
+          <option value="week">Semana</option>
+          <option value="month" selected>Mes</option>
+          <option value="custom">Personalizado</option>
+        </select>`,
+        `<select id="financialTypeFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Entradas e saidas</option>
+          <option value="INCOME">Entradas</option>
+          <option value="EXPENSE">Saidas</option>
+        </select>`,
+        `<input id="financialSearch" type="search" placeholder="Buscar descricao ou observacao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
+      ],
+      advanced: [
+        `<input id="financialCustomStart" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
+        `<input id="financialCustomEnd" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
+      ],
+      advancedLabel: "Periodo personalizado",
+    });
+    bindFilterBars(financialFilterMount);
+  }
+
+  const commissionsHeaderMount = document.getElementById("commissionsHeaderMount");
+  if (commissionsHeaderMount) {
+    commissionsHeaderMount.innerHTML = renderPageHeader({
+      context: "Funil operacional",
+      title: "Comissoes",
+      subtitle: "Fila de quem precisa receber, valores pendentes, pagamentos do periodo e rastreabilidade tecnica apenas no detalhe.",
+    });
+  }
+
+  const commissionsFilterMount = document.getElementById("commissionsFilterMount");
+  if (commissionsFilterMount) {
+    commissionsFilterMount.innerHTML = renderFilterBar({
+      id: "commissionsOperationalFilters",
+      essential: [
+        `<select id="commissionsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="month">Mes</option>
+          <option value="week">Semana</option>
+          <option value="today">Hoje</option>
+        </select>`,
+        `<select id="commissionsProfessionalFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos profissionais</option>
+        </select>`,
+        `<select id="commissionsAppliesToFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todas origens</option>
+          <option value="SERVICE">Atendimento finalizado</option>
+          <option value="PRODUCT">Venda de produto</option>
+        </select>`,
+      ],
+      advanced: [
+        `<select id="commissionsStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos status</option>
+          <option value="PENDING">Pendente</option>
+          <option value="PAID">Paga</option>
+          <option value="CANCELED">Cancelada</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(commissionsFilterMount);
+  }
+
+  const clientsHeaderMount = document.getElementById("clientsHeaderMount");
+  if (clientsHeaderMount) {
+    clientsHeaderMount.innerHTML = renderPageHeader({
+      context: "Relacionamento operacional",
+      title: "Clientes",
+      subtitle: "Carteira com ativos, risco, VIPs e reativacao prioritaria. Historico completo e rastros tecnicos ficam no detalhe.",
+      action: renderPrimaryAction({
+        label: "Novo cliente",
+        id: "clientsAddBtn",
+        type: "button",
+      }),
+    });
+  }
+
+  const clientsFilterMount = document.getElementById("clientsFilterMount");
+  if (clientsFilterMount) {
+    clientsFilterMount.innerHTML = renderFilterBar({
+      id: "clientsOperationalFilters",
+      essential: [
+        `<input id="clientsSearch" type="search" placeholder="Buscar nome, telefone ou tag" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
+        `<select id="clientsStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos status</option>
+          <option value="ACTIVE">Ativo</option>
+          <option value="AT_RISK">Em risco</option>
+          <option value="INACTIVE">Inativo</option>
+          <option value="VIP">VIP</option>
+        </select>`,
+        `<select id="clientsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="month">Mes</option>
+          <option value="week">Semana</option>
+          <option value="today">Hoje</option>
+        </select>`,
+      ],
+      advanced: [
+        `<select id="clientsSegmentFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos segmentos</option>
+          <option value="VALUE_HIGH">Maior valor</option>
+          <option value="VALUE_MEDIUM">Valor medio</option>
+          <option value="VALUE_LOW">Valor baixo</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(clientsFilterMount);
+  }
+
+  const professionalsHeaderMount = document.getElementById("professionalsHeaderMount");
+  if (professionalsHeaderMount) {
+    professionalsHeaderMount.innerHTML = renderPageHeader({
+      context: "Catalogo operacional",
+      title: "Profissionais",
+      subtitle: "Equipe ativa, servicos que pode atender, producao e comissoes resumidas. Rastros tecnicos ficam no detalhe.",
+    });
+  }
+
+  const professionalsFilterMount = document.getElementById("professionalsFilterMount");
+  if (professionalsFilterMount) {
+    professionalsFilterMount.innerHTML = renderFilterBar({
+      id: "professionalsOperationalFilters",
+      essential: [
+        `<select id="professionalsFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos profissionais</option>
+        </select>`,
+        `<select id="professionalsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="month">Mes</option>
+          <option value="week">Semana</option>
+          <option value="today">Hoje</option>
+        </select>`,
+      ],
+      advanced: [
+        `<span class="text-xs text-slate-500">Perfis e inativos dependem do cadastro de profissionais existente.</span>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(professionalsFilterMount);
+  }
+
+  const servicesHeaderMount = document.getElementById("servicesHeaderMount");
+  if (servicesHeaderMount) {
+    servicesHeaderMount.innerHTML = renderPageHeader({
+      context: "Catalogo operacional",
+      title: "Servicos",
+      subtitle: "Servicos vendaveis, preco, duracao, margem e profissionais habilitados primeiro. Detalhes tecnicos ficam recolhidos.",
+      action: renderPrimaryAction({
+        label: "Novo servico",
+        id: "servicesAddBtn",
+        type: "button",
+      }),
+    });
+  }
+
+  const servicesFilterMount = document.getElementById("servicesFilterMount");
+  if (servicesFilterMount) {
+    servicesFilterMount.innerHTML = renderFilterBar({
+      id: "servicesOperationalFilters",
+      essential: [
+        `<input id="servicesSearch" type="search" placeholder="Buscar servico ou descricao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
+        `<select id="servicesCategoryFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todas categorias</option>
+        </select>`,
+        `<select id="servicesStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="ALL">Todos status</option>
+          <option value="ACTIVE">Servicos ativos</option>
+          <option value="INACTIVE">Servicos inativos</option>
+        </select>`,
+      ],
+      advanced: [
+        `<input id="servicesMinPrice" type="number" min="0" step="0.01" placeholder="Preco minimo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
+        `<input id="servicesMaxPrice" type="number" min="0" step="0.01" placeholder="Preco maximo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(servicesFilterMount);
+  }
+
+  const auditHeaderMount = document.getElementById("auditHeaderMount");
+  if (auditHeaderMount) {
+    auditHeaderMount.innerHTML = renderPageHeader({
+      context: "Auditoria owner-only",
+      title: "Auditoria",
+      subtitle: "Linha do tempo legivel de acoes criticas, com rastreabilidade tecnica preservada apenas no detalhe.",
+    });
+  }
+
+  const auditFilterMount = document.getElementById("auditFilterMount");
+  if (auditFilterMount) {
+    auditFilterMount.innerHTML = renderFilterBar({
+      id: "auditOperationalFilters",
+      essential: [
+        `<input id="auditStartFilter" type="date" aria-label="Inicio" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
+        `<input id="auditEndFilter" type="date" aria-label="Fim" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
+        `<input id="auditEntityFilter" type="text" placeholder="Modulo ou entidade" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<input id="auditActorFilter" type="search" placeholder="Ator" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<input id="auditActionFilter" type="text" placeholder="Acao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+      ],
+      advanced: [
+        `<input id="auditRequestIdFilter" type="search" placeholder="requestId" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<input id="auditIdempotencyFilter" type="search" placeholder="idempotencyKey" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<input id="auditEntityIdFilter" type="search" placeholder="entityId" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<input id="auditRouteFilter" type="search" placeholder="rota" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
+        `<select id="auditMethodFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Todos metodos</option>
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PATCH">PATCH</option>
+          <option value="DELETE">DELETE</option>
+        </select>`,
+        `<select id="auditLimitFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="50">50 eventos</option>
+          <option value="100">100 eventos</option>
+          <option value="200">200 eventos</option>
+          <option value="500">500 eventos</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(auditFilterMount);
+  }
+}
+
 const appShell = document.getElementById("appShell");
 const appSidebar = document.getElementById("appSidebar");
 const appTopbar = document.getElementById("appTopbar");
 const appMobileTabs = document.getElementById("appMobileTabs");
+
+renderOperationalChrome();
 
 const appointmentForm = document.getElementById("appointmentForm");
 const saleForm = document.getElementById("saleForm");
@@ -167,6 +550,7 @@ const financialCashflow = document.getElementById("financialCashflow");
 const financialEntriesList = document.getElementById("financialEntriesList");
 const financialCommissionsList = document.getElementById("financialCommissionsList");
 const financialReports = document.getElementById("financialReports");
+const financialDrawerHost = document.getElementById("financialDrawerHost");
 const financialFeedback = document.getElementById("financialFeedback");
 const financialPeriod = document.getElementById("financialPeriod");
 const financialCustomStart = document.getElementById("financialCustomStart");
@@ -199,6 +583,7 @@ const inventoryEmptyAddBtn = document.getElementById("inventoryEmptyAddBtn");
 const inventoryTableWrap = document.getElementById("inventoryTableWrap");
 const inventoryTableBody = document.getElementById("inventoryTableBody");
 const inventoryMobileList = document.getElementById("inventoryMobileList");
+const inventoryDrawerHost = document.getElementById("inventoryDrawerHost");
 const inventoryAddBtn = document.getElementById("inventoryAddBtn");
 const inventoryProductModal = document.getElementById("inventoryProductModal");
 const inventoryProductModalTitle = document.getElementById("inventoryProductModalTitle");
@@ -231,6 +616,7 @@ const saleHistorySearch = document.getElementById("saleHistorySearch");
 const saleHistoryStart = document.getElementById("saleHistoryStart");
 const saleHistoryEnd = document.getElementById("saleHistoryEnd");
 const saleHistoryRefreshBtn = document.getElementById("saleHistoryRefreshBtn");
+const saleDrawerHost = document.getElementById("saleDrawerHost");
 const clientsSummary = document.getElementById("clientsSummary");
 const clientsReactivationQueue = document.getElementById("clientsReactivationQueue");
 const clientsAutomationSignals = document.getElementById("clientsAutomationSignals");
@@ -238,6 +624,7 @@ const clientsTable = document.getElementById("clientsTable");
 const clientsFeedback = document.getElementById("clientsFeedback");
 const professionalsSummary = document.getElementById("professionalsSummary");
 const professionalsTable = document.getElementById("professionalsTable");
+const professionalsDrawerHost = document.getElementById("professionalsDrawerHost");
 const servicesSummaryGrid = document.getElementById("servicesSummaryGrid");
 const servicesSearch = document.getElementById("servicesSearch");
 const servicesCategoryFilter = document.getElementById("servicesCategoryFilter");
@@ -253,6 +640,7 @@ const servicesMobileList = document.getElementById("servicesMobileList");
 const servicesDetailPanel = document.getElementById("servicesDetailPanel");
 const servicesDetailContent = document.getElementById("servicesDetailContent");
 const servicesDetailClose = document.getElementById("servicesDetailClose");
+const servicesDrawerHost = document.getElementById("servicesDrawerHost");
 const servicesAddBtn = document.getElementById("servicesAddBtn");
 const servicesModal = document.getElementById("servicesModal");
 const servicesModalTitle = document.getElementById("servicesModalTitle");
@@ -331,8 +719,14 @@ const auditActorFilter = document.getElementById("auditActorFilter");
 const auditStartFilter = document.getElementById("auditStartFilter");
 const auditEndFilter = document.getElementById("auditEndFilter");
 const auditLimitFilter = document.getElementById("auditLimitFilter");
+const auditRequestIdFilter = document.getElementById("auditRequestIdFilter");
+const auditIdempotencyFilter = document.getElementById("auditIdempotencyFilter");
+const auditEntityIdFilter = document.getElementById("auditEntityIdFilter");
+const auditRouteFilter = document.getElementById("auditRouteFilter");
+const auditMethodFilter = document.getElementById("auditMethodFilter");
 const auditFeedback = document.getElementById("auditFeedback");
 const auditEventsList = document.getElementById("auditEventsList");
+const auditDrawerHost = document.getElementById("auditDrawerHost");
 const automationRuleForm = document.getElementById("automationRuleForm");
 const automationRuleId = document.getElementById("automationRuleId");
 const automationRuleName = document.getElementById("automationRuleName");
@@ -359,7 +753,8 @@ const appointmentsEmptyClear = document.getElementById("appointmentsEmptyClear")
 const appointmentsTableWrap = document.getElementById("appointmentsTableWrap");
 const appointmentsTableBody = document.getElementById("appointmentsTableBody");
 const appointmentsMobileList = document.getElementById("appointmentsMobileList");
-const appointmentsDetailPanel = document.getElementById("appointmentsDetailPanel");
+const appointmentsDetailPanel =
+  document.getElementById("appointmentDrawerHost") || document.getElementById("appointmentsDetailPanel");
 const appointmentsDetailContent = document.getElementById("appointmentsDetailContent");
 const appointmentsDetailClose = document.getElementById("appointmentsDetailClose");
 const appointmentsFilterDate = document.getElementById("appointmentsFilterDate");
@@ -440,11 +835,14 @@ const clientsStatus = document.getElementById("clientsStatus");
 const clientsTags = document.getElementById("clientsTags");
 const clientsNotes = document.getElementById("clientsNotes");
 const clientsSubmitBtn = document.getElementById("clientsSubmitBtn");
+const clientsDrawerHost = document.getElementById("clientsDrawerHost");
 const professionalsFilter = document.getElementById("professionalsFilter");
 const professionalsPeriod = document.getElementById("professionalsPeriod");
 const commissionsProfessionalFilter = document.getElementById("commissionsProfessionalFilter");
 const commissionsAppliesToFilter = document.getElementById("commissionsAppliesToFilter");
 const commissionsPeriod = document.getElementById("commissionsPeriod");
+const commissionsStatusFilter = document.getElementById("commissionsStatusFilter");
+const commissionsDrawerHost = document.getElementById("commissionsDrawerHost");
 
 const scheduleAssistElements = {
   clientInsights,
@@ -459,6 +857,7 @@ const financialElements = {
   list: financialEntriesList,
   commissions: financialCommissionsList,
   reports: financialReports,
+  drawerHost: financialDrawerHost,
 };
 
 const stockElements = {
@@ -468,6 +867,7 @@ const stockElements = {
   tableWrap: inventoryTableWrap,
   tableBody: inventoryTableBody,
   mobileList: inventoryMobileList,
+  drawerHost: inventoryDrawerHost,
 };
 
 const clientsElements = {
@@ -475,11 +875,13 @@ const clientsElements = {
   automationSignals: clientsAutomationSignals,
   reactivationQueue: clientsReactivationQueue,
   table: clientsTable,
+  drawerHost: clientsDrawerHost,
 };
 
 const professionalsElements = {
   summary: professionalsSummary,
   table: professionalsTable,
+  drawerHost: professionalsDrawerHost,
 };
 
 const servicesElements = {
@@ -493,11 +895,13 @@ const servicesElements = {
     panel: servicesDetailPanel,
     content: servicesDetailContent,
   },
+  drawerHost: servicesDrawerHost,
 };
 
 const commissionsElements = {
   summary: commissionsSummary,
   table: commissionsTable,
+  drawerHost: commissionsDrawerHost,
 };
 
 const fidelizacaoElements = {
@@ -532,6 +936,7 @@ const metasElements = {
 const auditElements = {
   feedback: auditFeedback,
   list: auditEventsList,
+  drawerHost: auditDrawerHost,
 };
 
 const appointmentsElements = {
@@ -570,6 +975,9 @@ let productSalesHistory = [];
 let saleHistoryDebounce = null;
 let currentAutomationRules = [];
 let currentFinancialTransactions = [];
+let currentCommissionsPayload = null;
+let currentClientsPayload = null;
+let currentProfessionalsPayload = null;
 let currentServices = [];
 let currentServiceDetail = null;
 let currentSettingsPayload = null;
@@ -588,6 +996,7 @@ let servicesFilters = {
   maxPrice: "",
 };
 let inventoryProductsById = {};
+let currentStockPayload = null;
 let servicesByIdMap = {};
 let inventorySearchDebounce = null;
 let checkoutModalState = {
@@ -1568,43 +1977,41 @@ function renderSaleCart() {
 function renderRecentSales() {
   if (!saleRecentList) return;
   if (!productSalesHistory.length) {
-    saleRecentList.innerHTML = `<p class="text-sm text-gray-500">Nenhuma venda encontrada no historico.</p>`;
+    saleRecentList.innerHTML = renderEmptyState({
+      title: "Nenhuma venda encontrada.",
+      description: "Registre uma venda ou ajuste os filtros para ampliar o historico.",
+    });
     return;
   }
   saleRecentList.innerHTML = productSalesHistory
     .map(
       (sale) => `
-      <article class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <article class="pdv-history-row rounded-lg border border-gray-200 bg-gray-50 p-3">
         <div class="flex items-start justify-between gap-2">
           <div>
-            <strong class="text-sm text-gray-800">${sale.label}</strong>
-            <p class="text-xs text-gray-500 mt-1">${sale.meta}</p>
+            <strong class="text-sm text-gray-800">${sale.soldAtLabel}</strong>
+            <p class="text-xs text-gray-500 mt-1">${sale.clientLabel}</p>
           </div>
           <div class="text-right">
             <span class="block text-sm font-extrabold text-emerald-700">${sale.amount}</span>
-            <span class="mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${sale.statusTone || "border-emerald-300 bg-emerald-50 text-emerald-700"}">${sale.statusLabel || "Sem devolucao"}</span>
+            <span class="mt-1 inline-flex">${renderStatusChip(sale.status || "NOT_REFUNDED")}</span>
           </div>
         </div>
-        <div class="mt-2 space-y-1">
-          ${sale.items
-            .map(
-              (item) => `
-                <div class="text-xs text-gray-600">
-                  ${item.name}: ${item.quantity} vendido(s), ${item.refundedQuantity} devolvido(s)
-                </div>
-              `,
-            )
-            .join("")}
+        <div class="mt-2 text-xs text-gray-600">
+          ${sale.itemsSummary}
         </div>
-        ${
-          sale.canRefund !== false
-            ? `<div class="mt-3 flex justify-end">
-                <button type="button" data-product-refund-sale="${sale.id}" class="min-h-[40px] rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
-                  Devolver produto
-                </button>
-              </div>`
-            : ""
-        }
+        <div class="mt-3 flex flex-wrap justify-end gap-2">
+          <button type="button" data-product-sale-detail="${sale.id}" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700">
+            Ver detalhes
+          </button>
+          ${
+            sale.canRefund !== false
+              ? `<button type="button" data-product-refund-sale="${sale.id}" class="min-h-[40px] rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+                  Devolver
+                </button>`
+              : ""
+          }
+        </div>
       </article>
     `,
     )
@@ -1613,12 +2020,103 @@ function renderRecentSales() {
 
 function productSaleStatusMeta(status) {
   if (status === "REFUNDED") {
-    return { label: "Devolvida", tone: "border-slate-300 bg-slate-100 text-slate-600" };
+    return { label: "Devolvida" };
   }
   if (status === "PARTIALLY_REFUNDED") {
-    return { label: "Parcial", tone: "border-amber-300 bg-amber-50 text-amber-700" };
+    return { label: "Parcialmente devolvida" };
   }
-  return { label: "Sem devolucao", tone: "border-emerald-300 bg-emerald-50 text-emerald-700" };
+  return { label: "Sem devolucao" };
+}
+
+function renderSaleDrawer(sale) {
+  if (!saleDrawerHost || !sale) return;
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  const refundableItems = items.filter((item) => Number(item.refundableQuantity || 0) > 0);
+  saleDrawerHost.className = "";
+  saleDrawerHost.innerHTML = renderEntityDrawer({
+    id: "productSaleEntityDrawer",
+    open: true,
+    title: "Detalhe da venda",
+    subtitle: `${sale.soldAtLabel} | ${sale.clientLabel}`,
+    status: sale.status || "NOT_REFUNDED",
+    summary: `
+      <dl class="op-summary-grid">
+        <div><dt>Data</dt><dd>${sale.soldAtLabel}</dd></div>
+        <div><dt>Cliente</dt><dd>${sale.clientLabel}</dd></div>
+        <div><dt>Profissional</dt><dd>${sale.professionalLabel}</dd></div>
+        <div><dt>Total</dt><dd>${sale.amount}</dd></div>
+        <div><dt>Devolucao</dt><dd>${renderStatusChip(sale.status || "NOT_REFUNDED")}</dd></div>
+        <div><dt>Itens</dt><dd>${sale.label}</dd></div>
+      </dl>
+    `,
+    details: `
+      <div class="op-detail-list">
+        <p><strong>Itens da venda</strong></p>
+        <div class="pdv-drawer-items">
+          ${items
+            .map(
+              (item) => `
+                <div class="pdv-drawer-item">
+                  <strong>${item.name}</strong>
+                  <span>Vendido: ${item.quantity}</span>
+                  <span>Devolvido: ${item.refundedQuantity || 0}</span>
+                  <span>Disponivel para devolucao: ${item.refundableQuantity || 0}</span>
+                  <span>Subtotal: R$ ${Number(item.unitPrice * item.quantity || 0).toFixed(2)}</span>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+        <details class="pdv-impact-details">
+          <summary>Ver impacto financeiro</summary>
+          <p>Esta venda gerou entrada financeira.</p>
+          ${sale.totalRefundedAmount > 0 ? `<p>Esta devolucao gerou reverso financeiro de R$ ${Number(sale.totalRefundedAmount).toFixed(2)}.</p>` : ""}
+        </details>
+        <details class="pdv-impact-details">
+          <summary>Ver impacto no estoque</summary>
+          <p>Esta venda baixou o estoque.</p>
+          ${sale.totalRefundedAmount > 0 ? "<p>Esta devolucao retornou item ao estoque.</p>" : ""}
+        </details>
+      </div>
+    `,
+    history: `
+      <ol class="op-history-list">
+        <li><strong>Venda registrada</strong><span>${sale.soldAtLabel}</span></li>
+        ${
+          sale.totalRefundedAmount > 0
+            ? `<li><strong>Devolucao registrada</strong><span>Total devolvido: R$ ${Number(sale.totalRefundedAmount).toFixed(2)}</span></li>`
+            : "<li><strong>Sem devolucao registrada</strong><span>Todos os itens seguem como venda ativa.</span></li>"
+        }
+      </ol>
+    `,
+    technicalTrace: renderTechnicalTrace({
+      id: sale.id,
+      saleId: sale.id,
+      productSaleId: sale.id,
+      refundId: sale.refundId,
+      referenceType: "PRODUCT_SALE",
+      referenceId: sale.id,
+      idempotencyKey: sale.idempotencyKey,
+      auditEntity: "product_sale",
+      auditAction: sale.status || "NOT_REFUNDED",
+    }),
+    actions: `
+      ${
+        refundableItems.length
+          ? `<button type="button" data-drawer-product-refund-sale="${sale.id}" class="ux-btn ux-btn-danger">Devolver produto</button>`
+          : ""
+      }
+      <button type="button" data-drawer-close class="ux-btn ux-btn-muted">Fechar</button>
+    `,
+  });
+  saleDrawerHost.querySelectorAll("[data-drawer-product-refund-sale]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const current = productSalesHistory.find((item) => item.id === button.dataset.drawerProductRefundSale);
+      if (current) openProductRefundModal(current);
+    });
+  });
+  bindEntityDrawers(saleDrawerHost);
+  saleDrawerHost.classList.remove("hidden");
 }
 
 function normalizeProductSaleHistory(payload) {
@@ -1636,18 +2134,22 @@ function normalizeProductSaleHistory(payload) {
     const statusMeta = productSaleStatusMeta(sale.status);
     const soldAt = new Date(sale.soldAt);
     const soldAtLabel = Number.isNaN(soldAt.getTime()) ? "-" : soldAt.toLocaleString("pt-BR");
+    const totalItems = items.reduce((acc, item) => acc + item.quantity, 0);
     return {
       id: sale.id,
-      label: `${items.reduce((acc, item) => acc + item.quantity, 0)} item(ns)`,
+      label: `${totalItems} item(ns)`,
       amount: `R$ ${Number(sale.grossAmount || 0).toFixed(2)}`,
       clientLabel: sale.clientName || "Nao vinculado",
       professionalLabel: sale.professionalName || "Sem profissional",
       items,
       status: sale.status,
       statusLabel: statusMeta.label,
-      statusTone: statusMeta.tone,
       canRefund: items.some((item) => item.refundableQuantity > 0),
-      meta: `${soldAtLabel} · Cliente: ${sale.clientName || "Nao vinculado"} · Profissional: ${sale.professionalName || "Sem profissional"}`,
+      soldAtLabel,
+      itemsSummary: items.length === 1 ? items[0].name : `${items.length} produtos vendidos`,
+      totalRefundedAmount: Number(sale.totalRefundedAmount || 0),
+      meta: `${soldAtLabel} | Cliente: ${sale.clientName || "Nao vinculado"} | Profissional: ${sale.professionalName || "Sem profissional"}`,
+      createdAt: sale.createdAt,
     };
   });
 }
@@ -1892,10 +2394,16 @@ function extractApiErrorMessage(response, payload, fallbackMessage) {
     const normalized = fromPayload.toLowerCase();
     if (normalized === "not found") return fallbackMessage;
     if (normalized.includes("idempotencykey reutilizada")) {
-      return "Operacao protegida por idempotencia. Tente novamente sem repetir a acao manualmente.";
+      return "Esta operacao ja foi processada. Atualize a tela para conferir o resultado.";
+    }
+    if (normalized.includes("appointment not in service") || normalized.includes("nao esta em andamento")) {
+      return "Nao foi possivel finalizar porque o atendimento nao esta em andamento.";
+    }
+    if (normalized.includes("overlap") || normalized.includes("occupied") || normalized.includes("conflito")) {
+      return "Este horario ja esta ocupado. Escolha outro horario.";
     }
     if (normalized.includes("quantidade devolvida maior")) {
-      return "Nao foi possivel devolver quantidade maior que a vendida.";
+      return "A quantidade informada e maior do que a quantidade disponivel para devolucao.";
     }
     if (normalized.includes("atendimento nao concluido") || normalized.includes("atendimento ja estornado")) {
       return "Erro ao estornar atendimento. Verifique se ele ja foi concluido ou ja estornado.";
@@ -1912,18 +2420,25 @@ function ensureCheckoutModal() {
   modal.id = "appointmentCheckoutModal";
   modal.className = "fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3";
   modal.innerHTML = `
-    <article class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-      <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-        <h3 class="text-base font-bold text-slate-900">Finalizar atendimento</h3>
+    <article class="checkout-modal w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+      <div class="checkout-modal-header flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+        <div>
+          <p class="text-xs font-extrabold uppercase tracking-wide text-slate-500">Checkout do atendimento</p>
+          <h3 class="text-base font-bold text-slate-900">Finalizar atendimento</h3>
+        </div>
         <button type="button" data-checkout-close class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
       </div>
       <form id="appointmentCheckoutForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+        <div class="sm:col-span-2 checkout-total-panel">
+          <span>Total do atendimento</span>
+          <strong id="checkoutTotalDisplay">R$ 0,00</strong>
+        </div>
         <div class="sm:col-span-2 text-sm text-slate-700" id="checkoutSummary"></div>
-        <div class="sm:col-span-2">
-          <div class="text-sm font-semibold text-slate-700 mb-1">Produtos vendidos</div>
+        <details class="sm:col-span-2 checkout-products-panel">
+          <summary>Produtos adicionais</summary>
           <div id="checkoutProductsList" class="space-y-2"></div>
           <button type="button" id="checkoutAddProduct" class="mt-2 min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Adicionar produto</button>
-        </div>
+        </details>
         <label class="text-sm font-semibold text-slate-700">Metodo de pagamento
           <input id="checkoutPaymentMethod" type="text" value="PIX" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </label>
@@ -1933,10 +2448,11 @@ function ensureCheckoutModal() {
         <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
           <textarea id="checkoutNotes" rows="2" maxlength="500" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
         </label>
+        <div id="checkoutTechnicalTrace" class="sm:col-span-2"></div>
         <div id="checkoutFeedback" class="sm:col-span-2"></div>
         <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
           <button type="button" data-checkout-close class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-          <button type="submit" id="checkoutSubmitBtn" class="min-h-[44px] rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-sm font-semibold">Finalizar tudo</button>
+          ${renderPrimaryAction({ label: "Finalizar atendimento", id: "checkoutSubmitBtn", type: "submit" })}
         </div>
       </form>
     </article>
@@ -1962,18 +2478,31 @@ function renderCheckoutProducts() {
   const productOptions = Object.values(productsById)
     .map((item) => `<option value="${item.id}">${item.name} (Estoque: ${item.stockQty})</option>`)
     .join("");
+  if (!checkoutModalState.products.length) {
+    list.innerHTML = `
+      <div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-600">
+        Nenhum produto adicional neste checkout.
+      </div>
+    `;
+    return;
+  }
   list.innerHTML = checkoutModalState.products
     .map(
-      (row, index) => `
-      <div class="grid grid-cols-12 gap-2">
+      (row, index) => {
+        const product = productsById[row.productId];
+        const subtotal = Number(product?.salePrice || 0) * Number(row.quantity || 0);
+        return `
+      <div class="checkout-product-row grid grid-cols-12 gap-2">
         <select data-checkout-product="${index}" class="col-span-8 min-h-[40px] rounded-lg border border-slate-200 px-2 text-sm">
           <option value="">Selecione</option>
           ${productOptions}
         </select>
         <input data-checkout-qty="${index}" type="number" min="1" max="99" value="${row.quantity}" class="col-span-3 min-h-[40px] rounded-lg border border-slate-200 px-2 text-sm" />
         <button type="button" data-checkout-remove="${index}" class="col-span-1 min-h-[40px] rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs">X</button>
+        <div class="col-span-12 text-right text-xs font-bold text-slate-600">Subtotal: ${subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
       </div>
-    `,
+    `;
+      },
     )
     .join("");
   list.querySelectorAll("[data-checkout-product]").forEach((el) => {
@@ -2013,6 +2542,8 @@ function recomputeCheckoutTotal() {
   checkoutModalState.total = Number(total.toFixed(2));
   const totalInput = modal.querySelector("#checkoutTotal");
   if (totalInput) totalInput.value = total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const totalDisplay = modal.querySelector("#checkoutTotalDisplay");
+  if (totalDisplay) totalDisplay.textContent = total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function openCheckoutModal(appointment) {
@@ -2021,10 +2552,26 @@ function openCheckoutModal(appointment) {
   const summary = modal.querySelector("#checkoutSummary");
   if (summary) {
     summary.innerHTML = `
-      <div><strong>Cliente:</strong> ${appointment.client}</div>
-      <div><strong>Servico:</strong> ${appointment.service} | <strong>Profissional:</strong> ${appointment.professional}</div>
-      <div><strong>Valor do servico:</strong> ${Number(appointment.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
+      <dl class="checkout-summary-grid">
+        <div><dt>Cliente</dt><dd>${appointment.client}</dd></div>
+        <div><dt>Servico</dt><dd>${appointment.service}</dd></div>
+        <div><dt>Profissional</dt><dd>${appointment.professional}</dd></div>
+        <div><dt>Valor do servico</dt><dd>${Number(appointment.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd></div>
+      </dl>
     `;
+  }
+  const trace = modal.querySelector("#checkoutTechnicalTrace");
+  if (trace) {
+    trace.innerHTML = renderTechnicalTrace(
+      {
+        id: appointment.id,
+        referenceType: "APPOINTMENT",
+        referenceId: appointment.id,
+        auditEntity: "Appointment",
+        auditAction: "CHECKOUT",
+      },
+      { title: "Detalhe tecnico do checkout" },
+    );
   }
   const feedback = modal.querySelector("#checkoutFeedback");
   if (feedback) feedback.innerHTML = "";
@@ -2078,8 +2625,8 @@ async function submitCheckoutModal(event) {
       products,
     });
     modal.classList.add("hidden");
-    setScheduleFeedback("success", "Atendimento finalizado com checkout unificado.");
-    renderAppointmentsFeedback(appointmentsElements, "success", "Atendimento finalizado com checkout unificado.");
+    setScheduleFeedback("success", "Atendimento finalizado com sucesso.");
+    renderAppointmentsFeedback(appointmentsElements, "success", "Atendimento finalizado com sucesso.");
     await loadAll();
   } catch (error) {
     if (feedback) {
@@ -2087,7 +2634,7 @@ async function submitCheckoutModal(event) {
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
-    if (submitBtn) submitBtn.textContent = "Finalizar tudo";
+    if (submitBtn) submitBtn.textContent = "Finalizar atendimento";
   }
 }
 
@@ -2242,7 +2789,7 @@ function openProductRefundModal(sale) {
   const summary = modal.querySelector("#productRefundSummary");
   if (summary) {
     summary.innerHTML = `
-      <div><strong>Venda:</strong> ${sale.id}</div>
+      <div><strong>Venda:</strong> ${sale.soldAtLabel || "Venda selecionada"}</div>
       <div><strong>Total:</strong> ${sale.amount}</div>
       <div><strong>Cliente:</strong> ${sale.clientLabel || "Nao vinculado"}</div>
     `;
@@ -2257,6 +2804,7 @@ function openProductRefundModal(sale) {
           <span class="text-sm text-slate-700">
             <strong>${item.name}</strong>
             <span class="block text-xs text-slate-500">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: R$ ${Number(item.unitPrice || 0).toFixed(2)}</span>
+            <span class="block text-xs font-semibold text-slate-600 mt-1">Quantidade para devolver</span>
           </span>
           <input data-product-refund-product="${item.productId}" type="number" min="0" max="${item.refundableQuantity ?? item.quantity}" step="1" value="0" class="min-h-[44px] rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         </label>
@@ -2331,7 +2879,7 @@ async function submitProductRefund(event) {
     });
     modal.classList.add("hidden");
     modal.classList.remove("flex");
-    renderSaleFeedback("success", "Devolucao de produto registrada.", saleFeedback);
+    renderSaleFeedback("success", "Produto devolvido com sucesso.", saleFeedback);
     await loadCatalog();
     await loadAll();
   } catch (error) {
@@ -2344,6 +2892,12 @@ async function submitProductRefund(event) {
 }
 
 async function updateStatus(item, action) {
+  if (action === "DETAIL") {
+    selectedAppointmentId = item.id;
+    renderAppointmentDetailPanel();
+    return;
+  }
+
   if (action === "REFUND") {
     if (item.status !== "COMPLETED") return;
     openAppointmentRefundModal(item);
@@ -2416,7 +2970,9 @@ function renderAgendaView() {
 
 function renderAppointmentDetailPanel() {
   const selected = currentAppointments.find((item) => item.id === selectedAppointmentId) || null;
-  renderAppointmentDetail(appointmentsElements.detail, selected, currentAppointments);
+  renderAppointmentDetail(appointmentsElements.detail, selected, currentAppointments, {
+    onAction: handleAppointmentsAction,
+  });
 }
 
 async function handleAppointmentsAction(appointmentId, action) {
@@ -2500,7 +3056,7 @@ async function handleAppointmentsAction(appointmentId, action) {
   renderAppointmentsFeedback(
     appointmentsElements,
     "success",
-    `Status atualizado para ${nextStatus}.`,
+    `Status atualizado para ${actionLabel[action] || nextStatus}.`,
   );
   await loadAll();
 }
@@ -2949,7 +3505,7 @@ async function loadServiceDetail(serviceIdValue) {
 }
 
 function renderServiceDetailPanel() {
-  renderServiceDetail(servicesElements.detail, currentServiceDetail);
+  renderServiceDetail(servicesElements, currentServiceDetail);
 }
 
 function hideServicesModal() {
@@ -3007,6 +3563,10 @@ function servicePayloadFromForm() {
 }
 
 async function handleServiceAction(serviceIdValue, action, options = {}) {
+  if (action === "create-empty") {
+    showServicesModal(null);
+    return;
+  }
   const service = servicesByIdMap[serviceIdValue];
   if (!serviceIdValue || !action) return;
 
@@ -3087,14 +3647,25 @@ function hideInventoryProductModal() {
 function showInventoryStockModal({ productId, productName, type }) {
   if (!inventoryStockModal) return;
   const isAdd = type === "IN";
-  inventoryStockModalTitle.textContent = isAdd
-    ? `Adicionar quantidade - ${productName || "Produto"}`
-    : `Remover quantidade - ${productName || "Produto"}`;
-  inventoryStockSubmitBtn.textContent = isAdd ? "Adicionar" : "Remover";
+  const isAdjustment = type === "ADJUSTMENT";
+  inventoryStockModalTitle.textContent = isAdjustment
+    ? `Ajustar saldo - ${productName || "Produto"}`
+    : isAdd
+      ? `Registrar entrada - ${productName || "Produto"}`
+      : `Registrar saida - ${productName || "Produto"}`;
+  inventoryStockSubmitBtn.textContent = isAdjustment
+    ? "Confirmar saldo"
+    : isAdd
+      ? "Confirmar entrada"
+      : "Confirmar saida";
   inventoryStockProductId.value = productId || "";
   inventoryStockType.value = type || "IN";
   inventoryStockQuantity.value = "";
-  inventoryStockReason.value = isAdd ? "Reposicao manual" : "Baixa manual";
+  inventoryStockReason.value = isAdjustment
+    ? "Ajuste manual de saldo"
+    : isAdd
+      ? "Reposicao manual"
+      : "Baixa manual";
   inventoryStockModal.classList.remove("hidden");
   inventoryStockModal.classList.add("flex");
 }
@@ -3207,6 +3778,9 @@ async function loadCommissionsStatement() {
   if (commissionsProfessionalFilter.value) {
     query.set("professionalId", commissionsProfessionalFilter.value);
   }
+  if (commissionsStatusFilter?.value) {
+    query.set("status", commissionsStatusFilter.value);
+  }
 
   const response = await apiFetch(`${API}/financial/commissions?${query.toString()}`);
   const data = await response.json();
@@ -3232,9 +3806,6 @@ async function loadAuditEvents() {
   const entity = String(auditEntityFilter?.value || "").trim();
   const action = String(auditActionFilter?.value || "").trim();
   const actorId = String(auditActorFilter?.value || "").trim();
-  if (entity) query.set("entity", entity);
-  if (action) query.set("action", action);
-  if (actorId) query.set("actorId", actorId);
   if (auditStartFilter?.value) {
     query.set("start", new Date(`${auditStartFilter.value}T00:00:00`).toISOString());
   }
@@ -3251,7 +3822,69 @@ async function loadAuditEvents() {
         : "Falha ao carregar auditoria.";
     throw new Error(extractApiErrorMessage(response, data, fallback));
   }
-  return data || { events: [] };
+  const events = Array.isArray(data?.events) ? data.events : [];
+  const humanizeAuditToken = (value) =>
+    String(value || "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .trim()
+      .toLowerCase();
+  const advancedFilters = {
+    entity: entity.toLowerCase(),
+    action: action.toLowerCase(),
+    actor: actorId.toLowerCase(),
+    requestId: String(auditRequestIdFilter?.value || "").trim().toLowerCase(),
+    idempotencyKey: String(auditIdempotencyFilter?.value || "").trim().toLowerCase(),
+    entityId: String(auditEntityIdFilter?.value || "").trim().toLowerCase(),
+    route: String(auditRouteFilter?.value || "").trim().toLowerCase(),
+    method: String(auditMethodFilter?.value || "").trim().toUpperCase(),
+  };
+  const filteredEvents = events.filter((event) => {
+    if (
+      advancedFilters.entity &&
+      ![
+        event.entity,
+        humanizeAuditToken(event.entity),
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .some((value) => value.includes(advancedFilters.entity))
+    ) {
+      return false;
+    }
+    if (
+      advancedFilters.action &&
+      ![
+        event.action,
+        humanizeAuditToken(event.action),
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .some((value) => value.includes(advancedFilters.action))
+    ) {
+      return false;
+    }
+    if (
+      advancedFilters.actor &&
+      ![event.actorId, event.actorEmail, event.actorRole]
+        .map((value) => String(value || "").toLowerCase())
+        .some((value) => value.includes(advancedFilters.actor))
+    ) {
+      return false;
+    }
+    if (advancedFilters.requestId && !String(event.requestId || "").toLowerCase().includes(advancedFilters.requestId)) return false;
+    if (advancedFilters.idempotencyKey && !String(event.idempotencyKey || "").toLowerCase().includes(advancedFilters.idempotencyKey)) return false;
+    if (advancedFilters.entityId && !String(event.entityId || "").toLowerCase().includes(advancedFilters.entityId)) return false;
+    if (advancedFilters.route && !String(event.route || "").toLowerCase().includes(advancedFilters.route)) return false;
+    if (advancedFilters.method && String(event.method || "").toUpperCase() !== advancedFilters.method) return false;
+    return true;
+  });
+  return {
+    ...(data || {}),
+    events: filteredEvents,
+    summary: {
+      ...(data?.summary || {}),
+      total: filteredEvents.length,
+    },
+  };
 }
 
 async function loadFidelizacaoData() {
@@ -3678,8 +4311,10 @@ async function loadAll() {
   }
 
   if (stockResult.status === "fulfilled") {
+    currentStockPayload = stockResult.value;
     renderStockData(stockElements, stockResult.value);
   } else {
+    currentStockPayload = null;
     renderStockError(stockElements, "Nao foi possivel carregar estoque operacional.");
   }
 
@@ -3691,6 +4326,7 @@ async function loadAll() {
   }
 
   if (clientsResult.status === "fulfilled") {
+    currentClientsPayload = clientsResult.value;
     renderClientsData(clientsElements, {
       ...clientsResult.value,
       automationSignals: clientsAutomationSignalsPayload,
@@ -3701,12 +4337,19 @@ async function loadAll() {
         Boolean(clientsSegmentFilter.value),
     });
   } else {
+    currentClientsPayload = null;
     renderClientsError(clientsElements, "Nao foi possivel carregar carteira de clientes.");
   }
 
   if (professionalsResult.status === "fulfilled") {
-    renderProfessionalsData(professionalsElements, professionalsResult.value);
+    currentProfessionalsPayload = professionalsResult.value;
+    renderProfessionalsData(professionalsElements, professionalsResult.value, {
+      services: servicesResult.status === "fulfilled" ? servicesResult.value.services : allServices,
+      appointments: currentAppointments.length ? currentAppointments : currentAgenda,
+      commissions: commissionsResult.status === "fulfilled" ? commissionsResult.value.entries : [],
+    });
   } else {
+    currentProfessionalsPayload = null;
     renderProfessionalsError(
       professionalsElements,
       "Nao foi possivel carregar desempenho de profissionais.",
@@ -3729,10 +4372,12 @@ async function loadAll() {
   }
 
   if (commissionsResult.status === "fulfilled") {
+    currentCommissionsPayload = commissionsResult.value;
     renderCommissionsData(commissionsElements, commissionsResult.value, {
       canPayCommissions: state.role === "owner",
     });
   } else {
+    currentCommissionsPayload = null;
     renderCommissionsError(commissionsElements, "Nao foi possivel carregar extrato de comissoes.");
   }
 
@@ -4050,6 +4695,14 @@ if (settingsRoot) {
           isActive: trigger.getAttribute("data-next-active") === "true",
         });
         await refreshSettingsScreen("Status da regra de comissao atualizado.");
+        return;
+      }
+
+      if (action === "open-section") {
+        renderSettingsSectionDrawer(settingsElements, currentSettingsPayload || {}, {
+          professionals: Object.values(professionalsById),
+          services: allServices,
+        }, trigger.getAttribute("data-settings-section") || "business");
       }
     } catch (error) {
       renderSaleFeedback(
@@ -4128,9 +4781,15 @@ saleClearCartBtn.addEventListener("click", () => {
 
 if (saleRecentList) {
   saleRecentList.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-product-refund-sale]");
-    if (!target) return;
-    const sale = productSalesHistory.find((item) => item.id === target.getAttribute("data-product-refund-sale"));
+    const detailTarget = event.target.closest("[data-product-sale-detail]");
+    if (detailTarget) {
+      const sale = productSalesHistory.find((item) => item.id === detailTarget.getAttribute("data-product-sale-detail"));
+      if (sale) renderSaleDrawer(sale);
+      return;
+    }
+    const refundTarget = event.target.closest("[data-product-refund-sale]");
+    if (!refundTarget) return;
+    const sale = productSalesHistory.find((item) => item.id === refundTarget.getAttribute("data-product-refund-sale"));
     if (!sale) return;
     openProductRefundModal(sale);
   });
@@ -4165,8 +4824,9 @@ saleForm.addEventListener("submit", async (event) => {
       return;
     }
 
+    const idempotencyKey = buildOperationIdempotencyKey("product-sale");
     const result = await callJson(`${API}/sales/products`, "POST", {
-      idempotencyKey: buildOperationIdempotencyKey("product-sale"),
+      idempotencyKey,
       unitId,
       professionalId: saleProfessionalId.value || undefined,
       clientId: saleClientId.value || undefined,
@@ -4189,6 +4849,7 @@ saleForm.addEventListener("submit", async (event) => {
         label: `${totals.totalItems} item(ns)`,
         amount: `R$ ${Number(result.revenue.amount).toFixed(2)}`,
         clientLabel: saleClientId.options[saleClientId.selectedIndex]?.textContent || "Nao vinculado",
+        professionalLabel: saleProfessionalId.options[saleProfessionalId.selectedIndex]?.textContent || "Sem profissional",
         items: saleCart.map((item) => ({
           productId: item.productId,
           name: item.name,
@@ -4197,6 +4858,13 @@ saleForm.addEventListener("submit", async (event) => {
           refundableQuantity: item.quantity,
           unitPrice: item.unitPrice,
         })),
+        status: "NOT_REFUNDED",
+        statusLabel: "Sem devolucao",
+        canRefund: true,
+        soldAtLabel: new Date().toLocaleString("pt-BR"),
+        itemsSummary: saleCart.length === 1 ? saleCart[0].name : `${saleCart.length} produtos vendidos`,
+        totalRefundedAmount: 0,
+        idempotencyKey,
         meta: `${new Date().toLocaleString("pt-BR")} · Cliente: ${saleClientId.options[saleClientId.selectedIndex]?.textContent || "Nao vinculado"}`,
       },
       ...productSalesHistory,
@@ -4278,12 +4946,18 @@ clientsModalCancel?.addEventListener("click", () => {
 
 financialTransactionForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const amount = Number(financialTransactionAmount?.value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    renderSaleFeedback("warning", "Informe um valor válido.", financialFeedback);
+    financialTransactionAmount?.focus();
+    return;
+  }
   const payload = {
     unitId,
     type: financialTransactionType.value || "INCOME",
     category: String(financialTransactionCategory.value || "").trim(),
     description: String(financialTransactionDescription.value || "").trim(),
-    amount: Number(financialTransactionAmount.value || 0),
+    amount,
     date: new Date(`${financialTransactionDate.value}T12:00:00`).toISOString(),
     paymentMethod: String(financialTransactionPaymentMethod.value || "").trim() || undefined,
     professionalId: String(financialTransactionProfessional.value || "").trim() || undefined,
@@ -4295,20 +4969,23 @@ financialTransactionForm?.addEventListener("submit", async (event) => {
   try {
     if (editingId) {
       await callJson(`${API}/financial/transactions/${editingId}`, "PATCH", payload);
-      renderSaleFeedback("success", "Lancamento atualizado com sucesso.", financialFeedback);
+      renderSaleFeedback("success", "Lançamento registrado com sucesso.", financialFeedback);
     } else {
       await callJson(`${API}/financial/transactions`, "POST", {
         ...payload,
         idempotencyKey: buildOperationIdempotencyKey("financial-transaction"),
       });
-      renderSaleFeedback("success", "Lancamento criado com sucesso.", financialFeedback);
+      renderSaleFeedback("success", "Lançamento registrado com sucesso.", financialFeedback);
     }
     hideFinancialTransactionModal();
     await loadAll();
   } catch (error) {
+    const message = String(error?.message || "");
     renderSaleFeedback(
       "error",
-      error.message || "Nao foi possivel salvar o lancamento financeiro.",
+      message.includes("409") || message.toLowerCase().includes("idempot")
+        ? "Esta operação já foi processada. Atualize a tela para conferir o resultado."
+        : "Não foi possível registrar o lançamento. Confira os dados e tente novamente.",
       financialFeedback,
     );
   }
@@ -4326,22 +5003,31 @@ clientsForm?.addEventListener("submit", async (event) => {
     return;
   }
   if (!phone) {
-    renderSaleFeedback("warning", "Informe o telefone do cliente.", clientsFeedback);
+    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFeedback);
     clientsPhone?.focus();
     return;
   }
   if (!isValidClientPhone(phone)) {
-    renderSaleFeedback("warning", "Telefone invalido. Use um numero com DDD.", clientsFeedback);
+    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFeedback);
     clientsPhone?.focus();
     return;
   }
 
+  const selectedStatus = clientsStatus?.value || "NEW";
+  const explicitTags = String(clientsTags?.value || "")
+    .split(",")
+    .map((tag) => tag.trim().toUpperCase())
+    .filter((tag) => ["NEW", "RECURRING", "VIP", "INACTIVE"].includes(tag))
+    .slice(0, 6);
   const payload = {
     unitId,
     name,
     phone,
-    status: "NEW",
-    tags: ["NEW"],
+    email: String(clientsEmail?.value || "").trim() || undefined,
+    birthDate: clientsBirthDate?.value || undefined,
+    notes: String(clientsNotes?.value || "").trim() || undefined,
+    status: selectedStatus,
+    tags: explicitTags.length ? explicitTags : mapClientStatusToTags(selectedStatus),
   };
 
   if (clientsSubmitBtn) {
@@ -4364,8 +5050,8 @@ clientsForm?.addEventListener("submit", async (event) => {
     renderSaleFeedback(
       "error",
       duplicate
-        ? "Ja existe um cliente com esse telefone neste negocio."
-        : error.message || "Nao foi possivel cadastrar o cliente.",
+        ? "Ja existe cliente com este telefone."
+        : "Nao foi possivel salvar o cliente. Confira os dados e tente novamente.",
       clientsFeedback,
     );
   } finally {
@@ -4382,6 +5068,12 @@ inventoryAddBtn?.addEventListener("click", () => {
 
 inventoryEmptyAddBtn?.addEventListener("click", () => {
   showInventoryProductModal(null);
+});
+
+inventoryEmptyState?.addEventListener("click", (event) => {
+  if (event.target.closest("#inventoryEmptyAddBtn")) {
+    showInventoryProductModal(null);
+  }
 });
 
 inventoryProductModalClose?.addEventListener("click", () => {
@@ -4480,11 +5172,16 @@ inventoryStockForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const productId = String(inventoryStockProductId.value || "").trim();
   if (!productId) return;
+  const quantity = Number(inventoryStockQuantity.value || 0);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    renderSaleFeedback("error", "Quantidade invalida para ajuste.", inventoryFeedback);
+    return;
+  }
   try {
     await callJson(`${API}/inventory/${productId}/stock`, "PATCH", {
       unitId,
       type: inventoryStockType.value || "IN",
-      quantity: Number(inventoryStockQuantity.value || 0),
+      quantity,
       reason: String(inventoryStockReason.value || "").trim() || undefined,
     });
     hideInventoryStockModal();
@@ -4492,7 +5189,7 @@ inventoryStockForm?.addEventListener("submit", async (event) => {
   } catch (error) {
     renderSaleFeedback(
       "error",
-      error.message || "Nao foi possivel ajustar o estoque.",
+      error.message || "Nao foi possivel ajustar o estoque. Confira os dados e tente novamente.",
       inventoryFeedback,
     );
   }
@@ -4531,6 +5228,11 @@ function bindInventoryActionHandlers(container) {
     const productId = target.dataset.productId;
     const productName = target.dataset.productName;
     if (!action || !productId) return;
+
+    if (action === "detail") {
+      renderStockProductDrawer(stockElements, currentStockPayload || {}, productId);
+      return;
+    }
 
     if (action === "edit") {
       const product = inventoryProductsById[productId];
@@ -4573,6 +5275,7 @@ function bindInventoryActionHandlers(container) {
 
 bindInventoryActionHandlers(inventoryTableBody);
 bindInventoryActionHandlers(inventoryMobileList);
+bindInventoryActionHandlers(inventoryDrawerHost);
 
 function bindServicesActionHandlers(container) {
   if (!container) return;
@@ -4599,6 +5302,8 @@ function bindServicesActionHandlers(container) {
 
 bindServicesActionHandlers(servicesTableBody);
 bindServicesActionHandlers(servicesMobileList);
+bindServicesActionHandlers(servicesTableWrap);
+bindServicesActionHandlers(servicesDrawerHost);
 
 loyaltyAdjustForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -4927,6 +5632,15 @@ if (servicesMaxPrice) {
 }
 if (clientsTable) {
   clientsTable.addEventListener("click", (event) => {
+    const detailTrigger = event.target.closest('[data-clients-action="detail"]');
+    if (detailTrigger) {
+      const currentClient = findCurrentClient(detailTrigger.getAttribute("data-client-id"));
+      if (currentClient) {
+        renderClientDrawer(clientsElements, currentClient, buildClientDrawerContext(currentClient));
+      }
+      return;
+    }
+
     const trigger = event.target.closest('[data-clients-action="add-first"]');
     if (trigger) {
       showClientsModal();
@@ -4944,6 +5658,42 @@ if (clientsTable) {
     );
   });
 }
+if (clientsDrawerHost) {
+  clientsDrawerHost.addEventListener("click", (event) => {
+    const scheduleTarget = event.target.closest('[data-clients-action="schedule"]');
+    const invalidWhatsappTrigger = event.target.closest('[data-clients-action="open-whatsapp-invalid"]');
+    const financialTarget = event.target.closest('[data-clients-action="open-financial"]');
+    if (scheduleTarget) {
+      openClientScheduling(scheduleTarget.getAttribute("data-client-id"));
+      return;
+    }
+    if (invalidWhatsappTrigger) {
+      renderSaleFeedback(
+        "warning",
+        "Informe um telefone valido com DDD para abrir WhatsApp.",
+        clientsFeedback,
+      );
+      return;
+    }
+    if (financialTarget) {
+      navigate("financeiro");
+    }
+  });
+}
+if (professionalsTable) {
+  professionalsTable.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-professional-action]");
+    if (!target) return;
+    handleProfessionalAction(target.getAttribute("data-professional-id"), target.getAttribute("data-professional-action"));
+  });
+}
+if (professionalsDrawerHost) {
+  professionalsDrawerHost.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-professional-action]");
+    if (!target) return;
+    handleProfessionalAction(target.getAttribute("data-professional-id"), target.getAttribute("data-professional-action"));
+  });
+}
 clientsSearch.addEventListener("input", debouncedLoadAll);
 clientsStatusFilter.addEventListener("change", loadAll);
 clientsSegmentFilter.addEventListener("change", loadAll);
@@ -4953,6 +5703,7 @@ professionalsPeriod.addEventListener("change", loadAll);
 commissionsProfessionalFilter.addEventListener("change", loadAll);
 commissionsAppliesToFilter.addEventListener("change", loadAll);
 commissionsPeriod.addEventListener("change", loadAll);
+commissionsStatusFilter?.addEventListener("change", loadAll);
 fidelizacaoPeriod.addEventListener("change", loadAll);
 retentionRiskFilter.addEventListener("change", loadAll);
 automacoesPeriod.addEventListener("change", loadAll);
@@ -4968,6 +5719,23 @@ if (auditActorFilter) auditActorFilter.addEventListener("input", debouncedLoadAl
 if (auditStartFilter) auditStartFilter.addEventListener("change", loadAll);
 if (auditEndFilter) auditEndFilter.addEventListener("change", loadAll);
 if (auditLimitFilter) auditLimitFilter.addEventListener("change", loadAll);
+if (auditRequestIdFilter) auditRequestIdFilter.addEventListener("input", debouncedLoadAll);
+if (auditIdempotencyFilter) auditIdempotencyFilter.addEventListener("input", debouncedLoadAll);
+if (auditEntityIdFilter) auditEntityIdFilter.addEventListener("input", debouncedLoadAll);
+if (auditRouteFilter) auditRouteFilter.addEventListener("input", debouncedLoadAll);
+if (auditMethodFilter) auditMethodFilter.addEventListener("change", loadAll);
+if (auditEventsList) {
+  auditEventsList.addEventListener("click", (event) => {
+    const actionTarget = event.target.closest("[data-audit-action]");
+    if (!actionTarget) return;
+    const action = actionTarget.getAttribute("data-audit-action");
+    if (action !== "detail") return;
+    const id = actionTarget.getAttribute("data-audit-event-id");
+    const auditEvent = currentAuditPayload?.events?.find((item) => item.id === id);
+    if (!auditEvent) return;
+    renderAuditEventDrawer(auditElements, auditEvent);
+  });
+}
 if (financialPeriod && financialCustomStart && financialCustomEnd) {
   financialPeriod.addEventListener("change", () => {
     const isCustom = financialPeriod.value === "custom";
@@ -4978,9 +5746,23 @@ if (financialPeriod && financialCustomStart && financialCustomEnd) {
 
 if (financialEntriesList) {
   financialEntriesList.addEventListener("click", async (event) => {
+    const emptyAddTarget = event.target.closest("#financialEmptyAddBtn");
+    if (emptyAddTarget) {
+      showFinancialTransactionModal(null);
+      return;
+    }
+
     const actionTarget = event.target.closest("[data-financial-action]");
     if (!actionTarget) return;
     const action = actionTarget.getAttribute("data-financial-action");
+    if (action === "detail") {
+      const id = actionTarget.getAttribute("data-financial-transaction-id");
+      if (!id) return;
+      const row = currentFinancialTransactions.find((item) => item.id === id);
+      if (!row) return;
+      renderFinancialEntryDrawer(financialElements, row);
+      return;
+    }
     if (action === "edit") {
       const id = actionTarget.getAttribute("data-financial-transaction-id");
       if (!id) return;
@@ -4999,6 +5781,42 @@ if (financialEntriesList) {
           unitId,
           changedBy: "owner",
         });
+        renderSaleFeedback("success", "Lancamento excluido.", financialFeedback);
+        await loadAll();
+      } catch (error) {
+        renderSaleFeedback(
+          "error",
+          error.message || "Nao foi possivel excluir o lancamento.",
+          financialFeedback,
+        );
+      }
+    }
+  });
+}
+
+if (financialDrawerHost) {
+  financialDrawerHost.addEventListener("click", async (event) => {
+    const actionTarget = event.target.closest("[data-financial-action]");
+    if (!actionTarget) return;
+    const action = actionTarget.getAttribute("data-financial-action");
+    const id = actionTarget.getAttribute("data-financial-transaction-id");
+    if (!id) return;
+
+    if (action === "edit") {
+      const row = currentFinancialTransactions.find((item) => item.id === id);
+      if (row) showFinancialTransactionModal(row);
+      return;
+    }
+
+    if (action === "delete") {
+      const confirmed = window.confirm("Deseja excluir este lancamento manual?");
+      if (!confirmed) return;
+      try {
+        await callJson(`${API}/financial/transactions/${id}`, "DELETE", {
+          unitId,
+          changedBy: "owner",
+        });
+        financialDrawerHost.classList.add("hidden");
         renderSaleFeedback("success", "Lancamento excluido.", financialFeedback);
         await loadAll();
       } catch (error) {
@@ -5037,36 +5855,165 @@ if (financialCommissionsList) {
   });
 }
 
+function findCurrentCommission(commissionId) {
+  return Array.isArray(currentCommissionsPayload?.entries)
+    ? currentCommissionsPayload.entries.find((entry) => (entry.id || entry.commissionId) === commissionId)
+    : null;
+}
+
+function findCurrentClient(clientIdValue) {
+  return Array.isArray(currentClientsPayload?.clients)
+    ? currentClientsPayload.clients.find((client) => (client.clientId || client.id) === clientIdValue)
+    : null;
+}
+
+function findCurrentProfessional(professionalIdValue) {
+  return Array.isArray(currentProfessionalsPayload?.professionals)
+    ? currentProfessionalsPayload.professionals.find((item) => item.professionalId === professionalIdValue)
+    : null;
+}
+
+function handleProfessionalAction(professionalIdValue, action) {
+  if (!professionalIdValue || !action) return;
+  if (action === "detail") {
+    const professional = findCurrentProfessional(professionalIdValue);
+    if (!professional) return;
+    renderProfessionalDrawer(professionalsElements, professional, {
+      services: currentServices.length ? currentServices : allServices,
+      appointments: currentAppointments.length ? currentAppointments : currentAgenda,
+      commissions: Array.isArray(currentCommissionsPayload?.entries) ? currentCommissionsPayload.entries : [],
+    });
+    return;
+  }
+  if (action === "open-agenda") {
+    navigate("agenda");
+    if (professionalId) professionalId.value = professionalIdValue;
+    if (filterProfessional) filterProfessional.value = professionalIdValue;
+    renderAgendaView();
+    return;
+  }
+  if (action === "open-commissions") {
+    navigate("comissoes");
+    if (commissionsProfessionalFilter) commissionsProfessionalFilter.value = professionalIdValue;
+    loadAll();
+  }
+}
+
+function buildClientDrawerContext(client) {
+  const clientIdValue = client?.clientId || client?.id || "";
+  const clientName = String(client?.fullName || "").toLowerCase();
+  return {
+    unitId,
+    appointments: currentAgenda
+      .filter((item) => item.clientId === clientIdValue)
+      .sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime()),
+    productSales: productSalesHistory.filter((sale) => {
+      if (sale.clientId && sale.clientId === clientIdValue) return true;
+      return clientName && String(sale.clientLabel || "").toLowerCase() === clientName;
+    }),
+  };
+}
+
+function openClientScheduling(clientIdValue) {
+  navigate("agenda");
+  if (clientId && clientIdValue) {
+    clientId.value = clientIdValue;
+    refreshScheduleAssist();
+  }
+  agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  startsAt?.focus();
+}
+
+async function payCurrentCommission(commissionId, button) {
+  const commission = findCurrentCommission(commissionId);
+  if (!commissionId || !commission) return;
+
+  if (state.role !== "owner") {
+    renderSaleFeedback(
+      "error",
+      "Voce nao tem permissao para pagar comissoes.",
+      commissionsFeedback || financialFeedback,
+    );
+    return;
+  }
+  if (commission.status === "PAID") {
+    renderSaleFeedback("info", "Esta comissao ja foi paga.", commissionsFeedback || financialFeedback);
+    return;
+  }
+  const confirmed = window.confirm("Confirmar pagamento desta comissao?");
+  if (!confirmed) return;
+  try {
+    if (button) button.disabled = true;
+    const result = await callJson(`${API}/financial/commissions/${commissionId}/pay`, "PATCH", {
+      idempotencyKey: buildOperationIdempotencyKey("commission-pay"),
+      unitId,
+      changedBy: "owner",
+      paidAt: new Date().toISOString(),
+    });
+    renderSaleFeedback(
+      "success",
+      result.status === "PAID"
+        ? "Comissao paga com sucesso."
+        : "Esta operacao ja foi processada. Atualize a tela para conferir o resultado.",
+      commissionsFeedback || financialFeedback,
+    );
+    commissionsDrawerHost?.classList.add("hidden");
+    await loadAll();
+  } catch (error) {
+    const message = String(error.message || "");
+    const humanMessage = message.toLowerCase().includes("idempot")
+      ? "Esta operacao ja foi processada. Atualize a tela para conferir o resultado."
+      : "Nao foi possivel pagar a comissao. Confira os dados e tente novamente.";
+    renderSaleFeedback(
+      "error",
+      humanMessage,
+      commissionsFeedback || financialFeedback,
+    );
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 if (commissionsTable) {
   commissionsTable.addEventListener("click", async (event) => {
+    const detailTarget = event.target.closest('[data-commission-action="detail"]');
     const payTarget = event.target.closest('[data-commission-action="pay"]');
-    if (!payTarget || state.role !== "owner") return;
-    const commissionId = payTarget.getAttribute("data-commission-id");
-    if (!commissionId) return;
-    try {
-      payTarget.disabled = true;
-      const result = await callJson(`${API}/financial/commissions/${commissionId}/pay`, "PATCH", {
-        idempotencyKey: buildOperationIdempotencyKey("commission-pay"),
-        unitId,
-        changedBy: "owner",
-        paidAt: new Date().toISOString(),
+    const target = detailTarget || payTarget;
+    if (!target) return;
+    const commissionId = target.getAttribute("data-commission-id");
+    const commission = findCurrentCommission(commissionId);
+    if (!commissionId || !commission) return;
+
+    if (detailTarget) {
+      renderCommissionDrawer(commissionsElements, {
+        ...commission,
+        id: commission.id || commission.commissionId,
+        occurredAt: commission.occurredAt || commission.createdAt,
+      }, {
+        canPayCommissions: state.role === "owner",
       });
-      renderSaleFeedback(
-        "success",
-        result.financialEntryId
-          ? `Comissao paga e despesa financeira ${result.financialEntryId} registrada.`
-          : "Comissao paga. Atualize o financeiro para conferir a despesa vinculada.",
-        commissionsFeedback || financialFeedback,
-      );
-      await loadAll();
-    } catch (error) {
-      renderSaleFeedback(
-        "error",
-        error.message || "Nao foi possivel pagar a comissao.",
-        commissionsFeedback || financialFeedback,
-      );
-    } finally {
-      payTarget.disabled = false;
+      return;
+    }
+
+    await payCurrentCommission(commissionId, payTarget);
+  });
+}
+
+if (commissionsDrawerHost) {
+  commissionsDrawerHost.addEventListener("click", async (event) => {
+    const payTarget = event.target.closest('[data-commission-action="pay"]');
+    const financialTarget = event.target.closest('[data-commission-action="open-financial"]');
+    const auditTarget = event.target.closest('[data-commission-action="open-audit"]');
+    if (payTarget) {
+      await payCurrentCommission(payTarget.getAttribute("data-commission-id"), payTarget);
+      return;
+    }
+    if (financialTarget && !financialTarget.disabled) {
+      navigate("financeiro");
+      return;
+    }
+    if (auditTarget) {
+      navigate("auditoria");
     }
   });
 }
@@ -5115,6 +6062,33 @@ if (appointmentsEmptyClear) {
     appointmentsFilterClient.value = "";
     appointmentsFilterSearch.value = "";
     await loadAll();
+  });
+}
+
+if (appointmentsEmptyState) {
+  appointmentsEmptyState.addEventListener("click", async (event) => {
+    const target = event.target.closest("button");
+    if (!target) return;
+    if (target.id === "appointmentsEmptyNew") {
+      navigate("agenda");
+      agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+      clientId?.focus();
+      return;
+    }
+    if (target.id === "appointmentsEmptyToday") {
+      appointmentsFilterPeriod.value = "today";
+      appointmentsFilterDate.value = asDateInputValue(new Date());
+      await loadAll();
+      return;
+    }
+    if (target.id === "appointmentsEmptyClear") {
+      appointmentsFilterStatus.value = "";
+      appointmentsFilterProfessional.value = "";
+      appointmentsFilterService.value = "";
+      appointmentsFilterClient.value = "";
+      appointmentsFilterSearch.value = "";
+      await loadAll();
+    }
   });
 }
 

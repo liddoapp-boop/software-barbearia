@@ -1,3 +1,8 @@
+import {
+  renderEmptyState,
+  renderStatusChip,
+} from "../components/operational-ui.js";
+
 function asNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -34,6 +39,7 @@ const statusClass = {
 };
 
 const actionLabel = {
+  DETAIL: "Detalhes",
   CONFIRMED: "Confirmar",
   IN_SERVICE: "Iniciar",
   COMPLETE: "Finalizar atendimento",
@@ -46,6 +52,9 @@ const actionLabel = {
 };
 
 function actionButtonClass(action) {
+  if (action === "DETAIL") {
+    return "ux-btn ux-btn-muted";
+  }
   if (action === "COMPLETE") {
     return "ux-btn ux-btn-success";
   }
@@ -71,13 +80,13 @@ function actionButtonClass(action) {
 }
 
 function actionsForStatus(status) {
-  if (status === "SCHEDULED") return ["CONFIRMED", "RESCHEDULE", "CANCELLED", "SELL"];
+  if (status === "SCHEDULED") return ["DETAIL", "CONFIRMED", "RESCHEDULE", "CANCELLED"];
   if (status === "CONFIRMED") {
-    return ["IN_SERVICE", "RESCHEDULE", "CANCELLED", "NO_SHOW", "SELL"];
+    return ["DETAIL", "IN_SERVICE", "RESCHEDULE", "CANCELLED", "NO_SHOW"];
   }
-  if (status === "IN_SERVICE") return ["COMPLETE", "PAYMENT", "CANCELLED", "SELL"];
-  if (status === "COMPLETED") return ["REFUND", "SELL"];
-  return [];
+  if (status === "IN_SERVICE") return ["DETAIL", "COMPLETE", "CANCELLED"];
+  if (status === "COMPLETED") return ["DETAIL", "REFUND"];
+  return ["DETAIL"];
 }
 
 export function normalizeAgendaItems(payload) {
@@ -174,27 +183,31 @@ export function renderAgendaError(elements, onRetry) {
   }
 }
 
-function renderAgendaMetrics(elements, metrics) {
+function renderAgendaMetrics(elements, metrics, items = []) {
+  const now = new Date();
+  const next = [...items]
+    .filter((item) => ["SCHEDULED", "CONFIRMED", "IN_SERVICE"].includes(item.status))
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+    .find((item) => item.status === "IN_SERVICE" || item.startsAt.getTime() >= now.getTime());
+  const nextLabel = next
+    ? `${next.startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} - ${next.client}`
+    : "Sem proximo atendimento";
+  const nextMeta = next ? `${next.service} com ${next.professional}` : "A agenda do dia esta livre no recorte atual.";
   elements.metricsGrid.innerHTML = `
+    <article class="ux-kpi agenda-next-card">
+      <div class="ux-label">Proximo atendimento</div>
+      <div class="ux-value-sm">${nextLabel}</div>
+      <div class="ux-hint">${nextMeta}</div>
+    </article>
     <article class="ux-kpi">
-      <div class="ux-label">Atrasados</div>
+      <div class="ux-label">Agenda do dia</div>
+      <div class="ux-value-sm text-slate-100">${metrics.totalCount}</div>
+      <div class="ux-hint">Atendimentos no recorte</div>
+    </article>
+    <article class="ux-kpi">
+      <div class="ux-label">Atencao</div>
       <div class="ux-value-sm ${metrics.lateCount > 0 ? "text-amber-300" : "text-slate-100"}">${metrics.lateCount}</div>
-      <div class="ux-hint">Fora do horario previsto</div>
-    </article>
-    <article class="ux-kpi">
-      <div class="ux-label">Faltas</div>
-      <div class="ux-value-sm ${metrics.noShowCount > 0 ? "text-rose-300" : "text-slate-100"}">${metrics.noShowCount}</div>
-      <div class="ux-hint">Clientes que nao compareceram</div>
-    </article>
-    <article class="ux-kpi">
-      <div class="ux-label">Encaixes</div>
-      <div class="ux-value-sm text-slate-100">${metrics.fittingCount}</div>
-      <div class="ux-hint">Atendimentos fora da grade padrao</div>
-    </article>
-    <article class="ux-kpi">
-      <div class="ux-label">Fila ativa</div>
-      <div class="ux-value-sm ${metrics.queueCount > 0 ? "text-blue-300" : "text-slate-100"}">${metrics.queueCount}</div>
-      <div class="ux-hint">Confirmados e em atendimento</div>
+      <div class="ux-hint">Atrasados agora</div>
     </article>
   `;
 }
@@ -202,7 +215,10 @@ function renderAgendaMetrics(elements, metrics) {
 function renderQueue(elements, items) {
   const queue = items.filter((item) => item.status === "IN_SERVICE" || item.status === "CONFIRMED");
   if (!queue.length) {
-    elements.queue.innerHTML = "<p class='text-sm text-gray-500'>Sem fila ativa no momento.</p>";
+    elements.queue.innerHTML = renderEmptyState({
+      title: "Sem proximo atendimento ativo.",
+      description: "Confirmados e atendimentos em andamento aparecerao aqui.",
+    });
     return;
   }
 
@@ -212,7 +228,7 @@ function renderQueue(elements, items) {
       <article class="ux-kpi">
         <div class="flex items-start justify-between gap-2">
           <strong class="text-slate-100">${item.client}</strong>
-          <span class="ux-badge ${statusClass[item.status] || "bg-slate-700 text-slate-100"}">${statusLabel[item.status] || item.status}</span>
+          ${renderStatusChip(item.status)}
         </div>
         <div class="mt-1 text-sm text-slate-300">${item.service} - ${item.professional}</div>
       </article>
@@ -223,12 +239,10 @@ function renderQueue(elements, items) {
 
 function renderAgendaList(elements, list, handlers) {
   if (!list.length) {
-    elements.list.innerHTML = `
-      <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5 text-center">
-        <p class="text-sm font-semibold text-gray-700">Nenhum agendamento no filtro atual.</p>
-        <p class="text-xs text-gray-500 mt-1">Ajuste os filtros ou mude o periodo para visualizar mais resultados.</p>
-      </div>
-    `;
+    elements.list.innerHTML = renderEmptyState({
+      title: "Nenhum agendamento no filtro atual.",
+      description: "Ajuste os filtros ou mude o periodo para visualizar a agenda do dia.",
+    });
     return;
   }
 
@@ -254,13 +268,11 @@ function renderAgendaList(elements, list, handlers) {
         <article class="ux-card ${late ? "border-amber-500" : ""}">
           <div class="flex items-start justify-between gap-2">
             <strong class="text-slate-100">${time} - ${item.client}</strong>
-            <span class="ux-badge ${statusClass[item.status] || "bg-slate-700 text-slate-100"}">${statusLabel[item.status] || item.status}</span>
+            ${renderStatusChip(item.status)}
           </div>
           <div class="mt-1 text-sm text-slate-300">${item.service} - ${item.professional}</div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300 agenda-card-facts">
             <div><span class="text-slate-400">Valor</span> <strong class="text-slate-100">R$ ${item.servicePrice.toFixed(2)}</strong></div>
-            <div><span class="text-slate-400">Duracao</span> <strong class="text-slate-100">${item.serviceDurationMin} min</strong></div>
-            <div><span class="text-slate-400">Perfil</span> <strong class="text-slate-100">${clientTagLabel}</strong></div>
             <div><span class="text-slate-400">Sinal</span> <strong class="${late ? "text-amber-300" : "text-slate-100"}">${late ? "Atrasado" : item.isFitting ? "Encaixe" : "No prazo"}</strong></div>
           </div>
           ${
@@ -268,6 +280,7 @@ function renderAgendaList(elements, list, handlers) {
               ? `<div class="mt-2 ux-badge ux-badge-success" title="Venda de produto registrada para este cliente no dia">Produto vendido (${item.productItemsSoldCount} item(ns))</div>`
               : ""
           }
+          <div class="mt-2 text-xs text-slate-400">Perfil: <strong class="text-slate-200">${clientTagLabel}</strong></div>
           <div class="mt-2 flex flex-wrap gap-2">
             ${actions
               .map(
@@ -341,7 +354,7 @@ function renderAgendaGrid(elements, list) {
 
 export function renderAgendaData(elements, allItems, visibleItems, viewMode, handlers) {
   const metrics = computeAgendaMetrics(allItems);
-  renderAgendaMetrics(elements, metrics);
+  renderAgendaMetrics(elements, metrics, allItems);
   renderQueue(elements, allItems);
   if (viewMode === "grid") {
     renderAgendaGrid(elements, visibleItems);

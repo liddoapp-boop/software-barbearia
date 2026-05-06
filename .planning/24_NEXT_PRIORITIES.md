@@ -1,5 +1,92 @@
 ﻿# Next Priorities
 
+
+
+## Atualizacao 2026-05-05 (Fase 1.11 - Validacao completa do produto)
+- Criado `.planning/111_VALIDACAO_COMPLETA_PRODUTO_FRONTEND_LACUNAS.md`.
+- Decisao final: aprovado com ressalvas.
+- Backend, testes, smoke API, idempotencia, auditoria, permissoes e fluxos criticos estao consistentes para continuidade controlada.
+- Frontend refatorado existe e esta conectado em Agenda, Checkout, PDV, Historico de Vendas, Estoque, Financeiro, Auditoria, Comissoes, Clientes, Servicos, Profissionais e Configuracoes.
+- O produto ainda nao parece premium de forma homogenea: Dashboard, Automacoes, Fidelizacao e Metas seguem fora do contrato visual principal.
+- Metas existia no HTML/app/modulo, mas estava invisivel no menu; foi conectada ao menu owner e ao mobile "Mais".
+- A percepcao de que "nao mudou" provavelmente vem de mudancas mais estruturais que esteticas, tema escuro global, cache/servidor antigo possivel e telas iniciais ainda antigas.
+- `npm.cmd run build`, `npm.cmd run smoke:api`, `npm.cmd run test` fora do sandbox e `npm.cmd run test:db` fora do sandbox passaram.
+
+Prioridade imediata:
+1. Fase 1.12 - Checklist visual real desktop/mobile e correcao de percepcao premium.
+2. Executar inspecao humana com screenshots em Dashboard, Agenda, PDV, Estoque, Financeiro, Auditoria, Clientes, Configuracoes, Automacoes, Fidelizacao e Metas.
+3. Corrigir somente problemas visuais pequenos que impedem a percepcao de produto premium: contraste, espacamento, excesso de card, botoes inconsistentes, modais densos e filtros tecnicos expostos.
+4. Fase 1.13 - Levar Dashboard, Metas, Automacoes e Fidelizacao para o contrato operacional da Fase 1.1.
+5. Fase 1.14 - Reduzir `public/app.js` gradualmente, extraindo modais/handlers por modulo sem reescrever o frontend inteiro.
+6. Manter release/deploy controlado dependente de checklist visual real, `.env` alvo forte, PostgreSQL alvo e smoke remoto.
+
+## Atualizacao 2026-05-05 (Fase 1.10 - Configuracoes em hub limpo e reaproveitavel)
+- Criado `.planning/110_CONFIGURACOES_HUB_LIMPO_REAPROVEITAVEL.md`.
+- Configuracoes virou hub por temas com `PageHeader`, `StatusChip`, `EmptyState`, `EntityDrawer`, `TechnicalTrace` e `PrimaryAction`.
+- A superficie principal mostra Empresa, Horarios, Pagamentos, Equipe, Comissoes, Agenda, Seguranca, Aparencia e Parametros sem formulario gigante.
+- Edicao e revisao detalhada foram movidas para drawer, mantendo os formularios e endpoints existentes.
+- IDs tecnicos, timestamps e payloads ficam recolhidos em `TechnicalTrace`.
+- Pagamentos, Equipe e Comissoes usam linguagem operacional e status humanizado.
+- Seguranca nao promete troca de senha: informa que a funcionalidade ainda nao esta disponivel quando o backend nao suporta.
+- Build passou; testes falharam no sandbox por `spawn EPERM` e passaram fora do sandbox; smoke API passou.
+
+Prioridade imediata:
+1. Fase 1.11 - Auditoria visual real do frontend renderizado e polimento premium.
+2. Executar navegador real desktop/mobile para Agenda, PDV, Estoque, Financeiro, Auditoria, Comissoes, Clientes, Servicos, Profissionais e Configuracoes.
+3. Corrigir sobreposicoes, textos quebrados, excesso de densidade e estados vazios que aparecerem no render real.
+4. Revisar telas ainda densas: Automacoes, Fidelizacao, Metas e qualquer placeholder residual.
+5. Manter backend/schema congelados ate a auditoria visual concluir.
+
+## Atualizacao 2026-05-05 (Fase 1.9 - Servicos e Profissionais em catalogo operacional limpo)
+- Criado `.planning/109_SERVICOS_PROFISSIONAIS_CATALOGO_OPERACIONAL.md`.
+- Servicos virou catalogo operacional com `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- A superficie de Servicos mostra nome, categoria, preco, duracao, status, custo/margem resumidos, profissionais habilitados e acoes, sem tabela tecnica.
+- Profissionais virou catalogo de capacidade/producao com `PageHeader`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- A superficie de Profissionais mostra nome, status, servicos que pode atender, producao, ticket, ocupacao e comissao pendente, sem expor `professionalId`.
+- Relacao servico-profissional passou a ser apresentada por nomes e capacidade operacional; IDs crus ficam recolhidos.
+- `TechnicalTrace` foi ampliado para `serviceId`, `enabledProfessionalIds`, `userId`, `commissionRuleIds` e `serviceIds`.
+- Build passou; testes falharam no sandbox por `spawn EPERM` e passaram fora do sandbox; smoke API passou.
+
+Prioridade imediata:
+1. Fase 1.10 - Configuracoes em hub limpo e reaproveitavel.
+2. Transformar Configuracoes em hub por blocos operacionais: empresa/unidade, agenda, financeiro/comissoes, usuarios/perfis e integracoes.
+3. Esconder chaves, IDs, payloads e rastros em detalhe/`TechnicalTrace`.
+4. Manter configuracoes perigosas com confirmacao, linguagem humana e permissao atual.
+5. Executar checklist visual humano desktop/mobile de Clientes, Servicos, Profissionais, Comissoes, Auditoria, Financeiro, Estoque, PDV e Agenda antes de release.
+
+## Atualizacao 2026-05-05 (Fase 1.8 - Clientes em historico progressivo e acao comercial limpa)
+- Criado `.planning/108_CLIENTES_HISTORICO_PROGRESSIVO_ACAO_COMERCIAL.md`.
+- Clientes passou a usar `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- A superficie principal virou central de relacionamento: ativos, em risco, inativos, VIP, ticket medio, potencial de reativacao e decisao sugerida.
+- Cards mostram nome, telefone/WhatsApp, status humanizado, ultima visita, valor resumido, sinal comercial, proxima acao e "Ver detalhes".
+- Historico completo ficou no drawer por camadas: resumo, historico operacional, relacionamento, acoes e rastreabilidade tecnica.
+- IDs tecnicos, score bruto, payload, JSON e dados de auditoria ficaram fora da tela principal.
+- WhatsApp foi mantido como acao manual; nenhuma automacao real ou disparo automatico foi criado.
+- Build passou; testes falharam no sandbox por `spawn EPERM` e passaram fora do sandbox; smoke API passou.
+
+Prioridade imediata:
+1. Fase 1.9 - Servicos e Profissionais em catalogo operacional limpo.
+2. Transformar Servicos em catalogo operacional com preco, duracao, status, comissao e profissionais habilitados sem expor tecnica.
+3. Transformar Profissionais em visao de capacidade, agenda, desempenho e elegibilidade comercial.
+4. Usar drawer progressivo para regras, historico, vinculos e `TechnicalTrace`.
+5. Executar checklist visual humano desktop/mobile de Clientes, Comissoes, Auditoria, Financeiro, Estoque, PDV e Agenda antes de release.
+
+## Atualizacao 2026-05-05 (Fase 1.7 - Comissoes em funil operacional limpo)
+- Criado `.planning/107_COMISSOES_FUNIL_OPERACIONAL_LIMPO.md`.
+- Comissoes passou a usar `PageHeader`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer`, `TechnicalTrace` e `PrimaryAction`.
+- A superficie principal agora mostra pendente, pago no periodo, profissionais pendentes, antigas/vencidas e fila por profissional.
+- Origem/status foram humanizados: atendimento finalizado, venda de produto, ajuste manual, pendente, paga e cancelada.
+- IDs, referencias, `source` cru, `idempotencyKey`, payload tecnico e vinculos financeiros sairam da lista principal.
+- Pagamento continua owner-only, com mesma rota, `idempotencyKey`, confirmacao e mensagens humanas.
+- Build passou; testes e smoke falharam no sandbox por bloqueios conhecidos e nao puderam ser reexecutados fora do sandbox por limite da aprovacao automatica.
+
+Prioridade imediata:
+1. Fase 1.8 - Clientes em historico progressivo e acao comercial limpa.
+2. Transformar Clientes em carteira operacional: ultimo atendimento, recorrencia, risco, oportunidade e proxima acao.
+3. Mover IDs, score bruto, automacoes e rastreabilidade para drawer/`TechnicalTrace`.
+4. Reexecutar `npm.cmd run test` e `npm.cmd run smoke:api` fora do sandbox quando a aprovacao estiver disponivel.
+5. Executar checklist visual humano desktop/mobile de Agenda, PDV, Estoque, Financeiro, Auditoria e Comissoes antes de release.
+
 ## Atualizacao 2026-05-04 (Fase 0.9.3 execucao checklist/ambiente alvo)
 - Criado `.planning/97_EXECUCAO_CHECKLIST_AMBIENTE_ALVO.md` com decisao final `BLOQUEADO`.
 - Build, testes, smoke local e testes DB passaram fora das limitacoes conhecidas do sandbox.
@@ -287,6 +374,19 @@ Prioridade imediata:
 3. Outbox/auditoria transacional para fluxos financeiros criticos.
 4. Validacao manual mobile/browser dos novos fluxos em ambiente com dados reais.
 
+## Atualizacao 2026-05-05 (Fase 1.0 - UX/frontend iniciada)
+- Criado `.planning/100_MAPEAMENTO_FRONTEND_BACKEND_FUNIL_UX.md`.
+- A macrofase frontend/UX deve evoluir o produto por camadas, sem transformar o sistema em dashboard poluido.
+- Regra principal: tela operacional mostra decisao e proxima acao; rastreabilidade tecnica fica em detalhe, drawer tecnico ou Auditoria.
+- Principais riscos atuais: Financeiro expondo `source/referenceType/referenceId`, Auditoria iniciando tecnica demais, Central de agendamentos com excesso de KPIs, Automacoes/Fidelizacao densas e mobile ainda muito dependente de listas/filtros.
+
+Prioridade imediata:
+1. Fase 1.1 - Design system e contratos de camada: `PageHeader`, `PrimaryAction`, `FilterBar`, `EntityDrawer`, `TechnicalTrace`, `EmptyState`, `StatusChip`.
+2. Fase 1.2 - Financeiro limpo: mover rastreabilidade para detalhe sob demanda.
+3. Fase 1.3 - Agenda funil operacional: agenda do dia, proximo atendimento e historico separados por camada.
+4. Fase 1.4 - PDV premium com historico/devolucao em drawer.
+5. Fase 1.5 - Auditoria owner como timeline amigavel com filtros avancados recolhidos.
+
 ## Atualizacao 2026-05-04 (Fase 0.5 implementada)
 - Criado `GET /sales/products` para historico operacional de vendas de produto por unidade.
 - PDV agora consome o historico e permite devolucao de venda antiga, fora da sessao atual.
@@ -298,3 +398,102 @@ Prioridade imediata:
 1. Outbox/auditoria transacional para fluxos financeiros criticos.
 2. CRUD operacional de usuarios/equipe.
 3. Deploy/producao controlada com checklist de smoke manual.
+
+## Atualizacao 2026-05-05 (Fase 1.1 - Design System Operacional e Contratos UX)
+- Criado `.planning/101_DESIGN_SYSTEM_CONTRATOS_UX.md` com contratos de uso, regra de funil operacional, mobile, rastreabilidade tecnica e reuso SaaS por segmento.
+- Criado `public/components/operational-ui.js` com `PageHeader`, `PrimaryAction`, `FilterBar`, `EntityDrawer`, `TechnicalTrace`, `EmptyState` e `StatusChip`.
+- Adicionados estilos responsivos em `public/styles/layout.css` para a nova camada operacional.
+- Nenhuma tela critica foi removida, nenhuma regra de negocio foi alterada e a rastreabilidade tecnica foi preservada.
+- Componentes adicionais foram avaliados e adiados para evitar base generica demais nesta etapa.
+
+Prioridade imediata:
+1. Fase 1.2 - Agenda e Checkout em funil operacional premium.
+2. Aplicar primeiro `PageHeader`, `PrimaryAction`, `FilterBar`, `EntityDrawer`, `EmptyState` e `StatusChip` na Agenda sem alterar endpoints.
+3. Transformar Checkout em fluxo guiado com uma acao dominante e `TechnicalTrace` oculto para idempotencia/financeiro/auditoria.
+4. Depois, evoluir Financeiro para esconder `source/referenceType/referenceId` em detalhe sob demanda.
+5. Manter deploy/producao controlada bloqueado ate checklist visual humano, backup alvo, `.env` alvo e smoke remoto.
+
+## Atualizacao 2026-05-05 (Fase 1.2 - Agenda e Checkout em funil operacional premium)
+- Criado `.planning/102_AGENDA_CHECKOUT_FUNIL_PREMIUM.md`.
+- Agenda passou a usar contratos da Fase 1.1: `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- Filtros essenciais da Agenda ficaram visiveis; filtros avancados foram recolhidos.
+- Cards/listas agora priorizam horario, cliente, servico, profissional, status, valor e proxima acao.
+- Detalhe do agendamento foi movido para drawer progressivo com resumo, acoes, historico e rastreabilidade tecnica recolhida.
+- Checkout foi reorganizado com total em destaque, metodo de pagamento, produtos adicionais recolhiveis e acao primaria "Finalizar atendimento".
+- `idempotencyKey` segue sendo enviada nas operacoes criticas, sem aparecer para o usuario comum.
+- Nenhuma regra de negocio, dominio, schema Prisma, financeiro, estoque, comissao, auditoria, permissoes ou tenant guard foi alterada.
+
+Prioridade imediata:
+1. Fase 1.3 - PDV, Historico de Vendas e Devolucoes em funil operacional premium.
+2. Aplicar drawer progressivo para vendas antigas e devolucoes, mantendo rastreabilidade tecnica recolhida.
+3. Depois, evoluir Financeiro para esconder `source/referenceType/referenceId` em detalhe sob demanda.
+4. Executar checklist visual humano desktop/mobile antes de qualquer release.
+5. Manter deploy/producao controlada bloqueado ate backup alvo, `.env` alvo e smoke remoto.
+
+## Atualizacao 2026-05-05 (Fase 1.3 - PDV, Historico de Vendas e Devolucoes em funil operacional premium)
+- Criado `.planning/103_PDV_HISTORICO_DEVOLUCOES_FUNIL_PREMIUM.md`.
+- PDV passou a ser tarefa-primeiro: produto, quantidade, carrinho, total e acao "Cobrar venda".
+- Historico de vendas ficou compacto, com data, cliente, total, status e acoes "Ver detalhes" / "Devolver".
+- Detalhe da venda passou para `EntityDrawer`, com resumo, itens, impactos financeiro/estoque e `TechnicalTrace` recolhido.
+- Devolucao de produto ficou guiada por quantidade vendida, devolvida e disponivel, sem expor ID tecnico na superficie.
+- `idempotencyKey` segue enviada em venda e devolucao, sem aparecer para usuario comum.
+- Build passou; testes e smoke passaram fora do sandbox apos falhas conhecidas de `spawn EPERM`/Prisma no sandbox.
+
+Prioridade imediata:
+1. Fase 1.4 - Estoque rastreavel sem poluicao visual.
+2. Aplicar drawer progressivo para produto, ficha tecnica, movimentos, referencias e auditoria.
+3. Manter a tela principal do Estoque focada em busca, status, quantidade e acoes operacionais.
+4. Depois, evoluir Financeiro para esconder `source/referenceType/referenceId` em detalhe sob demanda.
+5. Executar checklist visual humano desktop/mobile antes de qualquer release.
+
+## Atualizacao 2026-05-05 (Fase 1.4 - Estoque rastreavel sem poluicao visual)
+- Criado `.planning/104_ESTOQUE_RASTREAVEL_SEM_POLUICAO_VISUAL.md`.
+- Estoque passou a usar `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- Produtos sem estoque, criticos e com estoque baixo passaram a aparecer primeiro.
+- A lista principal ficou limpa: produto, categoria, quantidade atual, minimo, status, sugestao e acoes.
+- Movimentacoes ficaram humanizadas para venda, devolucao, ajuste manual, perda, consumo interno e consumo por servico.
+- `productId`, `stockMovementId`, `referenceType` e `referenceId` foram movidos para `TechnicalTrace` recolhido.
+- Ajuste de estoque ficou mais explicito para entrada, saida e ajuste de saldo final.
+- Build passou; testes e smoke falharam no sandbox por bloqueios conhecidos (`spawn EPERM` e Prisma/binaries) e nao puderam ser reexecutados fora do sandbox por limite de aprovacao automatica.
+
+Prioridade imediata:
+1. Fase 1.5 - Financeiro conciliado e limpo.
+2. Esconder `source`, `referenceType`, `referenceId`, `professionalId` e rastreabilidade financeira em `TechnicalTrace`.
+3. Manter conciliacao visual com checkout, PDV, devolucao e comissoes sem transformar Financeiro em tela tecnica.
+4. Executar validacao visual humana desktop/mobile de Agenda, PDV e Estoque antes de release.
+5. Reexecutar `npm.cmd run test` e `npm.cmd run smoke:api` fora do sandbox quando a aprovacao estiver disponivel.
+
+## Atualizacao 2026-05-05 (Fase 1.5 - Financeiro conciliado e limpo)
+- Criado `.planning/105_FINANCEIRO_CONCILIADO_LIMPO.md`.
+- Financeiro passou a usar `PageHeader`, `PrimaryAction`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- A superficie principal agora prioriza Entradas, Saidas, Saldo, Resultado, principais origens e lista resumida.
+- Origens financeiras foram humanizadas para atendimento finalizado, venda de produto, comissao paga, estorno, devolucao e lancamento manual.
+- `source`, `referenceType`, `referenceId`, `professionalId`, `customerId`, `appointmentId`, `productSaleId` e `idempotencyKey` ficaram fora da lista principal.
+- Detalhe do lancamento passou a mostrar resumo, vinculos operacionais, impacto conciliado e rastreabilidade tecnica recolhida.
+- Lancamento manual manteve idempotencia e recebeu mensagens humanas.
+- Build passou; testes e smoke falharam no sandbox por bloqueios conhecidos e passaram fora do sandbox.
+
+Prioridade imediata:
+1. Fase 1.6 - Auditoria em timeline legivel e nao tecnica.
+2. Transformar eventos tecnicos em linha do tempo com labels humanos, ator, horario e entidade amigavel.
+3. Manter payloads, before/after, requestId, entityId e idempotencyKey recolhidos.
+4. Aplicar filtros essenciais e avancados recolhidos na Auditoria.
+5. Executar checklist visual humano desktop/mobile de Agenda, PDV, Estoque e Financeiro antes de release.
+
+## Atualizacao 2026-05-05 (Fase 1.6 - Auditoria em timeline legivel e nao tecnica)
+- Criado `.planning/106_AUDITORIA_TIMELINE_LEGIVEL.md`.
+- Auditoria passou a usar `PageHeader`, `FilterBar`, `StatusChip`, `EmptyState`, `EntityDrawer` e `TechnicalTrace`.
+- A superficie principal virou timeline agrupada por Hoje, Ontem e data, ordenada do evento mais recente para o mais antigo.
+- Actions tecnicas foram humanizadas para linguagem operacional com fallback conservador.
+- Cards mostram ator, perfil, acao, modulo, impacto, sensibilidade e "Ver detalhes".
+- IDs, rota, metodo, requestId, idempotencyKey, before/after e metadata ficaram fora da superficie principal.
+- O drawer do evento organiza resumo, contexto operacional, antes/depois e rastreabilidade tecnica recolhida.
+- Build passou; testes e smoke falharam no sandbox por bloqueios conhecidos e passaram fora do sandbox.
+
+Prioridade imediata:
+1. Fase 1.7 - Comissoes em funil operacional limpo.
+2. Mostrar pendencias, pagamentos e impacto financeiro de comissoes sem expor IDs/referencias na superficie.
+3. Usar drawer para detalhe da comissao, vinculo com atendimento/venda/profissional e `TechnicalTrace`.
+4. Manter pagamento de comissao owner-only e preservar permissao atual por perfil.
+5. Executar checklist visual humano desktop/mobile de Agenda, PDV, Estoque, Financeiro e Auditoria antes de release.
+

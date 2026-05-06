@@ -18,6 +18,7 @@ export const MENU_GROUPS = [
       { id: "financeiro", label: "Financeiro" },
       { id: "profissionais", label: "Profissionais" },
       { id: "comissoes", label: "Comissoes" },
+      { id: "metas", label: "Metas" },
     ],
   },
   {
@@ -95,6 +96,7 @@ export const SECONDARY_MODULE_IDS = [
   "financeiro",
   "profissionais",
   "comissoes",
+  "metas",
   "auditoria",
   "configuracoes",
   "fidelizacao",

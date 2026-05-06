@@ -119,7 +119,6 @@ export function renderCart(cart, elements, handlers) {
               <button type="button" data-cart-inc="${item.productId}" class="px-3 py-2 text-sm bg-white text-gray-700">+</button>
             </div>
             <div class="text-right">
-              <div class="text-xs text-gray-500">Unitario: ${toMoney(item.unitPrice)}</div>
               <div class="text-sm font-bold text-gray-900">Subtotal: ${toMoney(lineTotal)}</div>
             </div>
           </div>

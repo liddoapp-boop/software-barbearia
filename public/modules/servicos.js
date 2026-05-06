@@ -1,3 +1,11 @@
+import {
+  bindEntityDrawers,
+  renderEmptyState,
+  renderEntityDrawer,
+  renderPrimaryAction,
+  renderStatusChip,
+  renderTechnicalTrace,
+} from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
 
 function toNumber(value, fallback = 0) {
@@ -16,125 +24,152 @@ function pct(value) {
   return `${toNumber(value).toFixed(1)}%`;
 }
 
-function statusMeta(isActive) {
-  if (isActive) {
-    return {
-      label: "Ativo",
-      tone: "text-emerald-700 bg-emerald-100 border-emerald-200",
-    };
-  }
-  return {
-    label: "Inativo",
-    tone: "text-slate-600 bg-slate-100 border-slate-200",
-  };
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
-function card(title, value, subtitle = "", tone = "text-slate-900") {
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function serviceStatus(service = {}) {
+  return service.isActive === false ? "INACTIVE" : "ACTIVE";
+}
+
+function serviceStatusLabel(service = {}) {
+  return service.isActive === false ? "Servico inativo" : "Servico ativo";
+}
+
+function enabledProfessionalsLabel(service = {}, limit = 3) {
+  const professionals = Array.isArray(service.enabledProfessionals)
+    ? service.enabledProfessionals.filter(Boolean)
+    : [];
+  if (!professionals.length) return "Todos os profissionais ativos";
+  const names = professionals.map((item) => item.name || "Profissional").filter(Boolean);
+  const visible = names.slice(0, limit).join(", ");
+  const hidden = names.length - limit;
+  return hidden > 0 ? `${visible} +${hidden}` : visible;
+}
+
+function renderKpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="rounded-xl border border-slate-200 bg-white p-4">
-      <div class="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">${title}</div>
-      <div class="mt-1 text-lg font-black ${tone}">${value}</div>
-      <div class="text-xs text-slate-500 mt-1">${subtitle}</div>
+    <article class="ux-kpi catalog-kpi">
+      <div class="ux-label">${escapeHtml(title)}</div>
+      <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
+      ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
     </article>
   `;
 }
 
-export function renderServicesLoading(elements) {
-  if (elements.summary) renderPanelMessage(elements.summary, "Carregando resumo de servicos...");
-  if (elements.tableBody) {
-    elements.tableBody.innerHTML = `
-      <tr>
-        <td colspan="11" class="px-3 py-6 text-center text-sm text-slate-500">Carregando servicos...</td>
-      </tr>
-    `;
+function marginSignal(service = {}) {
+  const marginPct = toNumber(service.estimatedMarginPct);
+  if (marginPct <= 0 && toNumber(service.estimatedMargin) <= 0) return "Margem sem base";
+  if (marginPct < 25) return "Precisa ajuste";
+  if (marginPct < 35) return "Margem em atencao";
+  return "Margem saudavel";
+}
+
+function renderServiceCard(service = {}) {
+  const status = serviceStatus(service);
+  return `
+    <article class="catalog-row service-catalog-row">
+      <div class="catalog-row-main">
+        <div class="catalog-row-copy">
+          <div class="catalog-row-meta">
+            ${renderStatusChip(status, { label: serviceStatusLabel(service) })}
+            ${service.category ? renderStatusChip("INFO", { label: service.category }) : ""}
+            ${toNumber(service.salesCount) > 0 ? renderStatusChip("RECURRING", { label: "Com historico" }) : ""}
+          </div>
+          <strong>${escapeHtml(service.name || "Servico")}</strong>
+          <span>${escapeHtml(service.description || "Sem descricao curta cadastrada.")}</span>
+        </div>
+        <div class="catalog-row-price">
+          <span>Preco</span>
+          <strong>${escapeHtml(money(service.price))}</strong>
+          <small>${escapeHtml(toNumber(service.durationMinutes))} min</small>
+        </div>
+      </div>
+
+      <div class="catalog-row-facts">
+        <div><span>Executado por</span><strong>${escapeHtml(enabledProfessionalsLabel(service))}</strong></div>
+        <div><span>Custo estimado</span><strong>${escapeHtml(money(service.estimatedCost))}</strong></div>
+        <div><span>Margem estimada</span><strong>${escapeHtml(money(service.estimatedMargin))} (${escapeHtml(pct(service.estimatedMarginPct))})</strong></div>
+        <div><span>Uso no periodo</span><strong>${escapeHtml(toNumber(service.salesCount))} venda(s) - ${escapeHtml(money(service.revenueGenerated))}</strong></div>
+      </div>
+
+      <div class="catalog-row-action-strip">
+        <p>${escapeHtml(marginSignal(service))}. Relacao com agenda, checkout e comissoes fica no detalhe.</p>
+        <div class="catalog-row-actions">
+          <button type="button" data-service-action="detail" data-service-id="${escapeHtml(service.id)}" class="ux-btn ux-btn-muted">Ver detalhes</button>
+          <button type="button" data-service-action="edit" data-service-id="${escapeHtml(service.id)}" class="ux-btn ux-btn-muted">Editar</button>
+          <button type="button" data-service-action="duplicate" data-service-id="${escapeHtml(service.id)}" class="ux-btn ux-btn-muted">Duplicar</button>
+          <button
+            type="button"
+            data-service-action="toggle-status"
+            data-service-id="${escapeHtml(service.id)}"
+            data-next-active="${service.isActive ? "false" : "true"}"
+            class="ux-btn ${service.isActive ? "ux-btn-muted" : "ux-btn-success"}"
+          >${service.isActive ? "Inativar" : "Ativar"}</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderProfessionalsList(service = {}, allProfessionals = []) {
+  const enabled = Array.isArray(service.enabledProfessionals) ? service.enabledProfessionals : [];
+  const candidates = enabled.length ? enabled : allProfessionals.filter((item) => item.enabled);
+  if (!candidates.length) {
+    return `<p class="text-sm text-slate-400">Todos os profissionais ativos podem atender este servico.</p>`;
   }
-  if (elements.mobileList) renderPanelMessage(elements.mobileList, "Carregando servicos...");
+  return `
+    <div class="catalog-chip-list">
+      ${candidates
+        .map((item) => `<span>${escapeHtml(item.name || "Profissional")}</span>`)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderRecentUsage(usage = {}) {
+  const recent = Array.isArray(usage.recent) ? usage.recent.slice(0, 5) : [];
+  if (!recent.length) {
+    return `<p class="text-sm text-slate-400">Sem atendimentos recentes disponiveis para este servico.</p>`;
+  }
+  return `
+    <ol class="op-history-list">
+      ${recent
+        .map(
+          (item) => `
+            <li>
+              <strong>${escapeHtml(item.client || "Cliente")} com ${escapeHtml(item.professional || "profissional")}</strong>
+              <span>${escapeHtml(formatDateTime(item.startsAt))} - ${escapeHtml(item.status || "Status")} - ${escapeHtml(money(item.revenue))}</span>
+            </li>
+          `,
+        )
+        .join("")}
+    </ol>
+  `;
+}
+
+export function renderServicesLoading(elements) {
+  if (elements.summary) renderPanelMessage(elements.summary, "Carregando catalogo de servicos...");
+  if (elements.tableWrap) renderPanelMessage(elements.tableWrap, "Organizando catalogo operacional...");
+  if (elements.drawerHost) elements.drawerHost.innerHTML = "";
 }
 
 export function renderServicesError(elements, message = "Falha ao carregar servicos.") {
   if (elements.summary) renderPanelMessage(elements.summary, message, "error");
-  if (elements.tableBody) {
-    elements.tableBody.innerHTML = `
-      <tr>
-        <td colspan="11" class="px-3 py-6 text-center text-sm text-red-700">${message}</td>
-      </tr>
-    `;
-  }
-  if (elements.mobileList) renderPanelMessage(elements.mobileList, message, "error");
-}
-
-function renderDesktopRows(container, services = []) {
-  if (!container) return;
-  container.innerHTML = services
-    .map((service) => {
-      const status = statusMeta(service.isActive);
-      return `
-        <tr class="border-t border-slate-200">
-          <td class="px-3 py-3 align-top">
-            <div class="text-sm font-semibold text-slate-900">${service.name}</div>
-            <div class="text-xs text-slate-500 mt-1">${service.category || "Sem categoria"}</div>
-          </td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">${service.category || "-"}</td>
-          <td class="px-3 py-3 align-top text-sm font-semibold text-slate-900">${money(service.price)}</td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">${toNumber(service.durationMinutes)} min</td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">${pct(service.defaultCommissionRate)}</td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">${money(service.estimatedCost)}</td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">${money(service.estimatedMargin)} (${pct(service.estimatedMarginPct)})</td>
-          <td class="px-3 py-3 align-top">
-            <span class="inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${status.tone}">${status.label}</span>
-          </td>
-          <td class="px-3 py-3 align-top text-xs text-slate-600">${service.enabledProfessionals.length ? service.enabledProfessionals.map((item) => item.name).join(", ") : "Todos ativos"}</td>
-          <td class="px-3 py-3 align-top text-sm text-slate-700">
-            <div>${toNumber(service.salesCount)} vendas</div>
-            <div class="text-xs text-slate-500">${money(service.revenueGenerated)}</div>
-          </td>
-          <td class="px-3 py-3 align-top">
-            <div class="flex flex-wrap gap-1">
-              <button type="button" data-service-action="detail" data-service-id="${service.id}" class="min-h-[36px] rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">Detalhes</button>
-              <button type="button" data-service-action="edit" data-service-id="${service.id}" class="min-h-[36px] rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">Editar</button>
-              <button type="button" data-service-action="duplicate" data-service-id="${service.id}" class="min-h-[36px] rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">Duplicar</button>
-              <button type="button" data-service-action="toggle-status" data-service-id="${service.id}" data-next-active="${service.isActive ? "false" : "true"}" class="min-h-[36px] rounded-md border ${service.isActive ? "border-amber-300 bg-amber-50 text-amber-700" : "border-emerald-300 bg-emerald-50 text-emerald-700"} px-2 py-1 text-xs font-semibold">${service.isActive ? "Inativar" : "Ativar"}</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
-}
-
-function renderMobileCards(container, services = []) {
-  if (!container) return;
-  container.innerHTML = services
-    .map((service) => {
-      const status = statusMeta(service.isActive);
-      return `
-        <article class="rounded-xl border border-slate-200 bg-white p-3">
-          <div class="flex items-start justify-between gap-2">
-            <div>
-              <div class="text-sm font-semibold text-slate-900">${service.name}</div>
-              <div class="text-xs text-slate-500 mt-1">${service.category || "Sem categoria"}</div>
-            </div>
-            <span class="inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${status.tone}">${status.label}</span>
-          </div>
-          <div class="grid grid-cols-2 gap-2 mt-2 text-xs text-slate-600">
-            <div>Preco: <strong>${money(service.price)}</strong></div>
-            <div>Duracao: <strong>${toNumber(service.durationMinutes)} min</strong></div>
-            <div>Comissao: <strong>${pct(service.defaultCommissionRate)}</strong></div>
-            <div>Margem: <strong>${money(service.estimatedMargin)}</strong></div>
-          </div>
-          <div class="mt-2 text-xs text-slate-500">
-            ${service.salesCount} vendas • ${money(service.revenueGenerated)} de receita
-          </div>
-          <div class="flex flex-wrap gap-1 mt-3">
-            <button type="button" data-service-action="detail" data-service-id="${service.id}" class="min-h-[38px] rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">Detalhes</button>
-            <button type="button" data-service-action="edit" data-service-id="${service.id}" class="min-h-[38px] rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">Editar</button>
-            <button type="button" data-service-action="duplicate" data-service-id="${service.id}" class="min-h-[38px] rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">Duplicar</button>
-            <button type="button" data-service-action="toggle-status" data-service-id="${service.id}" data-next-active="${service.isActive ? "false" : "true"}" class="min-h-[38px] rounded-md border ${service.isActive ? "border-amber-300 bg-amber-50 text-amber-700" : "border-emerald-300 bg-emerald-50 text-emerald-700"} px-2 py-1 text-xs font-semibold">${service.isActive ? "Inativar" : "Ativar"}</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+  if (elements.tableWrap) renderPanelMessage(elements.tableWrap, message, "error");
+  if (elements.drawerHost) elements.drawerHost.innerHTML = "";
 }
 
 export function renderServicesData(elements, payload = {}) {
@@ -143,88 +178,148 @@ export function renderServicesData(elements, payload = {}) {
   const categories = Array.isArray(payload.categories) ? payload.categories : [];
 
   if (elements.summary) {
-    elements.summary.innerHTML = [
-      card("Total de servicos", toNumber(summary.totalServices)),
-      card("Servicos ativos", toNumber(summary.activeServices), "", "text-emerald-700"),
-      card("Servicos inativos", toNumber(summary.inactiveServices)),
-      card("Ticket medio", money(summary.averageTicket), "Preco medio atual"),
-      card(
-        "Mais vendido",
-        summary.bestSellingService?.name || "-",
-        summary.bestSellingService ? `${toNumber(summary.bestSellingService.salesCount)} vendas` : "Sem historico",
-      ),
-      card(
-        "Maior receita",
-        summary.highestRevenueService?.name || "-",
-        summary.highestRevenueService ? money(summary.highestRevenueService.revenueGenerated) : "Sem historico",
-      ),
-    ].join("");
+    const adjustment = Array.isArray(summary.priceAdjustmentCandidates)
+      ? summary.priceAdjustmentCandidates.length
+      : 0;
+    elements.summary.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+        ${renderKpi("Servicos", String(toNumber(summary.totalServices)), "Catalogo total")}
+        ${renderKpi("Ativos", String(toNumber(summary.activeServices)), "Vendaveis na agenda", "text-emerald-700")}
+        ${renderKpi("Inativos", String(toNumber(summary.inactiveServices)), "Fora da venda")}
+        ${renderKpi("Ticket medio", money(summary.averageTicket), "Preco medio atual")}
+        ${renderKpi("Mais vendido", summary.bestSellingService?.name || "-", summary.bestSellingService ? `${toNumber(summary.bestSellingService.salesCount)} venda(s)` : "Sem historico")}
+        ${renderKpi("Precisam ajuste", String(adjustment), "Preco ou margem em atencao", adjustment ? "text-amber-700" : "")}
+      </div>
+    `;
   }
 
   if (elements.categoryFilter) {
     const previous = elements.categoryFilter.value || "";
     elements.categoryFilter.innerHTML = `
       <option value="">Todas categorias</option>
-      ${categories.map((item) => `<option value="${item}">${item}</option>`).join("")}
+      ${categories.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join("")}
     `;
     if (categories.includes(previous)) elements.categoryFilter.value = previous;
   }
 
-  if (elements.emptyState) {
-    elements.emptyState.classList.toggle("hidden", services.length > 0);
-  }
-  if (elements.tableWrap) {
-    elements.tableWrap.classList.toggle("hidden", services.length === 0);
-    elements.tableWrap.classList.toggle("xl:block", services.length > 0);
-  }
-
+  if (!elements.tableWrap) return;
   if (!services.length) {
-    if (elements.tableBody) elements.tableBody.innerHTML = "";
-    if (elements.mobileList) elements.mobileList.innerHTML = "";
+    elements.tableWrap.innerHTML = renderEmptyState({
+      title: "Nenhum servico encontrado.",
+      description: "Ajuste os filtros ou cadastre um servico para alimentar agenda, checkout e comissoes.",
+      action: renderPrimaryAction({
+        label: "Adicionar primeiro servico",
+        attrs: { "data-service-action": "create-empty", "data-service-id": "new" },
+      }),
+    });
     return;
   }
 
-  renderDesktopRows(elements.tableBody, services);
-  renderMobileCards(elements.mobileList, services);
+  elements.tableWrap.classList.remove("hidden");
+  elements.tableWrap.innerHTML = `
+    <section class="catalog-list service-catalog-list">
+      ${services.map(renderServiceCard).join("")}
+    </section>
+  `;
 }
 
 export function renderServiceDetail(elements, payload = null) {
-  if (!elements?.panel || !elements?.content) return;
+  if (!elements?.drawerHost) return;
   if (!payload?.service) {
-    elements.panel.classList.add("hidden");
-    elements.content.innerHTML = "";
+    elements.drawerHost.classList.add("hidden");
+    elements.drawerHost.innerHTML = "";
     return;
   }
+
   const service = payload.service;
   const usage = payload.usage || {};
   const financialImpact = payload.financialImpact || {};
-  elements.content.innerHTML = `
-    <div class="space-y-2">
-      <h3 class="text-lg font-extrabold text-slate-900">${service.name}</h3>
-      <div class="text-sm text-slate-600">${service.description || "Sem descricao cadastrada."}</div>
-      <div class="grid grid-cols-2 gap-2 text-xs text-slate-600">
-        <div>Categoria: <strong>${service.category || "-"}</strong></div>
-        <div>Status: <strong>${service.isActive ? "Ativo" : "Inativo"}</strong></div>
-        <div>Preco: <strong>${money(service.price)}</strong></div>
-        <div>Duracao: <strong>${toNumber(service.durationMinutes)} min</strong></div>
-        <div>Comissao: <strong>${pct(service.defaultCommissionRate)}</strong></div>
-        <div>Custo estimado: <strong>${money(service.estimatedCost)}</strong></div>
-        <div>Margem estimada: <strong>${money(service.estimatedMargin)}</strong></div>
-        <div>Margem %: <strong>${pct(service.estimatedMarginPct)}</strong></div>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-        <div class="font-semibold text-slate-700">Historico resumido</div>
-        <div class="mt-1">${toNumber(usage.totalCompleted)} atendimentos concluidos</div>
-        <div>Receita acumulada: <strong>${money(usage.totalRevenue)}</strong></div>
-        <div>Ultima venda: <strong>${usage.lastSoldAt ? new Date(usage.lastSoldAt).toLocaleString("pt-BR") : "-"}</strong></div>
-      </div>
-      <div class="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600">
-        <div class="font-semibold text-slate-700">Impacto financeiro</div>
-        <div class="mt-1">Custo total estimado: <strong>${money(financialImpact.estimatedCostTotal)}</strong></div>
-        <div>Lucro total estimado: <strong>${money(financialImpact.estimatedProfitTotal)}</strong></div>
-      </div>
-      <div class="text-xs text-slate-600">Profissionais habilitados: <strong>${service.enabledProfessionals.length ? service.enabledProfessionals.map((item) => item.name).join(", ") : "Todos ativos"}</strong></div>
-    </div>
+  const professionals = Array.isArray(payload.professionals) ? payload.professionals : [];
+  const status = serviceStatus(service);
+
+  const summary = `
+    <dl class="op-summary-grid">
+      <div><dt>Nome</dt><dd>${escapeHtml(service.name || "Servico")}</dd></div>
+      <div><dt>Categoria</dt><dd>${escapeHtml(service.category || "Sem categoria")}</dd></div>
+      <div><dt>Preco</dt><dd>${escapeHtml(money(service.price))}</dd></div>
+      <div><dt>Duracao</dt><dd>${escapeHtml(toNumber(service.durationMinutes))} min</dd></div>
+      <div><dt>Status</dt><dd>${renderStatusChip(status, { label: serviceStatusLabel(service) })}</dd></div>
+      <div><dt>Descricao curta</dt><dd>${escapeHtml(service.description || "Sem descricao cadastrada")}</dd></div>
+    </dl>
   `;
-  elements.panel.classList.remove("hidden");
+
+  const details = `
+    <details class="client-progressive-panel" open>
+      <summary>Operacao</summary>
+      <div class="op-detail-list">
+        <p><strong>Executado por:</strong> ${escapeHtml(enabledProfessionalsLabel(service, 8))}</p>
+        ${renderProfessionalsList(service, professionals)}
+        <p><strong>Comissao padrao:</strong> ${escapeHtml(pct(service.defaultCommissionRate))}</p>
+        <p><strong>Custo estimado:</strong> ${escapeHtml(money(service.estimatedCost))}</p>
+        <p><strong>Margem estimada:</strong> ${escapeHtml(money(service.estimatedMargin))} (${escapeHtml(pct(service.estimatedMarginPct))})</p>
+        <p><strong>Observacoes:</strong> ${escapeHtml(service.notes || "Sem observacoes")}</p>
+      </div>
+    </details>
+  `;
+
+  const history = `
+    <details class="client-progressive-panel" open>
+      <summary>Uso e impacto</summary>
+      <div class="op-detail-list">
+        <p><strong>Quantidade vendida/agendada:</strong> ${escapeHtml(toNumber(usage.totalCompleted || service.salesCount))}</p>
+        <p><strong>Receita gerada:</strong> ${escapeHtml(money(usage.totalRevenue || service.revenueGenerated))}</p>
+        <p><strong>Ultima venda/atendimento:</strong> ${escapeHtml(formatDateTime(usage.lastSoldAt || service.lastCompletedAt))}</p>
+        <p><strong>Custo total estimado:</strong> ${escapeHtml(money(financialImpact.estimatedCostTotal))}</p>
+        <p><strong>Lucro total estimado:</strong> ${escapeHtml(money(financialImpact.estimatedProfitTotal))}</p>
+        <p>Agenda usa servico + profissional; checkout gera receita; comissao usa a regra vigente quando aplicavel.</p>
+      </div>
+    </details>
+    <details class="client-progressive-panel">
+      <summary>Atendimentos recentes</summary>
+      ${renderRecentUsage(usage)}
+    </details>
+  `;
+
+  const actions = `
+    <button type="button" data-service-action="edit" data-service-id="${escapeHtml(service.id)}" class="ux-btn ux-btn-primary">Editar servico</button>
+    <button type="button" data-service-action="toggle-status" data-service-id="${escapeHtml(service.id)}" data-next-active="${service.isActive ? "false" : "true"}" class="ux-btn ux-btn-muted">${service.isActive ? "Inativar" : "Ativar"}</button>
+    <button type="button" data-service-action="duplicate" data-service-id="${escapeHtml(service.id)}" class="ux-btn ux-btn-muted">Duplicar</button>
+  `;
+
+  const technicalTrace = renderTechnicalTrace({
+    id: service.id,
+    serviceId: service.id,
+    businessId: service.businessId,
+    unitId: service.unitId,
+    enabledProfessionalIds: service.enabledProfessionalIds,
+    status,
+    createdAt: service.createdAt,
+    updatedAt: service.updatedAt,
+    metadataJson: {
+      service,
+      usage,
+      financialImpact,
+      professionals,
+    },
+  });
+
+  elements.drawerHost.innerHTML = renderEntityDrawer({
+    id: "serviceDrawer",
+    title: service.name || "Servico",
+    subtitle: `${service.category || "Sem categoria"} - ${money(service.price)} - ${toNumber(service.durationMinutes)} min`,
+    status,
+    open: true,
+    summary,
+    details,
+    history,
+    technicalTrace,
+    actions,
+  });
+  elements.drawerHost.classList.remove("hidden");
+  bindEntityDrawers(elements.drawerHost);
+  elements.drawerHost.querySelectorAll("[data-drawer-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      elements.drawerHost.classList.add("hidden");
+    });
+  });
 }
