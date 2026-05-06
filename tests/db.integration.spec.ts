@@ -622,6 +622,42 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       ),
     ).toBe(true);
   });
+
+  it("gera relatorios gerenciais e CSV com dados reais do Prisma", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-17T13:00:00.000Z",
+    );
+    const checkout = await checkoutAppointment(app, appointmentId, uniqueId("reports-db-checkout"));
+    expect(checkout.statusCode).toBe(200);
+    await createProductSale(app, scenario, uniqueId("reports-db-sale"));
+
+    const base = `unitId=${scenario.unitId}&start=2026-05-10T00:00:00.000Z&end=2026-05-10T23:59:59.999Z`;
+    const financial = await app.inject({
+      method: "GET",
+      url: `/reports/management/financial?${base}`,
+    });
+    expect(financial.statusCode).toBe(200);
+    expect(financial.json().summary.serviceRevenue).toBeGreaterThan(0);
+
+    const stock = await app.inject({
+      method: "GET",
+      url: `/reports/management/stock?${base}`,
+    });
+    expect(stock.statusCode).toBe(200);
+    expect(stock.json().movements.some((row: { label: string }) => row.label === "Saida por venda")).toBe(true);
+
+    const csv = await app.inject({
+      method: "GET",
+      url: `/reports/management/export.csv?${base}&type=financial`,
+    });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.headers["content-type"]).toContain("text/csv");
+    expect(csv.body).toContain("Atendimento finalizado");
+  });
 });
 
 async function expectSingleRefundSideEffect(

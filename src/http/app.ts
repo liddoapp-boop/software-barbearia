@@ -8,7 +8,7 @@ import { OperationsService } from "../application/operations-service";
 import { PrismaOperationsService } from "../application/prisma-operations-service";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
-import { AppointmentStatus } from "../domain/types";
+import { AppointmentStatus, ReportExportType } from "../domain/types";
 import { prisma } from "../infrastructure/database/prisma";
 import {
   hashIdempotencyPayload,
@@ -101,6 +101,25 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   }
   if (route === "/audit/events") {
     return { isPublic: false, roles: ["owner"], unitSource: "query" };
+  }
+  if (route === "/reports/management/audit") {
+    return { isPublic: false, roles: ["owner"], unitSource: "query" };
+  }
+  if (route === "/reports/management/financial" || route === "/reports/management/summary") {
+    return { isPublic: false, roles: ["owner"], unitSource: "query" };
+  }
+  if (route === "/reports/management/product-sales") {
+    return { isPublic: false, roles: ["owner", "recepcao"], unitSource: "query" };
+  }
+  if (route === "/reports/management/export.csv") {
+    return { isPublic: false, roles: ["owner", "recepcao", "profissional"], unitSource: "query" };
+  }
+  if (route.startsWith("/reports/management/")) {
+    return {
+      isPublic: false,
+      roles: ["owner", "recepcao", "profissional"],
+      unitSource: "query",
+    };
   }
 
   if (route.startsWith("/integrations/") || route.startsWith("/automations/")) {
@@ -617,6 +636,28 @@ export function createApp() {
     unitId: z.string().min(1),
     start: z.string().datetime(),
     end: z.string().datetime(),
+  });
+
+  const managementReportQuerySchema = z.object({
+    unitId: z.string().min(1),
+    start: z.string().datetime(),
+    end: z.string().datetime(),
+    professionalId: z.string().min(1).optional(),
+    productId: z.string().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(1000).optional(),
+  });
+
+  const managementExportQuerySchema = managementReportQuerySchema.extend({
+    type: z.enum([
+      "financial",
+      "appointments",
+      "product-sales",
+      "stock",
+      "clients",
+      "professionals",
+      "commissions",
+      "audit",
+    ]),
   });
 
   const clientsOverviewQuerySchema = z.object({
@@ -1428,6 +1469,143 @@ export function createApp() {
     };
   }
 
+  function assertManagementReportAccess(request: FastifyRequest, type: ReportExportType) {
+    const role = (request as RequestWithAuth).auth?.role;
+    if (!role) return;
+    if (role === "owner") return;
+    if (type === "financial" || type === "audit" || type === "commissions") {
+      throw new Error("Acesso negado");
+    }
+    if (type === "product-sales" && role !== "recepcao") {
+      throw new Error("Acesso negado");
+    }
+  }
+
+  function csvEscape(value: unknown) {
+    return `"${String(value ?? "").replaceAll('"', '""')}"`;
+  }
+
+  function buildCsv(rows: unknown[][]) {
+    return `\uFEFF${rows.map((line) => line.map(csvEscape).join(";")).join("\n")}\n`;
+  }
+
+  function csvRowsForReport(type: ReportExportType, payload: any) {
+    if (type === "financial") {
+      return [
+        ["Data", "Tipo", "Origem", "Categoria", "Descricao", "Valor", "Forma de pagamento", "Profissional", "Cliente"],
+        ...(payload.lines ?? []).map((row: any) => [
+          row.date,
+          row.type,
+          row.originLabel,
+          row.category,
+          row.description,
+          row.amount,
+          row.paymentMethod,
+          row.professionalName,
+          row.customerName,
+        ]),
+      ];
+    }
+    if (type === "appointments") {
+      return [
+        ["Data", "Status", "Cliente", "Profissional", "Servico", "Valor"],
+        ...(payload.appointments ?? []).map((row: any) => [
+          row.startsAt,
+          row.status,
+          row.clientName,
+          row.professionalName,
+          row.serviceName,
+          row.price,
+        ]),
+      ];
+    }
+    if (type === "product-sales") {
+      return [
+        ["Data", "Cliente", "Profissional", "Status", "Total", "Devolvido", "Itens"],
+        ...(payload.sales ?? []).map((row: any) => [
+          row.soldAt,
+          row.clientName,
+          row.professionalName,
+          row.status,
+          row.grossAmount,
+          row.totalRefundedAmount,
+          (row.items ?? []).map((item: any) => `${item.productName} x${item.quantity}`).join(", "),
+        ]),
+      ];
+    }
+    if (type === "stock") {
+      return [
+        ["Data", "Produto", "Movimentacao", "Tipo", "Origem", "Quantidade"],
+        ...(payload.movements ?? []).map((row: any) => [
+          row.occurredAt,
+          row.productName,
+          row.label,
+          row.movementType,
+          row.referenceType,
+          row.quantity,
+        ]),
+      ];
+    }
+    if (type === "clients") {
+      return [
+        ["Cliente", "Status", "Visitas no periodo", "Receita no periodo", "LTV", "Ticket medio", "Ultima visita", "Acao recomendada"],
+        ...(payload.clients ?? []).map((row: any) => [
+          row.fullName,
+          row.status,
+          row.visits,
+          row.revenue,
+          row.ltv,
+          row.averageTicket,
+          row.lastVisitAt,
+          row.recommendedAction,
+        ]),
+      ];
+    }
+    if (type === "professionals") {
+      return [
+        ["Ranking", "Profissional", "Atendimentos concluidos", "Receita servicos", "Receita produtos", "Receita total", "Ticket medio", "Comissao pendente", "Comissao paga", "Comissao total"],
+        ...(payload.professionals ?? []).map((row: any) => [
+          row.rank,
+          row.professionalName,
+          row.completedAppointments,
+          row.serviceRevenue,
+          row.productRevenue,
+          row.totalRevenue,
+          row.averageTicket,
+          row.pendingCommission,
+          row.paidCommission,
+          row.totalCommission,
+        ]),
+      ];
+    }
+    if (type === "commissions") {
+      return [
+        ["Profissional", "Origem", "Base", "Comissao", "Status", "Criada em", "Paga em"],
+        ...(payload.entries ?? []).map((row: any) => [
+          row.professionalName,
+          row.source,
+          row.baseAmount,
+          row.commissionAmount,
+          row.status,
+          row.createdAt,
+          row.paidAt,
+        ]),
+      ];
+    }
+    return [
+      ["Data", "Ator", "Perfil", "Acao", "Modulo", "Rota", "Metodo"],
+      ...(payload.events ?? []).map((row: any) => [
+        row.createdAt,
+        row.actor,
+        row.actorRole,
+        row.action,
+        row.entity,
+        row.route,
+        row.method,
+      ]),
+    ];
+  }
+
   app.post("/auth/login", async (request) => {
     const body = authLoginSchema.parse(request.body);
     const email = body.email.trim().toLowerCase();
@@ -1540,6 +1718,100 @@ export function createApp() {
         total: rows.length,
       },
     };
+  });
+
+  app.get("/reports/management/summary", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementSummaryReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+    });
+  });
+
+  app.get("/reports/management/financial", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementFinancialReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      limit: query.limit,
+    });
+  });
+
+  app.get("/reports/management/appointments", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementAppointmentsReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      professionalId: query.professionalId,
+      limit: query.limit,
+    });
+  });
+
+  app.get("/reports/management/product-sales", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementProductSalesReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      productId: query.productId,
+      professionalId: query.professionalId,
+      limit: query.limit,
+    });
+  });
+
+  app.get("/reports/management/stock", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementStockReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      limit: query.limit,
+    });
+  });
+
+  app.get("/reports/management/professionals", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementProfessionalsReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      professionalId: query.professionalId,
+    });
+  });
+
+  app.get("/reports/management/audit", async (request) => {
+    const query = managementReportQuerySchema.parse(request.query);
+    return await operations.getManagementAuditReport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      limit: query.limit,
+    });
+  });
+
+  app.get("/reports/management/export.csv", async (request, reply) => {
+    const query = managementExportQuerySchema.parse(request.query);
+    assertManagementReportAccess(request, query.type);
+    const payload = await operations.getManagementReportForExport({
+      unitId: query.unitId,
+      start: new Date(query.start),
+      end: new Date(query.end),
+      type: query.type,
+      limit: query.limit,
+    });
+    const csv = buildCsv(csvRowsForReport(query.type, payload));
+    const startLabel = query.start.slice(0, 10);
+    const endLabel = query.end.slice(0, 10);
+    reply
+      .header("Content-Type", "text/csv; charset=utf-8")
+      .header(
+        "Content-Disposition",
+        `attachment; filename="relatorio-${query.type}-${query.unitId}-${startLabel}-${endLabel}.csv"`,
+      )
+      .send(csv);
   });
 
   app.get("/health", async () => ({ ok: true, authEnforced }));

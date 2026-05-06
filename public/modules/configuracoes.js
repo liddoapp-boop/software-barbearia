@@ -702,7 +702,8 @@ export function renderSettingsData(elements, payload = {}) {
   if (!elements.root) return;
   elements.root.innerHTML = `
     ${renderPageHeader({
-      context: "Configuracoes",
+      breadcrumb: "Inicio / Configuracoes",
+      eyebrow: "Configuracoes",
       title: "Hub de configuracoes",
       subtitle: "Organize empresa, agenda, pagamentos, equipe, comissoes, seguranca e aparencia sem transformar a tela em um formulario gigante.",
     })}

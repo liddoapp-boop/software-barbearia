@@ -63,7 +63,7 @@ function encodePayload(payload) {
 
 function severityStyle(level) {
   if (level === "HIGH") return "border-red-200 bg-red-50 text-red-900";
-  if (level === "LOW") return "border-blue-200 bg-blue-50 text-blue-900";
+  if (level === "LOW") return "border-indigo-300 bg-indigo-950/30 text-indigo-100";
   return "border-amber-200 bg-amber-50 text-amber-900";
 }
 
@@ -335,10 +335,10 @@ export function renderDashboardData(elements, payload) {
       <div class="text-3xl font-black text-emerald-900 mt-1">${currency(dashboard.revenueToday)}</div>
       <div class="text-xs text-emerald-800 mt-1">Resposta: estou ganhando hoje?</div>
     </article>
-    <article class="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-4 shadow-sm">
-      <div class="text-xs font-bold uppercase tracking-wide text-sky-700">Receita mes</div>
-      <div class="text-3xl font-black text-sky-900 mt-1">${currency(dashboard.revenueMonth)}</div>
-      <div class="text-xs text-sky-800 mt-1">${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth) >= 0 ? "+" : ""}${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth).toFixed(1)}% vs mes anterior</div>
+    <article class="rounded-2xl border border-indigo-300 bg-gradient-to-br from-indigo-950/40 to-slate-950 p-4 shadow-sm">
+      <div class="text-xs font-bold uppercase tracking-wide text-indigo-200">Receita mes</div>
+      <div class="text-3xl font-black text-indigo-50 mt-1">${currency(dashboard.revenueMonth)}</div>
+      <div class="text-xs text-indigo-200 mt-1">${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth) >= 0 ? "+" : ""}${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth).toFixed(1)}% vs mes anterior</div>
     </article>
     <article class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
       <div class="text-xs font-bold uppercase tracking-wide text-indigo-700">Ocupacao</div>

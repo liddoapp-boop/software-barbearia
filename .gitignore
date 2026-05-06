@@ -17,3 +17,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Browser validation evidence: keep textual manifests, keep heavy/session files local
+.planning/evidence/*/*.png
+.planning/evidence/*/*.json
+.planning/evidence/*/downloads/

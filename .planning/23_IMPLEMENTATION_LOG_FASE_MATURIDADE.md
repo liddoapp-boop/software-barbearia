@@ -1,4 +1,324 @@
-﻿# Implementation Log - Fase Maturidade
+Data: 2026-05-06
+Escopo: Fase 1.23 - Polimento visual premium, consistencia UI e experiencia SaaS.
+
+## Entregas executadas
+1. Criado `.planning/123_FRONTEND_POLIMENTO_VISUAL_PREMIUM.md` com auditoria visual inicial, escopo, melhorias e checklist.
+2. Reforcado design system leve em `public/styles/layout.css` com tokens premium dark, contraste, espacamento e consistencia de componentes.
+3. Sidebar refinada em `public/components/sidebar.js` com identidade premium e contexto de perfil ativo.
+4. Topbar refinada em `public/components/topbar.js` com microcopy operacional e contexto de modulo mais claro.
+5. Contexto temporal da topbar reforcado com atualizacao periodica em `public/app.js`.
+6. Ajustes mobile em tabs, area de toque e comportamento de filtros responsivos.
+7. Nenhuma alteracao em backend, Prisma, migrations, endpoints, contratos, regras de negocio, permissoes, auditoria, autenticacao, tenant guard ou idempotencia.
+
+## Arquivos alterados
+- `public/components/sidebar.js`
+- `public/components/topbar.js`
+- `public/styles/layout.css`
+- `public/app.js`
+- `.planning/123_FRONTEND_POLIMENTO_VISUAL_PREMIUM.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; reexecucao fora do sandbox bloqueada por revisao de risco automatica (possivel escrita em banco nao isolado).
+- `npm.cmd run smoke:api`: passou.
+- `git diff --check`: passou (somente warnings LF -> CRLF).
+- `git status --short`: executado; worktree segue com alteracoes pre-existentes + fase.
+
+## Resultado
+- Decisao da Fase 1.23: aprovado com ressalvas.
+- Direcionamento visual concluido com foco em polimento premium e baixo risco estrutural.
+- Ressalva: `test:db` depende de execucao em ambiente explicitamente isolado para evitar risco de escrita em base nao dedicada.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.22 - Execucao assistida no host interno real.
+
+## Entregas executadas
+1. Criado `.planning/122_EXECUCAO_ASSISTIDA_HOST_INTERNO_REAL.md`.
+2. Atualizados `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md` e `.planning/24_NEXT_PRIORITIES.md`.
+3. Validacao segura de `.env` sem expor segredos: confirmou presenca de `DATA_BACKEND`, `DATABASE_URL`, `AUTH_ENFORCED`, `NODE_ENV`, `PORT`; `AUTH_SECRET` presente porem fraco para release e `CORS_ORIGIN` ausente.
+4. Confirmado que `.env` segue ignorado pelo Git via `.gitignore`.
+5. Validacoes obrigatorias tecnicas executadas dentro do possivel na sessao atual.
+6. Nenhuma feature nova, nenhuma alteracao de schema/migration e nenhum seed destrutivo em base real.
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; reexecucao fora do sandbox bloqueada por seguranca automatica devido risco de escrita em banco nao isolado.
+- `npm.cmd run smoke:api`: passou localmente.
+- `git diff --check`: passou com warnings LF/CRLF.
+- `git status --short`: executado; worktree segue com alteracoes pre-existentes + fase.
+
+## Resultado
+- Decisao da Fase 1.22: bloqueado para release controlado interno real.
+- Bloqueios P0: host interno real nao informado, `.env` real do alvo nao validado, PostgreSQL alvo/backup/restore nao comprovados, smoke remoto nao executado e checklist visual desktop/mobile no host real nao executado.
+- Proxima fase recomendada: Fase 1.23 - janela assistida de homologacao no host interno real.
+
+---
+# Implementation Log - Fase Maturidade
+
+Data: 2026-05-06
+Escopo: Fase 1.21 - Ambiente interno e release candidate operacional.
+
+## Entregas executadas
+1. Criado `.planning/121_AMBIENTE_INTERNO_RELEASE_CANDIDATE_OPERACIONAL.md`.
+2. Revisado hardening operacional de ambiente: `DATA_BACKEND`, `DATABASE_URL`, `AUTH_SECRET`, `AUTH_ENFORCED`, `CORS_ORIGIN`, `NODE_ENV`, `PORT`, logging e Git ignore de `.env`.
+3. Confirmado `dotenv` sem `override: true` em `src/server.ts`, preservando variaveis externas para smoke/porta.
+4. Reforcado `scripts/smoke-api-flow.ps1` para validar `401` sem token e `403` cross-unit.
+5. Adicionado teste `tests/environment-hardening.spec.ts` para `AUTH_SECRET` em producao e CORS restrito.
+6. Atualizado `.env.example` com alerta explicito contra uso de credenciais dev em ambiente real e exemplo de lista de origens para `CORS_ORIGIN`.
+7. Registrado que `prisma/seed.ts` e destrutivo e nao deve ser executado em base operacional real.
+8. Nenhuma feature comercial nova, nenhum redesign grande e nenhuma alteracao fora do escopo da fase.
+
+## Arquivos alterados
+- `.planning/121_AMBIENTE_INTERNO_RELEASE_CANDIDATE_OPERACIONAL.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `.env.example`
+- `scripts/smoke-api-flow.ps1`
+- `tests/environment-hardening.spec.ts`
+
+## Validacao
+- `npm.cmd run build`: executar na etapa de validacao obrigatoria desta fase.
+- `npm.cmd run test`: executar na etapa de validacao obrigatoria desta fase.
+- `npm.cmd run test:db`: executar na etapa de validacao obrigatoria desta fase.
+- `npm.cmd run smoke:api`: executar na etapa de validacao obrigatoria desta fase.
+- `git diff --check`: executar na etapa de validacao obrigatoria desta fase.
+- `git status --short`: executar na etapa de validacao obrigatoria desta fase.
+
+## Resultado
+- Decisao da Fase 1.21: bloqueado.
+- O release candidate esta tecnicamente mais preparado, mas ainda sem ambiente alvo interno real, sem smoke remoto e sem validacao visual no host real.
+- Proxima fase recomendada: Fase 1.22 - execucao assistida no host interno real.
+
+---
+Data: 2026-05-06
+Escopo: Fase 1.20 - Analise completa do projeto, maturidade real e proximos passos estrategicos.
+
+## Entregas executadas
+1. Criado `.planning/120_ANALISE_COMPLETA_MATURIDADE_PROJETO_ROADMAP.md`.
+2. Auditados raiz/configuracao, backend, Prisma/PostgreSQL, frontend, UX, relatorios, seguranca, permissoes, testes, DevOps/release e documentacao `.planning`.
+3. Classificacao de maturidade definida como beta interno: acima de MVP operacional, abaixo de release controlado real e abaixo de produto comercial.
+4. Registrado que o core operacional esta forte: agenda, checkout, financeiro, estoque, comissoes, auditoria, idempotencia, tenant guard e relatorios locais.
+5. Registrado que o bloqueio principal segue sendo operacional/release: ambiente alvo ausente, `.env` real nao validado, PostgreSQL alvo/backup indefinidos, Tailwind CDN e worktree grande.
+6. Criada matriz de riscos P0/P1/P2/P3 e roadmap recomendado para as proximas fases.
+7. Nenhuma feature, schema Prisma, migration, regra de negocio, tela ou refatoracao grande foi implementada.
+
+## Arquivos alterados
+- `.planning/120_ANALISE_COMPLETA_MATURIDADE_PROJETO_ROADMAP.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou no sandbox.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`67 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`11 passed`).
+- `npm.cmd run smoke:api`: passou no sandbox.
+- `git diff --check`: passou, com warnings LF -> CRLF apenas.
+- `git status --short`: executado; worktree ja estava suja com alteracoes anteriores e arquivos novos das fases recentes.
+
+## Resultado
+- Decisao final: aprovado para continuar evolucao local e validacao interna assistida quando houver ambiente; bloqueado para release controlado real; nao pronto comercialmente.
+- Proxima fase recomendada: Fase 1.21 - Ambiente interno real e release candidate operacional.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.19 - Provisionamento e validacao real do ambiente interno.
+
+## Entregas executadas
+1. Criado `.planning/119_PROVISIONAMENTO_VALIDACAO_AMBIENTE_INTERNO.md`.
+2. Reclassificados os bloqueios herdados da Fase 1.18.
+3. `.env` local foi validado sem expor segredos.
+4. `.env.example`, CORS, scripts, Prisma, migrations e smoke foram revisados no escopo de release.
+5. EPERM do `db:generate` foi reproduzido e saneado encerrando apenas o listener local da porta `3333` e limpando temporarios do Prisma Client dentro do workspace.
+6. API antiga/defasada em `3333` deixou de ser usada na validacao; o smoke atualizado rodou em `3334`.
+7. Nenhuma feature, regra de negocio, schema, permissao ou UI foi alterada nesta fase.
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run db:generate`: falhou inicialmente por EPERM; passou apos saneamento.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`67 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`11 passed`).
+- `$env:SMOKE_BASE_URL='http://127.0.0.1:3334'; npm.cmd run smoke:api`: falhou no sandbox por Prisma/binaries; passou fora do sandbox, incluindo CSV de Clientes.
+
+## Resultado
+- Decisao da Fase 1.19: bloqueado.
+- O pacote atual esta saudavel para nova tentativa, mas nao ha ambiente alvo interno real, `.env` forte, PostgreSQL alvo, backup, CORS restrito, smoke remoto ou validacao visual no host real.
+- Proxima fase recomendada: Fase 1.20 - Execucao assistida no host interno definido.
+
+Documento: `.planning/119_PROVISIONAMENTO_VALIDACAO_AMBIENTE_INTERNO.md`.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.18 - Release controlado dos Relatorios em ambiente alvo interno.
+
+## Entregas executadas
+1. Criado `.planning/118_RELEASE_CONTROLADO_RELATORIOS_AMBIENTE_ALVO.md`.
+2. Revisadas as decisoes e ressalvas herdadas das Fases 1.14 a 1.17.
+3. Confirmado Git/worktree: branch `main...origin/main`, muitas alteracoes pendentes e documentos/evidencias ainda dependentes de staging intencional.
+4. Validado que `.env` esta ignorado e que evidencias brutas da Fase 1.16 continuam fora do pacote versionavel.
+5. Validado `.env.example`: documenta `DATA_BACKEND`, `DATABASE_URL`, `AUTH_SECRET`, `CORS_ORIGIN`, `PORT` e `SMOKE_BASE_URL`, sem segredo real.
+6. Validado `.env` local sem expor segredos: existe e esta fora do Git, mas e configuracao dev (`DATA_BACKEND=memory`, `NODE_ENV=development`, `AUTH_SECRET` fraco para release e sem `CORS_ORIGIN`).
+7. Rodado smoke com `SMOKE_BASE_URL=http://127.0.0.1:3333`; passou, mas a checagem direta revelou que o processo ativo em `3333` rejeita CSV `type=clients`, indicando API defasada.
+8. Endurecido `scripts/smoke-api-flow.ps1` para validar tambem CSV gerencial de Clientes, incluindo cabecalho humano e ausencia de `clientId`.
+9. Rodado smoke atualizado com `SMOKE_BASE_URL=http://127.0.0.1:3334`; passou iniciando o codigo atual em porta alternativa e validando CSV de Clientes.
+10. Registrado que ambiente alvo interno real, banco alvo, backup, CORS restrito e passada visual no host real nao foram confirmados.
+
+## Arquivos alterados
+- `.planning/118_RELEASE_CONTROLADO_RELATORIOS_AMBIENTE_ALVO.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `scripts/smoke-api-flow.ps1`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`67 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`11 passed`).
+- `npm.cmd run db:generate`: falhou fora do sandbox por `EPERM` ao renomear engine Prisma em `node_modules/.prisma/client`.
+- `$env:SMOKE_BASE_URL="http://127.0.0.1:3333"; npm.cmd run smoke:api`: passou, mas o alvo local ativo estava defasado para CSV de Clientes.
+- `$env:SMOKE_BASE_URL="http://127.0.0.1:3334"; npm.cmd run smoke:api`: passou com smoke atualizado e codigo atual.
+
+## Resultado
+- Decisao da Fase 1.18: bloqueado para release controlado em ambiente alvo interno.
+- O codigo atual esta validado localmente para nova tentativa, mas o release interno exige host real configurado, `.env` forte, PostgreSQL alvo, backup, `CORS_ORIGIN` restrito, smoke remoto e passada visual no host real.
+- Proxima fase recomendada: Fase 1.19 - Provisionamento e validacao real do ambiente interno.
+
+Documento: `.planning/118_RELEASE_CONTROLADO_RELATORIOS_AMBIENTE_ALVO.md`.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.17 - Preparacao de release visual/controlado dos Relatorios e saneamento de ressalvas finais.
+
+## Entregas executadas
+1. Criado `.planning/117_RELEASE_VISUAL_RELATORIOS_RESSALVAS_FINAIS.md`.
+2. Revisado estado das Fases 1.13 a 1.16, incluindo hub frontend, contratos backend, CSV, smoke, browser desktop/mobile e ressalvas finais.
+3. Decidido manter Tailwind CDN mitigado/documentado nesta fase, porque a UI ainda depende de classes utilitarias no HTML/app/modulos; remocao ficou para pipeline CSS antes de producao real/publica.
+4. Revisadas evidencias de `.planning/evidence/fase-116/`: cerca de 15.8 MB, com screenshots/JSON/CSVs e dados identificaveis de demonstracao.
+5. Criado `.planning/evidence/fase-116/MANIFEST.md` e ajustado `.gitignore` para manter PNGs, JSONs e downloads CSV locais/ignorados.
+6. Implementado CSV backend de Clientes em `/reports/management/export.csv?type=clients`, usando `getClientsOverview`, com cabecalhos humanos e sem IDs tecnicos, telefone ou e-mail.
+7. Atualizado frontend para habilitar `Baixar CSV` no relatorio Clientes e mapear `clientes` para `clients`.
+8. Ajustada linguagem de Profissionais para `Ocupacao estimada`, com aviso de que o calculo completo depende de grade historica de disponibilidade.
+9. Adicionado teste API pequeno para CSV gerencial de Clientes sem IDs tecnicos.
+10. Registrada regressao visual curta por revisao de codigo/CSS e reaproveitamento das evidencias reais da Fase 1.16.
+
+## Arquivos alterados
+- `.gitignore`
+- `.planning/117_RELEASE_VISUAL_RELATORIOS_RESSALVAS_FINAIS.md`
+- `.planning/evidence/fase-116/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+- `public/app.js`
+- `public/modules/relatorios.js`
+- `src/domain/types.ts`
+- `src/http/app.ts`
+- `src/application/operations-service.ts`
+- `src/application/prisma-operations-service.ts`
+- `tests/api.spec.ts`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`67 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`11 passed`).
+
+## Resultado
+- Decisao da Fase 1.17: aprovado com ressalvas.
+- Relatorios esta pronto para release controlado.
+- Ressalvas restantes: Tailwind CDN aceito apenas em ambiente controlado, ocupacao profissional segue estimada/parcial e evidencias brutas ficam fora do pacote versionavel.
+- Proxima fase recomendada: Fase 1.18 - Release controlado dos Relatorios em ambiente alvo interno.
+
+Documento: `.planning/117_RELEASE_VISUAL_RELATORIOS_RESSALVAS_FINAIS.md`.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.16 - Validacao visual real assistida em navegador desktop/mobile da aba Relatorios.
+
+## Entregas executadas
+1. Criado `.planning/116_VALIDACAO_VISUAL_RELATORIOS_DESKTOP_MOBILE_CSV.md`.
+2. Validada a aba Relatorios em Chrome real via CDP, desktop `1440x1100` e mobile `390x844`.
+3. Geradas evidencias em `.planning/evidence/fase-116/`, incluindo screenshots desktop/mobile, JSONs de Network/console e CSVs baixados pelo navegador.
+4. Validado que Relatorios abre sem placeholder antigo, com header unico, hub premium, filtro global e troca entre Financeiro, Atendimentos, Vendas, Estoque, Profissionais, Comissoes e Auditoria.
+5. Validado periodo Hoje, Semana, Mes e Personalizado.
+6. Rodado smoke para criar dados reais e validar CSV pelo clique do frontend.
+7. Corrigido `scripts/smoke-api-flow.ps1` para usar `-UseBasicParsing` no `Invoke-WebRequest` do CSV gerencial.
+8. Corrigido `public/modules/relatorios.js` para habilitar CSV nos relatorios com export backend suportado, incluindo Estoque.
+9. Validado que owner ve Relatorios completos; recepcao/profissional nao veem Relatorios, Financeiro, Comissoes nem Auditoria no menu.
+10. Validado Network com `/reports/management/*`, CSV via `/reports/management/export.csv`, 403 apenas em rotas sensiveis sem permissao e sem excecao JS critica.
+
+## Arquivos alterados
+- `.planning/116_VALIDACAO_VISUAL_RELATORIOS_DESKTOP_MOBILE_CSV.md`
+- `.planning/evidence/fase-116/*`
+- `public/modules/relatorios.js`
+- `scripts/smoke-api-flow.ps1`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- Checagem JS de `public/modules/relatorios.js`: passou.
+- `npm.cmd run smoke:api`: falhou antes da correcao por `Invoke-WebRequest` sem `-UseBasicParsing`; passou apos correcao.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`2 passed | 1 skipped`, `66 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`1 passed`, `11 passed`).
+- Browser desktop/mobile e CSV por clique: passaram.
+
+## Resultado
+- Decisao da Fase 1.16: aprovado com ressalvas.
+- Ressalvas: warning de Tailwind CDN no console, ocupacao de profissionais parcial e CSV de Clientes fora do contrato backend desta fase.
+- Proxima fase recomendada: Fase 1.17 - Preparacao de release visual/controlado e remocao da dependencia de Tailwind CDN para producao.
+
+Documento: `.planning/116_VALIDACAO_VISUAL_RELATORIOS_DESKTOP_MOBILE_CSV.md`.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.15 - Validacao operacional e visual dos Relatorios com backend atual, CSV real e correcao do smoke/porta alternativa.
+
+## Entregas executadas
+1. Criado `.planning/115_VALIDACAO_RELATORIOS_BACKEND_CSV_SMOKE.md`.
+2. Corrigido `src/server.ts` para usar `dotenv.config()` sem `override`, permitindo que `PORT` externo prevaleca sobre `.env`.
+3. Endurecido `scripts/smoke-api-flow.ps1` para nao aceitar API antiga apenas por `/health`: agora valida o contrato `/reports/management/summary` antes de seguir.
+4. Validado smoke padrao contra API atual e smoke em porta alternativa `3334`.
+5. Reexecutado `test:db` com o novo teste Prisma de relatorios gerenciais e CSV persistido.
+6. Validado CSV backend para `financial`, `appointments`, `product-sales`, `stock`, `professionals`, `commissions` e `audit`.
+7. Revisadas permissoes: `summary`, financeiro, comissoes e auditoria nao vazam para perfis nao-owner; tenant guard cross-unit permanece bloqueando.
+8. Adicionada cobertura em `tests/api.spec.ts` para `summary` nao-owner, export financeiro/auditoria bloqueado e export operacional permitido.
+9. Documentado `SMOKE_BASE_URL` em `.env.example`.
+10. Frontend Relatorios validado por codigo/CSS: aba real sem placeholder, endpoints atuais preferidos, CSV backend preferido e fallback local preservado.
+
+## Arquivos alterados
+- `.env.example`
+- `scripts/smoke-api-flow.ps1`
+- `src/server.ts`
+- `tests/api.spec.ts`
+- `.planning/115_VALIDACAO_RELATORIOS_BACKEND_CSV_SMOKE.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- Sintaxe JS publica relevante: passou com `tsc --allowJs --noEmit`.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`2 passed | 1 skipped`, `66 passed | 11 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`1 passed`, `11 passed`).
+- `npm.cmd run smoke:api`: falhou no sandbox por verificacao/download de engine Prisma; passou fora do sandbox.
+- `powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1 -BaseUrl http://127.0.0.1:3334`: falhou no sandbox pelo mesmo motivo; passou fora do sandbox.
+- Endpoints e CSVs de Relatorios validados por contrato HTTP via `app.inject` sobre `dist`.
+
+## Resultado
+- Decisao da Fase 1.15: aprovado com ressalvas.
+- Ressalva restante: validacao visual real desktop/mobile nao foi executada em navegador; nesta fase foi feita por codigo/CSS.
+- Proxima fase recomendada: Fase 1.16 - Validacao visual real assistida em navegador desktop/mobile, com screenshots e pequenos polimentos.
+
+Documento: `.planning/115_VALIDACAO_RELATORIOS_BACKEND_CSV_SMOKE.md`.
+
+---
 
 Data: 2026-05-04
 Escopo: Fase 0.9.3 - execucao real do checklist visual e ambiente alvo.
@@ -1346,3 +1666,118 @@ Escopo: Fase 1.11 - Validacao completa do produto, frontend renderizado e lacuna
 - Produto aprovado com ressalvas: funcionalmente consistente, mas visualmente ainda parcial.
 - A percepcao de que "nao mudou" e explicavel por mudancas estruturais pouco esteticas, tema escuro global, Dashboard ainda antigo e modulos avancados fora do novo contrato.
 - Proxima fase recomendada: Fase 1.12 - Checklist visual real desktop/mobile e correcao de percepcao premium.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.12 - Refactor visual premium, higienizacao de headers e correcao de percepcao visual.
+
+## Entregas executadas
+1. Criado `.planning/112_POLIMENTO_VISUAL_PREMIUM_HEADERS_CONTRASTE.md`.
+2. `PageHeader` foi ampliado com breadcrumb, eyebrow, meta, acoes secundarias e acao primaria.
+3. `Topbar` deixou de repetir titulo/breadcrumb de tela e virou barra global discreta.
+4. Dashboard, Metas, Automacoes e Fidelizacao passaram a ter header operacional premium.
+5. Headers estaticos redundantes foram removidos e acoes importantes foram preservadas/movidas.
+6. Paleta visual foi redefinida para navy/charcoal, slate, indigo/violet, emerald, amber e rose.
+7. Azul claro/sky foi removido dos elementos visiveis e remapeado para indigo/violet premium.
+8. Botoes, cards, filtros, drawers, tabelas/listas, chips, sidebar, mobile tabs e estados focus/hover receberam camada premium transversal.
+9. Configuracoes recebeu breadcrumb no `PageHeader` interno.
+10. Nenhum backend, schema Prisma, migration, endpoint, regra financeira, regra de agenda, permissao, auditoria, tenant guard ou idempotencia foi alterado.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/styles/layout.css`
+- `public/components/operational-ui.js`
+- `public/components/topbar.js`
+- `public/modules/dashboard.js`
+- `public/modules/agenda.js`
+- `public/modules/agendamentos.js`
+- `public/modules/configuracoes.js`
+- `.planning/112_POLIMENTO_VISUAL_PREMIUM_HEADERS_CONTRASTE.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: falhou no sandbox por rede/Prisma binaries; passou fora do sandbox.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`10 passed`).
+- Sintaxe ES module dos arquivos alterados: passou com `esbuild transform` fora do sandbox.
+- API local para revisao visual: `http://localhost:3333/`, `/app.js` e `/styles/layout.css` retornaram `200 OK`.
+
+## Resultado
+- Produto aprovado com ressalvas: a percepcao visual foi elevada, headers duplicados foram saneados e a paleta premium foi aplicada.
+- Ressalva: validacao visual in-app/browser automatizada nao foi executada porque o plugin de browser exige Node REPL nao disponivel nesta sessao.
+- Proxima fase recomendada: Fase 1.13 - Validacao visual humana assistida e redesign fino dos modulos avancados.
+
+---
+
+Data: 2026-05-05
+Escopo: Fase 1.13 - Relatorios operacionais em hub premium.
+
+## Entregas executadas
+1. Criado `.planning/113_RELATORIOS_OPERACIONAIS_HUB_PREMIUM.md`.
+2. Criado `public/modules/relatorios.js` como modulo frontend dedicado.
+3. A aba Relatorios deixou de usar placeholder e passou a ter `reportsSection` real.
+4. Criado hub premium com cards para Financeiro, Atendimentos, Vendas de produtos, Estoque, Clientes, Comissoes, Profissionais e Auditoria.
+5. Criado filtro global de periodo com Hoje, Semana, Mes e Periodo personalizado.
+6. Criado bundle frontend de dados por periodo reaproveitando endpoints existentes.
+7. Financeiro exibe entradas, saidas, saldo, resultado, receita de servicos, receita de produtos, comissoes pagas, estornos/devolucoes e lancamentos manuais.
+8. Atendimentos, Vendas, Clientes e Comissoes exibem resumo e detalhe operacional por periodo.
+9. Estoque, Profissionais e Auditoria mostram estado parcial honesto quando a base atual nao oferece historico completo.
+10. Exportacao CSV simples foi implementada para o relatorio aberto quando ha linhas renderizadas, sem IDs tecnicos.
+11. Nenhum backend, schema Prisma, migration, regra financeira, agenda, venda, estoque, comissao, auditoria, permissao, tenant guard ou idempotencia foi alterado.
+
+## Arquivos alterados
+- `public/index.html`
+- `public/app.js`
+- `public/styles/layout.css`
+- `public/modules/relatorios.js`
+- `.planning/113_RELATORIOS_OPERACIONAIS_HUB_PREMIUM.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`63 passed | 10 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`10 passed`).
+- Sintaxe ES module: passou com `node --input-type=module --check` via stdin para `public/app.js` e `public/modules/relatorios.js`.
+- Abertura da aba Relatorios no menu: validada por codigo em `menu-config.js`, `index.html` e `sectionsByModule`.
+- Troca de relatorio: validada por codigo via `[data-report-open]`.
+- Filtro de periodo: validado por codigo via `reportsPeriod`, datas customizadas e `loadReportsBundle`.
+- Responsividade basica: validada por CSS; passada visual humana/browser segue recomendada.
+
+## Resultado
+- Produto aprovado com ressalvas.
+- A tela Relatorios agora diferencia analise fechada por periodo do Dashboard e prepara exportacao CSV sem poluir a superficie.
+- Proxima fase recomendada: Fase 1.14 - Contrato backend de relatorios gerenciais e exportacao profissional.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.14 - Contrato backend de relatorios gerenciais e exportacao profissional.
+
+## Entregas executadas
+1. Criado `.planning/114_CONTRATO_BACKEND_RELATORIOS_GERENCIAIS_EXPORTACAO.md`.
+2. Criado namespace backend `/reports/management/*` com summary, financeiro, atendimentos, vendas de produtos, estoque, profissionais, auditoria e exportacao CSV.
+3. Adicionados contratos de dominio para payloads gerenciais e `ReportExportType`.
+4. Implementados agregadores em `OperationsService` e `PrismaOperationsService`, mantendo compatibilidade memory/Prisma sem migration.
+5. Frontend de Relatorios passou a preferir os novos endpoints e usar CSV backend antes do fallback frontend.
+6. Smoke API foi ampliado para consultar summary, financial, product-sales, stock e export CSV.
+7. Testes API foram adicionados para contratos principais, CSV, auditoria owner-only e tenant guard.
+8. Teste DB Prisma foi adicionado para relatorios gerenciais e CSV com dados reais persistidos.
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`66 passed | 10 skipped`).
+- `npm.cmd run test:db`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox antes do teste DB novo (`10 passed`). Reexecucao apos o novo teste DB foi recusada por limite da aprovacao automatica.
+- `npm.cmd run smoke:api`: falhou contra servidor antigo em `3333` sem novas rotas; tentativa em porta alternativa falhou porque `dotenv.config({ override: true })` forca porta do `.env` e encontrou `EADDRINUSE`.
+
+## Resultado
+- Decisao da Fase 1.14: aprovado com ressalvas.
+- Contratos backend e CSV foram criados e integrados ao frontend.
+- Ressalvas: smoke precisa ser reexecutado com API atual na porta livre; teste DB novo compila, mas nao foi reexecutado por limite da aprovacao automatica; ocupacao profissional ainda depende de base historica fechada.
+
+Documento: `.planning/114_CONTRATO_BACKEND_RELATORIOS_GERENCIAIS_EXPORTACAO.md`.

@@ -339,6 +339,95 @@ export interface FinancialManagementOverviewPayload {
   };
 }
 
+export type ReportExportType =
+  | "financial"
+  | "appointments"
+  | "product-sales"
+  | "stock"
+  | "clients"
+  | "professionals"
+  | "commissions"
+  | "audit";
+
+export interface ManagementReportPeriod {
+  unitId: UUID;
+  start: string;
+  end: string;
+}
+
+export interface ManagementReportCompleteness {
+  status: "complete" | "partial";
+  message?: string;
+}
+
+export interface FinancialReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  breakdown: {
+    byCategory: Array<{ category: string; kind: FinancialKind; amount: number; count: number }>;
+    byOrigin: Array<{ origin: string; label: string; amount: number; count: number }>;
+  };
+  lines: Array<Record<string, unknown>>;
+}
+
+export interface AppointmentsReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  topServices: Array<Record<string, unknown>>;
+  topProfessionals: Array<Record<string, unknown>>;
+  volumeByDay: Array<Record<string, unknown>>;
+  appointments: Array<Record<string, unknown>>;
+}
+
+export interface ProductSalesReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  topProducts: Array<Record<string, unknown>>;
+  sales: Array<Record<string, unknown>>;
+}
+
+export interface StockReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  alerts: Record<string, Array<Record<string, unknown>>>;
+  movements: Array<Record<string, unknown>>;
+  replenishmentSuggestions: Array<Record<string, unknown>>;
+  topOutgoingProducts: Array<Record<string, unknown>>;
+  productsWithoutMovement: Array<Record<string, unknown>>;
+}
+
+export interface ProfessionalsReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  professionals: Array<Record<string, unknown>>;
+}
+
+export interface AuditReportPayload {
+  period: ManagementReportPeriod;
+  completeness: ManagementReportCompleteness;
+  summary: Record<string, number>;
+  byActor: Array<Record<string, unknown>>;
+  byEntity: Array<Record<string, unknown>>;
+  events: Array<Record<string, unknown>>;
+}
+
+export interface ManagementReportSummary {
+  period: ManagementReportPeriod;
+  reports: Array<{
+    type: ReportExportType | "summary";
+    title: string;
+    status: "complete" | "partial" | "restricted";
+    hasData: boolean;
+    indicators: Record<string, number>;
+    message?: string;
+  }>;
+}
+
 export interface CommissionEntry {
   id: UUID;
   professionalId: UUID;

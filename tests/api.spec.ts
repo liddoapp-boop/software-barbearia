@@ -4004,4 +4004,174 @@ describe("API MVP", () => {
     expect(updateStatus.statusCode).toBe(403);
     process.env.AUTH_ENFORCED = "false";
   });
+
+  it("retorna contratos gerenciais de financeiro, atendimentos, vendas, estoque e profissionais por periodo", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const appointment = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-04-27T10:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(appointment.statusCode).toBe(200);
+    const appointmentId = appointment.json().appointment.id as string;
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "CONFIRMED", changedBy: "owner" },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "IN_SERVICE", changedBy: "owner" },
+    });
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "reports-management-checkout" },
+      payload: {
+        unitId: "unit-01",
+        completedAt: "2026-04-27T10:45:00.000Z",
+        paymentMethod: "PIX",
+        changedBy: "owner",
+        products: [{ productId: "prd-pomada", quantity: 1 }],
+      },
+    });
+    expect(checkout.statusCode).toBe(200);
+
+    const base = "unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z";
+    const financial = await app.inject({ method: "GET", url: `/reports/management/financial?${base}` });
+    expect(financial.statusCode).toBe(200);
+    expect(financial.json().summary.serviceRevenue).toBeGreaterThan(0);
+    expect(financial.json().breakdown.byOrigin[0].label).toBeTruthy();
+
+    const appointments = await app.inject({ method: "GET", url: `/reports/management/appointments?${base}` });
+    expect(appointments.statusCode).toBe(200);
+    expect(appointments.json().summary.completed).toBe(1);
+
+    const productSales = await app.inject({ method: "GET", url: `/reports/management/product-sales?${base}` });
+    expect(productSales.statusCode).toBe(200);
+    expect(productSales.json().summary.salesCount).toBe(1);
+
+    const stock = await app.inject({ method: "GET", url: `/reports/management/stock?${base}` });
+    expect(stock.statusCode).toBe(200);
+    expect(stock.json().movements.some((row: { label: string }) => row.label === "Saida por venda")).toBe(true);
+
+    const professionals = await app.inject({ method: "GET", url: `/reports/management/professionals?${base}` });
+    expect(professionals.statusCode).toBe(200);
+    expect(professionals.json().professionals[0].professionalName).toBeTruthy();
+
+    const summary = await app.inject({ method: "GET", url: `/reports/management/summary?${base}` });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().reports.map((item: { type: string }) => item.type)).toContain("financial");
+  });
+
+  it("exporta CSV gerencial com cabecalhos humanos", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/reports/management/export.csv?unitId=unit-01&start=2026-04-01T00:00:00.000Z&end=2026-04-30T23:59:59.999Z&type=financial",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/csv");
+    expect(response.headers["content-disposition"]).toContain("relatorio-financial-unit-01");
+    expect(response.body).toContain("\"Data\";\"Tipo\";\"Origem\"");
+  });
+
+  it("exporta CSV gerencial de clientes sem IDs tecnicos", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/reports/management/export.csv?unitId=unit-01&start=2026-04-01T00:00:00.000Z&end=2026-04-30T23:59:59.999Z&type=clients",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/csv");
+    expect(response.headers["content-disposition"]).toContain("relatorio-clients-unit-01");
+    expect(response.body).toContain("\"Cliente\";\"Status\";\"Visitas no periodo\"");
+    expect(response.body).not.toContain("clientId");
+    expect(response.body).not.toContain("cli-");
+  });
+
+  it("preserva permissoes e tenant guard nos relatorios gerenciais sensiveis", async () => {
+    process.env.DATA_BACKEND = "memory";
+    process.env.AUTH_ENFORCED = "true";
+    const app = createApp();
+    const ownerToken = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+    const receptionToken = await loginAs(app, {
+      email: "recepcao@barbearia.local",
+      password: "recepcao123",
+      activeUnitId: "unit-01",
+    });
+    const professionalToken = await loginAs(app, {
+      email: "profissional@barbearia.local",
+      password: "profissional123",
+      activeUnitId: "unit-01",
+    });
+
+    const base = "unitId=unit-01&start=2026-04-01T00:00:00.000Z&end=2026-04-30T23:59:59.999Z";
+    const summaryAsReception = await app.inject({
+      method: "GET",
+      url: `/reports/management/summary?${base}`,
+      headers: { authorization: `Bearer ${receptionToken}` },
+    });
+    expect(summaryAsReception.statusCode).toBe(403);
+
+    const auditAsReception = await app.inject({
+      method: "GET",
+      url: `/reports/management/audit?${base}`,
+      headers: { authorization: `Bearer ${receptionToken}` },
+    });
+    expect(auditAsReception.statusCode).toBe(403);
+
+    const auditAsOwner = await app.inject({
+      method: "GET",
+      url: `/reports/management/audit?${base}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(auditAsOwner.statusCode).toBe(200);
+
+    const auditExportAsReception = await app.inject({
+      method: "GET",
+      url: `/reports/management/export.csv?${base}&type=audit`,
+      headers: { authorization: `Bearer ${receptionToken}` },
+    });
+    expect(auditExportAsReception.statusCode).toBe(403);
+
+    const financialExportAsProfessional = await app.inject({
+      method: "GET",
+      url: `/reports/management/export.csv?${base}&type=financial`,
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(financialExportAsProfessional.statusCode).toBe(403);
+
+    const appointmentsExportAsProfessional = await app.inject({
+      method: "GET",
+      url: `/reports/management/export.csv?${base}&type=appointments`,
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(appointmentsExportAsProfessional.statusCode).toBe(200);
+    expect(appointmentsExportAsProfessional.headers["content-type"]).toContain("text/csv");
+
+    const crossUnit = await app.inject({
+      method: "GET",
+      url: "/reports/management/appointments?unitId=unit-02&start=2026-04-01T00:00:00.000Z&end=2026-04-30T23:59:59.999Z",
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(crossUnit.statusCode).toBe(403);
+    process.env.AUTH_ENFORCED = "false";
+  });
 });

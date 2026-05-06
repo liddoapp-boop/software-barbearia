@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import { createApp } from "./http/app";
 
-dotenv.config({ override: true });
+dotenv.config();
 
 async function bootstrap() {
   const app = createApp();

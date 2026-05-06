@@ -84,19 +84,21 @@ export function renderPrimaryAction({
   type = "button",
   href = "",
   disabled = false,
+  variant = "primary",
   attrs = {},
 } = {}) {
   const safeLabel = escapeHtml(label || "Continuar");
   const dataAttrs = attrsToString(attrs);
+  const actionClass = `op-action op-action-${escapeHtml(variant)}`;
   if (href) {
     return `
-      <a class="op-primary-action" href="${escapeHtml(href)}" ${id ? `id="${escapeHtml(id)}"` : ""} ${dataAttrs}>
+      <a class="${actionClass} op-primary-action" href="${escapeHtml(href)}" ${id ? `id="${escapeHtml(id)}"` : ""} ${dataAttrs}>
         ${safeLabel}
       </a>
     `;
   }
   return `
-    <button class="op-primary-action" type="${escapeHtml(type)}" ${id ? `id="${escapeHtml(id)}"` : ""} ${disabled ? "disabled" : ""} ${dataAttrs}>
+    <button class="${actionClass} op-primary-action" type="${escapeHtml(type)}" ${id ? `id="${escapeHtml(id)}"` : ""} ${disabled ? "disabled" : ""} ${dataAttrs}>
       ${safeLabel}
     </button>
   `;
@@ -106,16 +108,26 @@ export function renderPageHeader({
   title,
   subtitle = "",
   context = "",
+  breadcrumb = "",
+  eyebrow = "",
   action = "",
+  secondaryActions = "",
+  meta = "",
 } = {}) {
   return `
     <header class="op-page-header">
       <div class="op-page-header-main">
-        ${context ? `<p class="op-page-context">${escapeHtml(context)}</p>` : ""}
+        ${breadcrumb ? `<p class="op-page-breadcrumb">${escapeHtml(breadcrumb)}</p>` : ""}
+        ${context || eyebrow ? `<p class="op-page-context">${escapeHtml(eyebrow || context)}</p>` : ""}
         <h1 class="op-page-title">${escapeHtml(title || "Tela")}</h1>
         ${subtitle ? `<p class="op-page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
+        ${meta ? `<div class="op-page-meta">${meta}</div>` : ""}
       </div>
-      ${action ? `<div class="op-page-action">${action}</div>` : ""}
+      ${
+        action || secondaryActions
+          ? `<div class="op-page-action">${secondaryActions || ""}${action || ""}</div>`
+          : ""
+      }
     </header>
   `;
 }

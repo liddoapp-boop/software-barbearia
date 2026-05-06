@@ -1,4 +1,11 @@
 export function renderSidebar({ groups, activeModule, collapsed, badges = {}, role = "owner" }) {
+  const roleLabelMap = {
+    owner: "Owner",
+    recepcao: "Recepcao",
+    profissional: "Profissional",
+  };
+  const roleLabel = roleLabelMap[role] || "Owner";
+
   const groupMarkup = groups
     .map((group) => {
       const modules = group.modules
@@ -32,8 +39,9 @@ export function renderSidebar({ groups, activeModule, collapsed, badges = {}, ro
     <div class="sidebar-wrap ${collapsed ? "is-collapsed" : ""}">
       <div class="sb-header">
         <div class="sb-brand">
-          <p class="sb-kicker">Barbearia</p>
-          <strong class="sb-title">Premium SaaS</strong>
+          <p class="sb-kicker">Software Barbearia</p>
+          <strong class="sb-title">Hub Operacional Premium</strong>
+          <span class="sb-role-chip">Perfil ${roleLabel}</span>
         </div>
         <div class="sb-tools">
           <label class="sb-role-wrap" for="globalRoleSelect">

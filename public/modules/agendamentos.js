@@ -54,7 +54,7 @@ function statusLabel(status) {
 
 function statusClass(status) {
   if (status === "SCHEDULED") return "bg-slate-100 text-slate-700";
-  if (status === "CONFIRMED") return "bg-blue-100 text-blue-700";
+  if (status === "CONFIRMED") return "bg-indigo-100 text-indigo-700";
   if (status === "IN_SERVICE") return "bg-amber-100 text-amber-700";
   if (status === "COMPLETED") return "bg-emerald-100 text-emerald-700";
   if (status === "CANCELLED") return "bg-red-100 text-red-700";
@@ -126,7 +126,7 @@ function quickFlags(item, now, allItems) {
   if (pendingConfirmation) {
     flags.push({
       label: "Pendente de confirmacao",
-      className: "bg-blue-100 text-blue-700",
+      className: "bg-indigo-100 text-indigo-700",
     });
   }
   if (profile === "VIP") flags.push({ label: "VIP", className: "bg-yellow-100 text-yellow-800" });
@@ -250,7 +250,7 @@ export function renderAppointmentsFeedback(elements, type, message) {
       ? "bg-red-50 border-red-200 text-red-700"
       : type === "success"
         ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-        : "bg-blue-50 border-blue-200 text-blue-700";
+        : "bg-indigo-950/30 border-indigo-300 text-indigo-200";
   elements.feedback.className = `rounded-xl border px-3 py-2 text-sm ${classes}`;
   elements.feedback.textContent = safeText(message, "");
 }

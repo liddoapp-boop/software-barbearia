@@ -117,6 +117,12 @@ import {
   renderAuditLoading,
 } from "./modules/auditoria.js";
 import {
+  exportReportCsv,
+  renderReportsData,
+  renderReportsError,
+  renderReportsLoading,
+} from "./modules/relatorios.js";
+import {
   bindEntityDrawers,
   bindFilterBars,
   renderEmptyState,
@@ -150,10 +156,22 @@ const FRONTEND_AUTH_CREDENTIALS = {
 };
 
 function renderOperationalChrome() {
+  const dashboardHeaderMount = document.getElementById("dashboardHeaderMount");
+  if (dashboardHeaderMount) {
+    dashboardHeaderMount.innerHTML = renderPageHeader({
+      breadcrumb: "Inicio / Dashboard",
+      eyebrow: "Painel executivo",
+      title: "Dashboard",
+      subtitle: "Visao rapida para decisao imediata: receita, ocupacao, meta e prioridades com baixa friccao visual.",
+      meta: `<span>Menos ruido</span><span>Mais clareza</span>`,
+    });
+  }
+
   const agendaHeaderMount = document.getElementById("agendaHeaderMount");
   if (agendaHeaderMount) {
     agendaHeaderMount.innerHTML = renderPageHeader({
-      context: "Funil operacional",
+      breadcrumb: "Inicio / Agenda",
+      eyebrow: "Funil operacional",
       title: "Agenda",
       subtitle: "Agenda do dia, proximo atendimento e acoes principais sem expor dados tecnicos.",
       action: renderPrimaryAction({
@@ -201,7 +219,8 @@ function renderOperationalChrome() {
   const saleHeaderMount = document.getElementById("saleHeaderMount");
   if (saleHeaderMount) {
     saleHeaderMount.innerHTML = renderPageHeader({
-      context: "Funil operacional",
+      breadcrumb: "Inicio / PDV",
+      eyebrow: "Funil operacional",
       title: "PDV de produtos",
       subtitle: "Busque o produto, monte o carrinho, confira o total e cobre a venda sem expor rastros tecnicos.",
     });
@@ -237,7 +256,8 @@ function renderOperationalChrome() {
   const inventoryHeaderMount = document.getElementById("inventoryHeaderMount");
   if (inventoryHeaderMount) {
     inventoryHeaderMount.innerHTML = renderPageHeader({
-      context: "Funil operacional",
+      breadcrumb: "Inicio / Estoque",
+      eyebrow: "Funil operacional",
       title: "Estoque",
       subtitle: "Produtos criticos primeiro, reposicao clara e rastreabilidade tecnica apenas no detalhe.",
       action: renderPrimaryAction({
@@ -273,7 +293,8 @@ function renderOperationalChrome() {
   const financialHeaderMount = document.getElementById("financialHeaderMount");
   if (financialHeaderMount) {
     financialHeaderMount.innerHTML = renderPageHeader({
-      context: "Financeiro conciliado",
+      breadcrumb: "Inicio / Financeiro",
+      eyebrow: "Financeiro conciliado",
       title: "Financeiro",
       subtitle: "Resultado do periodo, entradas, saidas, saldo e origens operacionais sem expor rastros tecnicos.",
       action: renderPrimaryAction({
@@ -314,7 +335,8 @@ function renderOperationalChrome() {
   const commissionsHeaderMount = document.getElementById("commissionsHeaderMount");
   if (commissionsHeaderMount) {
     commissionsHeaderMount.innerHTML = renderPageHeader({
-      context: "Funil operacional",
+      breadcrumb: "Inicio / Comissoes",
+      eyebrow: "Funil operacional",
       title: "Comissoes",
       subtitle: "Fila de quem precisa receber, valores pendentes, pagamentos do periodo e rastreabilidade tecnica apenas no detalhe.",
     });
@@ -355,7 +377,8 @@ function renderOperationalChrome() {
   const clientsHeaderMount = document.getElementById("clientsHeaderMount");
   if (clientsHeaderMount) {
     clientsHeaderMount.innerHTML = renderPageHeader({
-      context: "Relacionamento operacional",
+      breadcrumb: "Inicio / Clientes",
+      eyebrow: "Relacionamento operacional",
       title: "Clientes",
       subtitle: "Carteira com ativos, risco, VIPs e reativacao prioritaria. Historico completo e rastros tecnicos ficam no detalhe.",
       action: renderPrimaryAction({
@@ -401,7 +424,8 @@ function renderOperationalChrome() {
   const professionalsHeaderMount = document.getElementById("professionalsHeaderMount");
   if (professionalsHeaderMount) {
     professionalsHeaderMount.innerHTML = renderPageHeader({
-      context: "Catalogo operacional",
+      breadcrumb: "Inicio / Profissionais",
+      eyebrow: "Catalogo operacional",
       title: "Profissionais",
       subtitle: "Equipe ativa, servicos que pode atender, producao e comissoes resumidas. Rastros tecnicos ficam no detalhe.",
     });
@@ -432,7 +456,8 @@ function renderOperationalChrome() {
   const servicesHeaderMount = document.getElementById("servicesHeaderMount");
   if (servicesHeaderMount) {
     servicesHeaderMount.innerHTML = renderPageHeader({
-      context: "Catalogo operacional",
+      breadcrumb: "Inicio / Servicos",
+      eyebrow: "Catalogo operacional",
       title: "Servicos",
       subtitle: "Servicos vendaveis, preco, duracao, margem e profissionais habilitados primeiro. Detalhes tecnicos ficam recolhidos.",
       action: renderPrimaryAction({
@@ -470,7 +495,8 @@ function renderOperationalChrome() {
   const auditHeaderMount = document.getElementById("auditHeaderMount");
   if (auditHeaderMount) {
     auditHeaderMount.innerHTML = renderPageHeader({
-      context: "Auditoria owner-only",
+      breadcrumb: "Inicio / Auditoria",
+      eyebrow: "Auditoria owner-only",
       title: "Auditoria",
       subtitle: "Linha do tempo legivel de acoes criticas, com rastreabilidade tecnica preservada apenas no detalhe.",
     });
@@ -510,6 +536,131 @@ function renderOperationalChrome() {
     });
     bindFilterBars(auditFilterMount);
   }
+
+  const reportsHeaderMount = document.getElementById("reportsHeaderMount");
+  if (reportsHeaderMount) {
+    reportsHeaderMount.innerHTML = renderPageHeader({
+      breadcrumb: "Inicio / Relatorios",
+      eyebrow: "Hub gerencial",
+      title: "Relatorios",
+      subtitle: "Analise fechada por periodo para conferencia operacional, historico gerencial e exportacao simples sem misturar com a decisao rapida do Dashboard.",
+      meta: `<span>Periodo fechado</span><span>Dados humanizados</span><span>Exportacao CSV</span>`,
+    });
+  }
+
+  const reportsFilterMount = document.getElementById("reportsFilterMount");
+  if (reportsFilterMount) {
+    reportsFilterMount.innerHTML = renderFilterBar({
+      id: "reportsOperationalFilters",
+      essential: [
+        `<select id="reportsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="today">Hoje</option>
+          <option value="week">Semana</option>
+          <option value="month" selected>Mes</option>
+          <option value="custom">Periodo personalizado</option>
+        </select>`,
+        `<input id="reportsCustomStart" type="date" aria-label="Inicio do periodo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
+        `<input id="reportsCustomEnd" type="date" aria-label="Fim do periodo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
+      ],
+      advanced: [
+        `<span class="reports-filter-note">Relatorios usam os dados operacionais disponiveis no periodo selecionado.</span>`,
+      ],
+      advancedLabel: "Base do recorte",
+    });
+    bindFilterBars(reportsFilterMount);
+  }
+
+  const fidelizacaoHeaderMount = document.getElementById("fidelizacaoHeaderMount");
+  if (fidelizacaoHeaderMount) {
+    fidelizacaoHeaderMount.innerHTML = renderPageHeader({
+      breadcrumb: "Inicio / Fidelizacao",
+      eyebrow: "Retencao premium",
+      title: "Fidelizacao",
+      subtitle: "Pontos, pacotes, assinaturas, retencao e multiunidade com leitura comercial simples.",
+    });
+  }
+
+  const fidelizacaoFilterMount = document.getElementById("fidelizacaoFilterMount");
+  if (fidelizacaoFilterMount) {
+    fidelizacaoFilterMount.innerHTML = renderFilterBar({
+      id: "fidelizacaoOperationalFilters",
+      essential: [
+        `<select id="fidelizacaoPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="month">Mes</option>
+          <option value="week">Semana</option>
+          <option value="today">Hoje</option>
+        </select>`,
+        `<select id="retentionRiskFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Risco (todos)</option>
+          <option value="HIGH">Alto</option>
+          <option value="MEDIUM">Medio</option>
+          <option value="LOW">Baixo</option>
+        </select>`,
+      ],
+    });
+    bindFilterBars(fidelizacaoFilterMount);
+  }
+
+  const automacoesHeaderMount = document.getElementById("automacoesHeaderMount");
+  if (automacoesHeaderMount) {
+    automacoesHeaderMount.innerHTML = renderPageHeader({
+      breadcrumb: "Inicio / Automacoes",
+      eyebrow: "IA e integracoes",
+      title: "Automacoes",
+      subtitle: "Regras, execucoes, scoring e logs apresentados como operacao assistida, sem alterar fluxos existentes.",
+    });
+  }
+
+  const automacoesFilterMount = document.getElementById("automacoesFilterMount");
+  if (automacoesFilterMount) {
+    automacoesFilterMount.innerHTML = renderFilterBar({
+      id: "automacoesOperationalFilters",
+      essential: [
+        `<select id="automacoesPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="month">Mes</option>
+          <option value="week">Semana</option>
+          <option value="today">Hoje</option>
+        </select>`,
+        `<select id="automacoesStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Execucoes (todos)</option>
+          <option value="SUCCESS">Sucesso</option>
+          <option value="FAILED">Falha</option>
+          <option value="PENDING">Pendente</option>
+        </select>`,
+      ],
+      advanced: [
+        `<select id="automacoesRiskFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Risco (todos)</option>
+          <option value="HIGH">Alto</option>
+          <option value="MEDIUM">Medio</option>
+          <option value="LOW">Baixo</option>
+        </select>`,
+        `<select id="automacoesProviderFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="">Provedor (todos)</option>
+          <option value="whatsapp-cloud">whatsapp-cloud</option>
+          <option value="billing-gateway">billing-gateway</option>
+        </select>`,
+      ],
+      advancedLabel: "Filtros avancados",
+    });
+    bindFilterBars(automacoesFilterMount);
+  }
+
+  const metasHeaderMount = document.getElementById("metasHeaderMount");
+  if (metasHeaderMount) {
+    metasHeaderMount.innerHTML = renderPageHeader({
+      breadcrumb: "Inicio / Metas",
+      eyebrow: "Performance operacional",
+      title: "Metas e Performance",
+      subtitle: "Progresso mensal, ritmo e rankings com foco em acao comercial clara.",
+      action: renderPrimaryAction({
+        label: "Definir meta",
+        id: "metasDefineGoalBtn",
+        type: "button",
+        attrs: { "data-metas-action": "open-goal-modal" },
+      }),
+    });
+  }
 }
 
 const appShell = document.getElementById("appShell");
@@ -545,6 +696,11 @@ const serviceSuggestions = document.getElementById("serviceSuggestions");
 const appointmentFeedback = document.getElementById("appointmentFeedback");
 const alternativeSlots = document.getElementById("alternativeSlots");
 const placeholderSection = document.getElementById("placeholderSection");
+const reportsRoot = document.getElementById("reportsRoot");
+const reportsFeedback = document.getElementById("reportsFeedback");
+const reportsPeriod = document.getElementById("reportsPeriod");
+const reportsCustomStart = document.getElementById("reportsCustomStart");
+const reportsCustomEnd = document.getElementById("reportsCustomEnd");
 const financialSummary = document.getElementById("financialSummary");
 const financialCashflow = document.getElementById("financialCashflow");
 const financialEntriesList = document.getElementById("financialEntriesList");
@@ -782,6 +938,11 @@ const dashboardElements = {
   automationSignals: dashboardAutomationSignals,
 };
 
+const reportsElements = {
+  root: reportsRoot,
+  feedback: reportsFeedback,
+};
+
 const sectionsByModule = {
   dashboard: document.getElementById("dashboardSection"),
   agenda: document.getElementById("agendaSection"),
@@ -797,6 +958,7 @@ const sectionsByModule = {
   automacoes: document.getElementById("automacoesSection"),
   metas: metasSection,
   configuracoes: document.getElementById("settingsSection"),
+  relatorios: document.getElementById("reportsSection"),
 };
 
 const allModuleIds = new Set(MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id));
@@ -983,6 +1145,8 @@ let currentServiceDetail = null;
 let currentSettingsPayload = null;
 let currentMetasPayload = null;
 let currentAuditPayload = null;
+let currentReportsPayload = null;
+let activeReportId = "financeiro";
 let inventoryFilters = {
   search: "",
   category: "",
@@ -1052,11 +1216,18 @@ if (!isAllowedModule(state.activeModule)) {
 startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
 if (financialCustomStart) financialCustomStart.value = asDateInputValue(new Date());
 if (financialCustomEnd) financialCustomEnd.value = asDateInputValue(new Date());
+if (reportsCustomStart) reportsCustomStart.value = asDateInputValue(new Date());
+if (reportsCustomEnd) reportsCustomEnd.value = asDateInputValue(new Date());
 if (metasGoalMonth) metasGoalMonth.value = asMonthInputValue(new Date());
 if (financialPeriod && financialCustomStart && financialCustomEnd) {
   const isCustomPeriod = financialPeriod.value === "custom";
   financialCustomStart.classList.toggle("hidden", !isCustomPeriod);
   financialCustomEnd.classList.toggle("hidden", !isCustomPeriod);
+}
+if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
+  const isCustomPeriod = reportsPeriod.value === "custom";
+  reportsCustomStart.classList.toggle("hidden", !isCustomPeriod);
+  reportsCustomEnd.classList.toggle("hidden", !isCustomPeriod);
 }
 
 let authSession = restoreAuthSession();
@@ -1336,6 +1507,8 @@ function updateTopbarDate() {
     timeStyle: "short",
   });
 }
+
+setInterval(updateTopbarDate, 30000);
 
 function syncAgendaFilterPanel() {
   if (!agendaFiltersPanel || !toggleAgendaFiltersBtn) return;
@@ -1768,7 +1941,7 @@ function renderPlaceholderModule() {
   placeholderSection.innerHTML = `
     <article class="placeholder-module">
       <h2 class="text-xl font-bold text-gray-800">${label}</h2>
-      <p class="text-sm text-gray-600 mb-3">Este modulo sera ativado nas proximas etapas. A navegacao ja esta pronta no novo App Shell.</p>
+      <p class="text-sm text-gray-600 mb-3">Modulo em preparacao. A navegacao ja esta pronta no App Shell premium.</p>
       <button type="button" class="rounded-lg bg-gray-900 text-white px-4 py-2 font-semibold" data-go-dashboard>
         Voltar para Dashboard
       </button>
@@ -1819,6 +1992,28 @@ function rangeFromPeriod(period) {
   const end = new Date(now);
   end.setHours(23, 59, 59, 999);
   return { start, end };
+}
+
+function rangeFromReportsPeriod(period) {
+  if (period === "custom") {
+    const startValue = reportsCustomStart?.value;
+    const endValue = reportsCustomEnd?.value;
+    if (startValue && endValue) {
+      const start = new Date(`${startValue}T00:00:00`);
+      const end = new Date(`${endValue}T23:59:59.999`);
+      if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+        return { start, end };
+      }
+    }
+  }
+  return rangeFromPeriod(period || "month");
+}
+
+function reportsPeriodLabel(range = {}) {
+  const start = range.start instanceof Date ? range.start : new Date(range.start);
+  const end = range.end instanceof Date ? range.end : new Date(range.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "Periodo selecionado";
+  return `${start.toLocaleDateString("pt-BR")} ate ${end.toLocaleDateString("pt-BR")}`;
 }
 
 function previousRangeFromCurrent(range) {
@@ -3887,6 +4082,66 @@ async function loadAuditEvents() {
   };
 }
 
+async function readOptionalJson(response, label) {
+  const data = await readResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(`${label}: ${extractApiErrorMessage(response, data, "Nao foi possivel carregar dados do relatorio.")}`);
+  }
+  return data;
+}
+
+async function loadReportsBundle() {
+  const period = reportsPeriod?.value || "month";
+  const range = rangeFromReportsPeriod(period);
+  const previous = previousRangeFromCurrent(range);
+  const common = {
+    unitId,
+    start: range.start.toISOString(),
+    end: range.end.toISOString(),
+  };
+  const query = (extra = {}) => new URLSearchParams({ ...common, ...extra }).toString();
+
+  const requests = {
+    managementSummary: apiFetch(`${API}/reports/management/summary?${query()}`),
+    managementFinancial: apiFetch(`${API}/reports/management/financial?${query({ limit: "400" })}`),
+    managementAppointments: apiFetch(`${API}/reports/management/appointments?${query({ limit: "500" })}`),
+    managementProductSales: apiFetch(`${API}/reports/management/product-sales?${query({ limit: "300" })}`),
+    managementStock: apiFetch(`${API}/reports/management/stock?${query({ limit: "300" })}`),
+    managementProfessionals: apiFetch(`${API}/reports/management/professionals?${query()}`),
+    managementAudit: apiFetch(`${API}/reports/management/audit?${query({ limit: "120" })}`),
+    financialCommissions: apiFetch(`${API}/financial/commissions?${query({ limit: "300" })}`),
+    clients: apiFetch(`${API}/clients/overview?${query()}`),
+  };
+
+  const settled = await Promise.allSettled(
+    Object.entries(requests).map(async ([key, request]) => [key, await readOptionalJson(await request, key)]),
+  );
+  const data = {};
+  const errors = {};
+  settled.forEach((result) => {
+    if (result.status === "fulfilled") {
+      const [key, value] = result.value;
+      data[key] = value;
+      return;
+    }
+    const message = result.reason?.message || "Dados indisponiveis.";
+    const [key, ...rest] = message.split(":");
+    errors[key || `endpoint-${Object.keys(errors).length + 1}`] = rest.join(":").trim() || message;
+  });
+
+  return {
+    period: {
+      type: period,
+      start: range.start.toISOString(),
+      end: range.end.toISOString(),
+      label: reportsPeriodLabel(range),
+    },
+    data,
+    errors,
+    exportParams: common,
+  };
+}
+
 async function loadFidelizacaoData() {
   const period = fidelizacaoPeriod.value || "month";
   const range = rangeFromPeriod(period);
@@ -4183,6 +4438,7 @@ async function loadAll() {
   renderSettingsLoading(settingsElements);
   renderMetasLoading(metasElements);
   renderAuditLoading(auditElements);
+  renderReportsLoading(reportsElements);
 
   const [
     agendaResult,
@@ -4200,6 +4456,7 @@ async function loadAll() {
     metasResult,
     auditResult,
     productSalesHistoryResult,
+    reportsResult,
   ] = await Promise.allSettled([
     loadAgendaByPeriod(),
     loadAppointmentsByFilters(),
@@ -4216,6 +4473,7 @@ async function loadAll() {
     loadMetasModule(),
     loadAuditEvents(),
     loadProductSalesHistory(),
+    loadReportsBundle(),
   ]);
 
   if (agendaResult.status === "fulfilled") {
@@ -4389,6 +4647,19 @@ async function loadAll() {
     renderAuditError(
       auditElements,
       auditResult.reason?.message || "Nao foi possivel carregar auditoria.",
+    );
+  }
+
+  if (reportsResult.status === "fulfilled") {
+    currentReportsPayload = reportsResult.value;
+    renderReportsData(reportsElements, reportsResult.value, {
+      activeReportId,
+    });
+  } else {
+    currentReportsPayload = null;
+    renderReportsError(
+      reportsElements,
+      reportsResult.reason?.message || "Nao foi possivel carregar relatorios operacionais.",
     );
   }
 
@@ -5600,6 +5871,16 @@ if (financialSearch) financialSearch.addEventListener("input", debouncedLoadAll)
 if (financialTypeFilter) financialTypeFilter.addEventListener("change", loadAll);
 if (financialCustomStart) financialCustomStart.addEventListener("change", loadAll);
 if (financialCustomEnd) financialCustomEnd.addEventListener("change", loadAll);
+if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
+  reportsPeriod.addEventListener("change", () => {
+    const isCustom = reportsPeriod.value === "custom";
+    reportsCustomStart.classList.toggle("hidden", !isCustom);
+    reportsCustomEnd.classList.toggle("hidden", !isCustom);
+    loadAll();
+  });
+  reportsCustomStart.addEventListener("change", loadAll);
+  reportsCustomEnd.addEventListener("change", loadAll);
+}
 if (servicesSearch) {
   servicesSearch.addEventListener("input", () => {
     servicesFilters.search = String(servicesSearch.value || "").trim();
@@ -5628,6 +5909,57 @@ if (servicesMaxPrice) {
   servicesMaxPrice.addEventListener("input", () => {
     servicesFilters.maxPrice = String(servicesMaxPrice.value || "").trim();
     debouncedLoadAll();
+  });
+}
+
+async function downloadBackendReportCsv(reportId) {
+  const typeMap = {
+    financeiro: "financial",
+    atendimentos: "appointments",
+    vendas: "product-sales",
+    estoque: "stock",
+    clientes: "clients",
+    profissionais: "professionals",
+    comissoes: "commissions",
+    auditoria: "audit",
+  };
+  const type = typeMap[reportId];
+  const params = currentReportsPayload?.exportParams;
+  if (!type || !params) return false;
+  const url = `${API}/reports/management/export.csv?${new URLSearchParams({
+    ...params,
+    type,
+  }).toString()}`;
+  const response = await apiFetch(url);
+  if (!response.ok) return false;
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filenameMatch = disposition.match(/filename="([^"]+)"/);
+  anchor.href = objectUrl;
+  anchor.download = filenameMatch?.[1] || `relatorio-${type}.csv`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+  return true;
+}
+
+if (reportsRoot) {
+  reportsRoot.addEventListener("click", async (event) => {
+    const openTarget = event.target.closest("[data-report-open]");
+    if (openTarget) {
+      activeReportId = openTarget.getAttribute("data-report-open") || "financeiro";
+      renderReportsData(reportsElements, currentReportsPayload, { activeReportId });
+      return;
+    }
+
+    const exportTarget = event.target.closest("[data-report-export]");
+    if (exportTarget && currentReportsPayload) {
+      const downloaded = await downloadBackendReportCsv(activeReportId);
+      if (!downloaded) exportReportCsv(currentReportsPayload, activeReportId);
+    }
   });
 }
 if (clientsTable) {

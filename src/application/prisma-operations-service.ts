@@ -18,9 +18,12 @@ import {
   BillingWebhookProcessResult,
   BillingReconciliationDiscrepancy,
   FinancialEntry,
+  FinancialReportPayload,
   FinancialManagementOverviewPayload,
   FinancialManagementProfessionalRow,
   FinancialManagementSnapshot,
+  AppointmentsReportPayload,
+  AuditReportPayload,
   Client,
   DashboardSuggestionTelemetryEvent,
   DashboardSuggestionTelemetryOutcome,
@@ -34,14 +37,19 @@ import {
   GoalProgressSummary,
   DashboardSmartAlert,
   MonthlyGoal,
+  ManagementReportSummary,
   Product,
+  ProductSalesReportPayload,
   ProductSale,
   ProductSaleHistoryRow,
   ProductSaleRefundStatus,
   Professional,
   Refund,
+  ReportExportType,
   ServiceStockConsumptionItem,
   Service,
+  StockReportPayload,
+  ProfessionalsReportPayload,
 } from "../domain/types";
 import {
   ACTIVE_APPOINTMENT_CONFLICT_STATUSES,
@@ -4807,6 +4815,440 @@ export class PrismaOperationsService {
         grossRevenue: Number(overview.summary.current.grossRevenue.toFixed(2)),
       },
     };
+  }
+
+  private roundMoney(value: number) {
+    return Number((Number(value) || 0).toFixed(2));
+  }
+
+  private humanizeFinancialOrigin(input: { source?: string | null; referenceType?: string | null }) {
+    const source = String(input.source ?? "").toUpperCase();
+    const referenceType = String(input.referenceType ?? "").toUpperCase();
+    if (source === "SERVICE" || referenceType === "APPOINTMENT") return "Atendimento finalizado";
+    if (source === "PRODUCT" || referenceType === "PRODUCT_SALE") return "Venda de produto";
+    if (source === "COMMISSION" || referenceType === "COMMISSION") return "Comissao paga";
+    if (referenceType === "APPOINTMENT_REFUND") return "Estorno de atendimento";
+    if (referenceType === "PRODUCT_SALE_REFUND") return "Devolucao de produto";
+    if (source === "MANUAL" || referenceType === "MANUAL") return "Lancamento manual";
+    if (source === "REFUND") return "Estorno/devolucao";
+    return "Movimentacao financeira";
+  }
+
+  private humanizeStockMovement(input: { movementType?: string; referenceType?: string }) {
+    const movementType = String(input.movementType ?? "").toUpperCase();
+    const referenceType = String(input.referenceType ?? "").toUpperCase();
+    if (referenceType === "PRODUCT_SALE" && movementType === "OUT") return "Saida por venda";
+    if ((referenceType === "PRODUCT_REFUND" || referenceType === "PRODUCT_SALE_REFUND") && movementType === "IN") return "Entrada por devolucao";
+    if (referenceType === "ADJUSTMENT") return "Ajuste manual";
+    if (referenceType === "INTERNAL" || movementType === "INTERNAL_USE") return "Consumo interno";
+    if (referenceType === "SERVICE_CONSUMPTION") return "Consumo por servico";
+    if (movementType === "LOSS") return "Perda";
+    return "Movimentacao de estoque";
+  }
+
+  async getManagementFinancialReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    limit?: number;
+  }): Promise<FinancialReportPayload> {
+    const [transactionsPayload, commissionsPayload] = await Promise.all([
+      this.getFinancialTransactions({ unitId: input.unitId, start: input.start, end: input.end, limit: input.limit ?? 300 }),
+      this.getFinancialCommissions({ unitId: input.unitId, start: input.start, end: input.end, limit: 1000 }),
+    ]);
+    const byCategory = new Map<string, { category: string; kind: "INCOME" | "EXPENSE"; amount: number; count: number }>();
+    const byOrigin = new Map<string, { origin: string; label: string; amount: number; count: number }>();
+    let totalIncome = 0;
+    let totalExpense = 0;
+    let serviceRevenue = 0;
+    let productRevenue = 0;
+    let refunds = 0;
+    let manualEntries = 0;
+    for (const row of transactionsPayload.transactions) {
+      const signed = row.type === "EXPENSE" ? -row.amount : row.amount;
+      if (row.type === "INCOME") totalIncome += row.amount;
+      else totalExpense += row.amount;
+      if (row.referenceType === "APPOINTMENT" || row.source === "SERVICE") serviceRevenue += row.amount;
+      if (row.referenceType === "PRODUCT_SALE" || row.source === "PRODUCT") productRevenue += row.amount;
+      if (String(row.referenceType).includes("REFUND") || row.source === "REFUND") refunds += row.amount;
+      if (row.referenceType === "MANUAL" || row.source === "MANUAL") manualEntries += signed;
+      const categoryKey = `${row.type}:${row.category || "GERAL"}`;
+      const category = byCategory.get(categoryKey) ?? { category: row.category || "GERAL", kind: row.type, amount: 0, count: 0 };
+      category.amount += row.amount;
+      category.count += 1;
+      byCategory.set(categoryKey, category);
+      const label = this.humanizeFinancialOrigin(row);
+      const origin = byOrigin.get(label) ?? { origin: row.referenceType || row.source || "UNKNOWN", label, amount: 0, count: 0 };
+      origin.amount += row.amount;
+      origin.count += 1;
+      byOrigin.set(label, origin);
+    }
+    const commissionsPaid = commissionsPayload.entries
+      .filter((item) => item.status === "PAID")
+      .reduce((acc, item) => acc + Number(item.commissionAmount ?? 0), 0);
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "complete" },
+      summary: {
+        totalIncome: this.roundMoney(totalIncome),
+        totalExpense: this.roundMoney(totalExpense),
+        balance: this.roundMoney(totalIncome - totalExpense),
+        periodResult: this.roundMoney(totalIncome - totalExpense),
+        serviceRevenue: this.roundMoney(serviceRevenue),
+        productRevenue: this.roundMoney(productRevenue),
+        commissionsPaid: this.roundMoney(commissionsPaid),
+        refunds: this.roundMoney(refunds),
+        manualEntries: this.roundMoney(manualEntries),
+      },
+      breakdown: {
+        byCategory: Array.from(byCategory.values()).map((item) => ({ ...item, amount: this.roundMoney(item.amount) })),
+        byOrigin: Array.from(byOrigin.values()).map((item) => ({ ...item, amount: this.roundMoney(item.amount) })),
+      },
+      lines: transactionsPayload.transactions.map((row) => ({
+        date: row.date,
+        type: row.type,
+        originLabel: this.humanizeFinancialOrigin(row),
+        category: row.category,
+        description: row.description,
+        amount: row.amount,
+        paymentMethod: row.paymentMethod,
+        professionalName: row.professionalName,
+        customerName: row.customerName,
+        referenceType: row.referenceType,
+        referenceId: row.referenceId,
+      })),
+    };
+  }
+
+  async getManagementAppointmentsReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    professionalId?: string;
+    limit?: number;
+  }): Promise<AppointmentsReportPayload> {
+    const appointments = (await this.getAppointments({
+      unitId: input.unitId,
+      start: input.start,
+      end: input.end,
+      professionalId: input.professionalId,
+    })).slice(0, Math.min(Math.max(input.limit ?? 300, 1), 1000));
+    const summary = { total: appointments.length, completed: 0, confirmed: 0, inService: 0, cancelled: 0, noShow: 0, blocked: 0, estimatedRevenue: 0, realizedRevenue: 0 };
+    const byService = new Map<string, { serviceId: string; serviceName: string; count: number; revenue: number }>();
+    const byProfessional = new Map<string, { professionalId: string; professionalName: string; count: number; revenue: number }>();
+    const byDay = new Map<string, { day: string; count: number }>();
+    for (const row of appointments) {
+      const price = Number(row.servicePrice ?? 0);
+      const status = String(row.status).toUpperCase();
+      if (status === "COMPLETED") summary.completed += 1;
+      if (status === "CONFIRMED") summary.confirmed += 1;
+      if (status === "IN_SERVICE") summary.inService += 1;
+      if (status === "CANCELLED") summary.cancelled += 1;
+      if (status === "NO_SHOW") summary.noShow += 1;
+      if (status === "BLOCKED") summary.blocked += 1;
+      summary.estimatedRevenue += price;
+      if (status === "COMPLETED") summary.realizedRevenue += price;
+      const service = byService.get(row.serviceId) ?? { serviceId: row.serviceId, serviceName: row.service, count: 0, revenue: 0 };
+      service.count += 1;
+      if (status === "COMPLETED") service.revenue += price;
+      byService.set(row.serviceId, service);
+      const professional = byProfessional.get(row.professionalId) ?? { professionalId: row.professionalId, professionalName: row.professional, count: 0, revenue: 0 };
+      professional.count += 1;
+      if (status === "COMPLETED") professional.revenue += price;
+      byProfessional.set(row.professionalId, professional);
+      const dayKey = new Date(row.startsAt).toISOString().slice(0, 10);
+      byDay.set(dayKey, { day: dayKey, count: (byDay.get(dayKey)?.count ?? 0) + 1 });
+    }
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "complete" },
+      summary: { ...summary, estimatedRevenue: this.roundMoney(summary.estimatedRevenue), realizedRevenue: this.roundMoney(summary.realizedRevenue) },
+      topServices: Array.from(byService.values()).map((item) => ({ ...item, revenue: this.roundMoney(item.revenue) })).sort((a, b) => b.count - a.count),
+      topProfessionals: Array.from(byProfessional.values()).map((item) => ({ ...item, revenue: this.roundMoney(item.revenue) })).sort((a, b) => b.count - a.count),
+      volumeByDay: Array.from(byDay.values()).sort((a, b) => b.count - a.count),
+      appointments: appointments.map((row) => ({
+        startsAt: row.startsAt.toISOString(),
+        status: row.status,
+        clientName: row.client,
+        professionalName: row.professional,
+        serviceName: row.service,
+        price: Number(row.servicePrice ?? 0),
+      })),
+    };
+  }
+
+  async getManagementProductSalesReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    productId?: string;
+    professionalId?: string;
+    limit?: number;
+  }): Promise<ProductSalesReportPayload> {
+    const payload = await this.listProductSales({
+      unitId: input.unitId,
+      start: input.start,
+      end: input.end,
+      productId: input.productId,
+      professionalId: input.professionalId,
+      limit: input.limit ?? 500,
+    });
+    const byProduct = new Map<string, { productId: string; productName: string; quantitySold: number; revenue: number; refundedQuantity: number }>();
+    let gross = 0;
+    let refunded = 0;
+    for (const sale of payload.sales) {
+      gross += sale.grossAmount;
+      refunded += sale.totalRefundedAmount;
+      for (const item of sale.items) {
+        const current = byProduct.get(item.productId) ?? { productId: item.productId, productName: item.productName ?? "Produto", quantitySold: 0, revenue: 0, refundedQuantity: 0 };
+        current.quantitySold += item.quantity;
+        current.revenue += item.quantity * item.unitPrice;
+        current.refundedQuantity += item.refundedQuantity;
+        byProduct.set(item.productId, current);
+      }
+    }
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "complete" },
+      summary: {
+        totalSold: this.roundMoney(gross),
+        salesCount: payload.sales.length,
+        productRevenue: this.roundMoney(gross - refunded),
+        averageProductTicket: payload.sales.length ? this.roundMoney(gross / payload.sales.length) : 0,
+        refundsCount: payload.sales.filter((sale) => sale.status !== "NOT_REFUNDED").length,
+        refundedAmount: this.roundMoney(refunded),
+      },
+      topProducts: Array.from(byProduct.values()).map((item) => ({ ...item, revenue: this.roundMoney(item.revenue) })).sort((a, b) => b.quantitySold - a.quantitySold),
+      sales: payload.sales.map((sale) => ({
+        soldAt: sale.soldAt.toISOString(),
+        clientName: sale.clientName ?? null,
+        professionalName: sale.professionalName ?? null,
+        grossAmount: sale.grossAmount,
+        totalRefundedAmount: sale.totalRefundedAmount,
+        status: sale.status,
+        items: sale.items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          refundedQuantity: item.refundedQuantity,
+        })),
+      })),
+    };
+  }
+
+  async getManagementStockReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    limit?: number;
+  }): Promise<StockReportPayload> {
+    const [overview, inventory, movementsRows] = await Promise.all([
+      this.getStockOverview({ unitId: input.unitId, limit: 50 }),
+      this.getInventory({ unitId: input.unitId, status: "ALL", limit: 80 }),
+      this.prisma.stockMovement.findMany({
+        where: { unitId: input.unitId, occurredAt: { gte: input.start, lte: input.end } },
+        orderBy: { occurredAt: "desc" },
+        take: Math.min(Math.max(input.limit ?? 300, 1), 1000),
+        include: { product: { select: { id: true, name: true } } },
+      }),
+    ]);
+    const products = Array.isArray(inventory.products) ? inventory.products : [];
+    const movements = movementsRows.map((item) => ({
+      occurredAt: item.occurredAt.toISOString(),
+      productId: item.productId,
+      productName: item.product.name,
+      movementType: item.movementType,
+      referenceType: item.referenceType,
+      quantity: item.quantity,
+      label: this.humanizeStockMovement(item),
+      referenceId: item.referenceId ?? null,
+    }));
+    const noStock = products.filter((item) => Number(item.quantity ?? 0) <= 0);
+    const critical = products.filter((item) => Number(item.quantity ?? 0) > 0 && Number(item.minimumStock ?? 0) > 0 && Number(item.quantity ?? 0) <= Math.max(1, Math.floor(Number(item.minimumStock ?? 0) / 2)));
+    const low = products.filter((item) => Number(item.quantity ?? 0) > 0 && Number(item.minimumStock ?? 0) > 0 && Number(item.quantity ?? 0) <= Number(item.minimumStock ?? 0));
+    const outgoingByProduct = new Map<string, { productId: string; productName: string; quantity: number }>();
+    for (const movement of movements) {
+      if (!["OUT", "LOSS", "INTERNAL_USE"].includes(String(movement.movementType))) continue;
+      const current = outgoingByProduct.get(String(movement.productId)) ?? { productId: String(movement.productId), productName: String(movement.productName), quantity: 0 };
+      current.quantity += Number(movement.quantity ?? 0);
+      outgoingByProduct.set(current.productId, current);
+    }
+    const movedProductIds = new Set(movements.map((item) => String(item.productId)));
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "complete" },
+      summary: {
+        noStock: noStock.length,
+        critical: critical.length,
+        belowMinimum: low.length,
+        inMovements: movements.filter((item) => item.movementType === "IN").length,
+        outMovements: movements.filter((item) => item.movementType === "OUT").length,
+        losses: movements.filter((item) => item.movementType === "LOSS").length,
+        internalUse: movements.filter((item) => item.movementType === "INTERNAL_USE").length,
+        serviceConsumption: movements.filter((item) => item.referenceType === "SERVICE_CONSUMPTION").length,
+        refundsIn: movements.filter((item) => item.label === "Entrada por devolucao").length,
+        salesOut: movements.filter((item) => item.label === "Saida por venda").length,
+        manualAdjustments: movements.filter((item) => item.label === "Ajuste manual").length,
+      },
+      alerts: { noStock, critical, belowMinimum: low },
+      movements,
+      replenishmentSuggestions: overview.replenishmentSuggestions.map((item) => ({ ...item })),
+      topOutgoingProducts: Array.from(outgoingByProduct.values()).sort((a, b) => b.quantity - a.quantity),
+      productsWithoutMovement: products.filter((item) => !movedProductIds.has(String(item.id))).map((item) => ({
+        productId: item.id,
+        productName: item.name,
+        quantity: item.quantity ?? 0,
+      })),
+    };
+  }
+
+  async getManagementProfessionalsReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    professionalId?: string;
+  }): Promise<ProfessionalsReportPayload> {
+    const [management, commissions] = await Promise.all([
+      this.getFinancialManagementOverview(input),
+      this.getFinancialCommissions({ unitId: input.unitId, start: input.start, end: input.end, professionalId: input.professionalId, limit: 1000 }),
+    ]);
+    const commissionByProfessional = new Map<string, { pending: number; paid: number; total: number }>();
+    for (const row of commissions.entries) {
+      const current = commissionByProfessional.get(row.professionalId) ?? { pending: 0, paid: 0, total: 0 };
+      current.total += row.commissionAmount;
+      if (row.status === "PENDING") current.pending += row.commissionAmount;
+      if (row.status === "PAID") current.paid += row.commissionAmount;
+      commissionByProfessional.set(row.professionalId, current);
+    }
+    const professionals = management.professionals
+      .filter((item) => !input.professionalId || item.professionalId === input.professionalId)
+      .map((item, index) => {
+        const commission = commissionByProfessional.get(item.professionalId) ?? { pending: 0, paid: 0, total: 0 };
+        return {
+          rank: index + 1,
+          professionalId: item.professionalId,
+          professionalName: item.name,
+          completedAppointments: item.appointmentsCompleted,
+          serviceRevenue: item.serviceRevenue,
+          productRevenue: item.productRevenue,
+          totalRevenue: item.grossRevenue,
+          averageTicket: item.ticketAverage,
+          pendingCommission: this.roundMoney(commission.pending),
+          paidCommission: this.roundMoney(commission.paid),
+          totalCommission: this.roundMoney(commission.total),
+          occupancyRate: null,
+        };
+      })
+      .sort((a, b) => Number(b.totalRevenue) - Number(a.totalRevenue));
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "partial", message: "Taxa de ocupacao depende de grade historica fechada; demais indicadores usam atendimentos, vendas e comissoes do periodo." },
+      summary: {
+        professionals: professionals.length,
+        completedAppointments: professionals.reduce((acc, item) => acc + Number(item.completedAppointments), 0),
+        serviceRevenue: this.roundMoney(professionals.reduce((acc, item) => acc + Number(item.serviceRevenue), 0)),
+        productRevenue: this.roundMoney(professionals.reduce((acc, item) => acc + Number(item.productRevenue), 0)),
+        totalRevenue: this.roundMoney(professionals.reduce((acc, item) => acc + Number(item.totalRevenue), 0)),
+        pendingCommission: this.roundMoney(professionals.reduce((acc, item) => acc + Number(item.pendingCommission), 0)),
+        paidCommission: this.roundMoney(professionals.reduce((acc, item) => acc + Number(item.paidCommission), 0)),
+      },
+      professionals,
+    };
+  }
+
+  async getManagementAuditReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    limit?: number;
+  }): Promise<AuditReportPayload> {
+    const rows = await this.prisma.auditLog.findMany({
+      where: { unitId: input.unitId, createdAt: { gte: input.start, lte: input.end } },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(Math.max(input.limit ?? 120, 1), 500),
+    });
+    const sensitive = ["REFUND", "COMMISSION", "FINANCIAL", "SETTINGS", "BLOCKED", "DENIED", "DELETE"];
+    const byActor = new Map<string, { actor: string; count: number }>();
+    const byEntity = new Map<string, { entity: string; count: number }>();
+    for (const event of rows) {
+      const actor = event.actorEmail ?? event.actorRole ?? "Usuario";
+      byActor.set(actor, { actor, count: (byActor.get(actor)?.count ?? 0) + 1 });
+      byEntity.set(event.entity, { entity: event.entity, count: (byEntity.get(event.entity)?.count ?? 0) + 1 });
+    }
+    const isSensitive = (event: (typeof rows)[number]) =>
+      sensitive.some((token) => `${event.action} ${event.entity} ${event.route}`.toUpperCase().includes(token));
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      completeness: { status: "complete", message: "Resumo gerencial; detalhes tecnicos completos permanecem na tela Auditoria." },
+      summary: {
+        totalEvents: rows.length,
+        criticalEvents: rows.filter(isSensitive).length,
+        sensitiveActions: rows.filter(isSensitive).length,
+        refunds: rows.filter((item) => `${item.action} ${item.entity}`.toUpperCase().includes("REFUND")).length,
+        commissionPayments: rows.filter((item) => item.action === "FINANCIAL_COMMISSION_MARKED_PAID").length,
+        manualFinancialEntries: rows.filter((item) => item.entity === "financial_transaction").length,
+        settingsChanges: rows.filter((item) => item.entity.includes("settings") || item.action.startsWith("SETTINGS_")).length,
+        blockedAccesses: rows.filter((item) => `${item.action} ${item.route}`.toUpperCase().includes("BLOCK")).length,
+      },
+      byActor: Array.from(byActor.values()).sort((a, b) => b.count - a.count),
+      byEntity: Array.from(byEntity.values()).sort((a, b) => b.count - a.count),
+      events: rows.map((event) => ({
+        createdAt: event.createdAt.toISOString(),
+        actor: event.actorEmail ?? event.actorRole,
+        actorRole: event.actorRole,
+        action: event.action,
+        entity: event.entity,
+        route: event.route,
+        method: event.method,
+        eventId: event.id,
+        entityId: event.entityId ?? null,
+      })),
+    };
+  }
+
+  async getManagementSummaryReport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+  }): Promise<ManagementReportSummary> {
+    const [financial, appointments, productSales, stock, professionals, audit] = await Promise.all([
+      this.getManagementFinancialReport(input),
+      this.getManagementAppointmentsReport(input),
+      this.getManagementProductSalesReport(input),
+      this.getManagementStockReport(input),
+      this.getManagementProfessionalsReport(input),
+      this.getManagementAuditReport(input),
+    ]);
+    return {
+      period: { unitId: input.unitId, start: input.start.toISOString(), end: input.end.toISOString() },
+      reports: [
+        { type: "financial", title: "Financeiro", status: financial.completeness.status, hasData: financial.lines.length > 0, indicators: financial.summary },
+        { type: "appointments", title: "Atendimentos", status: appointments.completeness.status, hasData: appointments.appointments.length > 0, indicators: appointments.summary },
+        { type: "product-sales", title: "Vendas de produtos", status: productSales.completeness.status, hasData: productSales.sales.length > 0, indicators: productSales.summary },
+        { type: "stock", title: "Estoque", status: stock.completeness.status, hasData: stock.movements.length > 0 || stock.alerts.belowMinimum.length > 0, indicators: stock.summary },
+        { type: "professionals", title: "Profissionais", status: professionals.completeness.status, hasData: professionals.professionals.length > 0, indicators: professionals.summary, message: professionals.completeness.message },
+        { type: "audit", title: "Auditoria", status: audit.completeness.status, hasData: audit.events.length > 0, indicators: audit.summary, message: audit.completeness.message },
+      ],
+    };
+  }
+
+  async getManagementReportForExport(input: {
+    unitId: string;
+    start: Date;
+    end: Date;
+    type: ReportExportType;
+    limit?: number;
+  }) {
+    if (input.type === "financial") return await this.getManagementFinancialReport(input);
+    if (input.type === "appointments") return await this.getManagementAppointmentsReport(input);
+    if (input.type === "product-sales") return await this.getManagementProductSalesReport(input);
+    if (input.type === "stock") return await this.getManagementStockReport(input);
+    if (input.type === "clients") {
+      return await this.getClientsOverview({ unitId: input.unitId, start: input.start, end: input.end, limit: input.limit });
+    }
+    if (input.type === "professionals") return await this.getManagementProfessionalsReport(input);
+    if (input.type === "commissions") return await this.getFinancialCommissions({ unitId: input.unitId, start: input.start, end: input.end, limit: input.limit });
+    return await this.getManagementAuditReport(input);
   }
 
   async getFinancialManagementOverview(input: {

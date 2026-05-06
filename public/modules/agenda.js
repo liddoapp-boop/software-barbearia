@@ -30,7 +30,7 @@ const statusLabel = {
 
 const statusClass = {
   SCHEDULED: "bg-slate-700/50 text-slate-200 border-slate-600",
-  CONFIRMED: "bg-blue-900/40 text-blue-200 border-blue-700",
+  CONFIRMED: "bg-indigo-950/40 text-indigo-200 border-indigo-700",
   IN_SERVICE: "bg-amber-900/40 text-amber-200 border-amber-700",
   COMPLETED: "bg-emerald-900/40 text-emerald-200 border-emerald-700",
   CANCELLED: "bg-red-900/40 text-red-200 border-red-700",
