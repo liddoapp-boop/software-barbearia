@@ -89,6 +89,14 @@ function actionsForStatus(status) {
   return ["DETAIL"];
 }
 
+function primaryActionForStatus(status) {
+  if (status === "SCHEDULED") return "CONFIRMED";
+  if (status === "CONFIRMED") return "IN_SERVICE";
+  if (status === "IN_SERVICE") return "COMPLETE";
+  if (status === "COMPLETED") return "DETAIL";
+  return "DETAIL";
+}
+
 export function normalizeAgendaItems(payload) {
   const rows = Array.isArray(payload) ? payload : [];
   return rows
@@ -253,6 +261,8 @@ function renderAgendaList(elements, list, handlers) {
         minute: "2-digit",
       });
       const actions = actionsForStatus(item.status);
+      const primaryAction = primaryActionForStatus(item.status);
+      const secondaryActions = actions.filter((action) => action !== primaryAction);
       const clientTag = item.clientTags[0] || "NEW";
       const clientTagLabel =
         clientTag === "VIP"
@@ -282,12 +292,22 @@ function renderAgendaList(elements, list, handlers) {
           }
           <div class="mt-2 text-xs text-slate-400">Perfil: <strong class="text-slate-200">${clientTagLabel}</strong></div>
           <div class="mt-2 flex flex-wrap gap-2">
-            ${actions
-              .map(
-                (action) =>
-                  `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${actionLabel[action] || action}</button>`,
-              )
-              .join("")}
+            <button data-id="${item.id}" data-action="${primaryAction}" class="${actionButtonClass(primaryAction)} agenda-action-primary">${actionLabel[primaryAction] || primaryAction}</button>
+            ${
+              secondaryActions.length
+                ? `<details class="agenda-secondary-actions">
+                    <summary>Mais acoes</summary>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      ${secondaryActions
+                        .map(
+                          (action) =>
+                            `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${actionLabel[action] || action}</button>`,
+                        )
+                        .join("")}
+                    </div>
+                  </details>`
+                : ""
+            }
           </div>
         </article>
       `;

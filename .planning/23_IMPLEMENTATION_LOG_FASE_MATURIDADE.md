@@ -1,4 +1,172 @@
 Data: 2026-05-06
+Escopo: Fase 1.29 - Homologacao final assistida para release controlado interno.
+
+## Entregas executadas
+1. Criado `.planning/129_HOMOLOGACAO_FINAL_RELEASE_CONTROLADO_INTERNO.md`.
+2. Criado `.planning/evidence/fase-129/MANIFEST.md`.
+3. Registrado estado inicial do Git com preservacao de alteracoes preexistentes.
+4. Validado IP local e disponibilidade HTTP local em `:3333` para rota de homologacao fisica.
+5. Executada checagem de seguranca de ambiente para gate de `test:db` (sem isolamento explicito, teste nao executado).
+6. Executadas validacoes tecnicas finais obrigatorias: `build`, `test` (fora do sandbox), `smoke:api`, `git diff --check`, `git status --short`.
+7. Consolidado resultado por gate com criterio de bloqueio para release interno real.
+
+## Arquivos alterados nesta fase
+- `.planning/129_HOMOLOGACAO_FINAL_RELEASE_CONTROLADO_INTERNO.md`
+- `.planning/evidence/fase-129/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `git status --short` inicial: executado.
+- `ipconfig`: executado (`IPv4 local 192.168.15.135`).
+- `curl` local em `127.0.0.1:3333` para `/health`, `/`, `/app.js`, `/styles/layout.css`: `200`.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `git diff --check`: passou (warnings LF/CRLF).
+- `git status --short` final: executado.
+
+## Resultado
+- Decisao da Fase 1.29: BLOQUEADO.
+- Bloqueios criticos: sem homologacao comprovada em smartphone fisico, sem banco de teste isolado comprovado para `test:db`, sem VPS/host real validado, sem `.env` real forte comprovado, sem backup/restore comprovado, sem smoke remoto real.
+- `test:db` mantido pendente por seguranca.
+- Release controlado interno permanece nao aprovado ate fechamento dos gates criticos.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.28 - Homologacao fisica mobile operacional + microajustes finais.
+
+## Entregas executadas
+1. Criado `.planning/128_HOMOLOGACAO_FISICA_MOBILE_OPERACIONAL.md`.
+2. Criado `.planning/evidence/fase-128/MANIFEST.md`.
+3. Registrado `git status --short` inicial com worktree preexistente.
+4. Executadas validacoes tecnicas obrigatorias (`build`, `test`, `smoke:api`, `git diff --check`).
+5. Mantido escopo estrito sem mudancas de backend, schema, contratos, regras de negocio ou arquitetura.
+6. Consolidada classificacao operacional dos fluxos mobile.
+7. Registrada ressalva formal por ausencia de rodada fisica completa nesta sessao.
+
+## Arquivos alterados nesta fase
+- `.planning/128_HOMOLOGACAO_FISICA_MOBILE_OPERACIONAL.md`
+- `.planning/evidence/fase-128/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `git status --short` inicial: executado.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `git diff --check`: executado ao final.
+- `git status --short` final: executado ao final.
+
+## Resultado
+- Decisao da Fase 1.28: aprovado com ressalvas.
+- Fluxos mobile principais seguem operacionais, sem regressao tecnica observada.
+- Ressalva obrigatoria: homologacao fisica completa em smartphone real ainda pendente nesta sessao.
+- `test:db` permanece pendente por seguranca sem comprovacao explicita de base isolada.
+- Proxima fase recomendada: Fase 1.29 - rodada assistida em celular fisico real com microajustes finais, sem redesign.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.26 - Redesign visual perceptivel controlado do frontend premium.
+
+## Entregas executadas
+1. Criado `.planning/126_REDESIGN_VISUAL_PERCEPTIVEL_FRONTEND_PREMIUM.md`.
+2. Criada pasta `.planning/evidence/fase-126/` com `MANIFEST.md`.
+3. Redesign visual aplicado somente no frontend (`public/styles/layout.css`, `public/components/sidebar.js`, `public/components/topbar.js`, `public/modules/dashboard.js`).
+4. Reforco de identidade premium em dashboard, sidebar, topbar, cards, tabelas, formularios, modais e mobile tabs sem aumento de densidade informacional.
+5. Nenhuma alteracao em backend, Prisma, schema, migrations, contratos de API, autenticacao, permissoes, idempotencia ou regras de negocio.
+6. Validacoes tecnicas executadas com build/test/smoke e checks de git.
+7. `test:db` mantido pendente por seguranca (sem evidencia objetiva de base isolada nesta fase).
+
+## Arquivos alterados
+- `public/styles/layout.css`
+- `public/components/sidebar.js`
+- `public/components/topbar.js`
+- `public/modules/dashboard.js`
+- `.planning/126_REDESIGN_VISUAL_PERCEPTIVEL_FRONTEND_PREMIUM.md`
+- `.planning/evidence/fase-126/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `git status --short`: executado.
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `git diff --check`: executado.
+- `git status --short` final: executado.
+
+## Resultado
+- Decisao da Fase 1.26: aprovado com ressalvas.
+- Evolucao visual ficou perceptivel e premium sem ampliar poluicao visual.
+- Ressalvas: homologacao visual humana completa e `test:db` isolado seguem pendentes para fechamento definitivo.
+- Proxima fase recomendada: Fase 1.27 - homologacao visual assistida por browser com checklist por tela e capturas comparativas.
+
+---
+Data: 2026-05-06
+Escopo: Fase 1.25 - Homologacao visual real completa + correcoes frontend premium controladas.
+
+## Entregas executadas
+1. Criado `.planning/125_HOMOLOGACAO_VISUAL_REAL_FRONTEND_PREMIUM.md`.
+2. Criada pasta `.planning/evidence/fase-125/` com `MANIFEST.md`.
+3. Auditoria visual objetiva por codigo para desktop/mobile com foco em overflow, filtros, tabelas, modais e consistencia premium.
+4. Correcoes frontend aplicadas apenas em `public/styles/layout.css` (hardening responsivo, tabela, modal e mobile tabs).
+5. Nenhuma alteracao em backend, Prisma, schema, migrations, contratos de API ou regras de negocio.
+6. Validacoes tecnicas executadas: `build`, `test` (fora do sandbox), `smoke:api`, checks HTTP e `git diff --check`.
+7. `test:db` nao executado por falta de comprovacao de banco isolado/safe.
+
+## Arquivos alterados
+- `public/styles/layout.css`
+- `.planning/125_HOMOLOGACAO_VISUAL_REAL_FRONTEND_PREMIUM.md`
+- `.planning/evidence/fase-125/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `GET /`, `/app.js`, `/styles/layout.css`, `/health`: `200`.
+- `git diff --check`: passou (warnings LF/CRLF).
+
+## Resultado
+- Decisao da Fase 1.25: bloqueado.
+- Motivo: homologacao visual humana/browser completa desktop+mobile por todas as telas obrigatorias nao concluida nesta sessao; `test:db` segue pendente por seguranca.
+- Proxima fase recomendada: Fase 1.26 - homologacao visual humana/browser completa por tela + evidencia de banco de teste dedicado para `test:db`.
+
+---
+Data: 2026-05-06
+Escopo: Fase 1.24 - Validacao visual assistida e test:db em banco isolado.
+
+## Entregas executadas
+1. Criado `.planning/124_VALIDACAO_VISUAL_PREMIUM_TESTDB_ISOLADO.md`.
+2. Criado `.planning/evidence/fase-124/MANIFEST.md`.
+3. Revisados documentos da Fase 1.23 e pendencias herdadas.
+4. Revisado estado do Git/worktree (`git status --short`, `git diff --check`, `git log --oneline -5`).
+5. Confirmado que `.env` nao esta versionado.
+6. Validados servidor e assets principais (`/`, `/app.js`, `/styles/layout.css`, `/health`) com `200`.
+7. Validacoes tecnicas executadas: `build`, `test` (fora do sandbox), `smoke:api`.
+8. Seguranca de banco para `test:db` analisada sem expor credenciais; isolamento explicito nao foi comprovado.
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `npm.cmd run test:db`: nao executado por seguranca (banco isolado/safe nao comprovado).
+- `git diff --check`: passou.
+- `git status --short`: passou.
+
+## Resultado
+- Decisao da Fase 1.24: bloqueado.
+- Motivos: validacao visual humana desktop/mobile completa nao executada e `test:db` sem comprovacao de banco isolado/safe.
+- Proxima fase recomendada: Fase 1.25 - homologacao visual real completa + `test:db` em base dedicada de teste comprovadamente descartavel.
+
+---
+
+Data: 2026-05-06
 Escopo: Fase 1.23 - Polimento visual premium, consistencia UI e experiencia SaaS.
 
 ## Entregas executadas
@@ -1180,7 +1348,7 @@ Esta etapa corrige as ressalvas da auditoria pos-idempotencia e transforma `idem
 
 2. Definido contrato de erro unico:
 - `400 Bad Request`
-- `idempotencyKey é obrigatória para esta operação`
+- `idempotencyKey Ã© obrigatÃ³ria para esta operaÃ§Ã£o`
 
 3. Garantido que as rotas protegidas validam a chave antes de acionar efeitos colaterais.
 
@@ -1781,3 +1949,72 @@ Escopo: Fase 1.14 - Contrato backend de relatorios gerenciais e exportacao profi
 - Ressalvas: smoke precisa ser reexecutado com API atual na porta livre; teste DB novo compila, mas nao foi reexecutado por limite da aprovacao automatica; ocupacao profissional ainda depende de base historica fechada.
 
 Documento: `.planning/114_CONTRATO_BACKEND_RELATORIOS_GERENCIAIS_EXPORTACAO.md`.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.26 - Redesign mobile-first operacional premium com simplificacao e priorizacao.
+
+## Entregas executadas
+1. Criado `.planning/126_MOBILE_FIRST_OPERACIONAL_PREMIUM.md`.
+2. Criada evidencia `.planning/evidence/fase-126/MANIFEST.md`.
+3. Dashboard mobile foi simplificado para foco inicial em KPIs essenciais, com insights em painel progressivo.
+4. Agenda mobile recebeu foco operacional: acao primaria por status e acoes secundarias recolhiveis por card.
+5. Bloco de "Novo agendamento", "Fila do momento" e "Estoque baixo" ficou progressivo no mobile para reduzir scroll inicial.
+6. PDV mobile passou a priorizar fluxo de venda e deixou historico recolhivel.
+7. Clientes/Servicos/Estoque/Financeiro tiveram compactacao visual no mobile para reduzir ruido sem retirar capacidade.
+8. Desktop foi preservado com paines progressivos abertos por padrao fora do mobile.
+
+## Arquivos alterados nesta fase
+- `public/index.html`
+- `public/app.js`
+- `public/styles/layout.css`
+- `public/modules/agenda.js`
+- `.planning/126_MOBILE_FIRST_OPERACIONAL_PREMIUM.md`
+- `.planning/evidence/fase-126/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `npm.cmd run test:db`: nao executado por seguranca (sem comprovacao explicita de isolamento da base de teste).
+- `git diff --check`: passou.
+
+## Resultado
+- Decisao: aprovado com ressalvas.
+- O mobile ficou mais leve, menos poluido e com foco em acao.
+- Ressalva: ainda recomenda homologacao visual assistida em dispositivo real para ajuste fino de micro-espacamento.
+
+---
+
+Data: 2026-05-06
+Escopo: Fase 1.27 - Homologacao visual mobile operacional real.
+
+## Entregas executadas
+1. Criado `.planning/127_HOMOLOGACAO_VISUAL_MOBILE_OPERACIONAL.md`.
+2. Criado `.planning/evidence/fase-127/MANIFEST.md`.
+3. Registrado `git status --short` inicial com alteracoes preexistentes (incluindo `public/components/sidebar.js`, `public/components/topbar.js` e `public/modules/dashboard.js`).
+4. Aplicado microajuste na Agenda para reduzir friccao mobile: modo inicial voltou para cards.
+5. Ajustados touch targets de paineis progressivos e de "Mais acoes" para melhor ergonomia no mobile.
+
+## Arquivos alterados nesta fase
+- `public/app.js`
+- `public/styles/layout.css`
+- `.planning/127_HOMOLOGACAO_VISUAL_MOBILE_OPERACIONAL.md`
+- `.planning/evidence/fase-127/MANIFEST.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
+
+## Validacao
+- `npm.cmd run build`: passou.
+- `npm.cmd run test`: falhou no sandbox por `spawn EPERM`; passou fora do sandbox (`70 passed | 11 skipped`).
+- `npm.cmd run smoke:api`: passou.
+- `npm.cmd run test:db`: nao executado por seguranca, sem comprovacao explicita de base isolada.
+- `git diff --check`: passou (avisos LF/CRLF sem erro de diff).
+
+## Resultado
+- Decisao: APROVADO COM RESSALVAS.
+- Fluxos principais ficaram operacionais e claros no mobile.
+- Ressalva: rodada final em dispositivo fisico ainda recomendada para fechamento sem pendencias.

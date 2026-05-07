@@ -42,6 +42,7 @@ export function renderSidebar({ groups, activeModule, collapsed, badges = {}, ro
           <p class="sb-kicker">Software Barbearia</p>
           <strong class="sb-title">Hub Operacional Premium</strong>
           <span class="sb-role-chip">Perfil ${roleLabel}</span>
+          <div class="sb-brand-line" aria-hidden="true"></div>
         </div>
         <div class="sb-tools">
           <label class="sb-role-wrap" for="globalRoleSelect">

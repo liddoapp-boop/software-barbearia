@@ -1527,6 +1527,26 @@ function syncMobileOperationActions() {
   mobileOperationActions.classList.toggle("hidden", !shouldShow);
 }
 
+function syncMobilePriorityPanels() {
+  const isMobile = state.viewport === "mobile";
+  const agendaScheduleDetails = document.getElementById("agendaScheduleDetails");
+  const dashboardInsightsDetails = document.getElementById("dashboardInsightsDetails");
+  if (agendaScheduleDetails) {
+    if (isMobile) {
+      agendaScheduleDetails.removeAttribute("open");
+    } else {
+      agendaScheduleDetails.setAttribute("open", "open");
+    }
+  }
+  if (dashboardInsightsDetails) {
+    if (isMobile) {
+      dashboardInsightsDetails.removeAttribute("open");
+    } else {
+      dashboardInsightsDetails.setAttribute("open", "open");
+    }
+  }
+}
+
 function navigate(moduleId, options = {}) {
   const normalizedModuleId = moduleId === "agendamentos" ? "agenda" : moduleId;
   if (!normalizedModuleId || !allModuleIds.has(normalizedModuleId) || !isAllowedModule(normalizedModuleId)) return;
@@ -1927,6 +1947,7 @@ function applySectionVisibility() {
         agendaCardsMode.classList.remove("hidden");
       }
     }
+    syncMobilePriorityPanels();
     syncMobileOperationActions();
     return;
   }

@@ -1,3 +1,83 @@
+## Atualizacao 2026-05-06 (Fase 1.29 - Homologacao final assistida para release controlado interno)
+- Criado `.planning/129_HOMOLOGACAO_FINAL_RELEASE_CONTROLADO_INTERNO.md`.
+- Criado `.planning/evidence/fase-129/MANIFEST.md`.
+- Decisao final: BLOQUEADO.
+- Validacoes locais continuam saudaveis (`build`, `test` fora do sandbox, `smoke:api`).
+- Gate de `test:db` permaneceu fechado por seguranca: sem comprovacao objetiva de banco isolado/descartavel.
+- Nao houve evidencia de smartphone fisico real, VPS/host real, `.env` real forte, backup/restore real e smoke remoto com URL real.
+- Release controlado interno NAO pode ser aprovado sem fechar os gates criticos.
+
+Prioridade imediata:
+1. Executar janela assistida com smartphone fisico real na mesma rede e checklist completo por fluxo.
+2. Comprovar banco de teste isolado (nome, URL, isolamento e descarte) e somente entao rodar `npm.cmd run test:db`.
+3. Validar VPS/host real: acesso, runtime, processo (PM2/Docker/servico), porta, firewall, proxy e acesso externo.
+4. Validar `.env` real forte sem expor segredos: `DATA_BACKEND=prisma`, `AUTH_SECRET` forte, `CORS_ORIGIN`, `NODE_ENV`, `PORT`, `LOG_LEVEL`, estrategia de usuarios reais.
+5. Comprovar backup e restore de PostgreSQL em banco separado.
+6. Executar smoke remoto completo com `SMOKE_BASE_URL` real e registrar evidencia.
+7. Reavaliar decisao de release controlado interno somente apos fechamento de todos os gates.
+
+Nao priorizar agora:
+1. Novas features.
+2. Redesign.
+3. Mudancas de contrato/API/regra de negocio sem incidente critico.
+4. Alteracoes em Prisma/migrations fora de necessidade objetiva de release.
+## Atualizacao 2026-05-06 (Fase 1.28 - Homologacao fisica mobile operacional + microajustes finais)
+- Criado `.planning/128_HOMOLOGACAO_FISICA_MOBILE_OPERACIONAL.md`.
+- Criado `.planning/evidence/fase-128/MANIFEST.md`.
+- Decisao final: aprovado com ressalvas.
+- Fluxos mobile principais permanecem operacionais sem regressao tecnica em build/test/smoke.
+- Nao houve mudanca de backend, banco, contratos ou arquitetura.
+- Rodada fisica completa em smartphone real nao foi concluida nesta sessao, mantendo ressalva obrigatoria.
+- `test:db` segue pendente por seguranca ate comprovacao explicita de base isolada/descartavel.
+
+Prioridade imediata:
+1. Fase 1.29 - homologacao assistida em celular fisico real na rede local (Android e/ou iOS), com checklist por fluxo.
+2. Validar teclado mobile real, conforto de toque e scroll em Agenda, Novo Agendamento, PDV, Dashboard e modais.
+3. Aplicar apenas microajustes finais de spacing/touch/contraste/alinhamento se surgirem no teste fisico.
+4. Preservar escopo: sem redesign, sem novos blocos e sem alteracoes de backend.
+5. Executar `npm.cmd run test:db` somente apos evidencia de banco de teste isolado.
+
+Nao priorizar agora:
+1. Mudancas de regras de negocio.
+2. Novos modulos ou KPIs.
+3. Refactor estrutural amplo.
+4. Alteracoes em Prisma, migrations ou contratos de API.
+## Atualizacao 2026-05-06 (Fase 1.25 - Homologacao visual real completa + correcoes frontend premium)
+- Criado `.planning/125_HOMOLOGACAO_VISUAL_REAL_FRONTEND_PREMIUM.md`.
+- Criada evidencia `.planning/evidence/fase-125/MANIFEST.md`.
+- Decisao final: bloqueado.
+- Frontend recebeu hardening visual controlado em `public/styles/layout.css` (responsividade, filtros, tabelas, modais e ajuste mobile).
+- `build`, `test` (fora do sandbox) e `smoke:api` passaram; `/`, `/app.js`, `/styles/layout.css` e `/health` responderam `200`.
+- Bloqueios remanescentes: homologacao visual humana/browser completa desktop+mobile por tela e comprovacao de banco isolado para `test:db`.
+
+Prioridade imediata:
+1. Fase 1.26 - Executar homologacao visual humana/browser completa por modulo (desktop 1366+ e mobile ~390).
+2. Registrar checklist por tela com classificacao objetiva (`aprovado`, `aprovado com ressalvas`, `ajuste leve`, `bloqueante`).
+3. Provisionar banco de teste dedicado/descartavel (nome e credenciais exclusivas de teste) para liberar `npm.cmd run test:db` com seguranca.
+4. Reexecutar `test:db` somente apos evidencia objetiva do isolamento.
+
+Nao priorizar agora:
+1. Mudancas de backend, Prisma ou contratos.
+2. Refactor arquitetural amplo.
+3. Novas features.
+## Atualizacao 2026-05-06 (Fase 1.24 - Validacao visual assistida e test:db em banco isolado)
+- Criado `.planning/124_VALIDACAO_VISUAL_PREMIUM_TESTDB_ISOLADO.md`.
+- Criado `.planning/evidence/fase-124/MANIFEST.md`.
+- Decisao final: bloqueado.
+- `build`, `test` (fora do sandbox) e `smoke:api` passaram; servidor/assets responderam `200`.
+- Bloqueios remanescentes: validacao visual humana desktop/mobile completa pendente e `test:db` nao executado por falta de comprovacao de banco isolado/safe.
+
+Prioridade imediata:
+1. Fase 1.25 - Homologacao visual real completa por tela (desktop + mobile) com evidencias.
+2. Definir banco de teste dedicado e descartavel para `test:db` (ex.: nome `*_test`, acesso restrito e sem dados reais).
+3. Executar `npm.cmd run test:db` somente apos comprovacao objetiva de isolamento.
+4. Registrar classificacao visual por tela: aprovado, aprovado com ressalvas, ajuste leve, redesign futuro, bloqueante.
+5. Consolidar decisao final de polimento premium com base na passada visual real.
+
+Nao priorizar agora:
+1. Novas features.
+2. Redesign amplo.
+3. Mudancas de backend/schema.
 ## Atualizacao 2026-05-06 (Fase 1.22 - Execucao assistida no host interno real)
 - Criado `.planning/122_EXECUCAO_ASSISTIDA_HOST_INTERNO_REAL.md`.
 - Decisao final: bloqueado para release controlado interno real.
@@ -726,3 +806,52 @@ Prioridade imediata:
 2. Executar passada visual assistida em host interno real para Desktop e Mobile em Dashboard, Agenda, PDV, Clientes, Financeiro e Relatorios.
 3. Consolidar pequenos ajustes finais de densidade e legibilidade apenas se surgirem na validacao visual.
 4. Planejar fase de modularizacao incremental de `public/index.html` e `public/app.js` sem reescrever arquitetura nem alterar fluxos.
+
+
+## Atualizacao 2026-05-06 (Fase 1.26 - Redesign visual perceptivel controlado do frontend premium)
+- Criado `.planning/126_REDESIGN_VISUAL_PERCEPTIVEL_FRONTEND_PREMIUM.md`.
+- Criada evidencia `.planning/evidence/fase-126/MANIFEST.md`.
+- Decisao final: aprovado com ressalvas.
+- Redesign visual ficou perceptivel com foco em simplicidade: chrome (sidebar/topbar), dashboard, superficies, tabelas, formularios, modais e mobile refinados sem aumentar informacao.
+- `build`, `test` (fora do sandbox) e `smoke:api` passaram.
+- `test:db` continua pendente por seguranca, aguardando evidencia objetiva de base de teste isolada.
+
+Prioridade imediata:
+1. Fase 1.27 - Homologacao visual assistida por browser (desktop e mobile) com checklist por modulo e comparativo antes/depois.
+2. Validar especificamente Dashboard, Agenda, PDV, Clientes, Servicos, Estoque, Financeiro, Sidebar, Topbar, Modais e Tabs mobile em viewport real.
+3. Aplicar apenas ajustes visuais finos de contraste/espacamento que surgirem na homologacao, sem aumentar densidade informacional.
+4. Executar `npm.cmd run test:db` somente apos comprovacao de banco dedicado de teste (isolado/descartavel).
+
+Nao priorizar agora:
+1. Mudancas de backend/Prisma/contratos.
+2. Features novas.
+3. Refactor estrutural amplo do app.
+
+## Atualizacao 2026-05-06 (Fase 1.26 - Mobile-first operacional premium)
+- Criado `.planning/126_MOBILE_FIRST_OPERACIONAL_PREMIUM.md`.
+- Criada evidencia `.planning/evidence/fase-126/MANIFEST.md`.
+- Mobile foi reorganizado para priorizar acao rapida: menos densidade inicial e mais conteudo progressivo.
+- Agenda recebeu CTA primaria por status em cada card e acoes secundarias em "Mais acoes".
+- Dashboard mobile prioriza KPIs essenciais e recolhe insights secundarios.
+- PDV mobile prioriza venda/carrinho/total e recolhe historico.
+- Build, test e smoke passaram; `test:db` segue pendente por seguranca (sem isolamento explicitamente comprovado).
+
+Prioridade imediata:
+1. Fase 1.27 - Homologacao visual mobile em viewport real com checklist de tempo ate acao principal.
+2. Ajustes finos de espacamento, toque e legibilidade com base na homologacao.
+3. Manter desktop estavel enquanto evolui navegacao operacional mobile.
+4. Executar `npm.cmd run test:db` somente apos comprovacao de base de teste dedicada e isolada.
+
+## Atualizacao 2026-05-06 (Fase 1.27 - Homologacao visual mobile operacional real)
+- Criado `.planning/127_HOMOLOGACAO_VISUAL_MOBILE_OPERACIONAL.md`.
+- Criado `.planning/evidence/fase-127/MANIFEST.md`.
+- Ajuste fino aplicado: Agenda mobile voltou a abrir em cards por padrao para reduzir densidade inicial e scroll.
+- Ajuste fino aplicado: summaries mobile e "Mais acoes" com alvo de toque mais confortavel.
+- Build, test e smoke passaram (test fora do sandbox por limitacao EPERM no sandbox).
+- `test:db` permanece pendente por seguranca ate comprovacao explicita de base isolada.
+
+Prioridade imediata:
+1. Fase 1.28 - homologacao assistida em smartphone fisico (iOS/Android) para fechamento sem ressalvas.
+2. Executar apenas microajustes de toque, teclado e espacamento se surgirem no teste fisico.
+3. Preservar o contrato mobile-first operacional sem novo redesign amplo.
+4. Nao executar `test:db` sem isolamento comprovado de base de testes.

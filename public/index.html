@@ -26,7 +26,7 @@
             <div id="dashboardHeaderMount"></div>
             <section id="kpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
 
-            <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+            <section class="grid grid-cols-1 xl:grid-cols-3 gap-3 dashboard-secondary-grid">
               <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                 <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-2">Meta mensal</h3>
                 <div id="goalBlock"></div>
@@ -41,12 +41,15 @@
               </article>
             </section>
 
-            <section class="grid grid-cols-1 gap-3">
-              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-indigo-700 mb-2">Insights</h3>
-                <div id="actionSuggestionsList" class="space-y-2"></div>
-              </article>
-            </section>
+            <details class="mobile-priority-details" id="dashboardInsightsDetails">
+              <summary>Ver insights e acao sugerida</summary>
+              <section class="grid grid-cols-1 gap-3">
+                <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                  <h3 class="text-sm font-extrabold uppercase tracking-wide text-indigo-700 mb-2">Insights</h3>
+                  <div id="actionSuggestionsList" class="space-y-2"></div>
+                </article>
+              </section>
+            </details>
 
             <div id="topsList" class="hidden"></div>
             <div id="forecastList" class="hidden"></div>
@@ -64,9 +67,11 @@
               <button id="viewGridBtn" type="button" class="px-3 py-2 text-sm bg-gray-900 text-white">Cards</button>
             </div>
 
-            <article id="agendaSchedulePanel" class="ux-card mb-3">
-              <h2 class="text-lg font-bold text-gray-800 mb-3">Novo Agendamento</h2>
-              <form id="appointmentForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <details id="agendaScheduleDetails" class="mobile-priority-details agenda-schedule-details">
+              <summary>Novo agendamento</summary>
+              <article id="agendaSchedulePanel" class="ux-card mb-3">
+                <h2 class="text-lg font-bold text-gray-800 mb-3">Novo Agendamento</h2>
+                <form id="appointmentForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label class="text-sm font-semibold text-gray-700">Cliente
                   <select id="clientId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
                 </label>
@@ -91,9 +96,10 @@
                 <div id="alternativeSlots" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
                   Horarios alternativos serao sugeridos aqui em caso de conflito.
                 </div>
-                <button type="submit" class="md:col-span-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 font-semibold transition-colors">Agendar</button>
-              </form>
-            </article>
+                  <button type="submit" class="md:col-span-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 font-semibold transition-colors">Agendar</button>
+                </form>
+              </article>
+            </details>
 
             <div id="agendaCardsMode">
             <section id="agendaMetricsGrid" class="agenda-next-strip mb-3"></section>
@@ -107,14 +113,20 @@
               </article>
 
               <aside class="space-y-3">
-                <article class="ux-card">
-                  <h2 class="text-lg font-bold text-gray-800 mb-3">Fila do Momento</h2>
-                  <div id="queueList" class="space-y-2"></div>
-                </article>
-                <article class="ux-card">
-                  <h2 class="text-lg font-bold text-gray-800 mb-3">Estoque Baixo</h2>
-                  <div id="lowStockList" class="space-y-2"></div>
-                </article>
+                <details class="mobile-priority-details">
+                  <summary>Fila do momento</summary>
+                  <article class="ux-card">
+                    <h2 class="text-lg font-bold text-gray-800 mb-3">Fila do Momento</h2>
+                    <div id="queueList" class="space-y-2"></div>
+                  </article>
+                </details>
+                <details class="mobile-priority-details">
+                  <summary>Estoque baixo</summary>
+                  <article class="ux-card">
+                    <h2 class="text-lg font-bold text-gray-800 mb-3">Estoque Baixo</h2>
+                    <div id="lowStockList" class="space-y-2"></div>
+                  </article>
+                </details>
               </aside>
             </section>
             </div>
@@ -262,14 +274,17 @@
                 </form>
                 <div id="saleFeedback" class="mt-2"></div>
               </article>
-              <article class="pdv-history-surface bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-                <h2 class="text-lg font-bold text-gray-800 mb-1">Historico de vendas</h2>
-                <p class="text-sm text-gray-500 mb-3">Consulte vendas e abra detalhes quando precisar devolver ou rastrear impacto.</p>
-                <div id="saleHistoryFilterMount" class="mb-3"></div>
-                <div id="saleRecentList" class="space-y-2">
-                  <p class="text-sm text-gray-500">Carregando vendas...</p>
-                </div>
-              </article>
+              <details class="mobile-priority-details">
+                <summary>Historico de vendas</summary>
+                <article class="pdv-history-surface bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+                  <h2 class="text-lg font-bold text-gray-800 mb-1">Historico de vendas</h2>
+                  <p class="text-sm text-gray-500 mb-3">Consulte vendas e abra detalhes quando precisar devolver ou rastrear impacto.</p>
+                  <div id="saleHistoryFilterMount" class="mb-3"></div>
+                  <div id="saleRecentList" class="space-y-2">
+                    <p class="text-sm text-gray-500">Carregando vendas...</p>
+                  </div>
+                </article>
+              </details>
             </section>
             <div id="saleDrawerHost" class="hidden"></div>
 

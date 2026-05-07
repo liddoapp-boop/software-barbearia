@@ -101,7 +101,7 @@ function buildActionCard(options) {
   const actionPayload = suggestion?.actionPayload || payload || {};
 
   return `
-    <article class="rounded-xl border p-3 ${style}">
+    <article class="dashboard-insight-card rounded-xl border p-3 ${style}">
       <div class="text-sm font-extrabold">${title}</div>
       <p class="text-xs mt-1">${description}</p>
       <div class="mt-2 text-xs font-semibold">Impacto estimado: ${currency(estimatedImpact)}</div>
@@ -282,7 +282,7 @@ export function renderDashboardLoading(elements) {
 
   kpiGrid.innerHTML = Array.from({ length: 4 }, () => {
     return `
-      <article class="rounded-2xl border border-slate-200 bg-white p-4 animate-pulse">
+      <article class="dashboard-kpi-card rounded-2xl border border-slate-200 bg-white p-4 animate-pulse">
         <div class="h-3 w-28 bg-slate-200 rounded"></div>
         <div class="h-8 w-40 bg-slate-200 rounded mt-3"></div>
         <div class="h-2 w-24 bg-slate-100 rounded mt-3"></div>
@@ -330,22 +330,22 @@ export function renderDashboardData(elements, payload) {
   if (!kpiGrid || !goalBlock || !topProfessionalsList || !alertsList || !actionSuggestionsList) return;
 
   kpiGrid.innerHTML = `
-    <article class="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
+    <article class="dashboard-kpi-card dashboard-kpi-card-primary rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
       <div class="text-xs font-bold uppercase tracking-wide text-emerald-700">Receita hoje</div>
       <div class="text-3xl font-black text-emerald-900 mt-1">${currency(dashboard.revenueToday)}</div>
-      <div class="text-xs text-emerald-800 mt-1">Resposta: estou ganhando hoje?</div>
+      <div class="text-xs text-emerald-800 mt-1">Leitura imediata do caixa do dia</div>
     </article>
-    <article class="rounded-2xl border border-indigo-300 bg-gradient-to-br from-indigo-950/40 to-slate-950 p-4 shadow-sm">
+    <article class="dashboard-kpi-card dashboard-kpi-card-dark rounded-2xl border border-indigo-300 bg-gradient-to-br from-indigo-950/40 to-slate-950 p-4 shadow-sm">
       <div class="text-xs font-bold uppercase tracking-wide text-indigo-200">Receita mes</div>
       <div class="text-3xl font-black text-indigo-50 mt-1">${currency(dashboard.revenueMonth)}</div>
       <div class="text-xs text-indigo-200 mt-1">${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth) >= 0 ? "+" : ""}${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth).toFixed(1)}% vs mes anterior</div>
     </article>
-    <article class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
+    <article class="dashboard-kpi-card rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
       <div class="text-xs font-bold uppercase tracking-wide text-indigo-700">Ocupacao</div>
       <div class="text-3xl font-black text-indigo-900 mt-1">${dashboard.occupancyRate.toFixed(1)}%</div>
-      <div class="text-xs text-indigo-800 mt-1">Resposta: estamos cheios ou vazios?</div>
+      <div class="text-xs text-indigo-800 mt-1">Visao rapida da capacidade do dia</div>
     </article>
-    <article class="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
+    <article class="dashboard-kpi-card rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
       <div class="text-xs font-bold uppercase tracking-wide text-amber-700">Meta mensal</div>
       <div class="text-3xl font-black text-amber-900 mt-1">${dashboard.goalProgress.toFixed(1)}%</div>
       <div class="mt-2 h-2 rounded-full bg-amber-100 overflow-hidden">
@@ -355,7 +355,7 @@ export function renderDashboardData(elements, payload) {
   `;
 
   goalBlock.innerHTML = `
-    <div class="rounded-xl border border-slate-200 bg-white p-3">
+    <div class="dashboard-soft-panel rounded-xl border border-slate-200 bg-white p-3">
       <div class="text-xs text-slate-500">Meta mensal ${currency(dashboard.goalMonth)}</div>
       <div class="text-2xl font-black text-slate-900 mt-1">${dashboard.goalProgress.toFixed(1)}%</div>
       <div class="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
@@ -368,12 +368,12 @@ export function renderDashboardData(elements, payload) {
   const topProfessional = safeArray(dashboard.topProfessionals)[0];
   const topService = safeArray(dashboard.topServices)[0];
   topProfessionalsList.innerHTML = `
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
+    <article class="dashboard-soft-panel rounded-xl border border-slate-200 bg-white p-3">
       <div class="text-xs text-slate-500">Top profissional</div>
       <div class="text-sm font-bold text-slate-900 mt-1">${topProfessional?.name || "Sem dados"}</div>
       <div class="text-xs text-slate-600 mt-1">Receita ${currency(topProfessional?.revenue || 0)}</div>
     </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
+    <article class="dashboard-soft-panel rounded-xl border border-slate-200 bg-white p-3">
       <div class="text-xs text-slate-500">Servico mais vendido</div>
       <div class="text-sm font-bold text-slate-900 mt-1">${topService?.name || "Sem dados"}</div>
       <div class="text-xs text-slate-600 mt-1">${asNumber(topService?.salesCount)} vendas | ${currency(topService?.revenueGenerated || 0)}</div>
@@ -391,18 +391,18 @@ export function renderDashboardData(elements, payload) {
   const atRiskCount = asNumber(dashboard.clientsOverview.summary.atRisk || dashboard.clientsOverdue.length);
 
   alertsList.innerHTML = `
-    <article class="rounded-xl border ${forecastDrop ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"} p-3">
+    <article class="dashboard-alert-card rounded-xl border ${forecastDrop ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"} p-3">
       <div class="text-xs font-bold uppercase tracking-wide ${forecastDrop ? "text-red-700" : "text-emerald-700"}">Queda de faturamento</div>
       <div class="text-sm font-bold ${forecastDrop ? "text-red-900" : "text-emerald-900"} mt-1">
         ${forecastDrop ? `Risco de queda detectado -> impacto ${currency(forecastDrop.estimatedImpact)}` : "Sem queda relevante prevista no momento"}
       </div>
     </article>
-    <article class="rounded-xl border border-amber-200 bg-amber-50 p-3">
+    <article class="dashboard-alert-card rounded-xl border border-amber-200 bg-amber-50 p-3">
       <div class="text-xs font-bold uppercase tracking-wide text-amber-700">Horarios vazios</div>
       <div class="text-sm font-bold text-amber-900 mt-1">${idleAlerts.length} janelas sem agenda nas proximas 72h</div>
       <div class="text-xs text-amber-900 mt-1">${idleWindowsText.length ? idleWindowsText.join(" | ") : "Nenhuma faixa critica no horizonte atual."}</div>
     </article>
-    <article class="rounded-xl border border-red-200 bg-red-50 p-3">
+    <article class="dashboard-alert-card rounded-xl border border-red-200 bg-red-50 p-3">
       <div class="text-xs font-bold uppercase tracking-wide text-red-700">Clientes em risco</div>
       <div class="text-sm font-bold text-red-900 mt-1">${atRiskCount} clientes pedem reativacao imediata</div>
       <div class="text-xs text-red-900 mt-1">Cada dia sem acao aumenta perda de recorrencia.</div>
@@ -417,7 +417,7 @@ export function renderDashboardData(elements, payload) {
   const reactivationImpact = asNumber(reactivationSuggestion?.estimatedImpact, 0);
   const idleImpact = asNumber(idleSuggestion?.estimatedImpact, 0);
   actionSuggestionsList.innerHTML = `
-    <details class="rounded-xl border border-slate-200 bg-white p-3">
+    <details class="dashboard-soft-panel rounded-xl border border-slate-200 bg-white p-3">
       <summary class="cursor-pointer text-sm font-bold text-slate-900">Ver insights</summary>
       <div class="mt-3 space-y-2">
         ${buildActionCard({
