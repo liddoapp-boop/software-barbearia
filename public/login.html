@@ -4,33 +4,61 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Entrar — Liddo Barber</title>
+    <script>
+      (function () {
+        var mode = localStorage.getItem("sb.themeMode") || "system";
+        var isDark = mode === "dark" || (mode === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet" />
     <style>
-      :root {
-        --color-bg:           #f2f1ed;
-        --color-surface:      #ffffff;
-        --color-bg-elevated:  #ebeae5;
-        --color-border:       rgba(38, 37, 30, 0.12);
-        --color-text-primary: #26251e;
-        --color-text-secondary: #4a4840;
-        --color-text-muted:   #6e6b63;
-        --color-accent:       #26251e;
-        --color-accent-hover: #141410;
-        --color-danger:       #cf2d56;
-        --color-danger-soft:  rgba(207, 45, 86, 0.08);
-        --color-danger-border: rgba(207, 45, 86, 0.20);
-        --radius-lg: 14px;
-        --radius-md: 10px;
+      :root[data-theme="light"] {
+        --bg:             #f2f1ed;
+        --surface:        #ffffff;
+        --text-primary:   #26251e;
+        --text-secondary: rgba(38, 37, 30, 0.55);
+        --text-tertiary:  rgba(38, 37, 30, 0.40);
+        --border-default: rgba(38, 37, 30, 0.10);
+        --accent:         #f54e00;
+        --error:          #cf2d56;
+        --error-soft:     rgba(207, 45, 86, 0.08);
+        --error-border:   rgba(207, 45, 86, 0.20);
+        --shadow-card:    rgba(0,0,0,0.14) 0px 28px 70px 0px, rgba(0,0,0,0.1) 0px 14px 32px 0px, rgba(38,37,30,0.1) 0px 0px 0px 1px;
+        --btn-bg:         #26251e;
+        --btn-bg-hover:   #141410;
+        --btn-tx:         #f2f1ed;
+        --spinner-track:  rgba(242, 241, 237, 0.35);
+        --spinner-head:   #f2f1ed;
+      }
+
+      :root[data-theme="dark"] {
+        --bg:             #1a1915;
+        --surface:        #2a2922;
+        --text-primary:   #e6e5e0;
+        --text-secondary: rgba(230, 229, 224, 0.55);
+        --text-tertiary:  rgba(230, 229, 224, 0.35);
+        --border-default: rgba(230, 229, 224, 0.10);
+        --accent:         #f54e00;
+        --error:          #e04a6f;
+        --error-soft:     rgba(224, 74, 111, 0.10);
+        --error-border:   rgba(224, 74, 111, 0.30);
+        --shadow-card:    rgba(0,0,0,0.4) 0px 28px 70px 0px, rgba(0,0,0,0.3) 0px 14px 32px 0px, rgba(230,229,224,0.08) 0px 0px 0px 1px;
+        --btn-bg:         #e6e5e0;
+        --btn-bg-hover:   #ffffff;
+        --btn-tx:         #1a1915;
+        --spinner-track:  rgba(26, 25, 21, 0.30);
+        --spinner-head:   #1a1915;
       }
 
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
       body {
-        font-family: 'Manrope', sans-serif;
-        background: var(--color-bg);
-        color: var(--color-text-primary);
+        font-family: system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text-primary);
         min-height: 100svh;
         display: flex;
         align-items: center;
@@ -40,96 +68,89 @@
       }
 
       .card {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
+        background: var(--surface);
+        border-radius: 8px;
         width: 100%;
-        max-width: 400px;
-        padding: 40px 36px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 10px 20px -3px rgba(38,37,30,0.06), 0 20px 40px -5px rgba(38,37,30,0.08);
+        max-width: 360px;
+        padding: 32px;
+        box-shadow: var(--shadow-card);
       }
 
       .logo {
         font-family: 'Bebas Neue', sans-serif;
         font-size: 32px;
         letter-spacing: 3px;
-        color: var(--color-text-primary);
+        color: var(--text-primary);
         text-align: center;
         margin-bottom: 4px;
       }
 
       .subtitle {
         text-align: center;
-        color: var(--color-text-muted);
-        font-size: 13px;
-        margin-bottom: 36px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-bottom: 28px;
       }
 
       label {
         display: block;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .08em;
-        color: var(--color-text-secondary);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
         margin-bottom: 6px;
-        margin-top: 20px;
+        margin-top: 16px;
       }
 
       input {
         width: 100%;
-        background: var(--color-bg);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        color: var(--color-text-primary);
-        font-family: 'Manrope', sans-serif;
-        font-size: 15px;
-        padding: 12px 14px;
+        background: var(--surface);
+        border: 1px solid var(--border-default);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 14px;
+        padding: 8px 10px;
         outline: none;
-        transition: border-color .15s, box-shadow .15s;
+        transition: border-color .15s;
       }
-      input::placeholder { color: var(--color-text-muted); }
-      input:focus {
-        border-color: var(--color-accent);
-        box-shadow: 0 0 0 3px rgba(38, 37, 30, 0.08);
-      }
+      input::placeholder { color: var(--text-tertiary); }
+      input:focus { border-color: var(--accent); }
 
       .btn {
         display: block;
         width: 100%;
-        margin-top: 28px;
-        padding: 14px;
-        background: #26251e;
-        color: #ffffff;
+        margin-top: 20px;
+        padding: 10px 20px;
+        background: var(--btn-bg);
+        color: var(--btn-tx);
         border: none;
-        border-radius: var(--radius-md);
-        font-family: 'Manrope', sans-serif;
-        font-size: 15px;
-        font-weight: 800;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
         cursor: pointer;
-        letter-spacing: .3px;
         transition: background .15s, opacity .15s;
       }
-      .btn:hover:not(:disabled) { background: #141410; }
+      .btn:hover:not(:disabled) { background: var(--btn-bg-hover); }
       .btn:disabled { opacity: .5; cursor: not-allowed; }
 
       .error {
         margin-top: 16px;
-        background: var(--color-danger-soft);
-        border: 1px solid var(--color-danger-border);
-        border-radius: var(--radius-md);
-        color: var(--color-danger);
+        background: var(--error-soft);
+        border: 1px solid var(--error-border);
+        border-radius: 4px;
+        color: var(--error);
         font-size: 13px;
-        padding: 10px 14px;
+        padding: 8px 10px;
         display: none;
       }
       .error.show { display: block; }
 
       .spinner {
         display: inline-block;
-        width: 16px; height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #ffffff;
+        width: 14px; height: 14px;
+        border: 2px solid var(--spinner-track);
+        border-top-color: var(--spinner-head);
         border-radius: 50%;
         animation: spin .6s linear infinite;
         vertical-align: middle;
