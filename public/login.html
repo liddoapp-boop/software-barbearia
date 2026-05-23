@@ -185,6 +185,30 @@
         errorMsg.classList.remove("show");
       }
 
+      function persistSession(data) {
+        localStorage.setItem("sb.authSession", JSON.stringify({
+          accessToken: data.accessToken,
+          expiresAt: data.expiresAt,
+          user: data.user,
+        }));
+        localStorage.setItem("authToken", data.accessToken);
+      }
+
+      async function loginWithBackend(email, password) {
+        const res = await fetch("/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, activeUnitId: "unit-01" }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error ?? "Email ou senha incorretos.");
+        }
+
+        return await res.json();
+      }
+
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         hideError();
@@ -211,21 +235,20 @@
           }
 
           const data = await res.json();
-          localStorage.setItem("sb.authSession", JSON.stringify({
-            accessToken: data.accessToken,
-            expiresAt: data.expiresAt,
-            user: data.user,
-          }));
-          localStorage.setItem("authToken", data.accessToken);
+          persistSession(data);
 
           window.location.href = "/";
         } catch (err) {
-          const msg = err?.code === "auth/invalid-credential" || err?.code === "auth/wrong-password" || err?.code === "auth/user-not-found"
-            ? "Email ou senha incorretos."
-            : err?.code === "auth/too-many-requests"
-            ? "Muitas tentativas. Aguarde alguns minutos."
-            : err?.message ?? "Erro ao entrar. Tente novamente.";
-          showError(msg);
+          try {
+            const data = await loginWithBackend(email, password);
+            persistSession(data);
+            window.location.href = "/";
+          } catch (backendErr) {
+            const msg = err?.code === "auth/too-many-requests"
+              ? "Muitas tentativas. Aguarde alguns minutos."
+              : backendErr?.message ?? "Email ou senha incorretos.";
+            showError(msg);
+          }
         } finally {
           submitBtn.disabled = false;
           submitBtn.textContent = "Entrar";
