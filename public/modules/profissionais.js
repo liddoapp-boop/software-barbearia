@@ -1,9 +1,6 @@
 import {
   bindEntityDrawers,
   renderEmptyState,
-  renderEntityDrawer,
-  renderStatusChip,
-  renderTechnicalTrace,
 } from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
 
@@ -21,6 +18,19 @@ function money(value) {
 
 function pct(value) {
   return `${toNumber(value).toFixed(1)}%`;
+}
+
+function initials(name = "") {
+  return (
+    String(name)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
 }
 
 function escapeHtml(value) {
@@ -59,10 +69,10 @@ function pendingCommissionFor(professionalId = "", commissions = []) {
 
 function renderKpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="ux-kpi catalog-kpi">
-      <div class="ux-label">${escapeHtml(title)}</div>
-      <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
-      ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
+    <article class="team-kpi ${tone}">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
     </article>
   `;
 }
@@ -70,45 +80,50 @@ function renderKpi(title, value, subtitle = "", tone = "") {
 function renderProfessionalCard(item = {}, context = {}) {
   const services = normalizeCatalogServices(context.services, item.professionalId);
   const pendingCommission = pendingCommissionFor(item.professionalId, context.commissions);
+  const name = item.name || "Profissional";
   return `
-    <article class="catalog-row professional-catalog-row">
-      <div class="catalog-row-main">
-        <div class="catalog-row-copy">
-          <div class="catalog-row-meta">
-            ${renderStatusChip("ACTIVE", { label: "Profissional ativo" })}
-            ${renderStatusChip("INFO", { label: "Pode atender" })}
-          </div>
-          <strong>${escapeHtml(item.name || "Profissional")}</strong>
+    <article class="team-row">
+      <div class="team-row-main" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}">
+        <div class="team-avatar">${escapeHtml(initials(name))}</div>
+        <div class="team-copy">
+          <strong>${escapeHtml(name)}</strong>
           <span>${escapeHtml(services.length ? serviceNamesForProfessional(context.services, item.professionalId, 4) : "Sem servicos vinculados no catalogo carregado.")}</span>
+          <div class="team-chips">
+            <span class="team-chip team-chip-green">Ativo</span>
+            <span class="team-chip">Pode atender</span>
+            ${pendingCommission ? `<span class="team-chip team-chip-warn">Comissao ${escapeHtml(money(pendingCommission))}</span>` : ""}
+          </div>
         </div>
-        <div class="catalog-row-price">
-          <span>Producao no periodo</span>
+        <div class="team-metric">
           <strong>${escapeHtml(money(item.revenue))}</strong>
-          <small>${escapeHtml(toNumber(item.completed))} atendimento(s)</small>
+          <span>Producao</span>
+        </div>
+        <div class="team-metric">
+          <strong>${escapeHtml(String(toNumber(item.completed)))}</strong>
+          <span>Atend.</span>
+        </div>
+        <div class="team-metric">
+          <strong>${escapeHtml(pct(item.occupancyRate))}</strong>
+          <span>Ocupacao</span>
         </div>
       </div>
-
-      <div class="catalog-row-facts">
-        <div><span>Servicos que executa</span><strong>${escapeHtml(services.length ? `${services.length} servico(s)` : "Nao mapeado")}</strong></div>
-        <div><span>Ticket medio</span><strong>${escapeHtml(money(item.ticketAverage))}</strong></div>
-        <div><span>Ocupacao</span><strong>${escapeHtml(pct(item.occupancyRate))}</strong></div>
-        <div><span>Comissao pendente</span><strong>${escapeHtml(pendingCommission ? money(pendingCommission) : "Sem pendencia no recorte")}</strong></div>
-      </div>
-
-      <div class="catalog-row-action-strip">
-        <p>Ativo para agenda. Comissoes, agenda relacionada e rastreabilidade ficam no detalhe.</p>
-        <div class="catalog-row-actions">
-          <button type="button" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}" class="ux-btn ux-btn-muted">Ver detalhes</button>
-          <button type="button" data-professional-action="open-agenda" data-professional-id="${escapeHtml(item.professionalId)}" class="ux-btn ux-btn-muted">Ver agenda</button>
-          <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(item.professionalId)}" class="ux-btn ux-btn-muted">Ver comissoes</button>
-        </div>
+      <div class="team-row-actions">
+        <button type="button" data-professional-action="open-agenda" data-professional-id="${escapeHtml(item.professionalId)}" class="team-icon-btn" title="Ver agenda">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+        </button>
+        <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(item.professionalId)}" class="team-icon-btn" title="Ver comissoes">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </button>
+        <button type="button" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}" class="team-arrow-btn" title="Ver detalhes">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
       </div>
     </article>
   `;
 }
 
 function renderServiceChips(services = []) {
-  if (!services.length) return `<p class="text-sm text-slate-400">Sem servicos habilitados no catalogo carregado.</p>`;
+  if (!services.length) return `<p class="ds-text-muted">Sem servicos habilitados no catalogo carregado.</p>`;
   return `
     <div class="catalog-chip-list">
       ${services.map((service) => `<span>${escapeHtml(service.name || "Servico")}</span>`).join("")}
@@ -116,23 +131,46 @@ function renderServiceChips(services = []) {
   `;
 }
 
+const appointmentStatusPt = {
+  SCHEDULED: "Agendado",
+  CONFIRMED: "Confirmado",
+  COMPLETED: "Concluido",
+  CANCELLED: "Cancelado",
+  CANCELED: "Cancelado",
+  NO_SHOW: "Nao compareceu",
+  BLOCKED: "Bloqueado",
+};
+
+function formatApptDate(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
 function renderRecentAppointments(professionalId = "", appointments = []) {
   const recent = (Array.isArray(appointments) ? appointments : [])
     .filter((item) => item.professionalId === professionalId)
+    .sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime())
     .slice(0, 5);
   if (!recent.length) {
-    return `<p class="text-sm text-slate-400">Sem agenda recente disponivel neste recorte.</p>`;
+    return `<p class="ds-text-muted">Sem agenda recente disponivel neste recorte.</p>`;
   }
   return `
     <ol class="op-history-list">
       ${recent
         .map(
-          (item) => `
-            <li>
-              <strong>${escapeHtml(item.service || "Atendimento")} com ${escapeHtml(item.client || "cliente")}</strong>
-              <span>${escapeHtml(item.startsAtLabel || item.startsAt || "-")} - ${escapeHtml(item.status || "Status")}</span>
-            </li>
-          `,
+          (item) => {
+            const statusKey = String(item.status || "").toUpperCase();
+            const statusPt = appointmentStatusPt[statusKey] || item.status || "Status";
+            const dateStr = formatApptDate(item.startsAt);
+            return `
+              <li>
+                <strong>${escapeHtml(item.service || item.serviceName || "Atendimento")} com ${escapeHtml(item.client || item.clientName || "cliente")}</strong>
+                <span>${escapeHtml(dateStr)} · ${escapeHtml(statusPt)}</span>
+              </li>
+            `;
+          },
         )
         .join("")}
     </ol>
@@ -169,11 +207,10 @@ export function renderProfessionalsData(elements, payload, context = {}) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-        ${renderKpi("Producao no periodo", money(summary.totalRevenue), "Receita gerada")}
-        ${renderKpi("Atendimentos concluidos", String(toNumber(summary.totalCompleted)), "Equipe ativa")}
-        ${renderKpi("Maior producao", summary.bestRevenue?.name || "-", summary.bestRevenue ? money(summary.bestRevenue.revenue) : "Sem historico", "text-emerald-700")}
-        ${renderKpi("Maior ocupacao", summary.bestOccupancy?.name || "-", summary.bestOccupancy ? pct(summary.bestOccupancy.occupancyRate) : "Sem historico")}
+      <div class="team-kpi-grid">
+        ${renderKpi("Producao", money(summary.totalRevenue), "Receita no recorte")}
+        ${renderKpi("Atendimentos", String(toNumber(summary.totalCompleted)), "Concluidos no periodo")}
+        ${renderKpi("Destaque", summary.bestRevenue?.name || "-", summary.bestRevenue ? money(summary.bestRevenue.revenue) : "Sem historico", "team-kpi-positive")}
       </div>
     `;
   }
@@ -188,7 +225,11 @@ export function renderProfessionalsData(elements, payload, context = {}) {
   }
 
   elements.table.innerHTML = `
-    <section class="catalog-list professional-catalog-list">
+    <div class="team-list-head">
+      <span>Equipe no recorte</span>
+      <strong>${professionals.length} ${professionals.length === 1 ? "profissional" : "profissionais"}</strong>
+    </div>
+    <section class="team-list">
       ${professionals.map((item) => renderProfessionalCard(item, context)).join("")}
     </section>
   `;
@@ -206,74 +247,104 @@ export function renderProfessionalDrawer(elements, professional = {}, context = 
     .filter((item) => String(item.status || "").toUpperCase() === "PAID")
     .reduce((acc, item) => acc + toNumber(item.amount || item.commissionAmount || item.value), 0);
 
-  const summary = `
-    <dl class="op-summary-grid">
-      <div><dt>Nome</dt><dd>${escapeHtml(professional.name || "Profissional")}</dd></div>
-      <div><dt>Status</dt><dd>${renderStatusChip("ACTIVE", { label: "Profissional ativo" })}</dd></div>
-      <div><dt>Perfil/funcao</dt><dd>${escapeHtml(professional.role || "Atendimento")}</dd></div>
-      <div><dt>Contato</dt><dd>${escapeHtml(professional.phone || professional.email || "Nao informado")}</dd></div>
-    </dl>
+  const recentAppointmentsHtml = renderRecentAppointments(professional.professionalId, context.appointments);
+  const serviceChipsHtml = renderServiceChips(services);
+  const occupancyPct = toNumber(professional.occupancyRate);
+  const occupancyColor = occupancyPct >= 70 ? "#22c55e" : occupancyPct >= 40 ? "#f59e0b" : "#94a3b8";
+
+  elements.drawerHost.innerHTML = `
+    <aside class="op-drawer is-open" id="professionalDrawer" aria-hidden="false">
+      <div class="op-drawer-backdrop" data-drawer-close></div>
+      <article class="op-drawer-panel team-drawer" role="dialog" aria-modal="true" aria-label="Detalhes do profissional">
+
+        <header class="team-drawer-head">
+          <div class="team-drawer-hero">
+            <div class="team-drawer-avatar">${escapeHtml(initials(professional.name))}</div>
+            <div class="team-drawer-hero-info">
+              <h2>${escapeHtml(professional.name || "Profissional")}</h2>
+              <p class="team-drawer-role">Profissional · Pode atender</p>
+              <div class="team-chips">
+                <span class="team-chip team-chip-green">Ativo</span>
+                ${services.length ? `<span class="team-chip">${services.length} ${services.length === 1 ? "servico" : "servicos"}</span>` : ""}
+              </div>
+            </div>
+          </div>
+          <button type="button" class="team-drawer-close" data-drawer-close aria-label="Fechar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </header>
+
+        <div class="team-drawer-metrics">
+          <div>
+            <strong>${escapeHtml(money(professional.revenue))}</strong>
+            <span>Producao</span>
+          </div>
+          <div>
+            <strong>${escapeHtml(String(toNumber(professional.completed)))}</strong>
+            <span>Atendimentos</span>
+          </div>
+          <div>
+            <strong style="color:${occupancyColor}">${escapeHtml(pct(professional.occupancyRate))}</strong>
+            <span>Ocupacao</span>
+          </div>
+        </div>
+
+        <div class="team-drawer-body">
+
+          <section class="team-drawer-section">
+            <h3>Desempenho no periodo</h3>
+            <div class="team-info-grid">
+              <div>
+                <span>Ticket medio</span>
+                <strong>${escapeHtml(money(professional.ticketAverage))}</strong>
+              </div>
+              <div>
+                <span>Total agendado</span>
+                <strong>${escapeHtml(String(toNumber(professional.total)))}</strong>
+              </div>
+              <div>
+                <span>Comissao pendente</span>
+                <strong style="${pendingCommission ? "color:#f59e0b" : ""}">${escapeHtml(pendingCommission ? money(pendingCommission) : "—")}</strong>
+              </div>
+              <div>
+                <span>Comissao paga</span>
+                <strong style="${paidCommission ? "color:#22c55e" : ""}">${escapeHtml(paidCommission ? money(paidCommission) : "—")}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="team-drawer-section">
+            <h3>Servicos habilitados</h3>
+            ${serviceChipsHtml}
+          </section>
+
+          <section class="team-drawer-section">
+            <details class="team-accordion" open>
+              <summary>Agenda recente</summary>
+              <div class="team-accordion-body">${recentAppointmentsHtml}</div>
+            </details>
+          </section>
+
+        </div>
+
+        <footer class="team-drawer-footer">
+          <button type="button" data-professional-action="open-agenda" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn team-footer-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+            Ver agenda
+          </button>
+          <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Ver comissoes
+          </button>
+          <button type="button" data-professional-action="edit" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+            Editar
+          </button>
+        </footer>
+
+      </article>
+    </aside>
   `;
-
-  const details = `
-    <details class="client-progressive-panel" open>
-      <summary>Operacao</summary>
-      <div class="op-detail-list">
-        <p><strong>Servicos habilitados:</strong> ${escapeHtml(services.length ? `${services.length} servico(s)` : "Sem vinculo explicito")}</p>
-        ${renderServiceChips(services)}
-        <p><strong>Producao resumida:</strong> ${escapeHtml(money(professional.revenue))} em ${escapeHtml(toNumber(professional.completed))} atendimento(s) concluido(s).</p>
-        <p><strong>Comissao pendente:</strong> ${escapeHtml(pendingCommission ? money(pendingCommission) : "Sem pendencia no recorte")}</p>
-        <p><strong>Comissao paga:</strong> ${escapeHtml(paidCommission ? money(paidCommission) : "Sem pagamento no recorte")}</p>
-      </div>
-    </details>
-    <details class="client-progressive-panel">
-      <summary>Agenda recente</summary>
-      ${renderRecentAppointments(professional.professionalId, context.appointments)}
-    </details>
-  `;
-
-  const history = `
-    <dl class="op-summary-grid">
-      <div><dt>Atendimentos concluidos</dt><dd>${escapeHtml(toNumber(professional.completed))}</dd></div>
-      <div><dt>Receita gerada</dt><dd>${escapeHtml(money(professional.revenue))}</dd></div>
-      <div><dt>Ticket medio</dt><dd>${escapeHtml(money(professional.ticketAverage))}</dd></div>
-      <div><dt>Ocupacao</dt><dd>${escapeHtml(pct(professional.occupancyRate))}</dd></div>
-      <div><dt>Total na agenda</dt><dd>${escapeHtml(toNumber(professional.total))}</dd></div>
-      <div><dt>Comissao estimada/pendente</dt><dd>${escapeHtml(pendingCommission ? money(pendingCommission) : "Sem pendencia")}</dd></div>
-    </dl>
-  `;
-
-  const actions = `
-    <button type="button" data-professional-action="open-agenda" data-professional-id="${escapeHtml(professional.professionalId)}" class="ux-btn ux-btn-primary">Ver agenda relacionada</button>
-    <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(professional.professionalId)}" class="ux-btn ux-btn-muted">Ver comissoes</button>
-    <button type="button" class="ux-btn ux-btn-muted" disabled title="Edicao depende do fluxo de cadastro de profissionais">Editar profissional</button>
-  `;
-
-  const technicalTrace = renderTechnicalTrace({
-    professionalId: professional.professionalId,
-    userId: professional.userId,
-    commissionRuleIds: professional.commissionRuleIds,
-    serviceIds: services.map((service) => service.id),
-    status: "ACTIVE",
-    metadataJson: {
-      professional,
-      services,
-      commissions,
-    },
-  });
-
-  elements.drawerHost.innerHTML = renderEntityDrawer({
-    id: "professionalDrawer",
-    title: professional.name || "Profissional",
-    subtitle: `Producao no periodo: ${money(professional.revenue)}`,
-    status: "ACTIVE",
-    open: true,
-    summary,
-    details,
-    history,
-    technicalTrace,
-    actions,
-  });
   elements.drawerHost.classList.remove("hidden");
   bindEntityDrawers(elements.drawerHost);
   elements.drawerHost.querySelectorAll("[data-drawer-close]").forEach((button) => {

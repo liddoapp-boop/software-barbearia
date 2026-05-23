@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liddo Barber — Agendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap" rel="stylesheet">
+  <style>
+    /* ══════════════════════════════════════════════
+       Warm palette — dark default, light via media query
+       Padrão: preferência do sistema (prefers-color-scheme)
+    ══════════════════════════════════════════════ */
+    :root {
+      /* Superfícies — warm dark */
+      --bg:  #1a1915;
+      --s1:  #1a1915;
+      --s2:  #2a2922;
+      --s3:  #33322a;
+      --s4:  #3d3c33;
+      --s5:  #4a4940;
+
+      /* Texto */
+      --tx:  #e6e5e0;
+      --tx2: rgba(230,229,224,0.62);
+      --tx3: rgba(230,229,224,0.38);
+
+      /* Bordas */
+      --bd:  rgba(230,229,224,0.08);
+      --bd2: rgba(230,229,224,0.16);
+      --bd3: rgba(230,229,224,0.40);
+
+      /* Seleção — warm neutral (sem laranja) */
+      --sel-bg: rgba(230,229,224,0.10);
+      --sel-bd: rgba(230,229,224,0.35);
+
+      /* Botão primário */
+      --btn-bg:       #3d3c33;
+      --btn-bg-hover: #4a4940;
+      --btn-tx:       #e6e5e0;
+
+      /* Semântico */
+      --ok:  #22c55e;
+      --err: #f43f5e;
+
+      /* Sombras */
+      --sh-card: rgba(0,0,0,.55) 0 28px 70px, rgba(0,0,0,.35) 0 14px 32px, rgba(230,229,224,.05) 0 0 0 1px;
+      --sh-amb:  rgba(0,0,0,.22) 0 0 16px, rgba(0,0,0,.10) 0 0 8px;
+      --sh-focus: rgba(230,229,224,0.15) 0 0 0 3px;
+
+      /* Backgrounds semi-transparentes */
+      --hdr-bg:      rgba(26,25,21,0.94);
+      --inputbar-bg: rgba(26,25,21,0.96);
+
+      /* Tipografia */
+      --fui: system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      --fsr: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+      --fmo: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+      /* Raios */
+      --r-sm:   4px;
+      --r:      8px;
+      --r-lg:   10px;
+      --r-pill: 9999px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:  #f2f1ed;
+        --s1:  #f2f1ed;
+        --s2:  #ffffff;
+        --s3:  #f7f7f4;
+        --s4:  #ebeae5;
+        --s5:  #dddcd6;
+
+        --tx:  #26251e;
+        --tx2: rgba(38,37,30,0.60);
+        --tx3: rgba(38,37,30,0.40);
+
+        --bd:  rgba(38,37,30,0.10);
+        --bd2: rgba(38,37,30,0.18);
+        --bd3: rgba(38,37,30,0.45);
+
+        --sel-bg: rgba(38,37,30,0.08);
+        --sel-bd: rgba(38,37,30,0.38);
+
+        --btn-bg:       #26251e;
+        --btn-bg-hover: #3d3c33;
+        --btn-tx:       #f2f1ed;
+
+        --sh-card: rgba(38,37,30,.12) 0 28px 70px, rgba(38,37,30,.07) 0 14px 32px, rgba(38,37,30,.10) 0 0 0 1px;
+        --sh-amb:  rgba(38,37,30,.07) 0 0 16px, rgba(38,37,30,.04) 0 0 8px;
+        --sh-focus: rgba(38,37,30,0.14) 0 0 0 3px;
+
+        --hdr-bg:      rgba(242,241,237,0.94);
+        --inputbar-bg: rgba(242,241,237,0.96);
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--fui);
+      background: var(--bg);
+      color: var(--tx);
+      font-size: 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .hdr {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--hdr-bg);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--bd);
+      z-index: 10;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 28px;
+      height: 28px;
+      color: var(--tx);
+      flex-shrink: 0;
+      opacity: .85;
+    }
+    .brand-name {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.30px;
+      color: var(--tx);
+      line-height: 1.1;
+    }
+    .brand-sub {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--tx3);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 1.4;
+    }
+    .btn-appts {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--s3);
+      color: var(--tx2);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-pill);
+      padding: 6px 12px;
+      font-family: var(--fui);
+      font-size: 13px;
+      font-weight: 400;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+      min-height: 44px;
+    }
+    .btn-appts:hover { color: var(--tx); border-color: var(--bd2); }
+    .btn-appts svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+    /* ── Chat ────────────────────────────────────────── */
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overscroll-behavior: contain;
+    }
+    .chat::-webkit-scrollbar { width: 4px; }
+    .chat::-webkit-scrollbar-track { background: transparent; }
+    .chat::-webkit-scrollbar-thumb { background: var(--s5); border-radius: 2px; }
+
+    /* ── Rows ────────────────────────────────────────── */
+    .row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      animation: popIn .24s cubic-bezier(.4,0,.2,1) both;
+    }
+    .row.user { justify-content: flex-end; }
+    .wrow {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      animation: popIn .24s cubic-bezier(.4,0,.2,1) both;
+      width: 100%;
+      padding-left: 0;
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(8px) scale(.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── Avatar ──────────────────────────────────────── */
+    .av {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--s4);
+      border: 1px solid var(--bd);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      color: var(--tx2);
+    }
+    .av svg { width: 14px; height: 14px; }
+
+    /* ── Bubbles ─────────────────────────────────────── */
+    .bub {
+      max-width: min(80%, 340px);
+      padding: 10px 14px;
+      border-radius: 12px 12px 12px 4px;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      font-size: 15px;
+      line-height: 1.5;
+      color: var(--tx);
+    }
+    .bub.user {
+      background: var(--s3);
+      border-radius: 12px 12px 4px 12px;
+    }
+    .bub strong { font-weight: 600; }
+
+    /* ── Typing ──────────────────────────────────────── */
+    .typ-row { display: flex; align-items: flex-end; gap: 8px; }
+    .typ-bub {
+      padding: 12px 16px;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      border-radius: 12px 12px 12px 4px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .dot { width: 6px; height: 6px; background: var(--tx3); border-radius: 50%; }
+    @keyframes bounce {
+      0%,60%,100% { transform: translateY(0); }
+      30%          { transform: translateY(-5px); }
+    }
+    .dot:nth-child(1) { animation: bounce .9s infinite 0s; }
+    .dot:nth-child(2) { animation: bounce .9s infinite .15s; }
+    .dot:nth-child(3) { animation: bounce .9s infinite .30s; }
+
+    /* ── Service Cards ───────────────────────────────── */
+    .svc-scroll {
+      width: 100%;
+      overflow-x: auto;
+      padding: 4px 0 8px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .svc-scroll::-webkit-scrollbar { display: none; }
+    .svc-row { display: flex; gap: 10px; width: max-content; }
+
+    .svc-card {
+      width: 148px;
+      flex-shrink: 0;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .2s;
+      animation: slideRight .22s cubic-bezier(.4,0,.2,1) both;
+    }
+    .svc-card:nth-child(2) { animation-delay: .04s; }
+    .svc-card:nth-child(3) { animation-delay: .08s; }
+    .svc-card:nth-child(4) { animation-delay: .12s; }
+    .svc-card:nth-child(5) { animation-delay: .16s; }
+    .svc-card:hover { border-color: var(--bd2); box-shadow: var(--sh-amb); }
+    .svc-card.selected {
+      border-color: var(--sel-bd);
+      background: var(--s3);
+      box-shadow: var(--sh-focus);
+    }
+    @keyframes slideRight {
+      from { opacity: 0; transform: translateX(-12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .svc-img {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: var(--s4);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .svc-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .svc-img-icon { width: 28px; height: 28px; color: var(--tx3); }
+    .svc-body { padding: 8px 10px 10px; }
+    .svc-name {
+      font-size: 13px; font-weight: 400;
+      letter-spacing: -.13px;
+      color: var(--tx);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .svc-price {
+      font-family: var(--fsr);
+      font-size: 15px; font-weight: 500;
+      color: var(--tx);
+      line-height: 1.2;
+    }
+    .svc-dur {
+      font-family: var(--fmo);
+      font-size: 11px; color: var(--tx3);
+      margin-top: 2px;
+    }
+
+    /* ── Calendar ────────────────────────────────────── */
+    .cal-nav {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .cal-lbl {
+      font-family: var(--fmo);
+      font-size: 12px; font-weight: 500;
+      color: var(--tx2); letter-spacing: .4px;
+    }
+    .cal-nav-btn {
+      width: 44px; height: 44px;
+      background: var(--s3);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-sm);
+      cursor: pointer; color: var(--tx2);
+      display: flex; align-items: center; justify-content: center;
+      transition: color .15s, border-color .15s;
+    }
+    .cal-nav-btn:hover { color: var(--tx); border-color: var(--bd2); }
+    .cal-nav-btn svg { width: 14px; height: 14px; }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .cal-hdr {
+      text-align: center;
+      font-size: 10px; font-weight: 500;
+      color: var(--tx3);
+      text-transform: uppercase; letter-spacing: .5px;
+      padding-bottom: 6px;
+    }
+    .cal-day {
+      aspect-ratio: 1; min-height: 44px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      border-radius: var(--r-sm);
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: none;
+      font-family: var(--fui);
+      transition: background .15s, border-color .15s;
+    }
+    .cal-day:hover:not(.unavail) { background: var(--s3); }
+    .cal-day.today { border-color: var(--bd2); }
+    .cal-day.sel { background: var(--sel-bg); border-color: var(--sel-bd); }
+    .cal-day.unavail { opacity: .30; pointer-events: none; cursor: default; }
+    .cal-day-num { font-size: 14px; font-weight: 400; color: var(--tx); line-height: 1; }
+    .cal-dot {
+      width: 4px; height: 4px;
+      border-radius: 50%; background: var(--ok);
+      margin-top: 3px;
+    }
+    .booking-hours {
+      margin-top: 10px;
+      border: 1px solid var(--bd);
+      border-radius: var(--r);
+      background: var(--s2);
+      padding: 9px 10px;
+    }
+    .booking-hours-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--tx3);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .booking-hours-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px 10px;
+    }
+    .booking-hours-item {
+      font-size: 11px;
+      color: var(--tx2);
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Slots */
+    .slots-wrap {
+      max-height: 0; overflow: hidden;
+      transition: max-height .35s cubic-bezier(.4,0,.2,1);
+      margin-top: 10px;
+    }
+    .slots-wrap.open { max-height: 400px; }
+    .slots-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .slot-btn {
+      padding: 8px 4px; min-height: 44px;
+      background: var(--s3);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-sm);
+      font-family: var(--fmo); font-size: 13px;
+      color: var(--tx2);
+      cursor: pointer; text-align: center;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .slot-btn:hover { border-color: var(--bd2); color: var(--tx); }
+    .slot-btn.sel { border-color: var(--sel-bd); color: var(--tx); background: var(--sel-bg); }
+    .slot-btn.taken { opacity: .30; pointer-events: none; text-decoration: line-through; }
+
+    /* ── Confirm Card ────────────────────────────────── */
+    .confirm-card {
+      width: 100%; max-width: 360px;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-lg);
+      padding: 16px;
+      box-shadow: var(--sh-card);
+    }
+    .cfr-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--bd);
+      font-size: 14px;
+    }
+    .cfr-row:last-of-type { border-bottom: none; }
+    .cfr-lbl { color: var(--tx2); }
+    .cfr-val { color: var(--tx); font-weight: 500; text-align: right; font-size: 13px; }
+    .cfr-price {
+      font-family: var(--fsr);
+      font-size: 18px; font-weight: 500;
+      color: var(--tx);
+    }
+    .btn-confirm {
+      width: 100%; margin-top: 14px;
+      padding: 12px 16px; min-height: 48px;
+      background: var(--btn-bg);
+      color: var(--btn-tx);
+      border: none; border-radius: var(--r);
+      font-family: var(--fui); font-size: 15px; font-weight: 600;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: background .15s, opacity .15s;
+    }
+    .btn-confirm:hover:not(:disabled) { background: var(--btn-bg-hover); }
+    .btn-confirm:disabled { opacity: .40; cursor: not-allowed; }
+    .btn-confirm svg { width: 18px; height: 18px; }
+
+    /* ── Input Bar ───────────────────────────────────── */
+    .input-bar {
+      flex-shrink: 0;
+      background: var(--inputbar-bg);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--bd);
+      padding: 10px 12px;
+      padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+      display: flex; align-items: center; gap: 8px;
+    }
+    .input-wrap {
+      flex: 1;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-pill);
+      display: flex; align-items: center; padding: 0 14px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .input-wrap:focus-within { border-color: var(--bd3); box-shadow: var(--sh-focus); }
+    .chat-input {
+      flex: 1; background: transparent; border: none; outline: none;
+      font-family: var(--fui); font-size: 15px; color: var(--tx);
+      padding: 10px 0; min-height: 44px;
+    }
+    .chat-input::placeholder { color: var(--tx3); }
+    .chat-input:disabled { opacity: .5; }
+    .btn-send {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: var(--s4);
+      border: 1px solid var(--bd);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background .15s, border-color .15s;
+      color: var(--tx2);
+    }
+    .btn-send:not(:disabled):hover { background: var(--s5); border-color: var(--bd2); color: var(--tx); }
+    .btn-send:disabled { opacity: .35; cursor: not-allowed; }
+    .btn-send svg { width: 18px; height: 18px; }
+
+    /* ── Bottom Sheet ────────────────────────────────── */
+    .overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.7);
+      z-index: 50; opacity: 0; pointer-events: none;
+      transition: opacity .3s;
+    }
+    .overlay.open { opacity: 1; pointer-events: all; }
+    .sheet {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      max-height: 80dvh;
+      background: var(--s1);
+      border-top: 1px solid var(--bd);
+      border-radius: 16px 16px 0 0;
+      z-index: 51;
+      transform: translateY(103%);
+      transition: transform .36s cubic-bezier(.32,1,.32,1);
+      display: flex; flex-direction: column;
+      overscroll-behavior: contain;
+    }
+    .sheet.open { transform: translateY(0); }
+    .sheet-handle {
+      width: 40px; height: 4px;
+      background: var(--s5); border-radius: 2px;
+      margin: 12px auto 16px; flex-shrink: 0;
+    }
+    .sheet-title {
+      font-size: 16px; font-weight: 600; letter-spacing: -.16px;
+      color: var(--tx);
+      padding: 0 16px 12px;
+      border-bottom: 1px solid var(--bd); flex-shrink: 0;
+    }
+    .sheet-body { flex: 1; overflow-y: auto; padding: 16px; overscroll-behavior: contain; }
+    .appt-item {
+      background: var(--s2); border: 1px solid var(--bd);
+      border-radius: var(--r); padding: 12px 14px; margin-bottom: 10px;
+    }
+    .appt-item:last-child { margin-bottom: 0; }
+    .appt-svc { font-size: 14px; font-weight: 500; color: var(--tx); margin-bottom: 4px; }
+    .appt-meta { font-size: 13px; color: var(--tx2); font-family: var(--fmo); }
+    .appt-price { font-family: var(--fsr); font-size: 15px; color: var(--tx); margin-top: 4px; }
+    .appt-badge {
+      display: inline-block; font-size: 11px; font-weight: 500;
+      padding: 2px 8px; border-radius: var(--r-pill); margin-top: 6px;
+    }
+    .appt-badge.pending { background: rgba(200,190,178,.08); color: var(--tx2); border: 1px solid var(--bd2); }
+    .appt-badge.done    { background: rgba(34,197,94,.12); color: var(--ok); }
+
+    /* ── Verify Card ─────────────────────────────────── */
+    .verify-card {
+      width: 100%; max-width: 340px;
+      background: var(--s2);
+      border: 1px solid var(--bd);
+      border-radius: var(--r-lg);
+      padding: 14px;
+    }
+    .verify-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--bd);
+      font-size: 14px;
+    }
+    .verify-row:last-of-type { border-bottom: none; }
+    .verify-lbl { color: var(--tx2); font-size: 13px; }
+    .verify-val { color: var(--tx); font-weight: 500; font-size: 13px; text-align: right; }
+    .verify-actions {
+      display: flex; gap: 8px; margin-top: 12px;
+    }
+    .btn-v-ok {
+      flex: 1; padding: 10px 12px; min-height: 44px;
+      background: var(--btn-bg); color: var(--btn-tx);
+      border: none; border-radius: var(--r);
+      font-family: var(--fui); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background .15s;
+    }
+    .btn-v-ok:hover { background: var(--btn-bg-hover); }
+    .btn-v-alt {
+      padding: 10px 12px; min-height: 44px;
+      background: var(--s3); color: var(--tx2);
+      border: 1px solid var(--bd); border-radius: var(--r);
+      font-family: var(--fui); font-size: 13px; font-weight: 400;
+      cursor: pointer; transition: color .15s, border-color .15s;
+    }
+    .btn-v-alt:hover { color: var(--tx); border-color: var(--bd2); }
+
+    /* ── Acessibilidade ──────────────────────────────── */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+    @media (max-width: 360px) {
+      .booking-hours-list { grid-template-columns: 1fr; }
+    }
+    @media (min-width: 600px) {
+      body { max-width: 480px; margin: 0 auto; box-shadow: var(--sh-card); }
+      .sheet { max-width: 480px; left: 50%; transform: translateX(-50%) translateY(103%); }
+      .sheet.open { transform: translateX(-50%) translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="sr-only" aria-live="polite" id="liveRgn"></div>
+
+<!-- Header -->
+<header class="hdr">
+  <div class="brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+      <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+      <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+      <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+    </svg>
+    <div>
+      <div class="brand-name">LIDDO BARBER</div>
+      <div class="brand-sub">chat</div>
+    </div>
+  </div>
+  <button class="btn-appts" id="btnAppts" aria-label="Ver meus agendamentos">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+    Meus Agendamentos
+  </button>
+</header>
+
+<!-- Chat -->
+<main class="chat" id="chat" role="log" aria-label="Conversa de agendamento" aria-live="polite"></main>
+
+<!-- Input -->
+<div class="input-bar">
+  <div class="input-wrap">
+    <input class="chat-input" id="chatInput" type="text"
+      placeholder="Digite sua resposta…" autocomplete="off" aria-label="Sua resposta">
+  </div>
+  <button class="btn-send" id="btnSend" disabled aria-label="Enviar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M22 2 11 13M22 2 15 22l-4-9-9-4 20-7z"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Bottom Sheet -->
+<div class="overlay" id="overlay" aria-hidden="true"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Meus Agendamentos" aria-hidden="true">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Meus Agendamentos</div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<script src="https://unpkg.com/imask@7.6.1/dist/imask.min.js"></script>
+<script>
+const API   = '';
+const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFIRM:6, DONE:7 };
+
+let step = STEPS.NAME;
+let services = [], slots = {};
+let selectedService = null, selectedDate = null, selectedSlot = null;
+let weekStart = null, phoneMask = null, confirmData = {};
+let publicWorkingHours = null;
+
+const chat      = document.getElementById('chat');
+const chatInput = document.getElementById('chatInput');
+const btnSend   = document.getElementById('btnSend');
+const liveRgn   = document.getElementById('liveRgn');
+
+/* ─ Storage ─ */
+const getClient = () => { try { return JSON.parse(localStorage.getItem('liddo_client')) || {}; } catch { return {}; } };
+const setClient = d  => localStorage.setItem('liddo_client', JSON.stringify({ ...getClient(), ...d }));
+const getAppts  = () => { try { return JSON.parse(localStorage.getItem('liddo_appts')) || []; } catch { return []; } };
+const saveAppt  = a  => { const l = getAppts(); l.unshift(a); localStorage.setItem('liddo_appts', JSON.stringify(l)); };
+
+const scrollEnd = () => requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+
+function fmtBRL(v) {
+  const n = v > 200 ? v / 100 : v;
+  return 'R$ ' + n.toFixed(2).replace('.', ',');
+}
+
+function normalizeWorkingHoursPayload(payload) {
+  const weekly = Array.isArray(payload?.weekly) ? payload.weekly : [];
+  if (!weekly.length) return null;
+  const byDay = new Map();
+  weekly.forEach((item) => {
+    const day = Number(item?.day);
+    if (!Number.isInteger(day) || day < 0 || day > 6) return;
+    const start = String(item?.start || '').trim();
+    const end = String(item?.end || '').trim();
+    byDay.set(day, {
+      day,
+      start,
+      end,
+      isClosed: Boolean(item?.isClosed) || !start || !end,
+    });
+  });
+  return Array.from({ length: 7 }, (_v, day) => byDay.get(day) || { day, start: '', end: '', isClosed: true });
+}
+
+async function fetchPublicWorkingHours() {
+  const token = localStorage.getItem('authToken');
+  const h = token ? { Authorization: 'Bearer ' + token } : {};
+  try {
+    const r = await fetch(API + '/public/working-hours', { headers: h });
+    if (!r.ok) return;
+    const data = await r.json();
+    publicWorkingHours = normalizeWorkingHoursPayload(data?.workingHours || data);
+  } catch {}
+}
+
+function renderWorkingHoursBlock() {
+  if (!Array.isArray(publicWorkingHours) || !publicWorkingHours.length) return '';
+  const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+  const items = publicWorkingHours.map((row) => {
+    const label = labels[row.day] || row.day;
+    const value = row.isClosed ? 'Fechado' : `${row.start} - ${row.end}`;
+    return `<div class="booking-hours-item"><strong>${label}:</strong> ${value}</div>`;
+  }).join('');
+  return `
+    <section class="booking-hours" aria-label="Horarios de atendimento da semana">
+      <div class="booking-hours-title">Horarios de atendimento</div>
+      <div class="booking-hours-list">${items}</div>
+    </section>
+  `;
+}
+
+/* ─ Avatar SVG ─ */
+const AV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+  <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+  <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+  <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+</svg>`;
+
+/* ─ Bubbles ─ */
+function appendBubble(html, isUser = false) {
+  const row = document.createElement('div');
+  row.className = 'row' + (isUser ? ' user' : '');
+  row.innerHTML = isUser
+    ? `<div class="bub user">${html}</div>`
+    : `<div class="bub">${html}</div>`;
+  chat.appendChild(row);
+  scrollEnd();
+  liveRgn.textContent = html.replace(/<[^>]+>/g, '');
+  return row;
+}
+
+function appendWidget(html) {
+  const w = document.createElement('div');
+  w.className = 'wrow';
+  w.innerHTML = html;
+  chat.appendChild(w);
+  scrollEnd();
+  return w;
+}
+
+let typingEl = null;
+function showTyping() {
+  if (typingEl) return;
+  typingEl = document.createElement('div');
+  typingEl.className = 'typ-row';
+  typingEl.setAttribute('aria-hidden', 'true');
+  typingEl.innerHTML = `<div class="typ-bub"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`;
+  chat.appendChild(typingEl);
+  scrollEnd();
+}
+function hideTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
+
+function say(html, delay = 600) {
+  return new Promise(resolve => {
+    showTyping();
+    setTimeout(() => { hideTyping(); appendBubble(html); resolve(); }, delay);
+  });
+}
+
+/* ─ Input ─ */
+function enableInput(ph = 'Digite sua resposta…', type = 'text') {
+  if (phoneMask) { try { phoneMask.destroy(); } catch {} phoneMask = null; }
+  chatInput.type = type;
+  chatInput.placeholder = ph;
+  chatInput.value = '';
+  chatInput.disabled = false;
+  btnSend.disabled = true;
+  requestAnimationFrame(() => chatInput.focus());
+  if (type === 'tel' && typeof IMask !== 'undefined') {
+    phoneMask = IMask(chatInput, { mask: '(00) 00000-0000' });
+  }
+}
+function disableInput() {
+  chatInput.disabled = true;
+  btnSend.disabled = true;
+  chatInput.placeholder = '…';
+}
+
+/* ─ Handle send ─ */
+async function handleSend() {
+  const raw = chatInput.value.trim();
+  if (!raw) return;
+  disableInput();
+
+  if (step === STEPS.NAME) {
+    const name = raw.replace(/[<>&]/g, '');
+    appendBubble(name, true);
+    setClient({ name });
+    await say(`Prazer, <strong>${name}</strong>! Qual é o seu WhatsApp com DDD?`);
+    step = STEPS.PHONE;
+    enableInput('(00) 00000-0000', 'tel');
+    const _sp = getClient().phone;
+    if (_sp) setTimeout(() => { if (phoneMask) { phoneMask.unmaskedValue = _sp; chatInput.dispatchEvent(new Event('input')); } }, 50);
+
+  } else if (step === STEPS.PHONE) {
+    const digits = phoneMask ? phoneMask.unmaskedValue : raw.replace(/\D/g, '');
+    if (digits.length < 10) {
+      await say('Número inválido. Informe o DDD + número. Ex: (11) 99999-9999', 300);
+      enableInput('(00) 00000-0000', 'tel');
+      return;
+    }
+    appendBubble(phoneMask ? phoneMask.value : raw, true);
+    setClient({ phone: digits });
+    chatInput.value = '';
+    await say('Ótimo! E o seu e-mail? <span style="color:var(--tx3);font-size:13px">(opcional — confirmação)</span>');
+    step = STEPS.EMAIL;
+    enableInput('seu@email.com', 'email');
+    const _se = getClient().email;
+    if (_se) { chatInput.value = _se; btnSend.disabled = false; }
+
+  } else if (step === STEPS.EMAIL) {
+    const email = raw.replace(/[<>&]/g, '');
+    appendBubble(email, true);
+    setClient({ email });
+    chatInput.value = '';
+    await say('Perfeito! Escolha o serviço:', 400);
+    step = STEPS.SERVICE;
+    await loadServices();
+  }
+}
+
+/* ═══ Services ════════════════════════════════════════════ */
+async function loadServices() {
+  disableInput();
+  showTyping();
+  try {
+    const token = localStorage.getItem('authToken');
+    const h = token ? { Authorization: 'Bearer ' + token } : {};
+    const r = await fetch(API + '/public/services', { headers: h });
+    if (r.ok) services = (await r.json()).map(s => ({ ...s, duration: s.durationMinutes ?? s.duration }));
+    else throw 0;
+  } catch {
+    services = [
+      { id: '1', name: 'Corte Clássico', price: 5500, duration: 30, imageUrl: '' },
+      { id: '2', name: 'Barba Completa', price: 4000, duration: 25, imageUrl: '' },
+      { id: '3', name: 'Corte + Barba',  price: 8500, duration: 55, imageUrl: '' },
+      { id: '4', name: 'Degradê',        price: 6000, duration: 40, imageUrl: '' },
+    ];
+  }
+  hideTyping();
+  renderServices();
+}
+
+const IMG_PH = `<svg class="svc-img-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+
+function renderServices() {
+  const cards = services.map((s, i) => {
+    const hasImg = s.imageUrl && s.imageUrl.length > 0;
+    return `<div class="svc-card" role="button" tabindex="0"
+      aria-label="${s.name}, ${fmtBRL(s.price)}, ${s.duration} minutos"
+      data-id="${s.id}" style="animation-delay:${i*.04}s">
+      <div class="svc-img">
+        ${hasImg ? `<img src="${s.imageUrl}" alt="${s.name}" loading="lazy" onerror="this.parentNode.innerHTML='${IMG_PH.replace(/"/g,"'")}'">` : IMG_PH}
+      </div>
+      <div class="svc-body">
+        <div class="svc-name">${s.name}</div>
+        <div class="svc-price">${fmtBRL(s.price)}</div>
+        <div class="svc-dur">${s.duration} min</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const w = appendWidget(`
+    <div class="svc-scroll" role="group" aria-label="Serviços disponíveis">
+      <div class="svc-row">${cards}</div>
+    </div>`);
+
+  w.querySelectorAll('.svc-card').forEach(c => {
+    c.addEventListener('click', () => onPickService(c.dataset.id));
+    c.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); onPickService(c.dataset.id); } });
+  });
+}
+
+async function onPickService(id) {
+  const svc = services.find(s => String(s.id) === String(id));
+  if (!svc) return;
+  selectedService = svc;
+  document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
+  await say(`<strong>${svc.name}</strong> — ótima escolha! Selecione uma data:`, 400);
+  step = STEPS.CALENDAR;
+  await loadCalendar();
+}
+
+/* ═══ Calendar ════════════════════════════════════════════ */
+async function fetchSlotsForWeek(ws) {
+  const key = toKey(ws);
+  const token = localStorage.getItem('authToken');
+  const h = token ? { Authorization: 'Bearer ' + token } : {};
+  try {
+    const r = await fetch(API + `/public/slots?serviceId=${selectedService.id}&weekStart=${key}`, { headers: h });
+    if (r.ok) Object.assign(slots, await r.json());
+  } catch {}
+}
+
+async function loadCalendar() {
+  disableInput();
+  const today = new Date(); today.setHours(0,0,0,0);
+  weekStart = new Date(today);
+  slots = {};
+  showTyping();
+  await Promise.all([
+    fetchSlotsForWeek(weekStart),
+    fetchPublicWorkingHours(),
+  ]);
+  hideTyping();
+  renderCalendar();
+}
+
+const toKey = d => d.toISOString().slice(0,10);
+
+function weekDates(s) {
+  return Array.from({ length:7 }, (_, i) => {
+    const d = new Date(s); d.setDate(d.getDate() + i); return d;
+  });
+}
+
+function renderCalendar() {
+  const prev = document.getElementById('calWidgetWrap');
+  if (prev) prev.remove();
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dates = weekDates(weekStart);
+  const DAYS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  const hdrs = DAYS.map(d => `<div class="cal-hdr">${d}</div>`).join('');
+  const cells = dates.map(date => {
+    const key = toKey(date);
+    const past = date < today;
+    const daySlots = slots[key] || [];
+    const hasAvail = daySlots.some(s => s.available !== false);
+    const isSel   = selectedDate === key;
+    const isToday = key === toKey(today);
+    let cls = 'cal-day';
+    if (past || (!hasAvail && !isSel)) cls += ' unavail';
+    if (isSel)   cls += ' sel';
+    if (isToday && !past) cls += ' today';
+    return `<button class="${cls}" data-key="${key}"
+      aria-label="${date.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})}"
+      aria-pressed="${isSel}">
+      <span class="cal-day-num">${date.getDate()}</span>
+      ${hasAvail && !past ? '<span class="cal-dot" aria-hidden="true"></span>' : ''}
+    </button>`;
+  }).join('');
+
+  const ls = dates[0].toLocaleDateString('pt-BR', { day:'numeric', month:'short' });
+  const le = dates[6].toLocaleDateString('pt-BR', { day:'numeric', month:'short' });
+
+  const w = appendWidget(`
+    <div id="calWidgetWrap" style="width:100%;padding:4px 0">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="calPrev" aria-label="Semana anterior">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <span class="cal-lbl">${ls} – ${le}</span>
+        <button class="cal-nav-btn" id="calNext" aria-label="Próxima semana">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+      <div class="cal-grid" role="group" aria-label="Selecione uma data">${hdrs}${cells}</div>
+      ${renderWorkingHoursBlock()}
+      <div class="slots-wrap" id="slotsWrap" aria-live="polite">
+        <div class="slots-grid" id="slotsGrid"></div>
+      </div>
+    </div>`);
+
+  document.getElementById('calPrev').addEventListener('click', async () => {
+    const t = new Date(); t.setHours(0,0,0,0);
+    const p = new Date(weekStart); p.setDate(p.getDate()-7);
+    if (p < t) return;
+    weekStart = p; selectedDate = null; selectedSlot = null;
+    if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
+    renderCalendar();
+  });
+  document.getElementById('calNext').addEventListener('click', async () => {
+    const n = new Date(weekStart); n.setDate(n.getDate()+7);
+    weekStart = n; selectedDate = null; selectedSlot = null;
+    if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
+    renderCalendar();
+  });
+  w.querySelectorAll('.cal-day:not(.unavail)').forEach(b => b.addEventListener('click', () => onPickDay(b.dataset.key)));
+}
+
+function onPickDay(key) {
+  selectedDate = key; selectedSlot = null;
+  document.querySelectorAll('.cal-day').forEach(b => {
+    const s = b.dataset.key === key;
+    b.classList.toggle('sel', s);
+    b.setAttribute('aria-pressed', s);
+  });
+  const wrap = document.getElementById('slotsWrap');
+  const grid = document.getElementById('slotsGrid');
+  if (!wrap || !grid) return;
+  const avail = (slots[key]||[]).filter(s => s.available !== false);
+  const taken = (slots[key]||[]).filter(s => s.available === false);
+  if (avail.length === 0 && taken.length === 0) {
+    grid.innerHTML = `<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Nenhum horário disponível.</p>`;
+  } else {
+    const all = [...avail,...taken].sort((a,b) => a.time.localeCompare(b.time));
+    grid.innerHTML = all.map(s =>
+      `<button class="slot-btn${s.available===false?' taken':''}" data-time="${s.time}">${s.time}</button>`
+    ).join('');
+    grid.querySelectorAll('.slot-btn:not(.taken)').forEach(b => b.addEventListener('click', () => onPickSlot(b.dataset.time)));
+  }
+  wrap.classList.add('open');
+  scrollEnd();
+}
+
+async function onPickSlot(time) {
+  selectedSlot = time;
+  document.querySelectorAll('.slot-btn').forEach(b => {
+    const s = b.dataset.time === time;
+    b.classList.toggle('sel', s);
+    b.setAttribute('aria-pressed', s);
+  });
+  scrollEnd();
+  await showConfirm();
+}
+
+/* ═══ Confirm ══════════════════════════════════════════════ */
+async function showConfirm() {
+  step = STEPS.CONFIRM;
+  const client = getClient();
+  const dateObj = new Date(selectedDate + 'T12:00:00');
+  const dateStr = dateObj.toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
+  confirmData = {
+    clientName: client.name, phone: client.phone, email: client.email||'',
+    serviceId: selectedService.id, serviceName: selectedService.name,
+    price: selectedService.price, duration: selectedService.duration,
+    date: selectedDate, time: selectedSlot, dateStr,
+  };
+  await say('Confirme seu agendamento:', 400);
+  const w = appendWidget(`
+    <div class="confirm-card">
+      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${confirmData.serviceName}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${dateStr}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${confirmData.time}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${confirmData.duration} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
+      <button class="btn-confirm" id="btnConfirm" aria-label="Confirmar agendamento">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+        Confirmar Agendamento
+      </button>
+    </div>`);
+  w.querySelector('#btnConfirm').addEventListener('click', submitBooking);
+}
+
+/* ═══ Submit ═══════════════════════════════════════════════ */
+async function submitBooking() {
+  const btn = document.getElementById('btnConfirm');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    const iso = new Date(`${confirmData.date}T${confirmData.time}:00.000-03:00`).toISOString();
+    const token = localStorage.getItem('authToken');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const r = await fetch(API + '/public/booking', {
+      method: 'POST', headers,
+      body: JSON.stringify({ clientName:confirmData.clientName, clientPhone:confirmData.phone, clientEmail:confirmData.email, serviceId:confirmData.serviceId, startsAt:iso }),
+    });
+    if (!r.ok) throw 0;
+    saveAppt({ id:Date.now(), service:confirmData.serviceName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
+    step = STEPS.DONE;
+    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">Até ${confirmData.time} — ${confirmData.dateStr}.</span>`);
+    await say('Para agendar novamente, é só me chamar. 😊', 800);
+  } catch {
+    if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar Novamente`; }
+    await say('Não consegui confirmar agora. Tente novamente em instantes.', 400);
+  }
+}
+
+/* ─ Input events ─ */
+chatInput.addEventListener('input', () => { btnSend.disabled = chatInput.value.trim().length === 0; });
+chatInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey && !btnSend.disabled) { e.preventDefault(); handleSend(); } });
+btnSend.addEventListener('click', handleSend);
+
+/* ─ Bottom Sheet ─ */
+const sheet   = document.getElementById('sheet');
+const overlay = document.getElementById('overlay');
+const sheetBody = document.getElementById('sheetBody');
+function openSheet() {
+  const appts = getAppts();
+  sheetBody.innerHTML = appts.length === 0
+    ? `<p style="color:var(--tx2);font-size:14px;text-align:center;padding:40px 0">Nenhum agendamento ainda.</p>`
+    : appts.map(a => `<div class="appt-item">
+        <div class="appt-svc">${a.service}</div>
+        <div class="appt-meta">${a.date} &bull; ${a.time}</div>
+        <div class="appt-price">${a.price}</div>
+        <span class="appt-badge ${a.status==='pending'?'pending':'done'}">${a.status==='pending'?'Pendente':'Concluído'}</span>
+      </div>`).join('');
+  sheet.classList.add('open'); overlay.classList.add('open');
+  sheet.setAttribute('aria-hidden','false'); overlay.setAttribute('aria-hidden','false');
+}
+function closeSheet() {
+  sheet.classList.remove('open'); overlay.classList.remove('open');
+  sheet.setAttribute('aria-hidden','true'); overlay.setAttribute('aria-hidden','true');
+}
+document.getElementById('btnAppts').addEventListener('click', openSheet);
+overlay.addEventListener('click', closeSheet);
+document.addEventListener('keydown', e => { if (e.key==='Escape' && sheet.classList.contains('open')) closeSheet(); });
+
+/* ─ Verify Card ─ */
+function fmtPhone(digits) {
+  if (!digits) return '';
+  return digits.replace(/^(\d{2})(\d{4,5})(\d{4})$/, '($1) $2-$3') || digits;
+}
+
+function showVerifyCard(c) {
+  disableInput();
+  const w = appendWidget(`
+    <div class="verify-card">
+      <div class="verify-row"><span class="verify-lbl">Nome</span><span class="verify-val">${c.name}</span></div>
+      <div class="verify-row"><span class="verify-lbl">WhatsApp</span><span class="verify-val">${fmtPhone(c.phone)}</span></div>
+      ${c.email ? `<div class="verify-row"><span class="verify-lbl">E-mail</span><span class="verify-val">${c.email}</span></div>` : ''}
+      <div class="verify-actions">
+        <button class="btn-v-ok" id="btnVOk">Está correto, continuar</button>
+        <button class="btn-v-alt" id="btnVAlt">Alterar dados</button>
+      </div>
+    </div>`);
+
+  w.querySelector('#btnVOk').addEventListener('click', async () => {
+    appendBubble('Está correto', true);
+    await say('Ótimo! Escolha o serviço:', 400);
+    step = STEPS.SERVICE;
+    await loadServices();
+  });
+
+  w.querySelector('#btnVAlt').addEventListener('click', async () => {
+    appendBubble('Quero alterar os dados', true);
+    await say(`Ok! Vamos atualizar. Qual é o seu nome? <span style="color:var(--tx3);font-size:13px">atual: ${c.name}</span>`, 400);
+    step = STEPS.NAME;
+    enableInput('Seu nome…');
+    chatInput.value = c.name;
+    btnSend.disabled = false;
+  });
+}
+
+/* ─ Init ─ */
+async function init() {
+  const c = getClient();
+  if (c.name && c.phone) {
+    await say(`Olá de novo, <strong>${c.name}</strong>! Que bom te ver. 👋`);
+    await say('Seus dados estão salvos. Confirme antes de continuar:', 400);
+    step = STEPS.VERIFY;
+    showVerifyCard(c);
+  } else if (c.name) {
+    await say(`Olá, <strong>${c.name}</strong>! Qual é o seu WhatsApp com DDD?`);
+    step = STEPS.PHONE;
+    enableInput('(00) 00000-0000', 'tel');
+  } else {
+    await say('Olá! Bem-vindo à <strong>Liddo Barber</strong>.');
+    await say('Qual é o seu nome?', 400);
+    step = STEPS.NAME;
+    enableInput('Seu nome…');
+  }
+}
+
+init();
+</script>
+</body>
+</html>

@@ -2,8 +2,6 @@ import {
   bindEntityDrawers,
   renderEmptyState,
   renderEntityDrawer,
-  renderPrimaryAction,
-  renderStatusChip,
   renderTechnicalTrace,
 } from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
@@ -37,6 +35,13 @@ function formatDateTime(value) {
     dateStyle: "short",
     timeStyle: "short",
   });
+}
+
+function formatDateShort(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 
 function parseRelatedId(notes = "", key = "") {
@@ -123,11 +128,28 @@ function summarizeOrigins(transactions = []) {
 
 function renderCard(title, value, tone = "", subtitle = "") {
   return `
-    <article class="ux-kpi finance-kpi">
-      <div class="ux-label">${escapeHtml(title)}</div>
-      <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
-      ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
+    <article class="fn-kpi ${tone}">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
     </article>
+  `;
+}
+
+function renderFinancialToolbar(transactions = [], cashFlow = {}) {
+  const movement = toNumber(cashFlow.incoming) + toNumber(cashFlow.outgoing);
+  const count = transactions.length;
+  return `
+    <div class="fn-toolbar">
+      <div>
+        <span class="fn-toolbar-label">${count} ${count === 1 ? "lancamento" : "lancamentos"}</span>
+        <strong>Movimento ${escapeHtml(money(movement))}</strong>
+      </div>
+      <button type="button" id="financialAddTransactionBtn" class="fn-add-btn">
+        <span aria-hidden="true">+</span>
+        Novo lancamento
+      </button>
+    </div>
   `;
 }
 
@@ -135,12 +157,12 @@ function renderOriginStrip(transactions = []) {
   const origins = summarizeOrigins(transactions);
   if (!origins.length) return "";
   return `
-    <article class="finance-origin-strip">
+    <article class="fn-origin-strip">
       <div>
-        <p class="ux-label">Principais origens</p>
-        <p class="finance-origin-title">De onde veio o movimento do periodo</p>
+        <p>Principais origens</p>
+        <strong>De onde veio o movimento do periodo</strong>
       </div>
-      <div class="finance-origin-list">
+      <div class="fn-origin-list">
         ${origins
           .map(
             (item) => `
@@ -156,79 +178,105 @@ function renderOriginStrip(transactions = []) {
   `;
 }
 
+function barPercent(value, max) {
+  const numeric = Math.abs(toNumber(value));
+  const limit = Math.max(Math.abs(toNumber(max)), 1);
+  if (numeric <= 0) return 0;
+  return Math.max(4, Math.min(100, Math.round((numeric / limit) * 100)));
+}
+
+function renderFinancialCharts(transactions = [], cashFlow = {}) {
+  const incoming = toNumber(cashFlow.incoming);
+  const outgoing = toNumber(cashFlow.outgoing);
+  const balance = toNumber(cashFlow.balance);
+  const maxFlow = Math.max(Math.abs(incoming), Math.abs(outgoing), Math.abs(balance), 1);
+  const origins = summarizeOrigins(transactions);
+  const maxOrigin = Math.max(...origins.map((item) => Math.abs(toNumber(item.amount))), 1);
+
+  return `
+    <section class="fn-visual-grid" aria-label="Visualizacao financeira">
+      <article class="fn-chart-card">
+        <div class="fn-chart-head">
+          <span>Fluxo de caixa</span>
+          <strong>Entradas, saidas e saldo</strong>
+        </div>
+        <div class="fn-flow-bars">
+          <div class="fn-flow-row fn-flow-income">
+            <span>Entradas</span>
+            <div><i style="width:${barPercent(incoming, maxFlow)}%"></i></div>
+            <strong>${escapeHtml(money(incoming))}</strong>
+          </div>
+          <div class="fn-flow-row fn-flow-expense">
+            <span>Saidas</span>
+            <div><i style="width:${barPercent(outgoing, maxFlow)}%"></i></div>
+            <strong>${escapeHtml(money(outgoing))}</strong>
+          </div>
+          <div class="fn-flow-row ${balance >= 0 ? "fn-flow-income" : "fn-flow-expense"}">
+            <span>Saldo</span>
+            <div><i style="width:${barPercent(balance, maxFlow)}%"></i></div>
+            <strong>${escapeHtml(money(balance))}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="fn-chart-card">
+        <div class="fn-chart-head">
+          <span>Origem do movimento</span>
+          <strong>${origins.length ? "Principais fontes do periodo" : "Sem origem registrada"}</strong>
+        </div>
+        <div class="fn-origin-bars">
+          ${
+            origins.length
+              ? origins
+                  .map(
+                    (item) => `
+                      <div class="fn-origin-bar">
+                        <div>
+                          <span>${escapeHtml(item.label)}</span>
+                          <strong>${escapeHtml(money(item.amount))}</strong>
+                        </div>
+                        <b><i style="width:${barPercent(item.amount, maxOrigin)}%"></i></b>
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<p class="fn-chart-empty">Os graficos aparecem automaticamente quando houver lancamentos no recorte.</p>`
+          }
+        </div>
+      </article>
+    </section>
+  `;
+}
+
 function renderTransactionActions(item = {}) {
   return `
-    <div class="finance-row-actions">
-      <button type="button" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}" class="ux-btn ux-btn-muted">Ver detalhes</button>
-    </div>
+    <button type="button" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}" class="fn-row-arrow" title="Ver detalhes">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+    </button>
   `;
 }
 
 function renderTransactionRow(item = {}) {
   const expense = isExpense(item);
   return `
-    <article class="finance-transaction-row ${expense ? "finance-transaction-expense" : "finance-transaction-income"}">
-      <div class="finance-transaction-main">
-        <div class="finance-transaction-copy">
-          <div class="finance-transaction-meta">
-            ${renderStatusChip(typeStatus(item.type), { label: typeLabel(item.type) })}
-            <span>${escapeHtml(formatDateTime(item.date))}</span>
-          </div>
+    <article class="fn-row ${expense ? "fn-row-expense" : "fn-row-income"}">
+      <div class="fn-row-main" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}">
+        <div class="fn-row-date">
+          <strong>${escapeHtml(formatDateShort(item.date))}</strong>
+          <span>${escapeHtml(typeLabel(item.type))}</span>
+        </div>
+        <div class="fn-row-copy">
           <strong>${escapeHtml(item.description || originLabel(item))}</strong>
-          <span>${escapeHtml(originLabel(item))}</span>
+          <span>${escapeHtml(originLabel(item))} · ${escapeHtml(item.category || "Sem categoria")}</span>
+          <small>${escapeHtml(item.paymentMethod || "Metodo nao informado")}</small>
         </div>
-        <div class="finance-transaction-value">
-          <span>${expense ? "Saida" : "Entrada"}</span>
+        <div class="fn-row-value">
           <strong>${expense ? "-" : "+"} ${escapeHtml(money(item.amount))}</strong>
+          <span>${escapeHtml(formatDateTime(item.date))}</span>
         </div>
       </div>
-      <div class="finance-transaction-foot">
-        <span>${escapeHtml(item.category || "Sem categoria")}</span>
-        <span>${escapeHtml(item.paymentMethod || "Metodo nao informado")}</span>
-        ${renderTransactionActions(item)}
-      </div>
+      <div class="fn-row-actions">${renderTransactionActions(item)}</div>
     </article>
-  `;
-}
-
-function renderTransactionsTable(items = []) {
-  return `
-    <div class="ux-table hidden xl:block">
-      <table class="w-full border-collapse">
-        <thead>
-          <tr>
-            <th class="px-3 py-3 text-left">Data</th>
-            <th class="px-3 py-3 text-left">Lancamento</th>
-            <th class="px-3 py-3 text-left">Origem</th>
-            <th class="px-3 py-3 text-left">Categoria</th>
-            <th class="px-3 py-3 text-left">Metodo</th>
-            <th class="px-3 py-3 text-right">Valor</th>
-            <th class="px-3 py-3 text-right">Acao</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items
-            .map((item) => {
-              const expense = isExpense(item);
-              return `
-                <tr>
-                  <td class="px-3 py-3 text-xs text-slate-300">${escapeHtml(formatDateTime(item.date))}</td>
-                  <td class="px-3 py-3">
-                    <div class="text-sm font-semibold text-slate-100">${escapeHtml(item.description || "-")}</div>
-                    <div class="mt-1">${renderStatusChip(typeStatus(item.type), { label: typeLabel(item.type) })}</div>
-                  </td>
-                  <td class="px-3 py-3 text-sm font-semibold text-slate-100">${escapeHtml(originLabel(item))}</td>
-                  <td class="px-3 py-3 text-xs text-slate-300">${escapeHtml(item.category || "-")}</td>
-                  <td class="px-3 py-3 text-xs text-slate-300">${escapeHtml(item.paymentMethod || "-")}</td>
-                  <td class="px-3 py-3 text-right text-sm font-bold ${expense ? "text-rose-300" : "text-emerald-300"}">${expense ? "-" : "+"} ${escapeHtml(money(item.amount))}</td>
-                  <td class="px-3 py-3 text-right">${renderTransactionActions(item)}</td>
-                </tr>
-              `;
-            })
-            .join("")}
-        </tbody>
-      </table>
-    </div>
   `;
 }
 
@@ -245,7 +293,7 @@ function renderOperationalLinks(item = {}) {
   ].filter(([, value]) => value);
 
   if (!rows.length) {
-    return `<p class="text-sm text-slate-400">Sem vinculo operacional informado para este lancamento.</p>`;
+    return `<p class="ds-text-muted">Sem vinculo operacional informado para este lancamento.</p>`;
   }
 
   return `
@@ -263,6 +311,7 @@ function renderOperationalLinks(item = {}) {
 
 export function renderFinancialLoading(elements) {
   if (elements.summary) renderPanelMessage(elements.summary, "Carregando resultado do periodo...");
+  if (elements.toolbar) renderPanelMessage(elements.toolbar, "Preparando acoes financeiras...");
   if (elements.cashflow) renderPanelMessage(elements.cashflow, "Carregando origens financeiras...");
   if (elements.list) renderPanelMessage(elements.list, "Carregando lancamentos financeiros...");
   if (elements.commissions) elements.commissions.innerHTML = "";
@@ -271,6 +320,7 @@ export function renderFinancialLoading(elements) {
 
 export function renderFinancialError(elements, message = "Falha ao carregar financeiro.") {
   if (elements.summary) renderPanelMessage(elements.summary, message, "error");
+  if (elements.toolbar) renderPanelMessage(elements.toolbar, message, "error");
   if (elements.cashflow) renderPanelMessage(elements.cashflow, message, "error");
   if (elements.list) renderPanelMessage(elements.list, message, "error");
   if (elements.commissions) elements.commissions.innerHTML = "";
@@ -292,29 +342,26 @@ export function renderFinancialData(elements, payload) {
   const transactions = Array.isArray(payload?.transactions?.transactions)
     ? payload.transactions.transactions
     : [];
-  const movement = toNumber(cashFlow.incoming) + toNumber(cashFlow.outgoing);
 
   if (elements.summary) {
     elements.summary.innerHTML = [
-      renderCard("Entradas", money(cashFlow.incoming), "text-emerald-700", "Receitas do periodo"),
-      renderCard("Saidas", money(cashFlow.outgoing), "text-rose-700", "Despesas e reversos"),
-      renderCard(
-        "Saldo",
-        money(cashFlow.balance),
-        toNumber(cashFlow.balance) >= 0 ? "text-emerald-700" : "text-rose-700",
-        "Entradas menos saidas",
-      ),
       renderCard(
         "Resultado",
         money(summary.estimatedProfit ?? cashFlow.balance),
-        toNumber(summary.estimatedProfit ?? cashFlow.balance) >= 0 ? "text-slate-100" : "text-rose-700",
-        `Movimento: ${money(movement)}`,
+        toNumber(summary.estimatedProfit ?? cashFlow.balance) >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
+        `Saldo ${money(cashFlow.balance)}`,
       ),
+      renderCard("Entradas", money(cashFlow.incoming), "fn-kpi-positive", "Receitas no recorte"),
+      renderCard("Saidas", money(cashFlow.outgoing), "fn-kpi-negative", "Despesas e reversos"),
     ].join("");
   }
 
+  if (elements.toolbar) {
+    elements.toolbar.innerHTML = renderFinancialToolbar(transactions, cashFlow);
+  }
+
   if (elements.cashflow) {
-    elements.cashflow.innerHTML = renderOriginStrip(transactions);
+    elements.cashflow.innerHTML = renderFinancialCharts(transactions, cashFlow);
   }
 
   if (elements.list) {
@@ -322,16 +369,14 @@ export function renderFinancialData(elements, payload) {
       elements.list.innerHTML = renderEmptyState({
         title: "Nenhum lancamento financeiro encontrado.",
         description: "Ajuste o periodo ou registre um lancamento manual para compor o caixa.",
-        action: renderPrimaryAction({
-          label: "Novo lancamento",
-          id: "financialEmptyAddBtn",
-          type: "button",
-        }),
       });
     } else {
       elements.list.innerHTML = `
-        ${renderTransactionsTable(transactions)}
-        <div class="space-y-2 xl:mt-3">${transactions.map((item) => renderTransactionRow(item)).join("")}</div>
+        <div class="fn-list-head">
+          <span>Lancamentos no recorte</span>
+          <strong>${transactions.length} ${transactions.length === 1 ? "registro" : "registros"}</strong>
+        </div>
+        <div class="fn-list">${transactions.map((item) => renderTransactionRow(item)).join("")}</div>
       `;
     }
   }

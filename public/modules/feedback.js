@@ -1,12 +1,12 @@
-function toneClasses(tone) {
-  if (tone === "error") return "border-red-200 bg-red-50 text-red-700";
-  if (tone === "warning") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (tone === "success") return "border-teal-200 bg-teal-50 text-teal-700";
-  return "border-gray-200 bg-gray-50 text-gray-600";
+function toneClass(tone) {
+  if (tone === "error") return "panel-msg-error";
+  if (tone === "warning") return "panel-msg-warning";
+  if (tone === "success") return "panel-msg-success";
+  return "";
 }
 
 export function feedbackPanel(message, tone = "neutral") {
-  return `<div class="rounded-lg border px-3 py-2 text-sm ${toneClasses(tone)}">${message}</div>`;
+  return `<div class="panel-msg ${toneClass(tone)}">${message}</div>`;
 }
 
 export function renderPanelMessage(element, message, tone = "neutral") {
@@ -17,10 +17,10 @@ export function renderPanelMessage(element, message, tone = "neutral") {
 export function renderInlineFeedback(element, type, message) {
   if (!element) return;
   if (!message) {
-    element.className = "mt-2";
+    element.className = "panel-msg-host";
     element.innerHTML = "";
     return;
   }
-  element.className = "mt-2";
+  element.className = "panel-msg-host";
   element.innerHTML = feedbackPanel(message, type || "neutral");
 }

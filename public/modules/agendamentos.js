@@ -52,15 +52,6 @@ function statusLabel(status) {
   return status;
 }
 
-function statusClass(status) {
-  if (status === "SCHEDULED") return "bg-slate-100 text-slate-700";
-  if (status === "CONFIRMED") return "bg-indigo-100 text-indigo-700";
-  if (status === "IN_SERVICE") return "bg-amber-100 text-amber-700";
-  if (status === "COMPLETED") return "bg-emerald-100 text-emerald-700";
-  if (status === "CANCELLED") return "bg-red-100 text-red-700";
-  if (status === "NO_SHOW") return "bg-rose-100 text-rose-700";
-  return "bg-gray-100 text-gray-700";
-}
 
 function computeClientProfile(item, allItems) {
   const tags = Array.isArray(item.clientTags) ? item.clientTags : [];
@@ -82,12 +73,8 @@ function profileLabel(profile) {
   return "Novo";
 }
 
-function profileClass(profile) {
-  if (profile === "VIP") return "bg-yellow-100 text-yellow-800";
-  if (profile === "EM_RISCO") return "bg-red-100 text-red-700";
-  if (profile === "INATIVO") return "bg-gray-200 text-gray-700";
-  if (profile === "RECORRENTE") return "bg-indigo-100 text-indigo-700";
-  return "bg-emerald-100 text-emerald-700";
+function profileChip(profile) {
+  return renderStatusChip(profile || "NOVO");
 }
 
 function formatTime(date) {
@@ -122,46 +109,32 @@ function quickFlags(item, now, allItems) {
   const hasNotes = Boolean(safeText(item.notes));
   const profile = computeClientProfile(item, allItems);
 
-  if (late) flags.push({ label: "Atrasado", className: "bg-amber-100 text-amber-700" });
-  if (pendingConfirmation) {
-    flags.push({
-      label: "Pendente de confirmacao",
-      className: "bg-indigo-100 text-indigo-700",
-    });
-  }
-  if (profile === "VIP") flags.push({ label: "VIP", className: "bg-yellow-100 text-yellow-800" });
-  if (profile === "EM_RISCO") flags.push({ label: "Cliente em risco", className: "bg-red-100 text-red-700" });
-  if (upcoming) flags.push({ label: "Horario proximo", className: "bg-emerald-100 text-emerald-700" });
-  if (hasNotes) flags.push({ label: "Tem observacao", className: "bg-violet-100 text-violet-700" });
+  if (late) flags.push({ status: "WARNING", label: "Atrasado" });
+  if (pendingConfirmation) flags.push({ status: "PENDING", label: "Pendente de confirmacao" });
+  if (profile === "VIP") flags.push({ status: "VIP", label: "VIP" });
+  if (profile === "EM_RISCO") flags.push({ status: "EM_RISCO", label: "Cliente em risco" });
+  if (upcoming) flags.push({ status: "PAID", label: "Horario proximo" });
+  if (hasNotes) flags.push({ status: "INFO", label: "Observacao" });
 
   return { flags, late, profile };
 }
 
 function actionsForStatus(status) {
-  if (status === "SCHEDULED") return ["CONFIRMED", "RESCHEDULE", "CANCELLED", "DETAIL", "WHATSAPP"];
-  if (status === "CONFIRMED") {
-    return ["IN_SERVICE", "RESCHEDULE", "CANCELLED", "NO_SHOW", "DETAIL", "WHATSAPP"];
+  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") {
+    return ["CANCELLED", "DETAIL", "WHATSAPP"];
   }
-  if (status === "IN_SERVICE") return ["COMPLETE", "DETAIL", "WHATSAPP"];
   if (status === "COMPLETED") return ["REFUND", "DETAIL", "WHATSAPP"];
   return ["DETAIL", "WHATSAPP"];
 }
 
 function primaryActionForStatus(status) {
-  if (status === "SCHEDULED") return "CONFIRMED";
-  if (status === "CONFIRMED") return "IN_SERVICE";
-  if (status === "IN_SERVICE") return "COMPLETE";
+  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") return "CANCELLED";
   if (status === "COMPLETED") return "REFUND";
   return "DETAIL";
 }
 
 function actionLabel(action) {
-  if (action === "CONFIRMED") return "Confirmar";
-  if (action === "IN_SERVICE") return "Iniciar";
-  if (action === "COMPLETE") return "Concluir";
-  if (action === "RESCHEDULE") return "Remarcar";
   if (action === "CANCELLED") return "Cancelar";
-  if (action === "NO_SHOW") return "Falta";
   if (action === "DETAIL") return "Detalhes";
   if (action === "WHATSAPP") return "WhatsApp";
   if (action === "REFUND") return "Estornar atendimento";
@@ -169,13 +142,13 @@ function actionLabel(action) {
 }
 
 function actionClass(action) {
-  if (action === "COMPLETE") return "bg-emerald-600 hover:bg-emerald-700 text-white";
-  if (action === "CANCELLED") return "bg-red-600 hover:bg-red-700 text-white";
-  if (action === "NO_SHOW") return "bg-rose-600 hover:bg-rose-700 text-white";
-  if (action === "REFUND") return "bg-amber-600 hover:bg-amber-700 text-white";
-  if (action === "WHATSAPP") return "bg-green-600 hover:bg-green-700 text-white";
-  if (action === "DETAIL") return "bg-slate-100 hover:bg-slate-200 text-slate-700";
-  return "bg-slate-900 hover:bg-slate-800 text-white";
+  if (action === "COMPLETE") return "ux-btn ux-btn-success";
+  if (action === "CANCELLED") return "ux-btn ux-btn-danger";
+  if (action === "NO_SHOW") return "ux-btn ux-btn-danger";
+  if (action === "REFUND") return "ux-btn ux-btn-muted";
+  if (action === "WHATSAPP") return "ux-btn ux-btn-muted";
+  if (action === "DETAIL") return "ux-btn ux-btn-muted";
+  return "ux-btn ux-btn-primary";
 }
 
 export function normalizeAppointmentsPayload(payload) {
@@ -217,41 +190,25 @@ export function normalizeAppointmentsPayload(payload) {
 }
 
 export function renderAppointmentsLoading(elements) {
-  elements.summary.innerHTML = Array.from({ length: 8 }, () => `
-    <article class="rounded-xl border border-slate-200 bg-white p-3 animate-pulse">
-      <div class="h-3 w-24 bg-slate-200 rounded"></div>
-      <div class="h-7 w-10 bg-slate-200 rounded mt-2"></div>
-      <div class="h-3 w-32 bg-slate-200 rounded mt-2"></div>
-    </article>
-  `).join("");
-  elements.tableBody.innerHTML = `
-    <tr><td colspan="8" class="p-4 text-sm text-slate-500">Carregando agendamentos...</td></tr>
-  `;
-  elements.mobileList.innerHTML = "<p class='text-sm text-slate-500'>Carregando agendamentos...</p>";
+  elements.summary.innerHTML = Array.from({ length: 3 }, () => `<article class="ux-kpi agenda-kpi-loading"></article>`).join("");
+  elements.tableBody.innerHTML = `<tr><td colspan="8" class="appts-td-loading">Carregando agendamentos...</td></tr>`;
+  elements.mobileList.innerHTML = `<p class="ds-text-muted">Carregando agendamentos...</p>`;
   elements.periodSummary.textContent = "Filtrando agendamentos...";
 }
 
 export function renderAppointmentsError(elements, message) {
   const text = normalizeErrorMessage(message);
-  elements.summary.innerHTML = `
-    <article class="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 col-span-full">
-      ${text}
-    </article>
-  `;
-  elements.tableBody.innerHTML = `
-    <tr><td colspan="8" class="p-4 text-sm text-red-700">${text}</td></tr>
-  `;
-  elements.mobileList.innerHTML = `<p class='text-sm text-red-700'>${text}</p>`;
+  elements.summary.innerHTML = `<div class="panel-msg panel-msg-error">${text}</div>`;
+  elements.tableBody.innerHTML = `<tr><td colspan="8" class="appts-td-loading panel-msg-error">${text}</td></tr>`;
+  elements.mobileList.innerHTML = `<p class="ds-text-muted">${text}</p>`;
 }
 
 export function renderAppointmentsFeedback(elements, type, message) {
-  const classes =
-    type === "error"
-      ? "bg-red-50 border-red-200 text-red-700"
-      : type === "success"
-        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-        : "bg-indigo-950/30 border-indigo-300 text-indigo-200";
-  elements.feedback.className = `rounded-xl border px-3 py-2 text-sm ${classes}`;
+  const modifier =
+    type === "error" ? "panel-msg-error"
+    : type === "success" ? "panel-msg-success"
+    : "panel-msg-warning";
+  elements.feedback.className = `panel-msg ${modifier}`;
   elements.feedback.textContent = safeText(message, "");
 }
 
@@ -298,7 +255,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
       title: "Nao ha agendamentos para este periodo.",
       description: "Crie um novo horario, volte para hoje ou limpe os filtros para ampliar a busca.",
       action: `
-        <div class="flex flex-wrap justify-center gap-2">
+        <div class="catalog-row-actions">
           <button type="button" id="appointmentsEmptyNew" class="ux-btn ux-btn-primary">Criar novo agendamento</button>
           <button type="button" id="appointmentsEmptyToday" class="ux-btn ux-btn-muted">Ver agenda de hoje</button>
           <button type="button" id="appointmentsEmptyClear" class="ux-btn ux-btn-muted">Limpar filtros</button>
@@ -320,34 +277,30 @@ export function renderAppointmentsData(elements, items, options = {}) {
       const actions = actionsForStatus(item.status);
       const primaryAction = primaryActionForStatus(item.status);
       return `
-        <tr class="${late ? "bg-amber-50" : "bg-white"} border-b border-slate-100">
-          <td class="px-3 py-3 text-sm font-semibold text-slate-800">${formatTime(item.startsAt)}</td>
-          <td class="px-3 py-3 text-sm text-slate-700">
-            <div class="font-semibold">${item.client}</div>
-            <div class="text-xs text-slate-500">${item.clientPhone || "Sem telefone"}</div>
-            ${
-              item.hasProductSale
-                ? `<div class="mt-1 inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"><span class="inline-flex h-4 min-w-[20px] items-center justify-center rounded bg-emerald-700 px-1 text-[9px] font-bold text-white">SALE</span> Produto vendido</div>`
-                : ""
-            }
+        <tr class="${late ? "appts-row-late" : ""}">
+          <td class="appts-td">${formatTime(item.startsAt)}</td>
+          <td class="appts-td">
+            <div class="ds-cell-primary">${item.client}</div>
+            <div class="ds-cell-secondary">${item.clientPhone || "Sem telefone"}</div>
+            ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido</div>` : ""}
           </td>
-          <td class="px-3 py-3 text-sm text-slate-700">${item.service}</td>
-          <td class="px-3 py-3 text-sm text-slate-700">${item.professional}</td>
-          <td class="px-3 py-3 text-sm text-slate-700">${item.serviceDurationMin} min</td>
-          <td class="px-3 py-3 text-sm text-slate-700">${money(item.servicePrice)}</td>
-          <td class="px-3 py-3">
-            <div class="flex flex-wrap gap-1">
+          <td class="appts-td">${item.service}</td>
+          <td class="appts-td">${item.professional}</td>
+          <td class="appts-td">${item.serviceDurationMin} min</td>
+          <td class="appts-td">${money(item.servicePrice)}</td>
+          <td class="appts-td">
+            <div class="appts-chip-group">
               ${renderStatusChip(item.status)}
-              <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${profileClass(profile)}">${profileLabel(profile)}</span>
-              ${flags.map((flag) => `<span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${flag.className}">${flag.label}</span>`).join("")}
+              ${profileChip(profile)}
+              ${flags.map((flag) => renderStatusChip(flag.status, { label: flag.label })).join("")}
             </div>
           </td>
-          <td class="px-3 py-3">
-            <div class="flex flex-wrap gap-1">
+          <td class="appts-td">
+            <div class="catalog-row-actions">
               ${actions
                 .map(
                   (action) =>
-                    `<button data-action="${action}" data-id="${item.id}" class="min-h-[36px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
+                    `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
                 )
                 .join("")}
             </div>
@@ -363,29 +316,25 @@ export function renderAppointmentsData(elements, items, options = {}) {
       const actions = actionsForStatus(item.status);
       const primaryAction = primaryActionForStatus(item.status);
       return `
-        <article class="rounded-xl border ${late ? "border-amber-300" : "border-slate-200"} bg-white p-3">
-          <div class="flex items-start justify-between gap-2">
+        <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
+          <div class="appts-mobile-head">
             <div>
-              <div class="text-sm font-bold text-slate-900">${formatTime(item.startsAt)} - ${item.client}</div>
-              <div class="text-xs text-slate-500">${item.service} | ${item.professional}</div>
+              <div class="ds-cell-primary">${formatTime(item.startsAt)} - ${item.client}</div>
+              <div class="ds-cell-secondary">${item.service} | ${item.professional}</div>
             </div>
             ${renderStatusChip(item.status)}
           </div>
-          <div class="mt-2 flex flex-wrap gap-1">
-            <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${profileClass(profile)}">${profileLabel(profile)}</span>
-            ${flags.map((flag) => `<span class="rounded-full px-2 py-0.5 text-[11px] font-semibold ${flag.className}">${flag.label}</span>`).join("")}
+          <div class="appts-chip-group">
+            ${profileChip(profile)}
+            ${flags.map((flag) => renderStatusChip(flag.status, { label: flag.label })).join("")}
           </div>
-          <div class="mt-2 text-xs text-slate-500">Telefone: ${item.clientPhone || "Nao informado"} | Valor: ${money(item.servicePrice)}</div>
-          ${
-            item.hasProductSale
-              ? `<div class="mt-1 inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"><span class="inline-flex h-4 min-w-[20px] items-center justify-center rounded bg-emerald-700 px-1 text-[9px] font-bold text-white">SALE</span> Produto vendido (${item.productItemsSoldCount} item(ns))</div>`
-              : ""
-          }
-          <div class="mt-2 flex flex-wrap gap-1">
+          <div class="ds-cell-secondary">Telefone: ${item.clientPhone || "Nao informado"} | Valor: ${money(item.servicePrice)}</div>
+          ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido (${item.productItemsSoldCount} item(ns))</div>` : ""}
+          <div class="catalog-row-actions">
             ${actions
               .map(
                 (action) =>
-                  `<button data-action="${action}" data-id="${item.id}" class="min-h-[40px] rounded-lg px-2 py-1 text-xs font-semibold ${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
+                  `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
               )
               .join("")}
           </div>

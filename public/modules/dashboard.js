@@ -32,9 +32,9 @@ function trendTone(value) {
 }
 
 function trendClass(tone) {
-  if (tone === "gain") return "text-emerald-700";
-  if (tone === "risk") return "text-red-700";
-  return "text-amber-700";
+  if (tone === "gain") return "ds-kpi-tone-success";
+  if (tone === "risk") return "ds-kpi-tone-danger";
+  return "ds-kpi-tone-warning";
 }
 
 function trendLabel(value) {
@@ -54,17 +54,17 @@ function formatDateTime(value) {
 }
 
 function emptyState(message) {
-  return `<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">${message}</div>`;
+  return `<div class="op-empty-state"><p class="op-empty-description">${message}</p></div>`;
 }
 
 function encodePayload(payload) {
   return encodeURIComponent(JSON.stringify(payload || {}));
 }
 
-function severityStyle(level) {
-  if (level === "HIGH") return "border-red-200 bg-red-50 text-red-900";
-  if (level === "LOW") return "border-indigo-300 bg-indigo-950/30 text-indigo-100";
-  return "border-amber-200 bg-amber-50 text-amber-900";
+function severityTone(level) {
+  if (level === "HIGH") return "danger";
+  if (level === "LOW") return "accent";
+  return "warning";
 }
 
 function parseBand(band) {
@@ -89,26 +89,24 @@ function buildActionCard(options) {
     tone,
     payload,
   } = options;
-  const style =
-    tone === "gain"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-      : tone === "risk"
-        ? "border-red-200 bg-red-50 text-red-900"
-        : "border-amber-200 bg-amber-50 text-amber-900";
+  const toneClass =
+    tone === "gain" ? "ds-action-card-success"
+    : tone === "risk" ? "ds-action-card-danger"
+    : "ds-action-card-warning";
   const suggestionId = suggestion?.id || `manual-${actionType}`;
   const ctaModule = suggestion?.ctaModule || "dashboard";
   const estimatedImpact = asNumber(suggestion?.estimatedImpact, impact);
   const actionPayload = suggestion?.actionPayload || payload || {};
 
   return `
-    <article class="rounded-xl border p-3 ${style}">
-      <div class="text-sm font-extrabold">${title}</div>
-      <p class="text-xs mt-1">${description}</p>
-      <div class="mt-2 text-xs font-semibold">Impacto estimado: ${currency(estimatedImpact)}</div>
-      <div class="mt-3 flex flex-wrap gap-2">
+    <article class="ds-action-card ${toneClass}">
+      <div class="ds-action-title">${title}</div>
+      <p class="ds-action-body">${description}</p>
+      <div class="ds-action-impact">Impacto estimado: ${currency(estimatedImpact)}</div>
+      <div class="ds-action-footer">
         <button
           type="button"
-          class="rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 text-xs font-semibold"
+          class="ux-btn ux-btn-primary"
           data-dashboard-cta="1"
           data-suggestion-id="${suggestionId}"
           data-action-type="${actionType}"
@@ -120,7 +118,7 @@ function buildActionCard(options) {
         </button>
         <button
           type="button"
-          class="rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-semibold"
+          class="ux-btn ux-btn-muted"
           data-dashboard-ignore="1"
           data-suggestion-id="${suggestionId}"
           data-action-type="${actionType}"
@@ -282,10 +280,10 @@ export function renderDashboardLoading(elements) {
 
   kpiGrid.innerHTML = Array.from({ length: 4 }, () => {
     return `
-      <article class="rounded-2xl border border-slate-200 bg-white p-4 animate-pulse">
-        <div class="h-3 w-28 bg-slate-200 rounded"></div>
-        <div class="h-8 w-40 bg-slate-200 rounded mt-3"></div>
-        <div class="h-2 w-24 bg-slate-100 rounded mt-3"></div>
+      <article class="ds-kpi" style="animation: pulse 1.4s ease infinite;">
+        <div style="height:10px;width:100px;border-radius:6px;background:var(--color-border);margin-bottom:10px;"></div>
+        <div style="height:30px;width:140px;border-radius:6px;background:var(--color-border);"></div>
+        <div style="height:8px;width:80px;border-radius:6px;background:var(--color-border-soft);margin-top:10px;"></div>
       </article>
     `;
   }).join("");
@@ -301,9 +299,10 @@ export function renderDashboardError(elements, onRetry) {
   if (!kpiGrid || !goalBlock || !topProfessionalsList || !alertsList || !actionSuggestionsList) return;
 
   kpiGrid.innerHTML = `
-    <article class="col-span-full rounded-2xl border border-red-200 bg-red-50 p-4">
-      <div class="text-sm font-bold text-red-800">Falha ao carregar o painel de decisao.</div>
-      <p class="text-sm text-red-700 mt-1">Sem dados nao ha acao: reconecte a API e atualize.</p>
+    <article class="ds-alert ds-alert-danger" style="grid-column: 1 / -1;">
+      <div class="ds-alert-label">Falha ao carregar</div>
+      <div class="ds-alert-title">Painel de decisao indisponivel</div>
+      <p class="ds-alert-body">Sem dados nao ha acao: reconecte a API e atualize.</p>
     </article>
   `;
   goalBlock.innerHTML = emptyState("Indicador indisponivel.");
@@ -311,12 +310,15 @@ export function renderDashboardError(elements, onRetry) {
   actionSuggestionsList.innerHTML = emptyState("Insights indisponiveis.");
 
   alertsList.innerHTML = `
-    <div class="rounded-xl border border-red-200 bg-red-50 px-3 py-3">
-      <p class="text-sm text-red-800">Nao foi possivel montar alertas e prioridades.</p>
-      <button type="button" data-dashboard-retry class="mt-2 rounded-lg bg-red-700 hover:bg-red-800 text-white px-3 py-1.5 text-xs font-semibold">
-        Tentar novamente
-      </button>
-    </div>
+    <article class="ds-alert ds-alert-danger">
+      <div class="ds-alert-label">Alertas indisponiveis</div>
+      <p class="ds-alert-body">Nao foi possivel montar alertas e prioridades.</p>
+      <div style="margin-top:10px;">
+        <button type="button" data-dashboard-retry class="ux-btn ux-btn-danger">
+          Tentar novamente
+        </button>
+      </div>
+    </article>
   `;
   const retryBtn = alertsList.querySelector("[data-dashboard-retry]");
   if (retryBtn && typeof onRetry === "function") {
@@ -330,53 +332,49 @@ export function renderDashboardData(elements, payload) {
   if (!kpiGrid || !goalBlock || !topProfessionalsList || !alertsList || !actionSuggestionsList) return;
 
   kpiGrid.innerHTML = `
-    <article class="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
-      <div class="text-xs font-bold uppercase tracking-wide text-emerald-700">Receita hoje</div>
-      <div class="text-3xl font-black text-emerald-900 mt-1">${currency(dashboard.revenueToday)}</div>
-      <div class="text-xs text-emerald-800 mt-1">Resposta: estou ganhando hoje?</div>
+    <article class="ds-kpi ds-kpi-success">
+      <div class="ds-kpi-label">Receita hoje</div>
+      <div class="ds-kpi-value">${currency(dashboard.revenueToday)}</div>
+      <div class="ds-kpi-hint">Estou ganhando hoje?</div>
     </article>
-    <article class="rounded-2xl border border-indigo-300 bg-gradient-to-br from-indigo-950/40 to-slate-950 p-4 shadow-sm">
-      <div class="text-xs font-bold uppercase tracking-wide text-indigo-200">Receita mes</div>
-      <div class="text-3xl font-black text-indigo-50 mt-1">${currency(dashboard.revenueMonth)}</div>
-      <div class="text-xs text-indigo-200 mt-1">${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth) >= 0 ? "+" : ""}${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth).toFixed(1)}% vs mes anterior</div>
+    <article class="ds-kpi ds-kpi-accent">
+      <div class="ds-kpi-label">Receita mes</div>
+      <div class="ds-kpi-value">${currency(dashboard.revenueMonth)}</div>
+      <div class="ds-kpi-hint">${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth) >= 0 ? "+" : ""}${percentDelta(dashboard.revenueMonth, dashboard.revenuePrevMonth).toFixed(1)}% vs mes anterior</div>
     </article>
-    <article class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm">
-      <div class="text-xs font-bold uppercase tracking-wide text-indigo-700">Ocupacao</div>
-      <div class="text-3xl font-black text-indigo-900 mt-1">${dashboard.occupancyRate.toFixed(1)}%</div>
-      <div class="text-xs text-indigo-800 mt-1">Resposta: estamos cheios ou vazios?</div>
+    <article class="ds-kpi ds-kpi-accent">
+      <div class="ds-kpi-label">Ocupacao</div>
+      <div class="ds-kpi-value">${dashboard.occupancyRate.toFixed(1)}%</div>
+      <div class="ds-kpi-hint">Estamos cheios ou vazios?</div>
     </article>
-    <article class="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
-      <div class="text-xs font-bold uppercase tracking-wide text-amber-700">Meta mensal</div>
-      <div class="text-3xl font-black text-amber-900 mt-1">${dashboard.goalProgress.toFixed(1)}%</div>
-      <div class="mt-2 h-2 rounded-full bg-amber-100 overflow-hidden">
-        <div class="h-full bg-amber-500" style="width: ${Math.min(dashboard.goalProgress, 100)}%"></div>
-      </div>
+    <article class="ds-kpi ds-kpi-warning">
+      <div class="ds-kpi-label">Meta mensal</div>
+      <div class="ds-kpi-value">${dashboard.goalProgress.toFixed(1)}%</div>
+      <div class="ds-kpi-progress"><div class="ds-kpi-progress-bar" style="width:${Math.min(dashboard.goalProgress, 100)}%;"></div></div>
     </article>
   `;
 
   goalBlock.innerHTML = `
-    <div class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs text-slate-500">Meta mensal ${currency(dashboard.goalMonth)}</div>
-      <div class="text-2xl font-black text-slate-900 mt-1">${dashboard.goalProgress.toFixed(1)}%</div>
-      <div class="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden">
-        <div class="h-full bg-emerald-600" style="width: ${Math.min(dashboard.goalProgress, 100)}%"></div>
-      </div>
-      <div class="text-xs text-slate-600 mt-2">Faltam ${currency(Math.max(0, dashboard.goalMonth - dashboard.revenueMonth))} para bater a meta.</div>
-    </div>
+    <article class="ds-kpi ds-kpi-warning">
+      <div class="ds-kpi-label">Meta mensal ${currency(dashboard.goalMonth)}</div>
+      <div class="ds-kpi-value">${dashboard.goalProgress.toFixed(1)}%</div>
+      <div class="ds-kpi-progress"><div class="ds-kpi-progress-bar" style="width:${Math.min(dashboard.goalProgress, 100)}%;"></div></div>
+      <div class="ds-kpi-hint">Faltam ${currency(Math.max(0, dashboard.goalMonth - dashboard.revenueMonth))} para bater a meta.</div>
+    </article>
   `;
 
   const topProfessional = safeArray(dashboard.topProfessionals)[0];
   const topService = safeArray(dashboard.topServices)[0];
   topProfessionalsList.innerHTML = `
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs text-slate-500">Top profissional</div>
-      <div class="text-sm font-bold text-slate-900 mt-1">${topProfessional?.name || "Sem dados"}</div>
-      <div class="text-xs text-slate-600 mt-1">Receita ${currency(topProfessional?.revenue || 0)}</div>
+    <article class="ds-kpi ds-kpi-success">
+      <div class="ds-kpi-label">Top profissional</div>
+      <div class="ds-kpi-value" style="font-size:18px;">${topProfessional?.name || "Sem dados"}</div>
+      <div class="ds-kpi-hint">Receita ${currency(topProfessional?.revenue || 0)}</div>
     </article>
-    <article class="rounded-xl border border-slate-200 bg-white p-3">
-      <div class="text-xs text-slate-500">Servico mais vendido</div>
-      <div class="text-sm font-bold text-slate-900 mt-1">${topService?.name || "Sem dados"}</div>
-      <div class="text-xs text-slate-600 mt-1">${asNumber(topService?.salesCount)} vendas | ${currency(topService?.revenueGenerated || 0)}</div>
+    <article class="ds-kpi ds-kpi-accent">
+      <div class="ds-kpi-label">Servico mais vendido</div>
+      <div class="ds-kpi-value" style="font-size:18px;">${topService?.name || "Sem dados"}</div>
+      <div class="ds-kpi-hint">${asNumber(topService?.salesCount)} vendas &middot; ${currency(topService?.revenueGenerated || 0)}</div>
     </article>
   `;
 
@@ -391,21 +389,21 @@ export function renderDashboardData(elements, payload) {
   const atRiskCount = asNumber(dashboard.clientsOverview.summary.atRisk || dashboard.clientsOverdue.length);
 
   alertsList.innerHTML = `
-    <article class="rounded-xl border ${forecastDrop ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"} p-3">
-      <div class="text-xs font-bold uppercase tracking-wide ${forecastDrop ? "text-red-700" : "text-emerald-700"}">Queda de faturamento</div>
-      <div class="text-sm font-bold ${forecastDrop ? "text-red-900" : "text-emerald-900"} mt-1">
-        ${forecastDrop ? `Risco de queda detectado -> impacto ${currency(forecastDrop.estimatedImpact)}` : "Sem queda relevante prevista no momento"}
+    <article class="ds-alert ${forecastDrop ? "ds-alert-danger" : "ds-alert-success"}">
+      <div class="ds-alert-label">Queda de faturamento</div>
+      <div class="ds-alert-title">
+        ${forecastDrop ? `Risco de queda detectado — impacto ${currency(forecastDrop.estimatedImpact)}` : "Sem queda relevante prevista no momento"}
       </div>
     </article>
-    <article class="rounded-xl border border-amber-200 bg-amber-50 p-3">
-      <div class="text-xs font-bold uppercase tracking-wide text-amber-700">Horarios vazios</div>
-      <div class="text-sm font-bold text-amber-900 mt-1">${idleAlerts.length} janelas sem agenda nas proximas 72h</div>
-      <div class="text-xs text-amber-900 mt-1">${idleWindowsText.length ? idleWindowsText.join(" | ") : "Nenhuma faixa critica no horizonte atual."}</div>
+    <article class="ds-alert ds-alert-warning">
+      <div class="ds-alert-label">Horarios vazios</div>
+      <div class="ds-alert-title">${idleAlerts.length} janela(s) sem agenda nas proximas 72h</div>
+      <div class="ds-alert-body">${idleWindowsText.length ? idleWindowsText.join(" &middot; ") : "Nenhuma faixa critica no horizonte atual."}</div>
     </article>
-    <article class="rounded-xl border border-red-200 bg-red-50 p-3">
-      <div class="text-xs font-bold uppercase tracking-wide text-red-700">Clientes em risco</div>
-      <div class="text-sm font-bold text-red-900 mt-1">${atRiskCount} clientes pedem reativacao imediata</div>
-      <div class="text-xs text-red-900 mt-1">Cada dia sem acao aumenta perda de recorrencia.</div>
+    <article class="ds-alert ds-alert-danger">
+      <div class="ds-alert-label">Clientes em risco</div>
+      <div class="ds-alert-title">${atRiskCount} cliente(s) pedem reativacao imediata</div>
+      <div class="ds-alert-body">Cada dia sem acao aumenta perda de recorrencia.</div>
     </article>
   `;
 
@@ -417,9 +415,11 @@ export function renderDashboardData(elements, payload) {
   const reactivationImpact = asNumber(reactivationSuggestion?.estimatedImpact, 0);
   const idleImpact = asNumber(idleSuggestion?.estimatedImpact, 0);
   actionSuggestionsList.innerHTML = `
-    <details class="rounded-xl border border-slate-200 bg-white p-3">
-      <summary class="cursor-pointer text-sm font-bold text-slate-900">Ver insights</summary>
-      <div class="mt-3 space-y-2">
+    <details class="ux-card" style="cursor:default;">
+      <summary class="ux-label" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;">
+        <span>&#9654;</span> Ver insights
+      </summary>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
         ${buildActionCard({
           title: "Reativar clientes inativos",
           description: "Abrir fila de reativacao para recuperar receita.",

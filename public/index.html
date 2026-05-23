@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0B0F14" />
+    <script>
+      (function () {
+        var t = localStorage.getItem("authToken");
+        if (!t) { window.location.replace("/login"); return; }
+        try {
+          var p = JSON.parse(atob(t.split(".")[1]));
+          if (p.exp && p.exp < Date.now() / 1000) {
+            localStorage.removeItem("authToken");
+            window.location.replace("/login");
+          }
+        } catch (_) {}
+      })();
+    </script>
     <title>Barbearia Premium | Dashboard Operacional</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,40 +24,37 @@
       href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/styles/layout.css" />
   </head>
-  <body class="theme-dark bg-gray-50 text-gray-900 overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
+  <body class="theme-dark overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
     <div id="appShell">
       <aside id="appSidebar" aria-label="Navegacao principal"></aside>
 
       <div id="appMain">
-        <header id="appTopbar"></header>
-
         <main id="appContent" class="min-w-0">
-          <section id="dashboardSection" data-section="dashboard" class="module-section space-y-4 min-w-0">
+          <section id="dashboardSection" data-section="dashboard" class="module-section hidden">
             <div id="dashboardHeaderMount"></div>
             <section id="kpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
 
             <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-2">Meta mensal</h3>
+              <article class="ux-card">
+                <h3 class="ux-section-label">Meta mensal</h3>
                 <div id="goalBlock"></div>
               </article>
-              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-red-700 mb-2">Alertas (max 3)</h3>
-                <div id="alertsList" class="space-y-2"></div>
+              <article class="ux-card">
+                <h3 class="ux-section-label ds-kpi-tone-danger">Alertas (max 3)</h3>
+                <div id="alertsList"></div>
               </article>
-              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-emerald-700 mb-2">Performance</h3>
-                <div id="topProfessionalsList" class="space-y-2"></div>
+              <article class="ux-card">
+                <h3 class="ux-section-label ds-kpi-tone-success">Performance</h3>
+                <div id="topProfessionalsList"></div>
               </article>
             </section>
 
             <section class="grid grid-cols-1 gap-3">
-              <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-indigo-700 mb-2">Insights</h3>
-                <div id="actionSuggestionsList" class="space-y-2"></div>
+              <article class="ux-card">
+                <h3 class="ux-section-label ds-kpi-tone-info">Insights</h3>
+                <div id="actionSuggestionsList"></div>
               </article>
             </section>
 
@@ -57,597 +67,623 @@
             <div id="dashboardAutomationSignals" class="hidden"></div>
           </section>
 
-          <section id="agendaSection" data-section="agenda" class="module-section hidden min-w-0">
-            <div id="agendaHeaderMount" class="mb-3"></div>
-            <div class="agenda-view-switch mb-3">
-              <button id="viewListBtn" type="button" class="px-3 py-2 text-sm bg-white text-gray-700">Lista</button>
-              <button id="viewGridBtn" type="button" class="px-3 py-2 text-sm bg-gray-900 text-white">Cards</button>
-            </div>
-
-            <article id="agendaSchedulePanel" class="ux-card mb-3">
-              <h2 class="text-lg font-bold text-gray-800 mb-3">Novo Agendamento</h2>
-              <form id="appointmentForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label class="text-sm font-semibold text-gray-700">Cliente
-                  <select id="clientId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                </label>
-                <label class="text-sm font-semibold text-gray-700">Profissional
-                  <select id="professionalId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                </label>
-                <label class="text-sm font-semibold text-gray-700">Servico
-                  <select id="serviceId" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                </label>
-                <label class="text-sm font-semibold text-gray-700">Horario
-                  <input type="datetime-local" id="startsAt" required class="mt-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
-                </label>
-                <div id="clientInsights" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
-                  Selecione um cliente para ver historico resumido e perfil.
-                </div>
-                <div id="serviceSuggestions" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
-                  Sugestoes de servicos relacionados aparecerao aqui.
-                </div>
-                <div id="appointmentFeedback" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
-                  Selecione cliente, profissional, servico e horario para validar disponibilidade.
-                </div>
-                <div id="alternativeSlots" class="md:col-span-2 rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm text-gray-600">
-                  Horarios alternativos serao sugeridos aqui em caso de conflito.
-                </div>
-                <button type="submit" class="md:col-span-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 font-semibold transition-colors">Agendar</button>
-              </form>
-            </article>
+          <section id="agendaSection" data-section="agenda" class="module-section hidden">
+            <div id="agendaHeaderMount" class="ds-mb"></div>
 
             <div id="agendaCardsMode">
-            <section id="agendaMetricsGrid" class="agenda-next-strip mb-3"></section>
-            <section class="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-3">
-              <article class="ux-card min-w-0">
-                <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-                  <h2 class="text-lg font-bold text-gray-800">Agenda do dia</h2>
-                </div>
-                <div id="agendaFilterMount" class="mb-3"></div>
-                <div id="agendaList" class="space-y-2"></div>
-              </article>
+              <section id="agendaMetricsGrid" class="agenda-next-strip ds-mb"></section>
+            </div>
 
-              <aside class="space-y-3">
-                <article class="ux-card">
-                  <h2 class="text-lg font-bold text-gray-800 mb-3">Fila do Momento</h2>
-                  <div id="queueList" class="space-y-2"></div>
-                </article>
-                <article class="ux-card">
-                  <h2 class="text-lg font-bold text-gray-800 mb-3">Estoque Baixo</h2>
-                  <div id="lowStockList" class="space-y-2"></div>
-                </article>
-              </aside>
-            </section>
+            <div class="wc-nav ds-mb">
+              <div class="wc-nav-left">
+                <button id="wcPrevWeekBtn" type="button" class="wc-nav-btn" title="Semana anterior">&#8592;</button>
+                <span id="wcWeekLabel" class="wc-week-label"></span>
+                <button id="wcNextWeekBtn" type="button" class="wc-nav-btn" title="Proxima semana">&#8594;</button>
+                <div class="wc-nav-right">
+                  <button id="viewGridBtn" type="button" class="wc-view-btn is-active">Semana</button>
+                  <button id="viewListBtn" type="button" class="wc-view-btn">Lista</button>
+                </div>
+              </div>
+              <button id="agendaNewAppointmentBtn" type="button" class="wc-add-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                Novo agendamento
+              </button>
+            </div>
+
+            <div id="agendaCalendarMode">
+              <div id="weekCalContainer" class="wc-outer"></div>
+              <div style="display:none" aria-hidden="true">
+                <div id="agendaFilterMount"></div>
+                <div id="agendaList"></div>
+                <div id="queueList"></div>
+                <div id="lowStockList"></div>
+              </div>
             </div>
           </section>
 
-          <div id="agendaListMode" class="hidden min-w-0 mt-3">
-            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 class="text-2xl font-extrabold text-slate-900">Agenda - Visao Lista</h2>
-                  <p id="appointmentsHeaderDate" class="text-sm text-slate-500 mt-1"></p>
-                </div>
-                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                  <span id="appointmentsPeriodSummary">Resumo do periodo</span>
-                </div>
+          <div id="agendaListMode" class="hidden al-wrap">
+            <!-- Filter bar -->
+            <div class="al-filter-bar">
+              <select id="alFilterStatus" class="al-filter-select">
+                <option value="__OPERATIONAL__" selected>Operacionais</option>
+                <option value="">Todos os status</option>
+                <option value="SCHEDULED">Agendado</option>
+                <option value="CONFIRMED">Confirmado</option>
+                <option value="IN_SERVICE">Em atendimento</option>
+                <option value="COMPLETED">Concluido</option>
+                <option value="CANCELLED">Cancelado</option>
+                <option value="NO_SHOW">Falta</option>
+              </select>
+              <select id="alFilterProfessional" class="al-filter-select">
+                <option value="">Todos os profissionais</option>
+              </select>
+              <input id="alFilterSearch" type="search" class="al-filter-search" placeholder="Buscar cliente…" />
+            </div>
+
+            <!-- Rendered list content -->
+            <div id="agendaListContent"></div>
+
+            <!-- Legacy elements kept hidden for JS compatibility -->
+            <div hidden aria-hidden="true">
+              <input id="appointmentsFilterDate" type="date" />
+              <select id="appointmentsFilterPeriod"><option value="today">Hoje</option><option value="week">Semana</option></select>
+              <select id="appointmentsFilterStatus"></select>
+              <select id="appointmentsFilterProfessional"></select>
+              <select id="appointmentsFilterService"></select>
+              <select id="appointmentsFilterClient"></select>
+              <input id="appointmentsFilterSearch" type="search" />
+              <div id="appointmentsSummaryGrid"></div>
+              <div id="appointmentsHeaderDate"></div>
+              <div id="appointmentsPeriodSummary"></div>
+              <div id="appointmentsFeedback"></div>
+              <div id="appointmentsEmptyState">
+                <button id="appointmentsEmptyNew"></button>
+                <button id="appointmentsEmptyToday"></button>
+                <button id="appointmentsEmptyClear"></button>
               </div>
-
-              <section id="appointmentsSummaryGrid" class="agenda-next-strip mt-4"></section>
-
-              <section class="rounded-xl border border-slate-200 bg-slate-50 p-3 mt-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                  <label class="text-xs font-semibold text-slate-600">Data
-                    <input id="appointmentsFilterDate" type="date" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600">Periodo
-                    <select id="appointmentsFilterPeriod" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <option value="today">Hoje</option>
-                      <option value="tomorrow">Amanha</option>
-                      <option value="week">Semana</option>
-                      <option value="month">Mes</option>
-                    </select>
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600">Status
-                    <select id="appointmentsFilterStatus" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <option value="">Filtrando todos os agendamentos</option>
-                      <option value="SCHEDULED">Agendado</option>
-                      <option value="CONFIRMED">Confirmado</option>
-                      <option value="IN_SERVICE">Em atendimento</option>
-                      <option value="COMPLETED">Concluido</option>
-                      <option value="CANCELLED">Cancelado</option>
-                      <option value="NO_SHOW">Falta</option>
-                    </select>
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600">Profissional
-                    <select id="appointmentsFilterProfessional" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <option value="">Todos os profissionais</option>
-                    </select>
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600">Servico
-                    <select id="appointmentsFilterService" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <option value="">Todos os servicos</option>
-                    </select>
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600">Cliente
-                    <select id="appointmentsFilterClient" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-                      <option value="">Todos os clientes</option>
-                    </select>
-                  </label>
-                  <label class="text-xs font-semibold text-slate-600 md:col-span-2">Busca por nome ou telefone
-                    <input
-                      id="appointmentsFilterSearch"
-                      type="search"
-                      placeholder="Ex.: Joao ou 11999990000"
-                      class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-                    />
-                  </label>
-                </div>
-              </section>
-
-              <div id="appointmentsFeedback" class="rounded-xl border border-indigo-300 bg-indigo-950/30 px-3 py-2 text-sm text-indigo-200 mt-4">
-                Painel operacional pronto para agir sobre os atendimentos do periodo.
-              </div>
-
-              <div id="appointmentsEmptyState" class="hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center mt-4">
-                <p class="text-base font-semibold text-slate-700">Nao ha agendamentos para este periodo.</p>
-                <p class="text-sm text-slate-500 mt-1">Crie um novo horario, volte para hoje ou limpe os filtros para ampliar a busca.</p>
-                <div class="mt-3 flex flex-wrap justify-center gap-2">
-                  <button type="button" id="appointmentsEmptyNew" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Criar novo agendamento</button>
-                  <button type="button" id="appointmentsEmptyToday" class="min-h-[44px] rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 px-4 py-2 text-sm font-semibold">Ver agenda de hoje</button>
-                  <button type="button" id="appointmentsEmptyClear" class="min-h-[44px] rounded-lg border border-indigo-300 bg-indigo-950/30 hover:bg-indigo-900/40 text-indigo-100 px-4 py-2 text-sm font-semibold">Limpar filtros</button>
-                </div>
-              </div>
-
-              <section id="appointmentsTableWrap" class="mt-4">
-                <div class="ux-table hidden xl:block">
-                  <table class="w-full border-collapse">
-                    <thead class="bg-slate-50">
-                      <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
-                        <th class="px-3 py-3">Horario</th>
-                        <th class="px-3 py-3">Cliente</th>
-                        <th class="px-3 py-3">Servico</th>
-                        <th class="px-3 py-3">Profissional</th>
-                        <th class="px-3 py-3">Duracao</th>
-                        <th class="px-3 py-3">Valor</th>
-                        <th class="px-3 py-3">Status e sinais</th>
-                        <th class="px-3 py-3">Acoes</th>
-                      </tr>
-                    </thead>
-                    <tbody id="appointmentsTableBody"></tbody>
-                  </table>
-                </div>
-                <div id="appointmentsMobileList" class="space-y-2 xl:hidden"></div>
-              </section>
-            </article>
+              <div id="appointmentsTableWrap"><table><tbody id="appointmentsTableBody"></tbody></table></div>
+              <div id="appointmentsMobileList"></div>
+            </div>
           </div>
 
           <div id="appointmentDrawerHost" class="hidden"></div>
 
-          <section id="operationSection" data-section="operacao" class="module-section hidden min-w-0">
-            <div id="saleHeaderMount" class="mb-3"></div>
-            <section class="pdv-funnel-grid grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)] gap-3">
-              <article class="pdv-sale-surface bg-slate-900 rounded-xl border border-slate-700 shadow-sm p-6">
-                <form id="saleForm" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <label class="text-sm font-semibold text-slate-200">Produto
-                    <select id="saleProductId" required class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
-                  </label>
-                  <label class="text-sm font-semibold text-slate-200">Quantidade
-                    <input type="number" id="saleQty" min="1" value="1" required class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm" />
-                  </label>
-                  <button type="button" id="saleAddItemBtn" class="md:col-span-2 min-h-[48px] rounded-lg border border-slate-500 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 font-semibold transition-colors">
-                    Adicionar ao carrinho
-                  </button>
-                  <label class="text-sm font-semibold text-slate-200">Cliente (opcional)
-                    <select id="saleClientId" class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
-                  </label>
-                  <label class="text-sm font-semibold text-slate-200">Profissional (opcional)
-                    <select id="saleProfessionalId" class="mt-1 rounded-lg border border-slate-600 bg-slate-950 text-slate-100 px-3 py-2 text-sm"></select>
-                  </label>
-                  <div class="md:col-span-2">
-                    <div id="saleCartList" class="space-y-2"></div>
+          <div id="scheduleDrawer" class="sched-drawer" aria-hidden="true">
+            <div class="sched-drawer-scrim" id="scheduleDrawerScrim"></div>
+            <div class="sched-drawer-panel">
+              <div class="sched-drawer-hdr">
+                <div>
+                  <p class="sched-drawer-title">Novo Agendamento</p>
+                  <p class="sched-drawer-sub">Preencha os campos para confirmar</p>
+                </div>
+                <button id="scheduleDrawerClose" class="sched-close-btn" type="button" aria-label="Fechar">&#10005;</button>
+              </div>
+              <div class="sched-drawer-body">
+                <article id="agendaSchedulePanel">
+                  <form id="appointmentForm">
+                    <label class="sched-label">Cliente
+                      <div class="client-search-wrap" style="margin-top:6px">
+                        <input type="text" id="clientSearch" placeholder="Nome do cliente..." autocomplete="off" class="sched-input" />
+                        <ul id="clientSearchDropdown" class="client-search-dropdown hidden"></ul>
+                        <input type="hidden" id="clientId" />
+                      </div>
+                    </label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+                      <label class="sched-label">Profissional
+                        <select id="professionalId" required class="sched-select" style="margin-top:6px"></select>
+                      </label>
+                      <label class="sched-label">Servico
+                        <select id="serviceId" required class="sched-select" style="margin-top:6px"></select>
+                      </label>
+                    </div>
+                    <label class="sched-label" style="display:block;margin-top:14px">Data e Hora
+                      <input type="datetime-local" id="startsAt" required class="sched-input" style="margin-top:6px" />
+                    </label>
+                    <div id="clientInsights" class="sched-info-block" style="margin-top:14px">
+                      Selecione um cliente para ver historico resumido e perfil.
+                    </div>
+                    <div id="serviceSuggestions" class="sched-info-block" style="margin-top:10px">
+                      Sugestoes de servicos relacionados aparecerao aqui.
+                    </div>
+                    <div id="appointmentFeedback" class="sched-info-block" style="margin-top:10px">
+                      Selecione cliente, profissional, servico e horario para validar disponibilidade.
+                    </div>
+                    <div id="alternativeSlots" class="sched-info-block" style="margin-top:10px">
+                      Horarios alternativos serao sugeridos aqui em caso de conflito.
+                    </div>
+                    <button type="submit" class="sched-submit-btn" style="margin-top:18px">Confirmar Agendamento</button>
+                  </form>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <section id="operationSection" data-section="operacao" class="module-section hidden">
+            <div id="saleHeaderMount" class="ds-mb"></div>
+
+            <form id="saleForm" class="pdv-mkt-form">
+              <!-- compat elements: hidden container keeps them out of layout even when JS resets className -->
+              <div hidden aria-hidden="true">
+                <select id="saleProductId" tabindex="-1"></select>
+                <input type="number" id="saleQty" min="1" value="1" tabindex="-1" />
+                <button type="button" id="saleAddItemBtn" tabindex="-1">Adicionar</button>
+                <div id="saleSelectedProductThumb"></div>
+                <p id="saleSelectedProductName"></p>
+                <p id="saleSelectedProductMeta"></p>
+              </div>
+
+              <div class="pdv-mkt-layout">
+
+                <!-- LEFT: catálogo de produtos -->
+                <div class="pdv-mkt-browser">
+                  <div class="pdv-mkt-search-row">
+                    <input
+                      type="search"
+                      id="pdvProductSearch"
+                      placeholder="Buscar produto..."
+                      class="ds-input pdv-mkt-search"
+                      autocomplete="off"
+                    />
                   </div>
-                  <div id="saleTotal" class="pdv-total-panel md:col-span-2 flex justify-between items-center border border-emerald-400 bg-emerald-950 p-3 rounded-lg mb-4">
-                    <span class="text-emerald-200">
-                      Total
-                      <span id="saleTotalItems" class="block text-xs text-emerald-300">0 item(ns)</span>
-                    </span>
-                    <span id="saleTotalValue" class="text-2xl font-extrabold text-emerald-100">R$ 0,00</span>
+                  <div id="saleCategoryList" class="pdv-category-list pdv-mkt-cats"></div>
+                  <div id="saleProductRail" class="pdv-mkt-grid"></div>
+                </div>
+
+                <!-- RIGHT: carrinho -->
+                <aside class="pdv-mkt-cart ux-card">
+                  <div class="pdv-mkt-cart-head">
+                    <p class="ux-label">Carrinho</p>
+                    <span id="saleTotalItems" class="pdv-mkt-cart-badge">0 item(ns)</span>
                   </div>
-                  <div class="md:col-span-2 flex flex-wrap gap-2">
-                    <button type="button" id="saleClearCartBtn" class="min-h-[48px] rounded-lg border border-slate-500 bg-slate-950 hover:bg-slate-800 text-slate-100 px-4 py-2 font-semibold transition-colors">
-                      Limpar carrinho
-                    </button>
+
+                  <div id="saleCartList" class="pdv-mkt-cart-items"></div>
+
+                  <div class="pdv-mkt-cart-meta">
+                    <label class="ds-form-label">Cliente (opcional)
+                      <select id="saleClientId" class="ds-input"></select>
+                    </label>
+                    <label class="ds-form-label">Profissional (opcional)
+                      <select id="saleProfessionalId" class="ds-input"></select>
+                    </label>
+                  </div>
+
+                  <div id="saleTotal" class="pdv-mkt-cart-total">
+                    <span class="ds-cell-secondary">Total</span>
+                    <span id="saleTotalValue" class="pdv-total-value">R$ 0,00</span>
+                  </div>
+
+                  <div class="pdv-mkt-cart-foot">
+                    <button type="button" id="saleClearCartBtn" class="ux-btn ux-btn-muted">Limpar</button>
                     <span id="saleCheckoutActionMount"></span>
                   </div>
-                </form>
-                <div id="saleFeedback" class="mt-2"></div>
-              </article>
-              <article class="pdv-history-surface bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-                <h2 class="text-lg font-bold text-gray-800 mb-1">Historico de vendas</h2>
-                <p class="text-sm text-gray-500 mb-3">Consulte vendas e abra detalhes quando precisar devolver ou rastrear impacto.</p>
-                <div id="saleHistoryFilterMount" class="mb-3"></div>
-                <div id="saleRecentList" class="space-y-2">
-                  <p class="text-sm text-gray-500">Carregando vendas...</p>
-                </div>
-              </article>
-            </section>
+
+                  <div id="saleFeedback" class="panel-msg-host"></div>
+                </aside>
+              </div>
+            </form>
+
             <div id="saleDrawerHost" class="hidden"></div>
 
-            <section class="mt-3">
-              <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-                <h2 class="text-lg font-bold text-gray-800">Caixa operacional no modulo Financeiro</h2>
-                <p class="text-sm text-gray-600 mt-2">
-                  O detalhamento completo de receita, despesas, lucro, comissoes e fluxo de caixa fica centralizado na aba Financeiro.
-                </p>
+            <section class="pdv-history-block">
+              <article class="pdv-history-surface ux-card">
+                <div class="pdv-card-head">
+                  <div>
+                    <p class="ux-label">Consulta</p>
+                    <h2 class="pdv-card-title">Histórico de vendas</h2>
+                    <p class="ds-text-muted">Busque vendas, veja produtos vendidos e abra detalhes quando precisar devolver.</p>
+                  </div>
+                </div>
+                <div id="saleHistoryFilterMount"></div>
+                <div id="saleRecentList">
+                  <p class="ds-text-muted">Carregando vendas...</p>
+                </div>
               </article>
             </section>
-          </section>
 
-          <section id="financeiroSection" data-section="financeiro" class="module-section hidden min-w-0">
-            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <div id="financialHeaderMount"></div>
+          </section><!-- /operationSection -->
 
-              <div id="financialFeedback" class="mt-3"></div>
-              <section id="financialSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-4"></section>
-              <section id="financialCashflow" class="mt-4"></section>
-              <section id="financialFilterMount" class="mt-4"></section>
+          <section id="financeiroSection" data-section="financeiro" class="module-section hidden">
+            <div id="financialHeaderMount"></div>
 
-              <section class="grid grid-cols-1 gap-3 mt-4">
-                <article class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
-                    <div>
-                      <h3 class="text-base font-bold text-slate-900">Lancamentos financeiros</h3>
-                      <p class="text-sm text-slate-500 mt-1">Resumo operacional por origem, valor, data e detalhe sob demanda.</p>
-                    </div>
+            <div id="financialFeedback" class="panel-msg-host"></div>
+            <section id="financialSummary"></section>
+            <section id="financialToolbarMount"></section>
+            <section id="financialFilterMount"></section>
+            <section id="financialCashflow"></section>
+            <section id="financialEntriesList"></section>
+
+            <div id="financialCommissionsList" class="hidden"></div>
+            <div id="financialReports" class="hidden"></div>
+            <div id="financialDrawerHost" class="hidden"></div>
+
+            <div id="financialTransactionModal" class="ds-modal-backdrop hidden">
+              <div class="fn-modal" role="dialog" aria-modal="true" aria-labelledby="financialTransactionModalTitle">
+                <div class="fn-modal-head">
+                  <div>
+                    <span class="fn-modal-eyebrow">Financeiro</span>
+                    <h3 id="financialTransactionModalTitle">Novo lancamento</h3>
+                    <p>Registre entrada ou despesa manual com os dados essenciais para conferencia.</p>
                   </div>
-                  <div id="financialEntriesList" class="space-y-2"></div>
-                </article>
-              </section>
-
-              <div id="financialCommissionsList" class="hidden"></div>
-              <div id="financialReports" class="hidden"></div>
-              <div id="financialDrawerHost" class="hidden"></div>
-
-              <div id="financialTransactionModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-slate-900/50 p-4">
-                <div class="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-4">
-                  <div class="flex items-center justify-between gap-2">
-                    <div>
-                      <h3 id="financialTransactionModalTitle" class="text-lg font-bold text-slate-900">Novo lancamento</h3>
-                      <p class="text-sm text-slate-500 mt-1">Registre uma entrada ou despesa manual sem expor rastreabilidade tecnica.</p>
-                    </div>
-                    <button type="button" id="financialTransactionModalClose" class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700">Fechar</button>
-                  </div>
-                  <form id="financialTransactionForm" class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-                    <input type="hidden" id="financialTransactionId" />
-                    <label class="text-sm font-semibold text-slate-700">Tipo
-                      <select id="financialTransactionType" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                        <option value="INCOME">Entrada</option>
-                        <option value="EXPENSE">Despesa</option>
-                      </select>
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Categoria
-                      <input id="financialTransactionCategory" type="text" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700 md:col-span-2">Descricao
-                      <input id="financialTransactionDescription" type="text" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Valor
-                      <input id="financialTransactionAmount" type="number" step="0.01" min="0.01" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Data
-                      <input id="financialTransactionDate" type="date" required class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Metodo de pagamento
-                      <input id="financialTransactionPaymentMethod" type="text" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="PIX, Cartao, Dinheiro..." />
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Profissional
-                      <select id="financialTransactionProfessional" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                        <option value="">Nao vincular</option>
-                      </select>
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700">Cliente
-                      <select id="financialTransactionCustomer" class="mt-1 min-h-[42px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                        <option value="">Nao vincular</option>
-                      </select>
-                    </label>
-                    <label class="text-sm font-semibold text-slate-700 md:col-span-2">Observacao interna
-                      <textarea id="financialTransactionNotes" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Contexto operacional opcional"></textarea>
-                    </label>
-                    <div class="md:col-span-2 flex flex-wrap justify-end gap-2 mt-2">
-                      <button type="button" id="financialTransactionModalCancel" class="min-h-[42px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-                      <button type="submit" id="financialTransactionSubmit" class="min-h-[42px] rounded-lg bg-slate-900 hover:bg-slate-800 px-4 py-2 text-sm font-semibold text-white">Salvar lancamento</button>
-                    </div>
-                  </form>
+                  <button type="button" id="financialTransactionModalClose" class="fn-modal-close" aria-label="Fechar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </button>
                 </div>
+                <form id="financialTransactionForm" class="fn-modal-form">
+                  <input type="hidden" id="financialTransactionId" />
+                  <label class="fn-field">Tipo
+                    <select id="financialTransactionType" required class="fn-input">
+                      <option value="INCOME">Entrada</option>
+                      <option value="EXPENSE">Despesa</option>
+                    </select>
+                  </label>
+                  <label class="fn-field">Categoria
+                    <input id="financialTransactionCategory" type="text" required class="fn-input" placeholder="Ex: Servicos, aluguel, produto" />
+                  </label>
+                  <label class="fn-field fn-field-full">Descricao
+                    <input id="financialTransactionDescription" type="text" required class="fn-input" placeholder="Resumo do lancamento" />
+                  </label>
+                  <label class="fn-field">Valor
+                    <input id="financialTransactionAmount" type="number" step="0.01" min="0.01" required class="fn-input" placeholder="0,00" />
+                  </label>
+                  <label class="fn-field">Data
+                    <input id="financialTransactionDate" type="date" required class="fn-input" />
+                  </label>
+                  <label class="fn-field">Metodo de pagamento
+                    <select id="financialTransactionPaymentMethod" class="fn-input">
+                      <option value="">Nao informado</option>
+                      <option value="PIX">PIX</option>
+                      <option value="Dinheiro">Dinheiro</option>
+                      <option value="Debito">Debito</option>
+                      <option value="Credito">Credito</option>
+                    </select>
+                  </label>
+                  <label class="fn-field fn-credit-terms" aria-hidden="true">Condicao do credito
+                    <select id="financialTransactionCreditTerms" class="fn-input">
+                      <option value="">Selecione</option>
+                      <option value="a vista">A vista</option>
+                      <option value="2x">2x</option>
+                      <option value="3x">3x</option>
+                      <option value="4x">4x</option>
+                      <option value="5x">5x</option>
+                      <option value="6x">6x</option>
+                      <option value="7x">7x</option>
+                      <option value="8x">8x</option>
+                      <option value="9x">9x</option>
+                      <option value="10x">10x</option>
+                      <option value="11x">11x</option>
+                      <option value="12x">12x</option>
+                    </select>
+                  </label>
+                  <label class="fn-field">Profissional
+                    <select id="financialTransactionProfessional" class="fn-input">
+                      <option value="">Nao vincular</option>
+                    </select>
+                  </label>
+                  <label class="fn-field">Cliente
+                    <select id="financialTransactionCustomer" class="fn-input">
+                      <option value="">Nao vincular</option>
+                    </select>
+                  </label>
+                  <label class="fn-field fn-field-full">Observacao interna
+                    <textarea id="financialTransactionNotes" rows="3" class="fn-input" placeholder="Contexto operacional opcional"></textarea>
+                  </label>
+                  <div class="fn-modal-actions">
+                    <button type="button" id="financialTransactionModalCancel" class="fn-btn fn-btn-muted">Cancelar</button>
+                    <button type="submit" id="financialTransactionSubmit" class="fn-btn fn-btn-primary">Salvar lancamento</button>
+                  </div>
+                </form>
               </div>
-            </article>
+            </div>
           </section>
 
-          <section id="estoqueSection" data-section="estoque" class="module-section hidden min-w-0">
-            <article class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <div id="inventoryHeaderMount"></div>
+          <section id="estoqueSection" data-section="estoque" class="module-section hidden">
+            <div id="inventoryHeaderMount"></div>
 
-              <section id="inventorySummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mt-4"></section>
+            <section id="inventorySummaryCards" class="inv-kpi-grid"></section>
 
-              <section id="inventoryFilterMount" class="mt-4"></section>
+            <div id="inventoryFilterMount"></div>
 
-              <div id="inventoryFeedback" class="mt-3"></div>
+            <div id="inventoryFeedback" class="panel-msg-host"></div>
 
-              <section id="inventoryEmptyState" class="hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center mt-4">
-                <p class="text-base font-semibold text-slate-700">Voce ainda nao cadastrou produtos no estoque.</p>
-                <button
-                  type="button"
-                  id="inventoryEmptyAddBtn"
-                  class="mt-3 min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold"
-                >
-                  Adicionar primeiro produto
-                </button>
-              </section>
+            <section id="inventoryEmptyState" class="hidden ux-empty-dashed">
+              <p class="ds-cell-primary">Voce ainda nao cadastrou produtos no estoque.</p>
+              <button type="button" id="inventoryEmptyAddBtn" class="ux-btn ux-btn-muted">
+                Adicionar primeiro produto
+              </button>
+            </section>
 
-              <section id="inventoryTableWrap" class="mt-4 ux-table hidden xl:block">
-                <table class="w-full border-collapse">
-                  <thead class="bg-slate-50">
-                    <tr class="text-left text-xs uppercase tracking-wide text-slate-500">
-                      <th class="px-3 py-3">Produto</th>
-                      <th class="px-3 py-3">Quantidade</th>
-                      <th class="px-3 py-3">Sugestao</th>
-                      <th class="px-3 py-3">Status</th>
-                      <th class="px-3 py-3">Acoes</th>
-                    </tr>
-                  </thead>
-                  <tbody id="inventoryTableBody"></tbody>
-                </table>
-              </section>
+            <section id="inventoryTableWrap" class="ux-table ds-xl-only hidden">
+              <table>
+                <thead>
+                  <tr class="ux-table-head-row">
+                    <th class="appts-td">Produto</th>
+                    <th class="appts-td">Quantidade</th>
+                    <th class="appts-td">Sugestao</th>
+                    <th class="appts-td">Status</th>
+                    <th class="appts-td">Acoes</th>
+                  </tr>
+                </thead>
+                <tbody id="inventoryTableBody"></tbody>
+              </table>
+            </section>
 
-              <div id="inventoryMobileList" class="space-y-2 mt-4 xl:hidden"></div>
-              <div id="inventoryDrawerHost"></div>
-            </article>
+            <div id="inventoryMobileList" class="inv-list"></div>
+            <div id="inventoryDrawerHost"></div>
           </section>
 
-          <section id="clientsSection" data-section="clientes" class="module-section hidden min-w-0">
-            <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-              <div id="clientsHeaderMount"></div>
-              <div id="clientsFilterMount" class="mt-4"></div>
-              <div id="clientsFeedback" class="mb-3"></div>
-              <div id="clientsSummary" class="mt-4 mb-3"></div>
-              <div id="clientsReactivationQueue" class="mb-3"></div>
-              <div id="clientsAutomationSignals" class="mb-3"></div>
-              <div id="clientsTable" class="space-y-2"></div>
-              <div id="clientsDrawerHost" class="hidden"></div>
-            </article>
+          <section id="clientsSection" data-section="clientes" class="module-section hidden">
+            <div id="clientsHeaderMount"></div>
+            <div id="clientsFeedback"></div>
+            <div id="clientsSummary"></div>
+            <div id="clientsToolbarMount"></div>
+            <div id="clientsFilterMount"></div>
+            <div id="clientsReactivationQueue"></div>
+            <div id="clientsTable"></div>
+            <div id="clientsAutomationSignals"></div>
+            <div id="clientsDrawerHost" class="hidden"></div>
           </section>
 
-          <section id="professionalsSection" data-section="profissionais" class="module-section hidden min-w-0">
-            <article class="ux-card">
-              <div id="professionalsHeaderMount"></div>
-              <section id="professionalsFilterMount" class="mt-4"></section>
-              <section id="professionalsSummary" class="mt-4"></section>
-              <section id="professionalsTable" class="mt-4"></section>
-            </article>
+          <section id="professionalsSection" data-section="profissionais" class="module-section hidden">
+            <div id="professionalsHeaderMount"></div>
+            <section id="professionalsSummary"></section>
+            <section id="professionalsFilterMount"></section>
+            <section id="professionalsTable"></section>
             <div id="professionalsDrawerHost" class="hidden"></div>
           </section>
 
-          <section id="servicesSection" data-section="servicos" class="module-section hidden min-w-0">
-            <article class="ux-card">
-              <div id="servicesHeaderMount"></div>
-              <section id="servicesSummaryGrid" class="mt-4"></section>
-              <section id="servicesFilterMount" class="mt-4"></section>
-
-              <div id="servicesFeedback" class="rounded-xl border border-indigo-300 bg-indigo-950/30 px-3 py-2 text-sm text-indigo-200 mt-4">
-                Ajuste o catalogo de servicos para refletir a operacao real de agenda, PDV, financeiro e comissoes.
-              </div>
-
-              <div id="servicesEmptyState" class="hidden"></div>
-              <section id="servicesTableWrap" class="mt-4"></section>
-            </article>
+          <section id="servicesSection" data-section="servicos" class="module-section hidden">
+            <div id="servicesHeaderMount"></div>
+            <section id="servicesSummaryGrid"></section>
+            <section id="servicesFilterMount"></section>
+            <div id="servicesFeedback"></div>
+            <div id="servicesEmptyState" class="hidden"></div>
+            <section id="servicesTableWrap"></section>
             <div id="servicesDrawerHost" class="hidden"></div>
           </section>
 
-          <section id="commissionsSection" data-section="comissoes" class="module-section hidden min-w-0">
-            <article class="ux-card">
-              <div id="commissionsHeaderMount"></div>
-              <section id="commissionsFilterMount" class="mt-4"></section>
-              <div id="commissionsFeedback" class="mt-3"></div>
-              <div id="commissionsSummary" class="mt-4"></div>
-              <div id="commissionsTable" class="mt-4 space-y-3"></div>
-              <div id="commissionsDrawerHost" class="hidden"></div>
-            </article>
+          <section id="commissionsSection" data-section="comissoes" class="module-section hidden">
+            <div id="commissionsHeaderMount"></div>
+            <section id="commissionsSummary"></section>
+            <section id="commissionsFilterMount"></section>
+            <div id="commissionsFeedback"></div>
+            <section id="commissionsTable"></section>
+            <div id="commissionsDrawerHost" class="hidden"></div>
           </section>
 
-          <section id="auditSection" data-section="auditoria" class="module-section hidden min-w-0">
-            <article class="ux-card">
-              <div id="auditHeaderMount"></div>
-              <section id="auditFilterMount" class="mt-4"></section>
-              <div id="auditFeedback" class="mt-3"></div>
-              <section id="auditEventsList" class="mt-4 space-y-3"></section>
-              <div id="auditDrawerHost" class="hidden"></div>
-            </article>
+          <section id="auditSection" data-section="auditoria" class="module-section hidden">
+            <div id="auditHeaderMount"></div>
+            <section id="auditFilterMount"></section>
+            <div id="auditFeedback"></div>
+            <section id="auditEventsList"></section>
+            <div id="auditDrawerHost" class="hidden"></div>
           </section>
 
-          <section id="fidelizacaoSection" data-section="fidelizacao" class="module-section hidden min-w-0">
+          <section id="fidelizacaoSection" data-section="fidelizacao" class="module-section hidden">
             <article class="ux-card">
               <div id="fidelizacaoHeaderMount"></div>
-              <section id="fidelizacaoFilterMount" class="mt-4"></section>
+              <section id="fidelizacaoFilterMount" class="ds-mt-lg"></section>
 
-              <div id="fidelizacaoSummary" class="mb-3"></div>
+              <div id="fidelizacaoSummary" class="ds-mb"></div>
 
               <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                <article class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Ajuste de Fidelidade</h3>
-                  <form id="loyaltyAdjustForm" class="grid grid-cols-1 md:grid-cols-5 gap-2">
-                    <select id="loyaltyClientId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm md:col-span-2"></select>
-                    <input id="loyaltyDelta" type="number" step="0.01" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="+/- pontos" />
-                    <select id="loyaltySourceType" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Ajuste de Fidelidade</h3>
+                  <form id="loyaltyAdjustForm" class="ds-form-grid">
+                    <select id="loyaltyClientId" class="ds-input ds-form-wide"></select>
+                    <input id="loyaltyDelta" type="number" step="0.01" class="ds-input" placeholder="+/- pontos" />
+                    <select id="loyaltySourceType" class="ds-input">
                       <option value="ADJUSTMENT">Ajuste</option>
                       <option value="REDEEM">Resgate</option>
                     </select>
-                    <button type="submit" class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold">Aplicar</button>
+                    <button type="submit" class="ux-btn ux-btn-muted">Aplicar</button>
                   </form>
-                  <div id="loyaltyFeedback" class="mt-2"></div>
+                  <div id="loyaltyFeedback" class="panel-msg-host"></div>
                 </article>
 
-                <article class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Pacotes e Assinaturas</h3>
-                  <form id="premiumActionsForm" class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <select id="premiumClientId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                    <select id="packageId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                    <select id="subscriptionPlanId" class="rounded-lg border border-gray-200 px-3 py-2 text-sm"></select>
-                    <button type="submit" class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold">Executar acoes</button>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Pacotes e Assinaturas</h3>
+                  <form id="premiumActionsForm" class="ds-form-grid">
+                    <select id="premiumClientId" class="ds-input"></select>
+                    <select id="packageId" class="ds-input"></select>
+                    <select id="subscriptionPlanId" class="ds-input"></select>
+                    <button type="submit" class="ux-btn ux-btn-muted">Executar acoes</button>
                   </form>
-                  <p class="mt-2 text-xs text-gray-500">Ao enviar: compra pacote e ativa assinatura para o cliente selecionado.</p>
-                  <div id="premiumFeedback" class="mt-1"></div>
+                  <p class="ds-text-muted">Ao enviar: compra pacote e ativa assinatura para o cliente selecionado.</p>
+                  <div id="premiumFeedback" class="panel-msg-host"></div>
                 </article>
               </section>
 
-              <section class="grid grid-cols-1 xl:grid-cols-4 gap-3 mt-3">
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Pacotes Ativos</h3>
-                  <div id="fidelizacaoPackages" class="space-y-2"></div>
+              <section class="grid grid-cols-1 xl:grid-cols-4 gap-3 ds-gap-top">
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Pacotes Ativos</h3>
+                  <div id="fidelizacaoPackages"></div>
                 </article>
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Assinaturas</h3>
-                  <div id="fidelizacaoSubscriptions" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Assinaturas</h3>
+                  <div id="fidelizacaoSubscriptions"></div>
                 </article>
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Retencao de Inativos</h3>
-                  <div id="fidelizacaoRetention" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Retencao de Inativos</h3>
+                  <div id="fidelizacaoRetention"></div>
                 </article>
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Multiunidade</h3>
-                  <div id="fidelizacaoMultiunit" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Multiunidade</h3>
+                  <div id="fidelizacaoMultiunit"></div>
                 </article>
               </section>
             </article>
           </section>
 
-          <section id="automacoesSection" data-section="automacoes" class="module-section hidden min-w-0">
+          <section id="automacoesSection" data-section="automacoes" class="module-section hidden">
             <article class="ux-card">
               <div id="automacoesHeaderMount"></div>
-              <section id="automacoesFilterMount" class="mt-4"></section>
-              <div id="automacoesFeedback" class="mb-3"></div>
+              <section id="automacoesFilterMount" class="ds-mt-lg"></section>
+              <div id="automacoesFeedback" class="ds-mb"></div>
 
-              <section class="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-3">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <h3 class="text-sm font-bold text-gray-700">Regras de Automacao</h3>
-                  <select id="automacoesRulesFilter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+              <section class="ux-card ds-mb">
+                <div class="catalog-section-head">
+                  <h3 class="ux-section-label">Regras de Automacao</h3>
+                  <select id="automacoesRulesFilter" class="ds-input ds-input-sm">
                     <option value="">Todas regras</option>
                     <option value="true">Somente ativas</option>
                     <option value="false">Somente inativas</option>
                   </select>
                 </div>
-                <form id="automationRuleForm" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2">
+                <form id="automationRuleForm" class="ds-form-grid">
                   <input id="automationRuleId" type="hidden" />
-                  <input
-                    id="automationRuleName"
-                    type="text"
-                    maxlength="120"
-                    placeholder="Nome da regra"
-                    class="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                    required
-                  />
-                  <select id="automationRuleTriggerType" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                  <input id="automationRuleName" type="text" maxlength="120" placeholder="Nome da regra" class="ds-input" required />
+                  <select id="automationRuleTriggerType" class="ds-input" required>
                     <option value="INACTIVITY">Inatividade</option>
                     <option value="BIRTHDAY">Aniversario</option>
                     <option value="HIGH_RISK">Risco alto</option>
                   </select>
-                  <select id="automationRuleChannel" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                  <select id="automationRuleChannel" class="ds-input" required>
                     <option value="WHATSAPP">WhatsApp</option>
                     <option value="SMS">SMS</option>
                     <option value="EMAIL">E-mail</option>
                     <option value="MANUAL">Manual</option>
                   </select>
-                  <select id="automationRuleTarget" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" required>
+                  <select id="automationRuleTarget" class="ds-input" required>
                     <option value="SEGMENT">Segmento</option>
                     <option value="CLIENT">Cliente</option>
                   </select>
-                  <input
-                    id="automationRuleMessageTemplate"
-                    type="text"
-                    maxlength="500"
-                    placeholder="Template da mensagem"
-                    class="rounded-lg border border-gray-200 px-3 py-2 text-sm xl:col-span-2"
-                    required
-                  />
-                  <div class="md:col-span-2 xl:col-span-6 flex flex-wrap gap-2">
-                    <button
-                      id="automationRuleSubmitBtn"
-                      type="submit"
-                      class="rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold"
-                    >
-                      Salvar regra
-                    </button>
-                    <button
-                      id="automationRuleCancelBtn"
-                      type="button"
-                      class="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-800 px-4 py-2 text-sm font-semibold"
-                    >
-                      Cancelar edicao
-                    </button>
+                  <input id="automationRuleMessageTemplate" type="text" maxlength="500" placeholder="Template da mensagem" class="ds-input ds-form-wide" required />
+                  <div class="ds-form-full catalog-row-actions">
+                    <button id="automationRuleSubmitBtn" type="submit" class="ux-btn ux-btn-muted">Salvar regra</button>
+                    <button id="automationRuleCancelBtn" type="button" class="ux-btn ux-btn-muted">Cancelar edicao</button>
                   </div>
                 </form>
-                <div id="automacoesRulesList" class="space-y-2 mt-3"></div>
+                <div id="automacoesRulesList" class="ds-gap-top"></div>
               </section>
 
-              <div id="automacoesSummary" class="mb-3"></div>
+              <div id="automacoesSummary" class="ds-mb"></div>
 
               <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Execucoes de Automacao</h3>
-                  <div id="automacoesExecutions" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Execucoes de Automacao</h3>
+                  <div id="automacoesExecutions"></div>
                 </article>
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Clientes com Score de Risco</h3>
-                  <div id="automacoesScoring" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Clientes com Score de Risco</h3>
+                  <div id="automacoesScoring"></div>
                 </article>
-                <article class="rounded-xl border border-gray-200 bg-white p-4">
-                  <h3 class="text-sm font-bold text-gray-700 mb-2">Logs de Integracoes</h3>
-                  <div id="automacoesWebhookLogs" class="space-y-2"></div>
+                <article class="ux-card">
+                  <h3 class="ux-section-label">Logs de Integracoes</h3>
+                  <div id="automacoesWebhookLogs"></div>
                 </article>
               </section>
             </article>
           </section>
 
-          <section id="metasSection" data-section="metas" class="module-section hidden min-w-0 space-y-3">
+          <section id="metasSection" data-section="metas" class="module-section hidden">
             <article class="ux-card">
               <div id="metasHeaderMount"></div>
-              <div id="metasFeedback" class="mt-4"></div>
+              <div id="metasFeedback" class="ds-mt-lg"></div>
             </article>
 
             <section id="metasSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
 
             <section class="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-3">
-              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Progresso da Meta</h3>
+              <article class="ux-card">
+                <h3 class="ux-section-label">Progresso da Meta</h3>
                 <div id="metasProgressBlock"></div>
               </article>
-              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Insights Acionaveis</h3>
+              <article class="ux-card">
+                <h3 class="ux-section-label">Insights Acionaveis</h3>
                 <div id="metasInsights"></div>
               </article>
             </section>
 
             <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Ranking de Profissionais</h3>
-                <div id="metasProfessionalsRanking" class="space-y-2"></div>
+              <article class="ux-card">
+                <h3 class="ux-section-label">Ranking de Profissionais</h3>
+                <div id="metasProfessionalsRanking"></div>
               </article>
-              <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 class="text-sm font-extrabold uppercase tracking-wide text-slate-700 mb-3">Ranking de Servicos</h3>
-                <div id="metasServicesRanking" class="space-y-2"></div>
+              <article class="ux-card">
+                <h3 class="ux-section-label">Ranking de Servicos</h3>
+                <div id="metasServicesRanking"></div>
               </article>
             </section>
           </section>
 
-          <section id="settingsSection" data-section="configuracoes" class="module-section hidden min-w-0">
-            <div id="settingsFeedback" class="mb-4"></div>
-            <div id="settingsRoot" class="space-y-4"></div>
+          <section id="settingsSection" data-section="configuracoes" class="module-section hidden">
+            <div id="settingsFeedback" class="ds-mb-lg"></div>
+            <div id="settingsRoot" class="ds-stack-lg"></div>
           </section>
 
-          <section id="reportsSection" data-section="relatorios" class="module-section hidden min-w-0">
+          <section id="reportsSection" data-section="relatorios" class="module-section hidden">
             <div id="reportsHeaderMount"></div>
-            <section id="reportsFilterMount" class="mt-4"></section>
-            <div id="reportsFeedback" class="mt-4"></div>
-            <div id="reportsRoot" class="mt-4 space-y-4"></div>
+            <section id="reportsFilterMount" class="ds-mt-lg"></section>
+            <div id="reportsFeedback" class="ds-mt-lg"></div>
+            <div id="reportsRoot" class="ds-mt-lg"></div>
+          </section>
+
+          <section id="whatsappSection" data-section="whatsapp" class="module-section hidden">
+            <div id="whatsappMount"></div>
+          </section>
+
+          <section id="agendamento-linkSection" data-section="agendamento-link" class="module-section hidden">
+            <div class="bkl-page">
+
+              <!-- Page header -->
+              <header class="op-page-header">
+                <div class="op-page-header-main">
+                  <h1 class="op-page-title">Link de Agendamento</h1>
+                  <p class="op-page-subtitle">
+                    Compartilhe no Instagram ou WhatsApp para clientes agendarem online sem precisar ligar.
+                  </p>
+                </div>
+                <div class="op-page-action">
+                  <a id="bookingLinkOpen" href="/agendamento" target="_blank" class="op-primary-action" style="gap:8px">
+                    Abrir página
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  </a>
+                </div>
+              </header>
+
+              <!-- Link card -->
+              <div class="bkl-card">
+                <div class="bkl-card-head">
+                  <span class="bkl-card-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  </span>
+                  <div>
+                    <strong>Link público de agendamento</strong>
+                    <span>Página acessível sem login — qualquer cliente pode agendar</span>
+                  </div>
+                </div>
+                <div class="bkl-link-row">
+                  <span id="bookingLinkText" class="bkl-link-text"></span>
+                  <button id="copyBookingLink" class="ux-btn ux-btn-muted">Copiar link</button>
+                </div>
+              </div>
+
+              <!-- Tips grid -->
+              <div class="bkl-tips-grid">
+                <div class="bkl-tip-item">
+                  <span class="bkl-tip-icon">📸</span>
+                  <div>
+                    <strong>Bio do Instagram</strong>
+                    <span>Cole o link na bio e direcione seguidores para agendar diretamente</span>
+                  </div>
+                </div>
+                <div class="bkl-tip-item">
+                  <span class="bkl-tip-icon">💬</span>
+                  <div>
+                    <strong>WhatsApp e Stories</strong>
+                    <span>Envie para clientes agendarem sem precisar ligar ou mandar mensagem</span>
+                  </div>
+                </div>
+                <div class="bkl-tip-item">
+                  <span class="bkl-tip-icon">📅</span>
+                  <div>
+                    <strong>Agendamento automático</strong>
+                    <span>O cliente escolhe serviço, data e horário disponível em tempo real</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
           </section>
 
           <section id="placeholderSection" class="module-section hidden"></section>
@@ -655,192 +691,319 @@
       </div>
     </div>
 
-    <div id="inventoryProductModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
-      <article class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h3 id="inventoryProductModalTitle" class="text-base font-bold text-slate-900">Adicionar produto</h3>
-          <button id="inventoryProductModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div id="inventoryProductModal" class="ds-modal-backdrop hidden">
+      <div class="inv-modal-panel">
+        <div class="inv-modal-header">
+          <div>
+            <p class="ux-label" id="inventoryProductModalTitle">Novo produto</p>
+            <p class="inv-modal-sub">Preencha os dados do produto. Campos com * são obrigatórios.</p>
+          </div>
+          <button id="inventoryProductModalClose" type="button" class="inv-modal-close" aria-label="Fechar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
-        <form id="inventoryProductForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+
+        <form id="inventoryProductForm" class="inv-modal-form">
           <input type="hidden" id="inventoryProductId" />
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Nome do produto
-            <input id="inventoryProductName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Preco de venda
-            <input id="inventoryProductSalePrice" type="number" min="0" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Quantidade atual
-            <input id="inventoryProductQuantity" type="number" min="0" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Custo do produto
-            <input id="inventoryProductCostPrice" type="number" min="0" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Estoque minimo
-            <input id="inventoryProductMinimumStock" type="number" min="0" step="1" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Categoria
-            <input id="inventoryProductCategory" type="text" maxlength="80" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacao
-            <textarea id="inventoryProductNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
-          </label>
-          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
-            <button type="button" id="inventoryProductModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-            <button type="submit" id="inventoryProductSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar produto</button>
+
+          <div class="inv-form-row inv-form-full">
+            <label class="inv-label" for="inventoryProductName">Nome do produto *</label>
+            <input id="inventoryProductName" type="text" maxlength="120" required class="inv-input" placeholder="Ex: Pomada Matte, Óleo de barba..." />
+          </div>
+
+          <div class="inv-form-row-2col">
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductSalePrice">Preço de venda *</label>
+              <input id="inventoryProductSalePrice" type="number" min="0" step="0.01" required class="inv-input" placeholder="0,00" />
+            </div>
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductQuantity">Quantidade atual *</label>
+              <input id="inventoryProductQuantity" type="number" min="0" step="1" required class="inv-input" placeholder="0" />
+            </div>
+          </div>
+
+          <div class="inv-form-row-2col">
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductCostPrice">Custo do produto</label>
+              <input id="inventoryProductCostPrice" type="number" min="0" step="0.01" class="inv-input" placeholder="0,00" />
+            </div>
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductMinimumStock">Estoque mínimo</label>
+              <input id="inventoryProductMinimumStock" type="number" min="0" step="1" class="inv-input" placeholder="0" />
+            </div>
+          </div>
+
+          <div class="inv-form-row-2col">
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductCategory">Categoria</label>
+              <input id="inventoryProductCategory" type="text" maxlength="80" class="inv-input" list="inventoryCategorySuggestions" placeholder="Ex: Pomadas, Finalizadores..." />
+              <datalist id="inventoryCategorySuggestions"></datalist>
+            </div>
+            <div class="inv-form-row">
+              <label class="inv-label" for="inventoryProductImageUrl">URL da imagem</label>
+              <input id="inventoryProductImageUrl" type="url" maxlength="500" class="inv-input" placeholder="https://..." />
+            </div>
+          </div>
+
+          <div class="inv-form-row inv-form-full">
+            <label class="inv-label" for="inventoryProductNotes">Observação interna</label>
+            <textarea id="inventoryProductNotes" maxlength="500" rows="3" class="inv-input inv-textarea" placeholder="Notas sobre fornecedor, validade, uso..."></textarea>
+          </div>
+
+          <div class="inv-modal-foot">
+            <button type="button" id="inventoryProductModalCancel" class="inv-btn-cancel">Cancelar</button>
+            <button type="submit" id="inventoryProductSubmitBtn" class="inv-btn-save">Salvar produto</button>
           </div>
         </form>
-      </article>
+      </div>
     </div>
 
-    <div id="inventoryStockModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
-      <article class="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl">
-        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h3 id="inventoryStockModalTitle" class="text-base font-bold text-slate-900">Ajustar estoque</h3>
-          <button id="inventoryStockModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div id="inventoryStockModal" class="ds-modal-backdrop hidden">
+      <div class="inv-modal-panel" style="max-width:420px">
+        <div class="inv-modal-header">
+          <div>
+            <p class="ux-label" id="inventoryStockModalTitle">Registrar entrada</p>
+            <p class="inv-modal-sub" id="inventoryStockModalSubtitle"></p>
+          </div>
+          <button id="inventoryStockModalClose" type="button" class="inv-modal-close" aria-label="Fechar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
-        <form id="inventoryStockForm" class="grid grid-cols-1 gap-3 p-4">
+        <form id="inventoryStockForm" class="inv-modal-form">
           <input type="hidden" id="inventoryStockProductId" />
-          <label class="text-sm font-semibold text-slate-700">Tipo de ajuste
-            <select id="inventoryStockType" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="IN">Entrada de reposicao</option>
-              <option value="OUT">Saida manual</option>
-              <option value="ADJUSTMENT">Ajustar saldo final</option>
-            </select>
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Quantidade
-            <input id="inventoryStockQuantity" type="number" min="0" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Motivo
-            <input id="inventoryStockReason" type="text" maxlength="240" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <div class="flex flex-wrap justify-end gap-2">
-            <button type="button" id="inventoryStockModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-            <button type="submit" id="inventoryStockSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Confirmar</button>
+          <div class="inv-form-full">
+            <label class="ds-form-label">Tipo de ajuste
+              <select id="inventoryStockType" class="ds-input">
+                <option value="IN">Entrada de reposicao</option>
+                <option value="OUT">Saida manual</option>
+                <option value="ADJUSTMENT">Ajustar saldo final</option>
+              </select>
+            </label>
+          </div>
+          <div class="inv-form-full">
+            <label class="ds-form-label">Quantidade
+              <input id="inventoryStockQuantity" type="number" min="0" step="1" required class="ds-input" placeholder="0" />
+            </label>
+          </div>
+          <div class="inv-form-full">
+            <label class="ds-form-label">Motivo
+              <input id="inventoryStockReason" type="text" maxlength="240" class="ds-input" />
+            </label>
+          </div>
+          <div class="inv-modal-foot">
+            <button type="button" id="inventoryStockModalCancel" class="inv-btn-cancel">Cancelar</button>
+            <button type="submit" id="inventoryStockSubmitBtn" class="inv-btn-save">Confirmar entrada</button>
           </div>
         </form>
-      </article>
+      </div>
     </div>
 
-    <div id="servicesModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
-      <article class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h3 id="servicesModalTitle" class="text-base font-bold text-slate-900">Adicionar servico</h3>
-          <button id="servicesModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div id="servicesModal" class="svc-modal-backdrop hidden">
+      <div class="svc-modal-panel">
+        <div class="svc-modal-head">
+          <div class="svc-modal-head-info">
+            <div>
+              <h3 id="servicesModalTitle" class="svc-modal-title">Adicionar servico</h3>
+              <p class="svc-modal-subtitle">Preencha os dados do novo servico</p>
+            </div>
+          </div>
+          <button id="servicesModalClose" type="button" class="svc-modal-close" aria-label="Fechar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
-        <form id="servicesForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
-          <input type="hidden" id="servicesId" />
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Nome do servico
-            <input id="servicesName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+
+        <div class="svc-modal-body">
+          <form id="servicesForm" novalidate>
+            <input type="hidden" id="servicesId" />
+
+            <div class="svc-modal-section">
+              <span class="svc-modal-section-label">Identificacao</span>
+              <div class="svc-modal-field svc-modal-full">
+                <label for="servicesName">Nome do servico *</label>
+                <input id="servicesName" type="text" maxlength="120" required placeholder="Ex: Corte Degradê" class="svc-modal-input" />
+              </div>
+              <div class="svc-modal-row">
+                <div class="svc-modal-field">
+                  <label for="servicesCategory">Categoria</label>
+                  <input id="servicesCategory" type="text" maxlength="120" placeholder="Ex: CORTE" class="svc-modal-input" />
+                </div>
+                <div class="svc-modal-field">
+                  <label for="servicesIsActive">Status</label>
+                  <select id="servicesIsActive" class="svc-modal-input">
+                    <option value="true">Ativo</option>
+                    <option value="false">Inativo</option>
+                  </select>
+                </div>
+              </div>
+              <div class="svc-modal-field svc-modal-full">
+                <label for="servicesDescription">Descricao</label>
+                <textarea id="servicesDescription" maxlength="1000" rows="2" placeholder="Descreva o servico brevemente..." class="svc-modal-input"></textarea>
+              </div>
+            </div>
+
+            <div class="svc-modal-section">
+              <span class="svc-modal-section-label">Preco e duracao</span>
+              <div class="svc-modal-row">
+                <div class="svc-modal-field">
+                  <label for="servicesPrice">Preco (R$) *</label>
+                  <input id="servicesPrice" type="number" min="0" step="0.01" required placeholder="0,00" class="svc-modal-input" />
+                </div>
+                <div class="svc-modal-field">
+                  <label for="servicesDurationMinutes">Duracao (min) *</label>
+                  <input id="servicesDurationMinutes" type="number" min="1" step="1" required placeholder="45" class="svc-modal-input" />
+                </div>
+              </div>
+              <div class="svc-modal-row">
+                <div class="svc-modal-field">
+                  <label for="servicesEstimatedCost">Custo estimado (R$)</label>
+                  <input id="servicesEstimatedCost" type="number" min="0" step="0.01" placeholder="0,00" class="svc-modal-input" />
+                </div>
+                <div class="svc-modal-field">
+                  <label for="servicesDefaultCommissionRate">Comissao padrao (%)</label>
+                  <input id="servicesDefaultCommissionRate" type="number" min="0" max="100" step="0.1" placeholder="0" class="svc-modal-input" />
+                </div>
+              </div>
+            </div>
+
+            <div class="svc-modal-section">
+              <span class="svc-modal-section-label">Imagem</span>
+              <div class="svc-modal-field svc-modal-full">
+                <label for="servicesImageUrl">URL da imagem</label>
+                <input id="servicesImageUrl" type="url" maxlength="500" placeholder="https://..." class="svc-modal-input" />
+              </div>
+            </div>
+
+            <div class="svc-modal-section">
+              <span class="svc-modal-section-label">Equipe</span>
+              <div class="svc-modal-field svc-modal-full">
+                <label for="servicesProfessionalIds">Profissionais habilitados</label>
+                <select id="servicesProfessionalIds" multiple class="svc-modal-input svc-modal-select-multi"></select>
+                <p class="svc-modal-hint">Segure Ctrl (ou Cmd) para selecionar varios profissionais</p>
+              </div>
+              <div class="svc-modal-field svc-modal-full">
+                <label for="servicesNotes">Observacoes internas</label>
+                <textarea id="servicesNotes" maxlength="1000" rows="2" placeholder="Notas para a equipe..." class="svc-modal-input"></textarea>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="svc-modal-footer">
+          <button type="button" id="servicesModalCancel" class="svc-modal-btn">Cancelar</button>
+          <button type="submit" form="servicesForm" id="servicesSubmitBtn" class="svc-modal-btn svc-modal-btn-primary">Salvar serviço</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="professionalsModal" class="ds-modal-backdrop hidden">
+      <div class="ds-modal-panel" style="max-width:480px">
+        <div class="ds-modal-head">
+          <h3 id="professionalsModalTitle" class="ux-section-label">Novo profissional</h3>
+          <button id="professionalsModalClose" type="button" class="ux-btn ux-btn-muted">Fechar</button>
+        </div>
+        <form id="professionalsForm" class="ds-form-grid">
+          <input type="hidden" id="professionalsFormId" />
+          <label class="ds-form-label ds-form-full">Nome *
+            <input id="professionalsFormName" type="text" maxlength="120" required placeholder="Nome completo" class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Preco
-            <input id="servicesPrice" type="number" min="0" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">Telefone
+            <input id="professionalsFormPhone" type="tel" maxlength="30" placeholder="(11) 99999-9999" class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Duracao (min)
-            <input id="servicesDurationMinutes" type="number" min="1" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">E-mail
+            <input id="professionalsFormEmail" type="email" maxlength="120" placeholder="email@exemplo.com" class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Categoria
-            <input id="servicesCategory" type="text" maxlength="120" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Comissao padrao (%)
-            <input id="servicesDefaultCommissionRate" type="number" min="0" max="100" step="0.1" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Custo estimado
-            <input id="servicesEstimatedCost" type="number" min="0" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Status
-            <select id="servicesIsActive" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="true">Ativo</option>
-              <option value="false">Inativo</option>
-            </select>
-          </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Descricao
-            <textarea id="servicesDescription" maxlength="1000" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
-          </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Profissionais habilitados
-            <select id="servicesProfessionalIds" multiple class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm h-28"></select>
-          </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
-            <textarea id="servicesNotes" maxlength="1000" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
-          </label>
-          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
-            <button type="button" id="servicesModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-            <button type="submit" id="servicesSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar servico</button>
+          <div id="professionalsFormFeedback" class="ds-form-full"></div>
+          <div class="ds-form-full catalog-row-actions">
+            <button type="button" id="professionalsModalCancel" class="ux-btn ux-btn-muted">Cancelar</button>
+            <button type="submit" id="professionalsSubmitBtn" class="ux-btn ux-btn-primary">Salvar profissional</button>
           </div>
         </form>
-      </article>
+      </div>
     </div>
 
-    <div id="clientsModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
-      <article class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h3 id="clientsModalTitle" class="text-base font-bold text-slate-900">Novo cliente</h3>
-          <button id="clientsModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div id="clientsModal" class="ds-modal-backdrop hidden">
+      <div class="cl-modal">
+        <div class="cl-modal-header">
+          <div>
+            <p class="cl-modal-eyebrow">CLIENTE</p>
+            <h3 id="clientsModalTitle" class="cl-modal-title">Novo cliente</h3>
+          </div>
+          <button id="clientsModalClose" type="button" class="cl-modal-close" aria-label="Fechar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
-        <form id="clientsForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
-          <label class="text-sm font-semibold text-slate-700">Nome do cliente
-            <input id="clientsName" type="text" maxlength="120" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <form id="clientsForm" class="cl-modal-form">
+          <div class="cl-modal-row">
+            <label class="ds-form-label">Nome *
+              <input id="clientsName" type="text" maxlength="120" required placeholder="Nome completo" class="ds-input" />
+            </label>
+            <label class="ds-form-label">Telefone *
+              <input id="clientsPhone" type="tel" maxlength="20" required placeholder="(11)99999-9999" class="ds-input" />
+            </label>
+          </div>
+          <div class="cl-modal-row">
+            <label class="ds-form-label">E-mail
+              <input id="clientsEmail" type="email" maxlength="120" placeholder="email@exemplo.com" class="ds-input" />
+            </label>
+            <label class="ds-form-label">Data de nascimento
+              <input id="clientsBirthDate" type="date" class="ds-input" />
+            </label>
+          </div>
+          <div class="cl-modal-row">
+            <label class="ds-form-label">Status
+              <select id="clientsStatus" class="ds-input">
+                <option value="NEW">Novo</option>
+                <option value="ACTIVE">Ativo</option>
+                <option value="VIP">VIP</option>
+                <option value="INACTIVE">Inativo</option>
+              </select>
+            </label>
+            <label class="ds-form-label">Tags (separadas por vírgula)
+              <input id="clientsTags" type="text" maxlength="200" placeholder="NEW, VIP" class="ds-input" />
+            </label>
+          </div>
+          <label class="ds-form-label">Observações
+            <textarea id="clientsNotes" maxlength="500" rows="3" class="ds-input"></textarea>
           </label>
-          <label class="text-sm font-semibold text-slate-700">Telefone
-            <input id="clientsPhone" type="tel" maxlength="20" required placeholder="(11) 99999-9999" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">E-mail
-            <input id="clientsEmail" type="email" maxlength="120" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Data de nascimento
-            <input id="clientsBirthDate" type="date" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Status do cliente
-            <select id="clientsStatus" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="NEW">Novo</option>
-              <option value="ACTIVE">Ativo</option>
-              <option value="VIP">VIP</option>
-              <option value="INACTIVE">Inativo</option>
-            </select>
-          </label>
-          <label class="text-sm font-semibold text-slate-700">Tags (separadas por virgula)
-            <input id="clientsTags" type="text" maxlength="200" placeholder="NEW, VIP" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
-            <textarea id="clientsNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
-          </label>
-          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
-            <button type="button" id="clientsModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-            <button type="submit" id="clientsSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar cliente</button>
+          <div id="clientsFormFeedback" class="panel-msg-host"></div>
+          <div class="cl-modal-footer">
+            <button type="button" id="clientsModalCancel" class="cl-footer-btn">Cancelar</button>
+            <button type="submit" id="clientsSubmitBtn" class="cl-footer-btn cl-footer-btn-primary">Salvar cliente</button>
           </div>
         </form>
-      </article>
+      </div>
     </div>
 
-    <div id="metasGoalModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3">
-      <article class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-        <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-          <h3 id="metasGoalModalTitle" class="text-base font-bold text-slate-900">Definir meta mensal</h3>
-          <button id="metasGoalModalClose" type="button" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div id="metasGoalModal" class="ds-modal-backdrop hidden">
+      <div class="ds-modal-panel" style="max-width:560px">
+        <div class="ds-modal-head">
+          <h3 id="metasGoalModalTitle" class="ux-section-label">Definir meta mensal</h3>
+          <button id="metasGoalModalClose" type="button" class="ux-btn ux-btn-muted">Fechar</button>
         </div>
-        <form id="metasGoalForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+        <form id="metasGoalForm" class="ds-form-grid">
           <input type="hidden" id="metasGoalId" />
-          <label class="text-sm font-semibold text-slate-700">Mes/Ano
-            <input id="metasGoalMonth" type="month" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">Mes/Ano
+            <input id="metasGoalMonth" type="month" required class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Meta de faturamento
-            <input id="metasRevenueTarget" type="number" min="0.01" step="0.01" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">Meta de faturamento
+            <input id="metasRevenueTarget" type="number" min="0.01" step="0.01" required class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Meta de atendimentos
-            <input id="metasAppointmentsTarget" type="number" min="1" step="1" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">Meta de atendimentos
+            <input id="metasAppointmentsTarget" type="number" min="1" step="1" required class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700">Meta de ticket medio (opcional)
-            <input id="metasAverageTicketTarget" type="number" min="0.01" step="0.01" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <label class="ds-form-label">Meta de ticket medio (opcional)
+            <input id="metasAverageTicketTarget" type="number" min="0.01" step="0.01" class="ds-input" />
           </label>
-          <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
-            <textarea id="metasNotes" maxlength="500" rows="3" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+          <label class="ds-form-label ds-form-full">Observacoes
+            <textarea id="metasNotes" maxlength="500" rows="3" class="ds-input"></textarea>
           </label>
-          <div id="metasGoalFormFeedback" class="sm:col-span-2"></div>
-          <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
-            <button type="button" id="metasGoalModalCancel" class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-            <button type="submit" id="metasGoalSubmitBtn" class="min-h-[44px] rounded-lg bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold">Salvar meta</button>
+          <div id="metasGoalFormFeedback" class="ds-form-full panel-msg-host"></div>
+          <div class="ds-form-full catalog-row-actions">
+            <button type="button" id="metasGoalModalCancel" class="ux-btn ux-btn-muted">Cancelar</button>
+            <button type="submit" id="metasGoalSubmitBtn" class="ux-btn ux-btn-primary">Salvar meta</button>
           </div>
         </form>
-      </article>
+      </div>
     </div>
 
     <div id="mobileOperationActions" class="mobile-operation-actions hidden">
@@ -854,4 +1017,3 @@
     <script type="module" src="/app.js"></script>
   </body>
 </html>
-

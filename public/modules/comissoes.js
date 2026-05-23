@@ -149,10 +149,10 @@ function groupByProfessional(entries = [], payload = {}) {
 
 function renderKpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="ux-kpi commission-kpi">
-      <div class="ux-label">${escapeHtml(title)}</div>
-      <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
-      ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
+    <article class="comm-kpi ${tone}">
+      <span>${escapeHtml(title)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
     </article>
   `;
 }
@@ -248,7 +248,7 @@ function renderOperationalLinkRows(entry = {}) {
   ].filter(([, value]) => value);
 
   if (!rows.length) {
-    return `<p class="text-sm text-slate-400">Sem vinculo operacional detalhado neste payload.</p>`;
+    return `<p class="ds-text-muted">Sem vinculo operacional detalhado neste payload.</p>`;
   }
 
   return `
@@ -303,11 +303,11 @@ export function renderCommissionsData(elements, payload, options = {}) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-        ${renderKpi("Pendente", money(totals.pending), "Valor ainda a pagar", "text-amber-700")}
-        ${renderKpi("Pago no periodo", money(totals.paid), "Comissoes ja liquidadas", "text-emerald-700")}
+      <div class="comm-kpi-grid">
+        ${renderKpi("Pendente", money(totals.pending), "Valor a pagar", "comm-kpi-warning")}
+        ${renderKpi("Pago no periodo", money(totals.paid), "Comissoes liquidadas", "comm-kpi-success")}
         ${renderKpi("Profissionais pendentes", String(totals.professionalsPending), "Quem precisa receber")}
-        ${renderKpi("Antigas ou vencidas", String(totals.stale), "Pendentes ha 7 dias ou mais", totals.stale ? "text-rose-700" : "")}
+        ${renderKpi("Antigas ou vencidas", String(totals.stale), "Ha 7 dias ou mais", totals.stale ? "comm-kpi-danger" : "")}
       </div>
       ${
         topPending
@@ -381,7 +381,7 @@ export function renderCommissionDrawer(elements, entry = {}, options = {}) {
     status: entry.status,
     open: true,
     summary,
-    details: `${renderCalculation(entry)}<div class="mt-3">${renderOperationalLinkRows(entry)}</div>`,
+    details: `${renderCalculation(entry)}<div class="ds-gap-top">${renderOperationalLinkRows(entry)}</div>`,
     history: renderCommissionHistory(entry),
     technicalTrace,
     actions,

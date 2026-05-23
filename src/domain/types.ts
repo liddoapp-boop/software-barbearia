@@ -45,6 +45,7 @@ export interface Service {
   defaultCommissionRate?: number;
   costEstimate: number;
   notes?: string;
+  imageUrl?: string;
   active: boolean;
   createdAt?: Date;
   updatedAt?: Date;

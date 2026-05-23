@@ -1,31 +1,59 @@
-import {
-  bindEntityDrawers,
-  renderEmptyState,
-  renderEntityDrawer,
-  renderStatusChip,
-  renderTechnicalTrace,
-} from "../components/operational-ui.js";
-import { renderPanelMessage } from "./feedback.js";
+import { renderEmptyState } from "../components/operational-ui.js";
 
 const ACTION_LABELS = {
+  // Agenda
+  APPOINTMENT_CREATED: "Agendamento criado",
+  APPOINTMENT_UPDATED: "Agendamento atualizado",
+  APPOINTMENT_CANCELLED: "Agendamento cancelado",
+  APPOINTMENT_CONFIRMED: "Agendamento confirmado",
+  APPOINTMENT_COMPLETED: "Atendimento concluido",
   APPOINTMENT_CHECKOUT: "Atendimento finalizado",
   APPOINTMENT_CHECKOUT_COMPLETED: "Atendimento finalizado",
-  CHECKOUT: "Atendimento finalizado",
+  APPOINTMENT_STATUS_UPDATED: "Status do agendamento alterado",
+  APPOINTMENT_STATUS_CHANGED: "Status do agendamento alterado",
+  APPOINTMENT_NO_SHOW: "Cliente nao compareceu",
   APPOINTMENT_REFUND: "Estorno de atendimento",
   APPOINTMENT_REFUNDED: "Estorno de atendimento",
+  CHECKOUT: "Atendimento finalizado",
+  // PDV
   PRODUCT_SALE_CREATED: "Venda de produto registrada",
-  PRODUCT_SALE_REFUND: "Devolucao de produto registrada",
-  PRODUCT_SALE_REFUNDED: "Devolucao de produto registrada",
+  PRODUCT_SALE_COMPLETED: "Venda de produto concluida",
+  PRODUCT_SALE_REFUND: "Devolucao de produto",
+  PRODUCT_SALE_REFUNDED: "Devolucao de produto",
+  // Financeiro
   FINANCIAL_MANUAL_ENTRY: "Lancamento financeiro manual",
   FINANCIAL_MANUAL_ENTRY_REGISTERED: "Lancamento financeiro manual",
   FINANCIAL_TRANSACTION_CREATED: "Lancamento financeiro registrado",
+  FINANCIAL_ENTRY_CREATED: "Lancamento financeiro registrado",
+  FINANCIAL_ENTRY_UPDATED: "Lancamento financeiro atualizado",
+  FINANCIAL_ENTRY_DELETED: "Lancamento financeiro removido",
+  // Comissoes
   COMMISSION_PAID: "Comissao paga",
-  STOCK_ADJUSTMENT: "Estoque ajustado",
-  STOCK_ADJUSTED: "Estoque ajustado",
+  COMMISSION_CREATED: "Comissao registrada",
+  COMMISSION_UPDATED: "Comissao atualizada",
+  // Estoque
+  STOCK_ADJUSTMENT: "Ajuste de estoque",
+  STOCK_ADJUSTED: "Ajuste de estoque",
+  INVENTORY_UPDATED: "Estoque atualizado",
+  PRODUCT_CREATED: "Produto cadastrado",
+  PRODUCT_UPDATED: "Produto atualizado",
+  PRODUCT_DELETED: "Produto removido",
+  // Configuracoes / negocio
   SETTINGS_UPDATED: "Configuracao alterada",
+  BUSINESS_SETTINGS_UPDATED: "Dados do negocio alterados",
+  BUSINESS_HOURS_UPDATED: "Horario de funcionamento alterado",
+  SERVICE_CREATED: "Servico cadastrado",
+  SERVICE_UPDATED: "Servico atualizado",
+  SERVICE_DELETED: "Servico removido",
+  PROFESSIONAL_CREATED: "Profissional cadastrado",
+  PROFESSIONAL_UPDATED: "Profissional atualizado",
+  PROFESSIONAL_DELETED: "Profissional removido",
+  // Acesso
   USER_LOGIN: "Login realizado",
   AUTH_LOGIN: "Login realizado",
-  PERMISSION_DENIED: "Acesso bloqueado",
+  USER_CREATED: "Usuario criado",
+  USER_UPDATED: "Usuario atualizado",
+  PERMISSION_DENIED: "Acesso negado",
 };
 
 const ENTITY_LABELS = {
@@ -40,6 +68,10 @@ const ENTITY_LABELS = {
   inventory: "Estoque",
   stock_movement: "Estoque",
   settings: "Configuracoes",
+  business_settings: "Configuracoes",
+  business_hours: "Configuracoes",
+  service: "Servicos",
+  professional: "Profissionais",
   user: "Usuarios",
 };
 
@@ -103,19 +135,33 @@ function humanizeToken(value) {
 
 function actionLabel(action = "") {
   const key = String(action || "").trim();
+  const upper = key.toUpperCase();
   if (ACTION_LABELS[key]) return ACTION_LABELS[key];
-  const normalized = key.toUpperCase();
-  if (normalized.includes("CHECKOUT")) return "Atendimento finalizado";
-  if (normalized.includes("REFUND")) return "Estorno ou devolucao registrada";
-  if (normalized.includes("COMMISSION") && normalized.includes("PAID")) return "Comissao paga";
-  if (normalized.includes("STOCK") || normalized.includes("INVENTORY")) return "Movimento de estoque";
-  if (normalized.includes("SETTING")) return "Configuracao alterada";
-  if (normalized.includes("LOGIN")) return "Login realizado";
-  if (normalized.includes("DENIED") || normalized.includes("FORBIDDEN")) return "Acesso bloqueado";
-  if (normalized.includes("CREATED") || normalized.includes("REGISTERED")) return `${humanizeToken(key.replace(/_(CREATED|REGISTERED)$/i, ""))} registrado`;
-  if (normalized.includes("UPDATED")) return `${humanizeToken(key.replace(/_UPDATED$/i, ""))} alterado`;
-  if (normalized.includes("DELETED")) return `${humanizeToken(key.replace(/_DELETED$/i, ""))} removido`;
-  return humanizeToken(key) || "Evento registrado";
+  if (ACTION_LABELS[upper]) return ACTION_LABELS[upper];
+  if (upper.includes("CHECKOUT")) return "Atendimento finalizado";
+  if (upper.includes("REFUND")) return "Estorno registrado";
+  if (upper.includes("APPOINTMENT") && upper.includes("STATUS")) return "Status do agendamento alterado";
+  if (upper.includes("APPOINTMENT") && upper.includes("CANCEL")) return "Agendamento cancelado";
+  if (upper.includes("APPOINTMENT") && upper.includes("CREAT")) return "Agendamento criado";
+  if (upper.includes("APPOINTMENT")) return "Agendamento atualizado";
+  if (upper.includes("COMMISSION")) return "Comissao registrada";
+  if (upper.includes("STOCK") || upper.includes("INVENTORY")) return "Movimentacao de estoque";
+  if (upper.includes("BUSINESS") && upper.includes("HOUR")) return "Horario de funcionamento alterado";
+  if (upper.includes("BUSINESS") || upper.includes("SETTING")) return "Configuracao alterada";
+  if (upper.includes("SERVICE") && upper.includes("CREAT")) return "Servico cadastrado";
+  if (upper.includes("SERVICE")) return "Servico atualizado";
+  if (upper.includes("PROFESSIONAL") && upper.includes("CREAT")) return "Profissional cadastrado";
+  if (upper.includes("PROFESSIONAL")) return "Profissional atualizado";
+  if (upper.includes("PRODUCT") && upper.includes("SALE")) return "Venda de produto";
+  if (upper.includes("PRODUCT") && upper.includes("CREAT")) return "Produto cadastrado";
+  if (upper.includes("PRODUCT")) return "Produto atualizado";
+  if (upper.includes("FINANCIAL") || upper.includes("ENTRY")) return "Lancamento financeiro";
+  if (upper.includes("LOGIN")) return "Login realizado";
+  if (upper.includes("DENIED") || upper.includes("FORBIDDEN")) return "Acesso negado";
+  if (upper.includes("CREAT") || upper.includes("REGISTER")) return "Registro criado";
+  if (upper.includes("UPDAT")) return "Registro atualizado";
+  if (upper.includes("DELET") || upper.includes("REMOV")) return "Registro removido";
+  return "Evento registrado";
 }
 
 function moduleLabel(entity = "") {
@@ -197,37 +243,30 @@ function impactSummary(event = {}) {
   return `${label} em ${module}.`;
 }
 
-function renderSensitivity(event = {}) {
-  if (!isSensitive(event)) return "";
-  return renderStatusChip("CRITICAL", { label: "Sensivel" });
+function moduleBadgeColor() {
+  return "aud-badge-default";
 }
 
 function renderTimelineEvent(event = {}) {
+  const sensitive = isSensitive(event);
   return `
-    <article class="audit-event-card ${isSensitive(event) ? "audit-event-sensitive" : ""}">
-      <div class="audit-event-time">
-        <span>${escapeHtml(formatDateTime(event.createdAt))}</span>
+    <article class="aud-event-card ${sensitive ? "aud-event-sensitive" : ""}" data-audit-action="detail" data-audit-event-id="${escapeHtml(event.id)}">
+      <div class="aud-event-left">
+        <span class="aud-event-time">${escapeHtml(formatDateTime(event.createdAt))}</span>
+        <span class="aud-module-badge ${moduleBadgeColor(event.entity)}">${escapeHtml(moduleLabel(event.entity))}</span>
       </div>
-      <div class="audit-event-main">
-        <div class="audit-event-head">
-          <div>
-            <p class="audit-event-action">${escapeHtml(actionLabel(event.action))}</p>
-            <p class="audit-event-impact">${escapeHtml(impactSummary(event))}</p>
-          </div>
-          <div class="audit-event-badges">
-            ${renderStatusChip("INFO", { label: moduleLabel(event.entity) })}
-            ${renderSensitivity(event)}
-          </div>
-        </div>
-        <div class="audit-event-meta">
+      <div class="aud-event-body">
+        <p class="aud-event-action">${escapeHtml(actionLabel(event.action))}</p>
+        <p class="aud-event-impact">${escapeHtml(impactSummary(event))}</p>
+        <div class="aud-event-meta">
           <span><strong>Ator</strong> ${escapeHtml(actorLabel(event))}</span>
           <span><strong>Perfil</strong> ${escapeHtml(roleLabel(event.actorRole || event.role))}</span>
-          <span><strong>Modulo</strong> ${escapeHtml(moduleLabel(event.entity))}</span>
-        </div>
-        <div class="audit-event-actions">
-          <button type="button" class="ux-btn ux-btn-muted" data-audit-action="detail" data-audit-event-id="${escapeHtml(event.id)}">Ver detalhes</button>
+          ${sensitive ? `<span class="aud-sensitive-tag">Sensivel</span>` : ""}
         </div>
       </div>
+      <button type="button" class="aud-detail-btn" data-audit-action="detail" data-audit-event-id="${escapeHtml(event.id)}" title="Ver detalhes">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
     </article>
   `;
 }
@@ -248,13 +287,13 @@ function groupEventsByDay(events = []) {
 
 function renderTimeline(events = []) {
   return `
-    <div class="audit-timeline">
+    <div class="aud-timeline">
       ${groupEventsByDay(events)
         .map(
           (group) => `
-            <section class="audit-day-group">
-              <h3>${escapeHtml(group.label)}</h3>
-              <div class="audit-day-events">
+            <section class="aud-day-group">
+              <h3 class="aud-day-label">${escapeHtml(group.label)}</h3>
+              <div class="aud-day-events">
                 ${group.events.map(renderTimelineEvent).join("")}
               </div>
             </section>
@@ -283,7 +322,7 @@ function contextRows(event = {}) {
 function renderContext(event = {}) {
   const rows = contextRows(event);
   if (!rows.length) {
-    return `<p class="text-sm text-slate-400">Sem vinculo operacional explicito neste evento.</p>`;
+    return `<p class="ds-text-muted">Sem vinculo operacional explicito neste evento.</p>`;
   }
   return `
     <dl class="op-summary-grid">
@@ -303,7 +342,7 @@ function renderBeforeAfter(event = {}) {
   const before = event.before ?? event.beforeJson;
   const after = event.after ?? event.afterJson;
   if (!changes.length && !before && !after) {
-    return `<p class="text-sm text-slate-400">Evento sem comparativo anterior e posterior.</p>`;
+    return `<p class="ds-text-muted">Evento sem comparativo anterior e posterior.</p>`;
   }
   return `
     <div class="audit-change-list">
@@ -320,7 +359,7 @@ function renderBeforeAfter(event = {}) {
                 `,
               )
               .join("")
-          : `<p class="text-sm text-slate-400">Antes e depois foram registrados, mas sem alteracoes simples para destacar.</p>`
+          : `<p class="ds-text-muted">Antes e depois foram registrados, mas sem alteracoes simples para destacar.</p>`
       }
       <details class="audit-advanced-details">
         <summary>Ver comparativo avancado</summary>
@@ -331,34 +370,19 @@ function renderBeforeAfter(event = {}) {
 }
 
 export function renderAuditLoading(elements) {
-  if (elements.feedback) {
-    renderPanelMessage(elements.feedback, "Carregando linha do tempo de auditoria...");
-  }
   if (elements.list) {
-    elements.list.innerHTML = "<p class='text-sm text-slate-500'>Buscando eventos...</p>";
+    elements.list.innerHTML = "<p class='aud-status-msg'>Buscando eventos...</p>";
   }
 }
 
 export function renderAuditError(elements, message = "Falha ao carregar auditoria.") {
-  if (elements.feedback) {
-    renderPanelMessage(elements.feedback, message, "error");
-  }
   if (elements.list) {
-    elements.list.innerHTML = "";
+    elements.list.innerHTML = `<p class='aud-status-msg aud-status-error'>${escapeHtml(message)}</p>`;
   }
 }
 
 export function renderAuditData(elements, payload) {
   const events = Array.isArray(payload?.events) ? payload.events : [];
-  if (elements.feedback) {
-    renderPanelMessage(
-      elements.feedback,
-      events.length
-        ? `${events.length} evento(s) na linha do tempo atual.`
-        : "Nenhum evento encontrado no filtro atual.",
-      events.length ? "success" : "info",
-    );
-  }
   if (!elements.list) return;
   if (!events.length) {
     elements.list.innerHTML = renderEmptyState({
@@ -373,47 +397,103 @@ export function renderAuditData(elements, payload) {
 export function renderAuditEventDrawer(elements, event = {}) {
   if (!elements.drawerHost || !event?.id) return;
 
-  const summary = `
-    <dl class="op-summary-grid">
-      <div><dt>Acao</dt><dd>${escapeHtml(actionLabel(event.action))}</dd></div>
-      <div><dt>Quando</dt><dd>${escapeHtml(formatDateTime(event.createdAt))}</dd></div>
-      <div><dt>Ator</dt><dd>${escapeHtml(actorLabel(event))}</dd></div>
-      <div><dt>Perfil</dt><dd>${escapeHtml(roleLabel(event.actorRole || event.role))}</dd></div>
-      <div><dt>Modulo</dt><dd>${escapeHtml(moduleLabel(event.entity))}</dd></div>
-      <div><dt>Entidade</dt><dd>${escapeHtml(moduleLabel(event.entity))}</dd></div>
-      <div><dt>Impacto</dt><dd>${escapeHtml(impactSummary(event))}</dd></div>
-      <div><dt>Sensibilidade</dt><dd>${escapeHtml(isSensitive(event) ? "Operacao sensivel" : "Operacao comum")}</dd></div>
-    </dl>
+  const sensitive = isSensitive(event);
+  const changes = collectChangedFields(event);
+  const contextRowsList = contextRows(event);
+
+  const changesHtml = changes.length
+    ? changes
+        .map((c) => {
+          const hasBefore = c.before != null && c.before !== "";
+          return `
+        <div class="aud-change-row">
+          <span class="aud-change-key">${escapeHtml(humanizeToken(c.key))}</span>
+          <div class="aud-change-diff">
+            ${hasBefore ? `<span class="aud-change-before">${escapeHtml(formatValue(c.before))}</span><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:.5"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>` : ""}
+            <span class="aud-change-after">${escapeHtml(formatValue(c.after))}</span>
+          </div>
+        </div>
+      `;
+        })
+        .join("")
+    : `<p class="aud-drawer-empty">Sem alteracoes detectadas neste evento.</p>`;
+
+  const contextHtml = contextRowsList.length
+    ? `<dl class="aud-drawer-grid">${contextRowsList.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(formatValue(value))}</dd></div>`).join("")}</dl>`
+    : `<p class="aud-drawer-empty">Sem vinculo operacional explicito.</p>`;
+
+  const technicalRows = [
+    ["ID do evento", event.id],
+    ["Entidade", event.entity],
+    ["ID da entidade", event.entityId],
+    ["Rota", event.route],
+    ["Metodo", event.method],
+    ["requestId", event.requestId],
+    ["idempotencyKey", event.idempotencyKey],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`)
+    .join("");
+
+  elements.drawerHost.innerHTML = `
+    <aside class="op-drawer is-open" id="auditEventDrawer">
+      <div class="op-drawer-backdrop" data-drawer-close></div>
+      <article class="op-drawer-panel team-drawer" role="dialog" aria-modal="true">
+
+        <header class="team-drawer-head">
+          <div class="team-drawer-hero">
+            <div class="team-drawer-hero-info">
+              <h2>${escapeHtml(actionLabel(event.action))}</h2>
+              <p class="team-drawer-role">${escapeHtml(moduleLabel(event.entity))} · ${escapeHtml(formatDateTime(event.createdAt))}</p>
+              ${sensitive ? `<div class="team-chips"><span class="team-chip" style="background:rgba(244,63,94,0.1);color:#be123c;border-color:rgba(244,63,94,0.2)">Sensivel</span></div>` : ""}
+            </div>
+          </div>
+          <button type="button" class="team-drawer-close" data-drawer-close aria-label="Fechar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </header>
+
+        <div class="team-drawer-body">
+          <section class="team-drawer-section">
+            <h3>Resumo</h3>
+            <dl class="aud-drawer-grid">
+              <div><dt>Ator</dt><dd>${escapeHtml(actorLabel(event))}</dd></div>
+              <div><dt>Perfil</dt><dd>${escapeHtml(roleLabel(event.actorRole || event.role))}</dd></div>
+              <div><dt>Modulo</dt><dd>${escapeHtml(moduleLabel(event.entity))}</dd></div>
+              <div><dt>Sensibilidade</dt><dd>${escapeHtml(sensitive ? "Operacao sensivel" : "Operacao comum")}</dd></div>
+            </dl>
+          </section>
+
+          ${changes.length ? `
+          <section class="team-drawer-section">
+            <h3>Alteracoes detectadas</h3>
+            <div class="aud-changes-list">${changesHtml}</div>
+          </section>` : ""}
+
+          ${contextRowsList.length ? `
+          <section class="team-drawer-section">
+            <h3>Vinculos operacionais</h3>
+            ${contextHtml}
+          </section>` : ""}
+
+          ${technicalRows ? `
+          <section class="team-drawer-section">
+            <details class="aud-technical-details">
+              <summary>Rastreabilidade tecnica</summary>
+              <dl class="aud-drawer-grid" style="margin-top:12px">${technicalRows}</dl>
+            </details>
+          </section>` : ""}
+        </div>
+
+        <footer class="team-drawer-footer">
+          <button type="button" class="team-footer-btn team-footer-primary" data-drawer-close>Fechar</button>
+        </footer>
+      </article>
+    </aside>
   `;
 
-  const technicalTrace = renderTechnicalTrace({
-    auditLogId: event.id,
-    entity: event.entity,
-    entityId: event.entityId,
-    action: event.action,
-    route: event.route,
-    method: event.method,
-    requestId: event.requestId,
-    correlationId: event.correlationId || event.requestId,
-    idempotencyKey: event.idempotencyKey,
-    beforeJson: event.before ?? event.beforeJson,
-    afterJson: event.after ?? event.afterJson,
-    metadataJson: event.metadata ?? event.metadataJson,
-  });
-
-  elements.drawerHost.innerHTML = renderEntityDrawer({
-    id: "auditEventDrawer",
-    title: actionLabel(event.action),
-    subtitle: `${moduleLabel(event.entity)} · ${formatDateTime(event.createdAt)}`,
-    status: isSensitive(event) ? "CRITICAL" : "",
-    open: true,
-    summary,
-    details: renderContext(event),
-    history: renderBeforeAfter(event),
-    technicalTrace,
-  });
   elements.drawerHost.classList.remove("hidden");
-  bindEntityDrawers(elements.drawerHost);
+
   elements.drawerHost.querySelectorAll("[data-drawer-close]").forEach((button) => {
     button.addEventListener("click", () => {
       elements.drawerHost.classList.add("hidden");

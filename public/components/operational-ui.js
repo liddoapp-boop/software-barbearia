@@ -62,6 +62,12 @@ function attrsToString(attrs = {}) {
     .join(" ");
 }
 
+function normalizeFilterFieldMarkup(field) {
+  const html = String(field || "").trim();
+  if (!html) return "";
+  return `<div class="op-filter-field">${html}</div>`;
+}
+
 function normalizeStatus(status, fallbackLabel = "") {
   const key = String(status || "").trim().toUpperCase();
   const [label, tone] = STATUS_MAP[key] || [fallbackLabel || key || "Status", "neutral"];
@@ -141,10 +147,12 @@ export function renderFilterBar({
 } = {}) {
   const safeId = id || `filter-${Math.random().toString(36).slice(2)}`;
   const hasAdvanced = advanced.length > 0;
+  const essentialFields = essential.map(normalizeFilterFieldMarkup).join("");
+  const advancedFields = advanced.map(normalizeFilterFieldMarkup).join("");
   return `
     <section class="op-filter-bar" ${id ? `id="${escapeHtml(id)}"` : ""}>
       <div class="op-filter-essential">
-        ${essential.join("")}
+        ${essentialFields}
         ${
           hasAdvanced
             ? `<button class="op-filter-toggle" type="button" aria-expanded="${expanded ? "true" : "false"}" data-filter-toggle="${escapeHtml(safeId)}">${escapeHtml(advancedLabel)}</button>`
@@ -153,7 +161,7 @@ export function renderFilterBar({
       </div>
       ${
         hasAdvanced
-          ? `<div class="op-filter-advanced ${expanded ? "is-open" : ""}" data-filter-panel="${escapeHtml(safeId)}">${advanced.join("")}</div>`
+          ? `<div class="op-filter-advanced ${expanded ? "is-open" : ""}" data-filter-panel="${escapeHtml(safeId)}">${advancedFields}</div>`
           : ""
       }
     </section>

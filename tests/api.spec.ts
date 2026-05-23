@@ -1936,6 +1936,29 @@ describe("API MVP", () => {
     }
 
     const originalEvent = refundEvents[0];
+    const originalCreatedAt = new Date(originalEvent.createdAt).getTime();
+    const beforeOriginal = new Date(originalCreatedAt - 1).toISOString();
+    const afterOriginal = new Date(originalCreatedAt + 1).toISOString();
+    const insidePeriod = await app.inject({
+      method: "GET",
+      url: `/audit/events?unitId=unit-01&entity=product_sale_refund&start=${encodeURIComponent(beforeOriginal)}&end=${encodeURIComponent(afterOriginal)}&limit=20`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(insidePeriod.statusCode).toBe(200);
+    expect(
+      (insidePeriod.json().events as Array<{ id: string }>).some((event) => event.id === originalEvent.id),
+    ).toBe(true);
+
+    const outsidePeriod = await app.inject({
+      method: "GET",
+      url: `/audit/events?unitId=unit-01&entity=product_sale_refund&end=${encodeURIComponent(beforeOriginal)}&limit=20`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(outsidePeriod.statusCode).toBe(200);
+    expect(
+      (outsidePeriod.json().events as Array<{ id: string }>).some((event) => event.id === originalEvent.id),
+    ).toBe(false);
+
     const manual = await app.inject({
       method: "POST",
       url: "/financial/manual-entry",

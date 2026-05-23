@@ -270,9 +270,9 @@ function renderFinancial(payload = {}) {
       html: `
         ${report.completeness?.message ? renderNotice(report.completeness.message) : ""}
         ${renderKpis([
-          { label: "Entradas", value: money(summary.totalIncome), hint: "Receitas do periodo", tone: "text-emerald-700" },
-          { label: "Saidas", value: money(summary.totalExpense), hint: "Despesas e reversos", tone: "text-rose-700" },
-          { label: "Saldo", value: money(summary.balance), hint: "Entradas menos saidas", tone: toNumber(summary.balance) >= 0 ? "text-emerald-700" : "text-rose-700" },
+          { label: "Entradas", value: money(summary.totalIncome), hint: "Receitas do periodo", tone: "ds-kpi-tone-success" },
+          { label: "Saidas", value: money(summary.totalExpense), hint: "Despesas e reversos", tone: "ds-kpi-tone-danger" },
+          { label: "Saldo", value: money(summary.balance), hint: "Entradas menos saidas", tone: toNumber(summary.balance) >= 0 ? "ds-kpi-tone-success" : "ds-kpi-tone-danger" },
           { label: "Resultado", value: money(summary.periodResult), hint: "Resultado do periodo" },
           { label: "Receita servicos", value: money(summary.serviceRevenue), hint: "Atendimentos finalizados" },
           { label: "Receita produtos", value: money(summary.productRevenue), hint: "Vendas de produtos" },
@@ -312,9 +312,9 @@ function renderFinancial(payload = {}) {
     html: `
       ${isMissing(payload, "financialTransactions") ? renderNotice("Relatorio parcial com base nos dados financeiros disponiveis.") : ""}
       ${renderKpis([
-        { label: "Entradas", value: money(cashFlow.incoming), hint: "Receitas do periodo", tone: "text-emerald-700" },
-        { label: "Saidas", value: money(cashFlow.outgoing), hint: "Despesas e reversos", tone: "text-rose-700" },
-        { label: "Saldo", value: money(cashFlow.balance), hint: "Entradas menos saidas", tone: toNumber(cashFlow.balance) >= 0 ? "text-emerald-700" : "text-rose-700" },
+        { label: "Entradas", value: money(cashFlow.incoming), hint: "Receitas do periodo", tone: "ds-kpi-tone-success" },
+        { label: "Saidas", value: money(cashFlow.outgoing), hint: "Despesas e reversos", tone: "ds-kpi-tone-danger" },
+        { label: "Saldo", value: money(cashFlow.balance), hint: "Entradas menos saidas", tone: toNumber(cashFlow.balance) >= 0 ? "ds-kpi-tone-success" : "ds-kpi-tone-danger" },
         { label: "Resultado", value: money(summary.estimatedProfit ?? cashFlow.balance), hint: "Resultado estimado" },
         { label: "Receita servicos", value: money(management.serviceRevenue), hint: "Atendimentos finalizados" },
         { label: "Receita produtos", value: money(management.productRevenue), hint: "Vendas de produtos" },
@@ -364,11 +364,11 @@ function renderAppointments(payload = {}) {
         ${report.completeness?.message ? renderNotice(report.completeness.message) : ""}
         ${renderKpis([
           { label: "Agendamentos", value: String(toNumber(summary.total)), hint: "Total no periodo" },
-          { label: "Concluidos", value: String(toNumber(summary.completed)), hint: "Atendimentos finalizados", tone: "text-emerald-700" },
+          { label: "Concluidos", value: String(toNumber(summary.completed)), hint: "Atendimentos finalizados", tone: "ds-kpi-tone-success" },
           { label: "Confirmados", value: String(toNumber(summary.confirmed)), hint: "Prontos para executar" },
           { label: "Em atendimento", value: String(toNumber(summary.inService)), hint: "Em andamento" },
           { label: "Cancelados", value: String(toNumber(summary.cancelled)), hint: "Cancelamentos" },
-          { label: "Faltas", value: String(toNumber(summary.noShow)), hint: "Nao comparecimentos", tone: "text-rose-700" },
+          { label: "Faltas", value: String(toNumber(summary.noShow)), hint: "Nao comparecimentos", tone: "ds-kpi-tone-danger" },
           { label: "Receita realizada", value: money(summary.realizedRevenue), hint: "Atendimentos concluidos" },
         ])}
         <section class="reports-split">
@@ -398,11 +398,11 @@ function renderAppointments(payload = {}) {
       ${isMissing(payload, "appointments") ? renderNotice("Este relatorio depende de evolucao futura do backend ou de dados de agenda carregaveis no periodo.") : ""}
       ${renderKpis([
         { label: "Agendamentos", value: String(rows.length), hint: "Total no periodo" },
-        { label: "Concluidos", value: String(countByStatus.Concluidos || 0), hint: "Atendimentos finalizados", tone: "text-emerald-700" },
+        { label: "Concluidos", value: String(countByStatus.Concluidos || 0), hint: "Atendimentos finalizados", tone: "ds-kpi-tone-success" },
         { label: "Confirmados", value: String(countByStatus.Confirmados || 0), hint: "Prontos para executar" },
         { label: "Em atendimento", value: String(countByStatus["Em atendimento"] || 0), hint: "Em andamento" },
         { label: "Cancelados", value: String(countByStatus.Cancelados || 0), hint: "Cancelamentos" },
-        { label: "Faltas", value: String(countByStatus.Faltas || 0), hint: "Nao comparecimentos", tone: "text-rose-700" },
+        { label: "Faltas", value: String(countByStatus.Faltas || 0), hint: "Nao comparecimentos", tone: "ds-kpi-tone-danger" },
       ])}
       <section class="reports-split">
         <details class="reports-detail-panel" open><summary>Servicos mais realizados</summary>${renderRows(topServices.map((item) => ({ title: item.label, value: `${item.count} atend.`, meta: "Volume no periodo" })), "Sem servicos no periodo.")}</details>
@@ -448,9 +448,9 @@ function renderProductSales(payload = {}) {
       html: `
         ${report.completeness?.message ? renderNotice(report.completeness.message) : ""}
         ${renderKpis([
-          { label: "Total vendido", value: money(summary.totalSold), hint: "Receita bruta de produtos", tone: "text-emerald-700" },
+          { label: "Total vendido", value: money(summary.totalSold), hint: "Receita bruta de produtos", tone: "ds-kpi-tone-success" },
           { label: "Vendas", value: String(toNumber(summary.salesCount)), hint: "Cupons de produto" },
-          { label: "Devolucoes", value: money(summary.refundedAmount), hint: "Produtos devolvidos", tone: toNumber(summary.refundedAmount) ? "text-rose-700" : "" },
+          { label: "Devolucoes", value: money(summary.refundedAmount), hint: "Produtos devolvidos", tone: toNumber(summary.refundedAmount) ? "ds-kpi-tone-danger" : "" },
           { label: "Receita produtos", value: money(summary.productRevenue), hint: "Receita liquida simples" },
           { label: "Ticket medio", value: money(summary.averageProductTicket), hint: "Por venda de produto" },
         ])}
@@ -481,9 +481,9 @@ function renderProductSales(payload = {}) {
     html: `
       ${isMissing(payload, "productSales") ? renderNotice("Relatorio parcial com base nas vendas de produto disponiveis.") : ""}
       ${renderKpis([
-        { label: "Total vendido", value: money(revenue), hint: "Receita bruta de produtos", tone: "text-emerald-700" },
+        { label: "Total vendido", value: money(revenue), hint: "Receita bruta de produtos", tone: "ds-kpi-tone-success" },
         { label: "Vendas", value: String(sales.length), hint: "Cupons de produto" },
-        { label: "Devolucoes", value: money(refunds), hint: "Produtos devolvidos", tone: refunds ? "text-rose-700" : "" },
+        { label: "Devolucoes", value: money(refunds), hint: "Produtos devolvidos", tone: refunds ? "ds-kpi-tone-danger" : "" },
         { label: "Receita produtos", value: money(revenue - refunds), hint: "Receita liquida simples" },
         { label: "Ticket medio", value: money(sales.length ? revenue / sales.length : 0), hint: "Por venda de produto" },
       ])}
@@ -529,9 +529,9 @@ function renderStock(payload = {}) {
       html: `
         ${stock.completeness?.message ? renderNotice(stock.completeness.message) : ""}
         ${renderKpis([
-          { label: "Sem estoque", value: String(toNumber(summary.noStock)), hint: "Produtos zerados", tone: toNumber(summary.noStock) ? "text-rose-700" : "" },
-          { label: "Criticos", value: String(toNumber(summary.critical)), hint: "Abaixo da metade do minimo", tone: toNumber(summary.critical) ? "text-rose-700" : "" },
-          { label: "Abaixo do minimo", value: String(toNumber(summary.belowMinimum)), hint: "Reposicao planejada", tone: toNumber(summary.belowMinimum) ? "text-amber-700" : "" },
+          { label: "Sem estoque", value: String(toNumber(summary.noStock)), hint: "Produtos zerados", tone: toNumber(summary.noStock) ? "ds-kpi-tone-danger" : "" },
+          { label: "Criticos", value: String(toNumber(summary.critical)), hint: "Abaixo da metade do minimo", tone: toNumber(summary.critical) ? "ds-kpi-tone-danger" : "" },
+          { label: "Abaixo do minimo", value: String(toNumber(summary.belowMinimum)), hint: "Reposicao planejada", tone: toNumber(summary.belowMinimum) ? "ds-kpi-tone-warning" : "" },
           { label: "Entradas", value: String(toNumber(summary.inMovements)), hint: "No periodo" },
           { label: "Saidas", value: String(toNumber(summary.outMovements)), hint: "No periodo" },
           { label: "Reposicao sugerida", value: String(suggestions.length), hint: "Base atual" },
@@ -559,9 +559,9 @@ function renderStock(payload = {}) {
     html: `
       ${renderNotice("Relatorio parcial com base no estoque atual e nas movimentacoes recentes disponiveis. O recorte historico completo depende de evolucao futura do backend.")}
       ${renderKpis([
-        { label: "Sem estoque", value: String(out), hint: "Produtos zerados", tone: out ? "text-rose-700" : "" },
-        { label: "Criticos", value: String(critical), hint: "Abaixo da metade do minimo", tone: critical ? "text-rose-700" : "" },
-        { label: "Abaixo do minimo", value: String(low), hint: "Reposicao planejada", tone: low ? "text-amber-700" : "" },
+        { label: "Sem estoque", value: String(out), hint: "Produtos zerados", tone: out ? "ds-kpi-tone-danger" : "" },
+        { label: "Criticos", value: String(critical), hint: "Abaixo da metade do minimo", tone: critical ? "ds-kpi-tone-danger" : "" },
+        { label: "Abaixo do minimo", value: String(low), hint: "Reposicao planejada", tone: low ? "ds-kpi-tone-warning" : "" },
         { label: "Entradas", value: String(inMovements), hint: "Movimentacoes recentes" },
         { label: "Saidas", value: String(outMovements), hint: "Venda, consumo ou ajuste" },
         { label: "Reposicao sugerida", value: String(suggestions.length), hint: "Base atual" },
@@ -594,10 +594,10 @@ function renderClients(payload = {}) {
     html: `
       ${isMissing(payload, "clients") ? renderNotice("Relatorio parcial com base nos dados de clientes disponiveis.") : ""}
       ${renderKpis([
-        { label: "Ativos", value: String(toNumber(summary.active)), hint: "Carteira ativa", tone: "text-emerald-700" },
-        { label: "Em risco", value: String(toNumber(summary.atRisk)), hint: "Precisam retorno", tone: "text-amber-700" },
+        { label: "Ativos", value: String(toNumber(summary.active)), hint: "Carteira ativa", tone: "ds-kpi-tone-success" },
+        { label: "Em risco", value: String(toNumber(summary.atRisk)), hint: "Precisam retorno", tone: "ds-kpi-tone-warning" },
         { label: "Inativos", value: String(toNumber(summary.inactive)), hint: "Reativacao possivel" },
-        { label: "VIPs", value: String(toNumber(summary.vip)), hint: "Maior valor", tone: "text-indigo-700" },
+        { label: "VIPs", value: String(toNumber(summary.vip)), hint: "Maior valor", tone: "ds-kpi-tone-info" },
         { label: "Potencial", value: money(summary.potentialReactivationRevenue), hint: "Reativacao estimada" },
         { label: "Ticket medio", value: money(summary.averageTicket), hint: "Quando disponivel" },
       ])}
@@ -642,10 +642,10 @@ function renderCommissions(payload = {}) {
     html: `
       ${isMissing(payload, "financialCommissions") ? renderNotice("Relatorio parcial com base nas comissoes disponiveis.") : ""}
       ${renderKpis([
-        { label: "Pendente", value: money(pending.reduce((acc, item) => acc + item.commissionAmount, 0)), hint: "Pagamento no modulo Comissoes", tone: "text-amber-700" },
-        { label: "Pago no periodo", value: money(paid.reduce((acc, item) => acc + item.commissionAmount, 0)), hint: "Impacto financeiro", tone: "text-emerald-700" },
+        { label: "Pendente", value: money(pending.reduce((acc, item) => acc + item.commissionAmount, 0)), hint: "Pagamento no modulo Comissoes", tone: "ds-kpi-tone-warning" },
+        { label: "Pago no periodo", value: money(paid.reduce((acc, item) => acc + item.commissionAmount, 0)), hint: "Impacto financeiro", tone: "ds-kpi-tone-success" },
         { label: "Profissionais", value: String(byProfessional.size), hint: "Comissao gerada" },
-        { label: "Comissoes antigas", value: String(old.length), hint: "Pendentes ha 7 dias ou mais", tone: old.length ? "text-rose-700" : "" },
+        { label: "Comissoes antigas", value: String(old.length), hint: "Pendentes ha 7 dias ou mais", tone: old.length ? "ds-kpi-tone-danger" : "" },
       ])}
       <details class="reports-detail-panel" open>
         <summary>Total por profissional</summary>
@@ -736,7 +736,7 @@ function renderAudit(payload = {}) {
         ${report.completeness?.message ? renderNotice(report.completeness.message) : ""}
         ${renderKpis([
           { label: "Eventos", value: String(toNumber(summary.totalEvents)), hint: "No periodo" },
-          { label: "Criticos", value: String(toNumber(summary.criticalEvents)), hint: "Exigem conferencia", tone: toNumber(summary.criticalEvents) ? "text-rose-700" : "" },
+          { label: "Criticos", value: String(toNumber(summary.criticalEvents)), hint: "Exigem conferencia", tone: toNumber(summary.criticalEvents) ? "ds-kpi-tone-danger" : "" },
           { label: "Alteracoes sensiveis", value: String(toNumber(summary.sensitiveActions)), hint: "Resumo operacional" },
           { label: "Estornos/devolucoes", value: String(toNumber(summary.refunds)), hint: "Operacoes reversas" },
         ])}
@@ -768,7 +768,7 @@ function renderAudit(payload = {}) {
       ${renderNotice("Relatorio parcial e resumido. O detalhe tecnico completo permanece na tela Auditoria.")}
       ${renderKpis([
         { label: "Eventos", value: String(events.length), hint: "No periodo" },
-        { label: "Criticos", value: String(critical.length), hint: "Exigem conferencia", tone: critical.length ? "text-rose-700" : "" },
+        { label: "Criticos", value: String(critical.length), hint: "Exigem conferencia", tone: critical.length ? "ds-kpi-tone-danger" : "" },
         { label: "Alteracoes sensiveis", value: String(critical.filter((item) => String(item.action || "").toLowerCase().includes("delete") || String(item.action || "").toLowerCase().includes("update")).length), hint: "Resumo operacional" },
         { label: "Estornos/devolucoes", value: String(critical.filter((item) => `${item.action} ${item.entity}`.toLowerCase().includes("refund")).length), hint: "Operacoes reversas" },
       ])}
@@ -810,7 +810,7 @@ function renderHubCard(report, activeId) {
         <span>Pergunta</span>
         <strong>${escapeHtml(report.question)}</strong>
       </div>
-      <button type="button" class="op-action op-action-primary" data-report-open="${escapeHtml(report.id)}">
+      <button type="button" class="ux-btn ux-btn-primary" data-report-open="${escapeHtml(report.id)}">
         Abrir relatorio
       </button>
     </article>

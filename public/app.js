@@ -9,8 +9,8 @@ import {
   mapModuleToMobileTab,
 } from "./components/menu-config.js";
 import { renderSidebar } from "./components/sidebar.js";
-import { renderTopbar } from "./components/topbar.js";
 import { renderMobileTabs } from "./components/mobile-tabs.js";
+import { renderWhatsAppSection } from "./components/whatsapp.js";
 import {
   renderDashboardData,
   renderDashboardError,
@@ -50,6 +50,7 @@ import {
 } from "./modules/pdv.js";
 import {
   buildWhatsAppLinkFromPhone,
+  formatPhoneBR,
   isValidClientPhone,
   normalizePhoneDigits,
 } from "./modules/phone.js";
@@ -79,6 +80,7 @@ import {
 } from "./modules/profissionais.js";
 import {
   renderServiceDetail,
+  renderServiceEditPanel,
   renderServicesData,
   renderServicesError,
   renderServicesLoading,
@@ -103,8 +105,9 @@ import {
   renderSettingsData,
   renderSettingsError,
   renderSettingsLoading,
-  renderSettingsSectionDrawer,
+  renderSettingsSidebar,
 } from "./modules/configuracoes.js";
+import { animateSettingsScreen } from "./modules/motion-effects.js";
 import {
   renderMetasData,
   renderMetasError,
@@ -137,7 +140,6 @@ import {
 const API = "";
 const unitId = "unit-01";
 const STORAGE_ACTIVE_MODULE = "sb.activeModule";
-const STORAGE_SIDEBAR_COLLAPSED = "sb.sidebarCollapsed";
 const STORAGE_ACTIVE_ROLE = "sb.activeRole";
 const STORAGE_AUTH_SESSION = "sb.authSession";
 const FRONTEND_AUTH_CREDENTIALS = {
@@ -174,11 +176,6 @@ function renderOperationalChrome() {
       eyebrow: "Funil operacional",
       title: "Agenda",
       subtitle: "Agenda do dia, proximo atendimento e acoes principais sem expor dados tecnicos.",
-      action: renderPrimaryAction({
-        label: "Novo agendamento",
-        id: "agendaNewAppointmentBtn",
-        type: "button",
-      }),
     });
   }
 
@@ -187,18 +184,18 @@ function renderOperationalChrome() {
     agendaFilterMount.innerHTML = renderFilterBar({
       id: "agendaOperationalFilters",
       essential: [
-        `<input id="filterSearch" type="search" placeholder="Buscar cliente, servico ou profissional" class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]" />`,
-        `<select id="filterPeriod" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        `<input id="filterSearch" type="search" placeholder="Buscar cliente, servico ou profissional" class="ds-input min-w-[220px]" />`,
+        `<select id="filterPeriod" class="ds-input">
           <option value="today">Hoje</option>
           <option value="week">Semana</option>
           <option value="month">Mes</option>
         </select>`,
-        `<select id="filterProfessional" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        `<select id="filterProfessional" class="ds-input">
           <option value="">Todos profissionais</option>
         </select>`,
       ],
       advanced: [
-        `<select id="filterStatus" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        `<select id="filterStatus" class="ds-input">
           <option value="">Todos status</option>
           <option value="SCHEDULED">Agendado</option>
           <option value="CONFIRMED">Confirmado</option>
@@ -207,7 +204,7 @@ function renderOperationalChrome() {
           <option value="CANCELLED">Cancelado</option>
           <option value="NO_SHOW">Nao compareceu</option>
         </select>`,
-        `<select id="filterService" class="rounded-lg border border-gray-200 px-3 py-2 text-sm">
+        `<select id="filterService" class="ds-input">
           <option value="">Todos servicos</option>
         </select>`,
       ],
@@ -223,6 +220,12 @@ function renderOperationalChrome() {
       eyebrow: "Funil operacional",
       title: "PDV de produtos",
       subtitle: "Busque o produto, monte o carrinho, confira o total e cobre a venda sem expor rastros tecnicos.",
+      secondaryActions: `
+        <div class="pdv-module-tabs pdv-header-tabs" role="tablist" aria-label="Modulo PDV">
+          <button type="button" class="pdv-tab-btn is-active" data-pdv-target="operacao">Venda</button>
+          <button type="button" class="pdv-tab-btn" data-pdv-target="estoque">Estoque</button>
+        </div>
+      `,
     });
   }
 
@@ -238,19 +241,53 @@ function renderOperationalChrome() {
 
   const saleHistoryFilterMount = document.getElementById("saleHistoryFilterMount");
   if (saleHistoryFilterMount) {
-    saleHistoryFilterMount.innerHTML = renderFilterBar({
-      id: "saleHistoryFilters",
-      essential: [
-        `<input id="saleHistorySearch" type="search" placeholder="Buscar cliente ou produto" class="rounded-lg border border-gray-200 px-3 py-2 text-sm min-w-[220px]" />`,
-        `<button type="button" id="saleHistoryRefreshBtn" class="min-h-[40px] rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-700">Atualizar</button>`,
-      ],
-      advanced: [
-        `<input id="saleHistoryStart" type="date" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" />`,
-        `<input id="saleHistoryEnd" type="date" class="rounded-lg border border-gray-200 px-3 py-2 text-sm" />`,
-      ],
-      advancedLabel: "Periodo do historico",
-    });
-    bindFilterBars(saleHistoryFilterMount);
+    saleHistoryFilterMount.innerHTML = `
+      <div class="sale-history-filter-bar">
+        <div class="shf-search-wrap">
+          <svg class="shf-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="saleHistorySearch" type="search" placeholder="Buscar cliente ou produto..." class="ds-input shf-search" autocomplete="off" />
+        </div>
+        <div class="shf-picker-wrap" id="shfPickerWrap">
+          <input id="saleHistoryStart" type="hidden" />
+          <input id="saleHistoryEnd" type="hidden" />
+          <button type="button" id="saleHistoryDateTrigger" class="shf-trigger">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+            <span id="saleHistoryDateLabel">Últimos 30 dias</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="shfPickerPopover" class="shf-popover hidden" role="dialog" aria-label="Selecionar período">
+            <div class="shf-presets">
+              <button type="button" class="shf-preset" data-shf-preset="today">Hoje</button>
+              <button type="button" class="shf-preset" data-shf-preset="7d">Últimos 7 dias</button>
+              <button type="button" class="shf-preset is-active" data-shf-preset="30d">Últimos 30 dias</button>
+              <button type="button" class="shf-preset" data-shf-preset="month">Este mês</button>
+              <button type="button" class="shf-preset" data-shf-preset="prev-month">Mês anterior</button>
+            </div>
+            <div class="shf-cals" id="shfCals"></div>
+            <div class="shf-popover-foot">
+              <span id="shfRangeLabel" class="shf-range-label"></span>
+              <button type="button" id="shfApplyBtn" class="shf-apply-btn">Aplicar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    initSaleHistoryDatePicker();
+
+    // Re-query after DOM injection (these were null when queried at module level)
+    const liveSearch = document.getElementById("saleHistorySearch");
+    if (liveSearch) {
+      liveSearch.addEventListener("input", () => {
+        window.clearTimeout(saleHistoryDebounce);
+        saleHistoryDebounce = window.setTimeout(() => {
+          loadProductSalesHistory().catch(() => {
+            if (saleRecentList) {
+              saleRecentList.innerHTML = `<p class="panel-msg panel-msg-error">Nao foi possivel carregar historico de vendas.</p>`;
+            }
+          });
+        }, 300);
+      });
+    }
   }
 
   const inventoryHeaderMount = document.getElementById("inventoryHeaderMount");
@@ -260,34 +297,39 @@ function renderOperationalChrome() {
       eyebrow: "Funil operacional",
       title: "Estoque",
       subtitle: "Produtos criticos primeiro, reposicao clara e rastreabilidade tecnica apenas no detalhe.",
-      action: renderPrimaryAction({
-        label: "Novo produto",
-        id: "inventoryAddBtn",
-        type: "button",
-      }),
+      secondaryActions: `
+        <div class="pdv-module-tabs pdv-header-tabs" role="tablist" aria-label="Modulo PDV">
+          <button type="button" class="pdv-tab-btn" data-pdv-target="operacao">Venda</button>
+          <button type="button" class="pdv-tab-btn is-active" data-pdv-target="estoque">Estoque</button>
+        </div>
+      `,
     });
   }
 
   const inventoryFilterMount = document.getElementById("inventoryFilterMount");
   if (inventoryFilterMount) {
-    inventoryFilterMount.innerHTML = renderFilterBar({
-      id: "inventoryOperationalFilters",
-      essential: [
-        `<input id="inventorySearch" type="search" placeholder="Buscar produto" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
-        `<select id="inventoryStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <option value="ALL">Todos status</option>
-          <option value="OUT_OF_STOCK">Sem estoque</option>
-          <option value="LOW_STOCK">Estoque baixo</option>
-        </select>`,
-      ],
-      advanced: [
-        `<select id="inventoryCategoryFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <option value="">Todas categorias</option>
-        </select>`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(inventoryFilterMount);
+    inventoryFilterMount.innerHTML = `
+      <div class="inv-filter-strip">
+        <div class="inv-filter-group">
+          <div class="inv-filter-search-wrap">
+            <svg class="inv-filter-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input id="inventorySearch" type="search" placeholder="Buscar produto..." class="ds-input inv-filter-search" autocomplete="off" />
+          </div>
+          <select id="inventoryStatusFilter" class="ds-input inv-filter-select">
+            <option value="ALL">Todos status</option>
+            <option value="OUT_OF_STOCK">Sem estoque</option>
+            <option value="LOW_STOCK">Estoque baixo</option>
+          </select>
+          <select id="inventoryCategoryFilter" class="ds-input inv-filter-select">
+            <option value="">Todas categorias</option>
+          </select>
+        </div>
+        <button type="button" id="inventoryAddBtn" class="ux-btn inventory-add-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          Novo produto
+        </button>
+      </div>
+    `;
   }
 
   const financialHeaderMount = document.getElementById("financialHeaderMount");
@@ -296,40 +338,33 @@ function renderOperationalChrome() {
       breadcrumb: "Inicio / Financeiro",
       eyebrow: "Financeiro conciliado",
       title: "Financeiro",
-      subtitle: "Resultado do periodo, entradas, saidas, saldo e origens operacionais sem expor rastros tecnicos.",
-      action: renderPrimaryAction({
-        label: "Novo lancamento",
-        id: "financialAddTransactionBtn",
-        type: "button",
-      }),
+      subtitle: "Resultado, entradas, saidas e lancamentos em uma visao operacional limpa.",
     });
   }
 
   const financialFilterMount = document.getElementById("financialFilterMount");
   if (financialFilterMount) {
-    financialFilterMount.innerHTML = renderFilterBar({
-      id: "financialOperationalFilters",
-      essential: [
-        `<select id="financialPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+    financialFilterMount.innerHTML = `
+      <div class="fn-filter-bar" id="financialOperationalFilters">
+        <select id="financialPeriod" class="fn-filter-select" aria-label="Periodo">
           <option value="today">Hoje</option>
           <option value="week">Semana</option>
           <option value="month" selected>Mes</option>
           <option value="custom">Personalizado</option>
-        </select>`,
-        `<select id="financialTypeFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="financialTypeFilter" class="fn-filter-select" aria-label="Tipo de lancamento">
           <option value="">Entradas e saidas</option>
           <option value="INCOME">Entradas</option>
           <option value="EXPENSE">Saidas</option>
-        </select>`,
-        `<input id="financialSearch" type="search" placeholder="Buscar descricao ou observacao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
-      ],
-      advanced: [
-        `<input id="financialCustomStart" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
-        `<input id="financialCustomEnd" type="date" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
-      ],
-      advancedLabel: "Periodo personalizado",
-    });
-    bindFilterBars(financialFilterMount);
+        </select>
+        <input id="financialCustomStart" type="date" class="fn-filter-select fn-custom-date hidden" aria-label="Inicio do periodo" />
+        <input id="financialCustomEnd" type="date" class="fn-filter-select fn-custom-date hidden" aria-label="Fim do periodo" />
+        <div class="fn-filter-search-wrap">
+          <svg class="fn-filter-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="financialSearch" type="search" placeholder="Buscar descricao, categoria ou observacao..." class="fn-filter-search" autocomplete="off" />
+        </div>
+      </div>
+    `;
   }
 
   const commissionsHeaderMount = document.getElementById("commissionsHeaderMount");
@@ -344,34 +379,29 @@ function renderOperationalChrome() {
 
   const commissionsFilterMount = document.getElementById("commissionsFilterMount");
   if (commissionsFilterMount) {
-    commissionsFilterMount.innerHTML = renderFilterBar({
-      id: "commissionsOperationalFilters",
-      essential: [
-        `<select id="commissionsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <option value="month">Mes</option>
-          <option value="week">Semana</option>
+    commissionsFilterMount.innerHTML = `
+      <div class="comm-filter-bar" id="commissionsOperationalFilters">
+        <select id="commissionsPeriod" class="comm-filter-select" aria-label="Periodo">
+          <option value="month">Este mes</option>
+          <option value="week">Esta semana</option>
           <option value="today">Hoje</option>
-        </select>`,
-        `<select id="commissionsProfessionalFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="commissionsProfessionalFilter" class="comm-filter-select" aria-label="Profissional">
           <option value="">Todos profissionais</option>
-        </select>`,
-        `<select id="commissionsAppliesToFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="commissionsAppliesToFilter" class="comm-filter-select" aria-label="Origem">
           <option value="">Todas origens</option>
-          <option value="SERVICE">Atendimento finalizado</option>
-          <option value="PRODUCT">Venda de produto</option>
-        </select>`,
-      ],
-      advanced: [
-        `<select id="commissionsStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <option value="SERVICE">Atendimento</option>
+          <option value="PRODUCT">Produto</option>
+        </select>
+        <select id="commissionsStatusFilter" class="comm-filter-select" aria-label="Status">
           <option value="">Todos status</option>
           <option value="PENDING">Pendente</option>
           <option value="PAID">Paga</option>
           <option value="CANCELED">Cancelada</option>
-        </select>`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(commissionsFilterMount);
+        </select>
+      </div>
+    `;
   }
 
   const clientsHeaderMount = document.getElementById("clientsHeaderMount");
@@ -381,76 +411,71 @@ function renderOperationalChrome() {
       eyebrow: "Relacionamento operacional",
       title: "Clientes",
       subtitle: "Carteira com ativos, risco, VIPs e reativacao prioritaria. Historico completo e rastros tecnicos ficam no detalhe.",
-      action: renderPrimaryAction({
-        label: "Novo cliente",
-        id: "clientsAddBtn",
-        type: "button",
-      }),
     });
   }
 
   const clientsFilterMount = document.getElementById("clientsFilterMount");
   if (clientsFilterMount) {
-    clientsFilterMount.innerHTML = renderFilterBar({
-      id: "clientsOperationalFilters",
-      essential: [
-        `<input id="clientsSearch" type="search" placeholder="Buscar nome, telefone ou tag" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
-        `<select id="clientsStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+    clientsFilterMount.innerHTML = `
+      <div class="cl-filter-bar">
+        <select id="clientsStatusFilter" class="cl-filter-select">
           <option value="">Todos status</option>
           <option value="ACTIVE">Ativo</option>
           <option value="AT_RISK">Em risco</option>
           <option value="INACTIVE">Inativo</option>
           <option value="VIP">VIP</option>
-        </select>`,
-        `<select id="clientsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <option value="month">Mes</option>
-          <option value="week">Semana</option>
-          <option value="today">Hoje</option>
-        </select>`,
-      ],
-      advanced: [
-        `<select id="clientsSegmentFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="clientsSegmentFilter" class="cl-filter-select">
           <option value="">Todos segmentos</option>
           <option value="VALUE_HIGH">Maior valor</option>
-          <option value="VALUE_MEDIUM">Valor medio</option>
+          <option value="VALUE_MEDIUM">Valor médio</option>
           <option value="VALUE_LOW">Valor baixo</option>
-        </select>`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(clientsFilterMount);
+        </select>
+        <select id="clientsPeriod" class="cl-filter-select" style="flex-basis:120px;width:120px">
+          <option value="month">Este mês</option>
+          <option value="week">Esta semana</option>
+          <option value="today">Hoje</option>
+          <option value="quarter">90 dias</option>
+        </select>
+        <select id="clientsLimit" class="cl-filter-select" style="flex-basis:116px;width:116px">
+          <option value="50">50 clientes</option>
+          <option value="100">100 clientes</option>
+          <option value="200">200 clientes</option>
+        </select>
+        <div class="cl-filter-search-wrap">
+          <input id="clientsSearch" type="search" placeholder="Buscar cliente..." class="cl-filter-search" autocomplete="off" />
+        </div>
+      </div>
+    `;
   }
 
   const professionalsHeaderMount = document.getElementById("professionalsHeaderMount");
   if (professionalsHeaderMount) {
     professionalsHeaderMount.innerHTML = renderPageHeader({
       breadcrumb: "Inicio / Profissionais",
-      eyebrow: "Catalogo operacional",
-      title: "Profissionais",
-      subtitle: "Equipe ativa, servicos que pode atender, producao e comissoes resumidas. Rastros tecnicos ficam no detalhe.",
+      eyebrow: "Equipe operacional",
+      title: "Equipe",
+      subtitle: "Equipe ativa, atendimentos do periodo, producao e proximas acoes sem ruido visual.",
     });
   }
 
   const professionalsFilterMount = document.getElementById("professionalsFilterMount");
   if (professionalsFilterMount) {
-    professionalsFilterMount.innerHTML = renderFilterBar({
-      id: "professionalsOperationalFilters",
-      essential: [
-        `<select id="professionalsFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+    professionalsFilterMount.innerHTML = `
+      <div class="team-filter-bar" id="professionalsOperationalFilters">
+        <select id="professionalsFilter" class="team-filter-select" aria-label="Profissional">
           <option value="">Todos profissionais</option>
-        </select>`,
-        `<select id="professionalsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="professionalsPeriod" class="team-filter-select" aria-label="Periodo">
           <option value="month">Mes</option>
           <option value="week">Semana</option>
           <option value="today">Hoje</option>
-        </select>`,
-      ],
-      advanced: [
-        `<span class="text-xs text-slate-500">Perfis e inativos dependem do cadastro de profissionais existente.</span>`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(professionalsFilterMount);
+        </select>
+        <button type="button" id="professionalsAddBtn" class="pr-add-btn" style="margin-left:auto">
+          <span aria-hidden="true">+</span> Novo profissional
+        </button>
+      </div>
+    `;
   }
 
   const servicesHeaderMount = document.getElementById("servicesHeaderMount");
@@ -458,38 +483,29 @@ function renderOperationalChrome() {
     servicesHeaderMount.innerHTML = renderPageHeader({
       breadcrumb: "Inicio / Servicos",
       eyebrow: "Catalogo operacional",
-      title: "Servicos",
-      subtitle: "Servicos vendaveis, preco, duracao, margem e profissionais habilitados primeiro. Detalhes tecnicos ficam recolhidos.",
-      action: renderPrimaryAction({
-        label: "Novo servico",
-        id: "servicesAddBtn",
-        type: "button",
-      }),
+      title: "Serviços",
+      subtitle: "Catalogo de servicos vendaveis com preco, duracao, margem e profissionais habilitados. Detalhe tecnico no drawer.",
     });
   }
 
   const servicesFilterMount = document.getElementById("servicesFilterMount");
   if (servicesFilterMount) {
-    servicesFilterMount.innerHTML = renderFilterBar({
-      id: "servicesOperationalFilters",
-      essential: [
-        `<input id="servicesSearch" type="search" placeholder="Buscar servico ou descricao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[220px]" />`,
-        `<select id="servicesCategoryFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+    servicesFilterMount.innerHTML = `
+      <div class="svc-filter-bar" id="servicesOperationalFilters">
+        <input id="servicesSearch" type="search" placeholder="Buscar servico ou descricao" class="svc-filter-input" />
+        <select id="servicesCategoryFilter" class="svc-filter-select" aria-label="Categoria">
           <option value="">Todas categorias</option>
-        </select>`,
-        `<select id="servicesStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        </select>
+        <select id="servicesStatusFilter" class="svc-filter-select" aria-label="Status">
           <option value="ALL">Todos status</option>
-          <option value="ACTIVE">Servicos ativos</option>
-          <option value="INACTIVE">Servicos inativos</option>
-        </select>`,
-      ],
-      advanced: [
-        `<input id="servicesMinPrice" type="number" min="0" step="0.01" placeholder="Preco minimo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
-        `<input id="servicesMaxPrice" type="number" min="0" step="0.01" placeholder="Preco maximo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(servicesFilterMount);
+          <option value="ACTIVE">Ativos</option>
+          <option value="INACTIVE">Inativos</option>
+        </select>
+        <button type="button" id="servicesAddBtn" class="svc-add-btn" style="margin-left:auto">
+          <span aria-hidden="true">+</span> Novo serviço
+        </button>
+      </div>
+    `;
   }
 
   const auditHeaderMount = document.getElementById("auditHeaderMount");
@@ -504,37 +520,67 @@ function renderOperationalChrome() {
 
   const auditFilterMount = document.getElementById("auditFilterMount");
   if (auditFilterMount) {
-    auditFilterMount.innerHTML = renderFilterBar({
-      id: "auditOperationalFilters",
-      essential: [
-        `<input id="auditStartFilter" type="date" aria-label="Inicio" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
-        `<input id="auditEndFilter" type="date" aria-label="Fim" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />`,
-        `<input id="auditEntityFilter" type="text" placeholder="Modulo ou entidade" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<input id="auditActorFilter" type="search" placeholder="Ator" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<input id="auditActionFilter" type="text" placeholder="Acao" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-      ],
-      advanced: [
-        `<input id="auditRequestIdFilter" type="search" placeholder="requestId" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<input id="auditIdempotencyFilter" type="search" placeholder="idempotencyKey" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<input id="auditEntityIdFilter" type="search" placeholder="entityId" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<input id="auditRouteFilter" type="search" placeholder="rota" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]" />`,
-        `<select id="auditMethodFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+    auditFilterMount.innerHTML = `
+      <div class="aud-filter-bar">
+        <div class="aud-picker-wrap" id="audPickerWrap">
+          <input id="auditStartFilter" type="hidden" />
+          <input id="auditEndFilter" type="hidden" />
+          <button type="button" id="auditDateTrigger" class="shf-trigger aud-filter-trigger">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+            <span id="auditDateLabel">Últimos 30 dias</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="audPickerPopover" class="shf-popover hidden" role="dialog" aria-label="Selecionar período">
+            <div class="shf-presets">
+              <button type="button" class="shf-preset" data-aud-preset="today">Hoje</button>
+              <button type="button" class="shf-preset" data-aud-preset="7d">Últimos 7 dias</button>
+              <button type="button" class="shf-preset is-active" data-aud-preset="30d">Últimos 30 dias</button>
+              <button type="button" class="shf-preset" data-aud-preset="month">Este mês</button>
+              <button type="button" class="shf-preset" data-aud-preset="prev-month">Mês anterior</button>
+            </div>
+            <div class="shf-cals" id="audCals"></div>
+            <div class="shf-popover-foot">
+              <span id="audRangeLabel" class="shf-range-label"></span>
+              <button type="button" id="audApplyBtn" class="shf-apply-btn">Aplicar</button>
+            </div>
+          </div>
+        </div>
+        <select id="auditEntityFilter" class="aud-filter-input">
+          <option value="">Todos os módulos</option>
+          <option value="agenda">Agenda</option>
+          <option value="pdv">PDV</option>
+          <option value="financeiro">Financeiro</option>
+          <option value="comissoes">Comissões</option>
+          <option value="estoque">Estoque</option>
+          <option value="configuracoes">Configurações</option>
+          <option value="profissionais">Profissionais</option>
+          <option value="servicos">Serviços</option>
+          <option value="usuarios">Usuários</option>
+        </select>
+        <select id="auditActorFilter" class="aud-filter-input">
+          <option value="">Todos os atores</option>
+        </select>
+        <select id="auditLimitFilter" class="aud-filter-input">
+          <option value="50">50 eventos</option>
+          <option value="100">100 eventos</option>
+          <option value="200">200 eventos</option>
+          <option value="500">500 eventos</option>
+        </select>
+        <input id="auditActionFilter" type="search" placeholder="Acao" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditRequestIdFilter" type="search" placeholder="requestId" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditIdempotencyFilter" type="search" placeholder="idempotencyKey" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditEntityIdFilter" type="search" placeholder="entityId" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditRouteFilter" type="search" placeholder="rota" class="aud-filter-input aud-filter-input-hidden" />
+        <select id="auditMethodFilter" class="aud-filter-input aud-filter-input-hidden">
           <option value="">Todos metodos</option>
           <option value="GET">GET</option>
           <option value="POST">POST</option>
           <option value="PATCH">PATCH</option>
           <option value="DELETE">DELETE</option>
-        </select>`,
-        `<select id="auditLimitFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-          <option value="50">50 eventos</option>
-          <option value="100">100 eventos</option>
-          <option value="200">200 eventos</option>
-          <option value="500">500 eventos</option>
-        </select>`,
-      ],
-      advancedLabel: "Filtros avancados",
-    });
-    bindFilterBars(auditFilterMount);
+        </select>
+      </div>
+    `;
+    initAuditDatePicker();
   }
 
   const reportsHeaderMount = document.getElementById("reportsHeaderMount");
@@ -553,14 +599,14 @@ function renderOperationalChrome() {
     reportsFilterMount.innerHTML = renderFilterBar({
       id: "reportsOperationalFilters",
       essential: [
-        `<select id="reportsPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="reportsPeriod" class="ds-input">
           <option value="today">Hoje</option>
           <option value="week">Semana</option>
           <option value="month" selected>Mes</option>
           <option value="custom">Periodo personalizado</option>
         </select>`,
-        `<input id="reportsCustomStart" type="date" aria-label="Inicio do periodo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
-        `<input id="reportsCustomEnd" type="date" aria-label="Fim do periodo" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hidden" />`,
+        `<input id="reportsCustomStart" type="date" aria-label="Inicio do periodo" class="ds-input hidden" />`,
+        `<input id="reportsCustomEnd" type="date" aria-label="Fim do periodo" class="ds-input hidden" />`,
       ],
       advanced: [
         `<span class="reports-filter-note">Relatorios usam os dados operacionais disponiveis no periodo selecionado.</span>`,
@@ -585,12 +631,12 @@ function renderOperationalChrome() {
     fidelizacaoFilterMount.innerHTML = renderFilterBar({
       id: "fidelizacaoOperationalFilters",
       essential: [
-        `<select id="fidelizacaoPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="fidelizacaoPeriod" class="ds-input">
           <option value="month">Mes</option>
           <option value="week">Semana</option>
           <option value="today">Hoje</option>
         </select>`,
-        `<select id="retentionRiskFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="retentionRiskFilter" class="ds-input">
           <option value="">Risco (todos)</option>
           <option value="HIGH">Alto</option>
           <option value="MEDIUM">Medio</option>
@@ -616,12 +662,12 @@ function renderOperationalChrome() {
     automacoesFilterMount.innerHTML = renderFilterBar({
       id: "automacoesOperationalFilters",
       essential: [
-        `<select id="automacoesPeriod" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="automacoesPeriod" class="ds-input">
           <option value="month">Mes</option>
           <option value="week">Semana</option>
           <option value="today">Hoje</option>
         </select>`,
-        `<select id="automacoesStatusFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="automacoesStatusFilter" class="ds-input">
           <option value="">Execucoes (todos)</option>
           <option value="SUCCESS">Sucesso</option>
           <option value="FAILED">Falha</option>
@@ -629,13 +675,13 @@ function renderOperationalChrome() {
         </select>`,
       ],
       advanced: [
-        `<select id="automacoesRiskFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="automacoesRiskFilter" class="ds-input">
           <option value="">Risco (todos)</option>
           <option value="HIGH">Alto</option>
           <option value="MEDIUM">Medio</option>
           <option value="LOW">Baixo</option>
         </select>`,
-        `<select id="automacoesProviderFilter" class="min-h-[44px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+        `<select id="automacoesProviderFilter" class="ds-input">
           <option value="">Provedor (todos)</option>
           <option value="whatsapp-cloud">whatsapp-cloud</option>
           <option value="billing-gateway">billing-gateway</option>
@@ -665,7 +711,6 @@ function renderOperationalChrome() {
 
 const appShell = document.getElementById("appShell");
 const appSidebar = document.getElementById("appSidebar");
-const appTopbar = document.getElementById("appTopbar");
 const appMobileTabs = document.getElementById("appMobileTabs");
 
 renderOperationalChrome();
@@ -702,6 +747,7 @@ const reportsPeriod = document.getElementById("reportsPeriod");
 const reportsCustomStart = document.getElementById("reportsCustomStart");
 const reportsCustomEnd = document.getElementById("reportsCustomEnd");
 const financialSummary = document.getElementById("financialSummary");
+const financialToolbarMount = document.getElementById("financialToolbarMount");
 const financialCashflow = document.getElementById("financialCashflow");
 const financialEntriesList = document.getElementById("financialEntriesList");
 const financialCommissionsList = document.getElementById("financialCommissionsList");
@@ -726,6 +772,7 @@ const financialTransactionDescription = document.getElementById("financialTransa
 const financialTransactionAmount = document.getElementById("financialTransactionAmount");
 const financialTransactionDate = document.getElementById("financialTransactionDate");
 const financialTransactionPaymentMethod = document.getElementById("financialTransactionPaymentMethod");
+const financialTransactionCreditTerms = document.getElementById("financialTransactionCreditTerms");
 const financialTransactionProfessional = document.getElementById("financialTransactionProfessional");
 const financialTransactionCustomer = document.getElementById("financialTransactionCustomer");
 const financialTransactionNotes = document.getElementById("financialTransactionNotes");
@@ -753,10 +800,13 @@ const inventoryProductQuantity = document.getElementById("inventoryProductQuanti
 const inventoryProductCostPrice = document.getElementById("inventoryProductCostPrice");
 const inventoryProductMinimumStock = document.getElementById("inventoryProductMinimumStock");
 const inventoryProductCategory = document.getElementById("inventoryProductCategory");
+const inventoryProductImageUrl = document.getElementById("inventoryProductImageUrl");
+const inventoryCategorySuggestions = document.getElementById("inventoryCategorySuggestions");
 const inventoryProductNotes = document.getElementById("inventoryProductNotes");
 const inventoryProductSubmitBtn = document.getElementById("inventoryProductSubmitBtn");
 const inventoryStockModal = document.getElementById("inventoryStockModal");
 const inventoryStockModalTitle = document.getElementById("inventoryStockModalTitle");
+const inventoryStockModalSubtitle = document.getElementById("inventoryStockModalSubtitle");
 const inventoryStockModalClose = document.getElementById("inventoryStockModalClose");
 const inventoryStockModalCancel = document.getElementById("inventoryStockModalCancel");
 const inventoryStockForm = document.getElementById("inventoryStockForm");
@@ -774,10 +824,12 @@ const saleHistoryEnd = document.getElementById("saleHistoryEnd");
 const saleHistoryRefreshBtn = document.getElementById("saleHistoryRefreshBtn");
 const saleDrawerHost = document.getElementById("saleDrawerHost");
 const clientsSummary = document.getElementById("clientsSummary");
+const clientsToolbarMount = document.getElementById("clientsToolbarMount");
 const clientsReactivationQueue = document.getElementById("clientsReactivationQueue");
 const clientsAutomationSignals = document.getElementById("clientsAutomationSignals");
 const clientsTable = document.getElementById("clientsTable");
 const clientsFeedback = document.getElementById("clientsFeedback");
+const clientsFormFeedback = document.getElementById("clientsFormFeedback");
 const professionalsSummary = document.getElementById("professionalsSummary");
 const professionalsTable = document.getElementById("professionalsTable");
 const professionalsDrawerHost = document.getElementById("professionalsDrawerHost");
@@ -814,7 +866,17 @@ const servicesProfessionalIds = document.getElementById("servicesProfessionalIds
 const servicesIsActive = document.getElementById("servicesIsActive");
 const servicesEstimatedCost = document.getElementById("servicesEstimatedCost");
 const servicesNotes = document.getElementById("servicesNotes");
+const servicesImageUrl = document.getElementById("servicesImageUrl");
 const servicesSubmitBtn = document.getElementById("servicesSubmitBtn");
+const professionalsModal = document.getElementById("professionalsModal");
+const professionalsModalClose = document.getElementById("professionalsModalClose");
+const professionalsModalCancel = document.getElementById("professionalsModalCancel");
+const professionalsForm = document.getElementById("professionalsForm");
+const professionalsFormId = document.getElementById("professionalsFormId");
+const professionalsFormName = document.getElementById("professionalsFormName");
+const professionalsFormPhone = document.getElementById("professionalsFormPhone");
+const professionalsFormEmail = document.getElementById("professionalsFormEmail");
+const professionalsFormFeedback = document.getElementById("professionalsFormFeedback");
 const commissionsSummary = document.getElementById("commissionsSummary");
 const commissionsTable = document.getElementById("commissionsTable");
 const commissionsFeedback = document.getElementById("commissionsFeedback");
@@ -921,7 +983,12 @@ const appointmentsFilterService = document.getElementById("appointmentsFilterSer
 const appointmentsFilterClient = document.getElementById("appointmentsFilterClient");
 const appointmentsFilterSearch = document.getElementById("appointmentsFilterSearch");
 const agendaCardsMode = document.getElementById("agendaCardsMode");
+const agendaCalendarMode = document.getElementById("agendaCalendarMode");
 const agendaListMode = document.getElementById("agendaListMode");
+const alFilterStatus = document.getElementById("alFilterStatus");
+const alFilterProfessional = document.getElementById("alFilterProfessional");
+const alFilterSearch = document.getElementById("alFilterSearch");
+const agendaListContent = document.getElementById("agendaListContent");
 
 const dashboardElements = {
   kpiGrid,
@@ -959,11 +1026,18 @@ const sectionsByModule = {
   metas: metasSection,
   configuracoes: document.getElementById("settingsSection"),
   relatorios: document.getElementById("reportsSection"),
+  whatsapp: document.getElementById("whatsappSection"),
+  "agendamento-link": document.getElementById("agendamento-linkSection"),
 };
 
-const allModuleIds = new Set(MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id));
+const allModuleIds = new Set([
+  ...MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id),
+  ...Object.keys(sectionsByModule),
+]);
 
 const clientId = document.getElementById("clientId");
+const clientSearch = document.getElementById("clientSearch");
+const clientSearchDropdown = document.getElementById("clientSearchDropdown");
 const professionalId = document.getElementById("professionalId");
 const serviceId = document.getElementById("serviceId");
 const startsAt = document.getElementById("startsAt");
@@ -976,15 +1050,21 @@ const viewListBtn = document.getElementById("viewListBtn");
 const viewGridBtn = document.getElementById("viewGridBtn");
 const saleProductId = document.getElementById("saleProductId");
 const saleQty = document.getElementById("saleQty");
+const saleCategoryList = document.getElementById("saleCategoryList");
+const saleProductRail = document.getElementById("saleProductRail");
+const saleSelectedProductThumb = document.getElementById("saleSelectedProductThumb");
+const saleSelectedProductName = document.getElementById("saleSelectedProductName");
+const saleSelectedProductMeta = document.getElementById("saleSelectedProductMeta");
 const saleClientId = document.getElementById("saleClientId");
 const saleProfessionalId = document.getElementById("saleProfessionalId");
 const saleAddItemBtn = document.getElementById("saleAddItemBtn");
 const saleClearCartBtn = document.getElementById("saleClearCartBtn");
+const pdvProductSearch = document.getElementById("pdvProductSearch");
 const clientsSearch = document.getElementById("clientsSearch");
 const clientsStatusFilter = document.getElementById("clientsStatusFilter");
 const clientsSegmentFilter = document.getElementById("clientsSegmentFilter");
 const clientsPeriod = document.getElementById("clientsPeriod");
-const clientsAddBtn = document.getElementById("clientsAddBtn");
+const clientsLimit = document.getElementById("clientsLimit");
 const clientsModal = document.getElementById("clientsModal");
 const clientsModalClose = document.getElementById("clientsModalClose");
 const clientsModalCancel = document.getElementById("clientsModalCancel");
@@ -1015,6 +1095,7 @@ const scheduleAssistElements = {
 
 const financialElements = {
   summary: financialSummary,
+  toolbar: financialToolbarMount,
   cashflow: financialCashflow,
   list: financialEntriesList,
   commissions: financialCommissionsList,
@@ -1034,6 +1115,7 @@ const stockElements = {
 
 const clientsElements = {
   summary: clientsSummary,
+  toolbar: clientsToolbarMount,
   automationSignals: clientsAutomationSignals,
   reactivationQueue: clientsReactivationQueue,
   table: clientsTable,
@@ -1126,12 +1208,18 @@ let currentAgenda = [];
 let currentAppointments = [];
 let currentView = "cards";
 let selectedAppointmentId = "";
+let wcWeekStart = null;
+let wcItems = [];
+let wcLoaded = false;
+let alFocusedAppointmentId = "";
+let currentWorkingHours = null;
 let productsById = {};
 let clientsById = {};
 let servicesById = {};
 let professionalsById = {};
 let allServices = [];
 let saleCart = createEmptyCart();
+let saleSelectedCategory = "";
 let recentSales = [];
 let productSalesHistory = [];
 let saleHistoryDebounce = null;
@@ -1143,6 +1231,9 @@ let currentProfessionalsPayload = null;
 let currentServices = [];
 let currentServiceDetail = null;
 let currentSettingsPayload = null;
+let settingsActiveSection = "business";
+let settingsReturnModule = "financeiro";
+let accountMenuOpen = false;
 let currentMetasPayload = null;
 let currentAuditPayload = null;
 let currentReportsPayload = null;
@@ -1181,14 +1272,51 @@ let schedulingCatalog = {
 };
 
 const actionLabel = {
-  CONFIRMED: "Confirmar",
-  IN_SERVICE: "Iniciar",
   COMPLETE: "Concluir",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
+};
+
+const SLOT_BLOCKING_STATUSES = new Set(["SCHEDULED", "CONFIRMED", "IN_SERVICE", "BLOCKED"]);
+const SETTINGS_DAY_LABELS = [
+  "Domingo",
+  "Segunda",
+  "Terca",
+  "Quarta",
+  "Quinta",
+  "Sexta",
+  "Sabado",
+];
+const SETTINGS_HOURS_PRESETS = {
+  barber_default: [
+    { dayOfWeek: 0, opensAt: "09:00", closesAt: "12:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 1, opensAt: "14:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 2, opensAt: "14:00", closesAt: "18:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 3, opensAt: "11:30", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 4, opensAt: "11:30", closesAt: "19:30", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 5, opensAt: "13:30", closesAt: "21:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 6, opensAt: "07:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+  ],
+  commercial_day: [
+    { dayOfWeek: 0, opensAt: "", closesAt: "", breakStart: "", breakEnd: "", isClosed: true },
+    { dayOfWeek: 1, opensAt: "09:00", closesAt: "19:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+    { dayOfWeek: 2, opensAt: "09:00", closesAt: "19:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+    { dayOfWeek: 3, opensAt: "09:00", closesAt: "19:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+    { dayOfWeek: 4, opensAt: "09:00", closesAt: "19:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+    { dayOfWeek: 5, opensAt: "09:00", closesAt: "19:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+    { dayOfWeek: 6, opensAt: "09:00", closesAt: "14:00", breakStart: "", breakEnd: "", isClosed: false },
+  ],
+  clear_all: Array.from({ length: 7 }, (_item, dayOfWeek) => ({
+    dayOfWeek,
+    opensAt: "",
+    closesAt: "",
+    breakStart: "",
+    breakEnd: "",
+    isClosed: true,
+  })),
 };
 
 const agendaElements = {
@@ -1200,7 +1328,6 @@ const agendaElements = {
 const state = {
   role: restoreRole(),
   activeModule: restoreActiveModule(),
-  sidebarCollapsed: restoreSidebarCollapsed(),
   viewport: getViewport(),
   mobileTab: "inicio",
   mobileMoreOpen: false,
@@ -1212,6 +1339,70 @@ if (!isAllowedModule(state.activeModule)) {
   state.activeModule = firstAllowedModule();
   state.mobileTab = mapModuleToMobileTab(state.activeModule);
 }
+
+const STORAGE_THEME_MODE = "sb.themeMode";
+const systemThemeQuery =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+
+function normalizeThemeMode(mode) {
+  const value = String(mode || "").trim().toLowerCase();
+  if (value === "dark" || value === "light" || value === "system") return value;
+  return "system";
+}
+
+function resolveEffectiveTheme(themeMode) {
+  const normalized = normalizeThemeMode(themeMode);
+  if (normalized !== "system") return normalized;
+  return systemThemeQuery?.matches ? "dark" : "light";
+}
+
+function applyThemeMode(themeMode, options = {}) {
+  const persist = options.persist !== false;
+  const normalized = normalizeThemeMode(themeMode);
+  const effective = resolveEffectiveTheme(normalized);
+  document.documentElement.setAttribute("data-theme-mode", normalized);
+  document.documentElement.setAttribute("data-theme", effective);
+  document.body.classList.toggle("theme-dark", effective === "dark");
+  document.body.classList.toggle("theme-light", effective === "light");
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) {
+    themeMeta.setAttribute("content", effective === "dark" ? "#0B0F14" : "#f2f1ed");
+  }
+  if (persist) {
+    localStorage.setItem(STORAGE_THEME_MODE, normalized);
+  }
+}
+
+function applyThemeFromSettingsPayload(payload) {
+  const saved = payload?.business?.themeMode;
+  const localPreference = localStorage.getItem(STORAGE_THEME_MODE);
+  if (!localPreference && saved === "light") {
+    applyThemeMode("system", { persist: false });
+    return;
+  }
+  if (saved) {
+    applyThemeMode(saved);
+    return;
+  }
+  applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "system", { persist: false });
+}
+
+if (systemThemeQuery) {
+  const syncSystemTheme = () => {
+    const selectedMode = normalizeThemeMode(localStorage.getItem(STORAGE_THEME_MODE));
+    if (selectedMode !== "system") return;
+    applyThemeMode(selectedMode, { persist: false });
+  };
+  if (typeof systemThemeQuery.addEventListener === "function") {
+    systemThemeQuery.addEventListener("change", syncSystemTheme);
+  } else if (typeof systemThemeQuery.addListener === "function") {
+    systemThemeQuery.addListener(syncSystemTheme);
+  }
+}
+
+applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "system", { persist: false });
 
 startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
 if (financialCustomStart) financialCustomStart.value = asDateInputValue(new Date());
@@ -1336,8 +1527,9 @@ async function apiFetch(url, options = {}) {
 function restoreActiveModule() {
   const stored = localStorage.getItem(STORAGE_ACTIVE_MODULE);
   if (stored === "agendamentos") return "agenda";
+  if (stored === "dashboard") return "financeiro";
   if (stored && allModuleIds.has(stored)) return stored;
-  return "dashboard";
+  return "financeiro";
 }
 
 function restoreRole() {
@@ -1350,10 +1542,6 @@ function restoreRole() {
   return "owner";
 }
 
-function restoreSidebarCollapsed() {
-  return localStorage.getItem(STORAGE_SIDEBAR_COLLAPSED) === "1";
-}
-
 function getViewport() {
   const width = window.innerWidth;
   if (width < 768) return "mobile";
@@ -1363,7 +1551,6 @@ function getViewport() {
 
 function persistNavigationState() {
   localStorage.setItem(STORAGE_ACTIVE_MODULE, state.activeModule);
-  localStorage.setItem(STORAGE_SIDEBAR_COLLAPSED, state.sidebarCollapsed ? "1" : "0");
   localStorage.setItem(STORAGE_ACTIVE_ROLE, state.role);
 }
 
@@ -1376,6 +1563,8 @@ function getAllowedModules() {
 }
 
 function isAllowedModule(moduleId) {
+  if (moduleId === "dashboard") return isAllowedModule("financeiro");
+  if (moduleId === "estoque" && getAllowedModules().includes("operacao")) return true;
   return getAllowedModules().includes(moduleId);
 }
 
@@ -1384,7 +1573,7 @@ function firstAllowedModule() {
   if (isAllowedModule(preferred)) return preferred;
   const allowed = getAllowedModules();
   if (allowed.length) return allowed[0];
-  return "dashboard";
+  return "financeiro";
 }
 
 function getSecondaryModulesForRole() {
@@ -1399,22 +1588,26 @@ function getMobileTabsForRole() {
 }
 
 function renderShell() {
-  appShell.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
   const roleMenuGroups = getRoleMenuGroups();
   const secondaryModules = getSecondaryModulesForRole();
   const mobileTabs = getMobileTabsForRole();
+  const isSettingsMode = state.activeModule === "configuracoes";
 
-  appSidebar.innerHTML = renderSidebar({
-    groups: roleMenuGroups,
-    activeModule: state.activeModule,
-    collapsed: state.sidebarCollapsed,
-    badges: state.navBadges,
-    role: state.role,
-  });
+  appShell?.classList.toggle("settings-mode", isSettingsMode);
 
-  appTopbar.innerHTML = renderTopbar({
-    moduleLabel: getModuleLabel(state.activeModule),
-  });
+  appSidebar.innerHTML = isSettingsMode
+    ? renderSettingsSidebar({
+        activeSection: settingsActiveSection,
+        user: authSession?.user,
+        accountMenuOpen,
+      })
+    : renderSidebar({
+        groups: roleMenuGroups,
+        activeModule: state.activeModule === "estoque" ? "operacao" : state.activeModule,
+        badges: state.navBadges,
+        user: authSession?.user,
+        accountMenuOpen,
+      });
 
   appMobileTabs.innerHTML = renderMobileTabs({
     tabs: mobileTabs,
@@ -1425,24 +1618,97 @@ function renderShell() {
   });
 
   bindShellEvents();
-  updateTopbarDate();
   syncAgendaFilterPanel();
 }
 
 function bindShellEvents() {
-  appSidebar.querySelectorAll("[data-sidebar-module]").forEach((button) => {
-    button.addEventListener("click", () => navigate(button.dataset.sidebarModule));
+  appSidebar.querySelectorAll("[data-settings-shell-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.getAttribute("data-settings-shell-action");
+      if (action === "back") {
+        const fallback = isAllowedModule(settingsReturnModule) ? settingsReturnModule : firstAllowedModule();
+        navigate(fallback);
+      }
+    });
   });
 
-  const sidebarToggle = appSidebar.querySelector("[data-sidebar-toggle]");
-  if (sidebarToggle) {
-    sidebarToggle.addEventListener("click", () => {
-      state.sidebarCollapsed = !state.sidebarCollapsed;
-      persistNavigationState();
+  appSidebar.querySelectorAll('[data-settings-action="select-settings-section"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      settingsActiveSection = button.getAttribute("data-settings-section") || "business";
       renderShell();
-      applySectionVisibility();
+      renderSettingsData(settingsElements, currentSettingsPayload || {}, {
+        professionals: Object.values(professionalsById),
+        services: allServices,
+      }, settingsActiveSection);
+      animateSettingsScreen(settingsRoot);
+      const hoursForm = settingsRoot?.querySelector("#settingsHoursForm");
+      if (hoursForm instanceof HTMLFormElement) {
+        refreshSettingsHoursPreview(hoursForm);
+      }
+      renderSaleFeedback("", "", settingsFeedback);
     });
-  }
+  });
+
+  appSidebar.querySelectorAll("[data-sidebar-module]").forEach((button) => {
+    button.addEventListener("click", () => {
+      accountMenuOpen = false;
+      appSidebar.querySelectorAll("[data-sidebar-module]").forEach((item) => item.classList.remove("is-active"));
+      button.classList.add("is-active");
+      navigate(button.dataset.sidebarModule);
+    });
+  });
+
+  appSidebar.querySelectorAll("[data-sidebar-toggle-group]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const groupId = btn.dataset.sidebarToggleGroup;
+      const groupEl = appSidebar.querySelector(`[data-sidebar-group="${groupId}"]`);
+      if (groupEl) groupEl.classList.toggle("is-open");
+    });
+  });
+
+  appSidebar.querySelectorAll("[data-account-action]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const action = button.getAttribute("data-account-action");
+      if (action === "toggle") {
+        accountMenuOpen = !accountMenuOpen;
+        renderShell();
+        return;
+      }
+      accountMenuOpen = false;
+      if (action === "settings") {
+        settingsActiveSection = settingsActiveSection || "business";
+        if (state.activeModule !== "configuracoes") settingsReturnModule = state.activeModule;
+        navigate("configuracoes");
+        if (currentSettingsPayload) {
+          renderSettingsData(settingsElements, currentSettingsPayload, {
+            professionals: Object.values(professionalsById),
+            services: allServices,
+          }, settingsActiveSection);
+          animateSettingsScreen(settingsRoot);
+        }
+        return;
+      }
+      if (action === "user") {
+        settingsActiveSection = "usuario";
+        if (state.activeModule !== "configuracoes") settingsReturnModule = state.activeModule;
+        navigate("configuracoes");
+        if (currentSettingsPayload) {
+          renderSettingsData(settingsElements, currentSettingsPayload, {
+            professionals: Object.values(professionalsById),
+            services: allServices,
+          }, settingsActiveSection);
+          animateSettingsScreen(settingsRoot);
+        }
+        return;
+      }
+      if (action === "logout") {
+        localStorage.removeItem("authToken");
+        localStorage.removeItem(STORAGE_AUTH_SESSION);
+        window.location.replace("/login");
+      }
+    });
+  });
 
   const roleSelect = document.getElementById("globalRoleSelect");
   if (roleSelect) {
@@ -1498,17 +1764,12 @@ function bindShellEvents() {
   });
 }
 
-function updateTopbarDate() {
-  const todayLabel = document.getElementById("todayLabel");
-  if (!todayLabel) return;
-
-  todayLabel.textContent = new Date().toLocaleString("pt-BR", {
-    dateStyle: "full",
-    timeStyle: "short",
-  });
-}
-
-setInterval(updateTopbarDate, 30000);
+document.addEventListener("click", (event) => {
+  if (!accountMenuOpen) return;
+  if (event.target instanceof Element && event.target.closest("#appSidebar .sb-account")) return;
+  accountMenuOpen = false;
+  renderShell();
+});
 
 function syncAgendaFilterPanel() {
   if (!agendaFiltersPanel || !toggleAgendaFiltersBtn) return;
@@ -1528,9 +1789,13 @@ function syncMobileOperationActions() {
 }
 
 function navigate(moduleId, options = {}) {
-  const normalizedModuleId = moduleId === "agendamentos" ? "agenda" : moduleId;
+  const normalizedModuleId =
+    moduleId === "agendamentos" ? "agenda" : moduleId === "dashboard" ? "financeiro" : moduleId;
   if (!normalizedModuleId || !allModuleIds.has(normalizedModuleId) || !isAllowedModule(normalizedModuleId)) return;
 
+  if (normalizedModuleId === "configuracoes" && state.activeModule !== "configuracoes") {
+    settingsReturnModule = state.activeModule || firstAllowedModule();
+  }
   state.activeModule = normalizedModuleId;
   state.mobileTab = mapModuleToMobileTab(normalizedModuleId);
   if (state.mobileTab !== "mais") state.mobileMoreOpen = false;
@@ -1572,7 +1837,7 @@ function renderDashboardPlaybook(actionType, payload = {}) {
           .slice(0, 3)
           .map(
             (client) =>
-              `<li class="text-xs text-emerald-800">${client.fullName || "Cliente"} (${Number(client.daysWithoutReturn || 0)} dias) - impacto ${Number(client.estimatedImpact || 0).toFixed(2)}</li>`,
+              `<li class="ds-cell-secondary">${client.fullName || "Cliente"} (${Number(client.daysWithoutReturn || 0)} dias) - impacto ${Number(client.estimatedImpact || 0).toFixed(2)}</li>`,
           )
           .join("")
       : actionType === "FILL_IDLE_SLOTS"
@@ -1580,7 +1845,7 @@ function renderDashboardPlaybook(actionType, payload = {}) {
             .slice(0, 3)
             .map(
               (windowItem) =>
-                `<li class="text-xs text-emerald-800">${windowItem.professionalName || "Profissional"} | faixa ${windowItem.band || "-"} | ${windowItem.horizonHours || 0}h</li>`,
+                `<li class="ds-cell-secondary">${windowItem.professionalName || "Profissional"} | faixa ${windowItem.band || "-"} | ${windowItem.horizonHours || 0}h</li>`,
             )
             .join("")
         : "";
@@ -1590,7 +1855,7 @@ function renderDashboardPlaybook(actionType, payload = {}) {
       ? `
         <button
           type="button"
-          class="rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 text-xs font-semibold"
+          class="ux-btn ux-btn-success"
           data-playbook-execute-reactivation="1"
         >
           Executar campanha de reativacao agora
@@ -1599,13 +1864,11 @@ function renderDashboardPlaybook(actionType, payload = {}) {
       : "";
 
   dashboardPlaybookPanel.innerHTML = `
-    <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 space-y-2">
-      <p class="text-xs font-semibold text-emerald-900">Playbook: ${actionType || "ACAO"}</p>
-      <ol class="space-y-1">
-        ${steps.map((step) => `<li class="text-xs text-emerald-800">${step}</li>`).join("") || "<li class='text-xs text-emerald-800'>Sem passos detalhados.</li>"}
-      </ol>
-      ${details ? `<ul class="space-y-1">${details}</ul>` : ""}
-      <div class="pt-1">${executeButton}</div>
+    <div class="panel-msg panel-msg-success">
+      <p class="ds-cell-primary">Playbook: ${actionType || "ACAO"}</p>
+      <ol>${steps.map((step) => `<li class="ds-cell-secondary">${step}</li>`).join("") || "<li class='ds-cell-secondary'>Sem passos detalhados.</li>"}</ol>
+      ${details ? `<ul>${details}</ul>` : ""}
+      <div>${executeButton}</div>
     </div>
   `;
 }
@@ -1915,17 +2178,25 @@ function applySectionVisibility() {
   });
   placeholderSection.classList.add("hidden");
   if (agendaCardsMode) agendaCardsMode.classList.add("hidden");
+  if (agendaCalendarMode) agendaCalendarMode.classList.add("hidden");
   if (agendaListMode) agendaListMode.classList.add("hidden");
 
   const implemented = sectionsByModule[state.activeModule];
   if (implemented) {
     implemented.classList.remove("hidden");
     if (state.activeModule === "agenda") {
+      if (agendaCardsMode) agendaCardsMode.classList.remove("hidden");
       if (currentView === "list") {
         if (agendaListMode) agendaListMode.classList.remove("hidden");
-      } else if (agendaCardsMode) {
-        agendaCardsMode.classList.remove("hidden");
+      } else {
+        if (agendaCalendarMode) agendaCalendarMode.classList.remove("hidden");
       }
+    }
+    if (state.activeModule === "whatsapp") {
+      initWhatsAppSection();
+    }
+    if (state.activeModule === "agendamento-link") {
+      initBookingLinkSection();
     }
     syncMobileOperationActions();
     return;
@@ -1939,17 +2210,15 @@ function applySectionVisibility() {
 function renderPlaceholderModule() {
   const label = getModuleLabel(state.activeModule);
   placeholderSection.innerHTML = `
-    <article class="placeholder-module">
-      <h2 class="text-xl font-bold text-gray-800">${label}</h2>
-      <p class="text-sm text-gray-600 mb-3">Modulo em preparacao. A navegacao ja esta pronta no App Shell premium.</p>
-      <button type="button" class="rounded-lg bg-gray-900 text-white px-4 py-2 font-semibold" data-go-dashboard>
-        Voltar para Dashboard
-      </button>
+    <article class="placeholder-module ux-card">
+      <h2 class="ux-section-label">${label}</h2>
+      <p class="ds-text-muted">Modulo em preparacao. A navegacao ja esta pronta no App Shell premium.</p>
+      <button type="button" class="ux-btn ux-btn-muted" data-go-dashboard>Voltar para Financeiro</button>
     </article>
   `;
 
   const goHomeBtn = placeholderSection.querySelector("[data-go-dashboard]");
-  if (goHomeBtn) goHomeBtn.addEventListener("click", () => navigate("dashboard"));
+  if (goHomeBtn) goHomeBtn.addEventListener("click", () => navigate("financeiro"));
 }
 
 function isoDayStart() {
@@ -1984,6 +2253,14 @@ function rangeFromPeriod(period) {
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+  if (period === "quarter") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 89);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
     end.setHours(23, 59, 59, 999);
     return { start, end };
   }
@@ -2093,6 +2370,284 @@ function rangeFromAppointmentFilters() {
   };
 }
 
+let _clientsForSearch = [];
+function initClientSearch(clients) {
+  _clientsForSearch = clients || [];
+  if (!clientSearch || !clientSearchDropdown) return;
+  clientSearch.oninput = () => {
+    const q = clientSearch.value.trim().toLowerCase();
+    if (!q) { clientSearchDropdown.classList.add("hidden"); clientId.value = ""; return; }
+    const matches = _clientsForSearch.filter(c =>
+      c.fullName.toLowerCase().includes(q) || (c.phone || "").replace(/\D/g,"").includes(q.replace(/\D/g,""))
+    ).slice(0, 8);
+    if (!matches.length) { clientSearchDropdown.classList.add("hidden"); return; }
+    clientSearchDropdown.innerHTML = matches.map(c =>
+      `<li class="cs-opt" data-id="${c.id}" data-name="${escapeHtml(c.fullName)}">
+        <span class="cs-name">${escapeHtml(c.fullName)}</span>
+        ${c.phone ? `<span class="cs-phone">${c.phone}</span>` : ""}
+      </li>`
+    ).join("");
+    clientSearchDropdown.querySelectorAll(".cs-opt").forEach(li => {
+      li.addEventListener("click", () => {
+        clientId.value = li.dataset.id;
+        clientSearch.value = li.dataset.name;
+        clientSearchDropdown.classList.add("hidden");
+        clientId.dispatchEvent(new Event("change"));
+      });
+    });
+    clientSearchDropdown.classList.remove("hidden");
+  };
+  document.addEventListener("click", e => {
+    if (clientSearch && !clientSearch.contains(e.target) && !clientSearchDropdown.contains(e.target))
+      clientSearchDropdown.classList.add("hidden");
+  }, { once: false });
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function money(value) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function productCategory(product = {}) {
+  return String(product.category || "Sem categoria").trim() || "Sem categoria";
+}
+
+function productImageUrl(product = {}) {
+  const direct = String(product.imageUrl || product.imageURL || product.image || "").trim();
+  if (direct) return direct;
+  const notes = String(product.notes || "");
+  const match = notes.match(/(?:Imagem|Image|imageUrl):\s*(https?:\/\/\\S+)/i);
+  return match ? match[1].trim() : "";
+}
+
+function stripProductImageNote(notes = "") {
+  return String(notes || "")
+    .split(/\n/)
+    .filter((line) => !/^\s*(?:Imagem|Image|imageUrl):/i.test(line))
+    .join("\n")
+    .trim();
+}
+
+function composeProductNotes(notes = "", imageUrl = "") {
+  const cleanNotes = stripProductImageNote(notes);
+  const cleanImage = String(imageUrl || "").trim();
+  return [cleanNotes, cleanImage ? `Imagem: ${cleanImage}` : ""].filter(Boolean).join("\n");
+}
+
+function productInitials(product = {}) {
+  return String(product.name || "Produto")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "P";
+}
+
+const CAMERA_ICON_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
+
+function renderProductThumb(product = {}, className = "pdv-product-thumb") {
+  const imageUrl = productImageUrl(product);
+  if (imageUrl) {
+    return `<div class="${className} has-image"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name || "Produto")}" loading="lazy" /></div>`;
+  }
+  const isMktThumb = className.includes("pdv-mkt-thumb");
+  return `<div class="${className} pdv-thumb-placeholder">${isMktThumb ? CAMERA_ICON_SVG : escapeHtml(productInitials(product))}</div>`;
+}
+
+function isSlotBlockingStatus(status) {
+  return SLOT_BLOCKING_STATUSES.has(String(status || "").trim());
+}
+
+function parseTimeToMinutes(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parts = text.split(":");
+  if (parts.length !== 2) return null;
+  const hours = Number(parts[0]);
+  const minutes = Number(parts[1]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function settingsHoursReadRow(form, dayOfWeek) {
+  if (!(form instanceof HTMLFormElement)) return null;
+  const checkbox = form.querySelector(`input[name="closed_${dayOfWeek}"]`);
+  const opensAtInput = form.querySelector(`input[name="opensAt_${dayOfWeek}"]`);
+  const closesAtInput = form.querySelector(`input[name="closesAt_${dayOfWeek}"]`);
+  const breakStartInput = form.querySelector(`input[name="breakStart_${dayOfWeek}"]`);
+  const breakEndInput = form.querySelector(`input[name="breakEnd_${dayOfWeek}"]`);
+  if (
+    !(checkbox instanceof HTMLInputElement) ||
+    !(opensAtInput instanceof HTMLInputElement) ||
+    !(closesAtInput instanceof HTMLInputElement) ||
+    !(breakStartInput instanceof HTMLInputElement) ||
+    !(breakEndInput instanceof HTMLInputElement)
+  ) {
+    return null;
+  }
+  return {
+    dayOfWeek,
+    isClosed: checkbox.checked,
+    opensAt: String(opensAtInput.value || "").trim(),
+    closesAt: String(closesAtInput.value || "").trim(),
+    breakStart: String(breakStartInput.value || "").trim(),
+    breakEnd: String(breakEndInput.value || "").trim(),
+  };
+}
+
+function settingsHoursApplyClosedState(form, dayOfWeek, isClosed) {
+  if (!(form instanceof HTMLFormElement)) return;
+  ["opensAt_", "closesAt_", "breakStart_", "breakEnd_"].forEach((prefix) => {
+    const input = form.querySelector(`input[name="${prefix}${dayOfWeek}"]`);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.disabled = isClosed;
+    if (isClosed) input.value = "";
+  });
+  const dayCard = form.querySelector(`input[name="closed_${dayOfWeek}"]`)?.closest(".cfg-day");
+  dayCard?.classList.toggle("is-closed", isClosed);
+}
+
+function settingsHoursFormatRow(row) {
+  if (!row || row.isClosed || !row.opensAt || !row.closesAt) return "Fechado";
+  if (row.breakStart && row.breakEnd) {
+    return `${row.opensAt} as ${row.closesAt}, pausa ${row.breakStart} as ${row.breakEnd}`;
+  }
+  return `${row.opensAt} as ${row.closesAt}`;
+}
+
+function refreshSettingsHoursPreview(form) {
+  if (!(form instanceof HTMLFormElement)) return;
+  const previewList = form.querySelector(".cfg-hours-preview-list");
+  if (!previewList) return;
+  previewList.innerHTML = SETTINGS_DAY_LABELS.map((label, dayOfWeek) => {
+    const row = settingsHoursReadRow(form, dayOfWeek);
+    return `<p><strong>${label}:</strong> ${settingsHoursFormatRow(row)}</p>`;
+  }).join("");
+}
+
+function applySettingsHoursPreset(form, presetId) {
+  if (!(form instanceof HTMLFormElement)) return false;
+  const presetRows = SETTINGS_HOURS_PRESETS[presetId];
+  if (!Array.isArray(presetRows) || !presetRows.length) return false;
+  presetRows.forEach((row) => {
+    const dayOfWeek = Number(row.dayOfWeek);
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return;
+    const checkbox = form.querySelector(`input[name="closed_${dayOfWeek}"]`);
+    const opensAtInput = form.querySelector(`input[name="opensAt_${dayOfWeek}"]`);
+    const closesAtInput = form.querySelector(`input[name="closesAt_${dayOfWeek}"]`);
+    const breakStartInput = form.querySelector(`input[name="breakStart_${dayOfWeek}"]`);
+    const breakEndInput = form.querySelector(`input[name="breakEnd_${dayOfWeek}"]`);
+    if (!(checkbox instanceof HTMLInputElement)) return;
+    checkbox.checked = Boolean(row.isClosed);
+    if (opensAtInput instanceof HTMLInputElement) opensAtInput.value = row.opensAt || "";
+    if (closesAtInput instanceof HTMLInputElement) closesAtInput.value = row.closesAt || "";
+    if (breakStartInput instanceof HTMLInputElement) breakStartInput.value = row.breakStart || "";
+    if (breakEndInput instanceof HTMLInputElement) breakEndInput.value = row.breakEnd || "";
+    settingsHoursApplyClosedState(form, dayOfWeek, checkbox.checked);
+  });
+  refreshSettingsHoursPreview(form);
+  return true;
+}
+
+function copyDayHoursToNextDays(form, sourceDay) {
+  if (!(form instanceof HTMLFormElement)) return false;
+  const source = settingsHoursReadRow(form, sourceDay);
+  if (!source || sourceDay >= 6) return false;
+  let copied = 0;
+  for (let day = sourceDay + 1; day <= 6; day += 1) {
+    const checkbox = form.querySelector(`input[name="closed_${day}"]`);
+    const opensAtInput = form.querySelector(`input[name="opensAt_${day}"]`);
+    const closesAtInput = form.querySelector(`input[name="closesAt_${day}"]`);
+    const breakStartInput = form.querySelector(`input[name="breakStart_${day}"]`);
+    const breakEndInput = form.querySelector(`input[name="breakEnd_${day}"]`);
+    if (!(checkbox instanceof HTMLInputElement)) continue;
+    checkbox.checked = source.isClosed;
+    if (opensAtInput instanceof HTMLInputElement) opensAtInput.value = source.opensAt;
+    if (closesAtInput instanceof HTMLInputElement) closesAtInput.value = source.closesAt;
+    if (breakStartInput instanceof HTMLInputElement) breakStartInput.value = source.breakStart;
+    if (breakEndInput instanceof HTMLInputElement) breakEndInput.value = source.breakEnd;
+    settingsHoursApplyClosedState(form, day, checkbox.checked);
+    copied += 1;
+  }
+  refreshSettingsHoursPreview(form);
+  return copied > 0;
+}
+
+function normalizeWorkingHours(payload) {
+  const weeklyInput = Array.isArray(payload?.weekly) ? payload.weekly : [];
+  if (!weeklyInput.length) return null;
+  const byDay = new Map();
+  for (const entry of weeklyInput) {
+    const day = Number(entry?.day);
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+    const start = String(entry?.start || "").trim();
+    const end = String(entry?.end || "").trim();
+    const isClosed = Boolean(entry?.isClosed) || !start || !end;
+    byDay.set(day, {
+      day,
+      label: String(entry?.label || ""),
+      start: isClosed ? "" : start,
+      end: isClosed ? "" : end,
+      isClosed,
+    });
+  }
+  return {
+    timezone: String(payload?.timezone || "America/Sao_Paulo"),
+    weekly: Array.from({ length: 7 }, (_item, day) => {
+      const item = byDay.get(day);
+      if (item) return item;
+      return {
+        day,
+        label: "",
+        start: "",
+        end: "",
+        isClosed: true,
+      };
+    }),
+  };
+}
+
+function updateWorkingHoursFromPayload(payload) {
+  const normalized = normalizeWorkingHours(payload);
+  if (!normalized) return;
+  currentWorkingHours = normalized;
+}
+
+function getWorkingHoursForDay(dayOfWeek) {
+  if (!currentWorkingHours || !Array.isArray(currentWorkingHours.weekly)) return null;
+  const found = currentWorkingHours.weekly.find((item) => item.day === dayOfWeek);
+  return found || null;
+}
+
+function getWeekCalendarBounds() {
+  const fallback = { startHour: 8, endHour: 20 };
+  if (!currentWorkingHours || !Array.isArray(currentWorkingHours.weekly)) return fallback;
+  const windows = currentWorkingHours.weekly
+    .filter((row) => row && !row.isClosed && row.start && row.end)
+    .map((row) => {
+      const from = parseTimeToMinutes(row.start);
+      const to = parseTimeToMinutes(row.end);
+      if (from == null || to == null || to <= from) return null;
+      return { from, to };
+    })
+    .filter(Boolean);
+  if (!windows.length) return fallback;
+  const min = Math.min(...windows.map((item) => item.from));
+  const max = Math.max(...windows.map((item) => item.to));
+  const startHour = Math.max(0, Math.floor(min / 60));
+  const endHour = Math.min(24, Math.ceil(max / 60));
+  if (endHour - startHour < 4) return fallback;
+  return { startHour, endHour };
+}
+
 function fillSelect(select, items, label, options = {}) {
   if (!select) return;
   const blank = options.blankLabel ? `<option value="">${options.blankLabel}</option>` : "";
@@ -2148,6 +2703,7 @@ function renderSaleCart() {
       try {
         saleCart = updateCartItemQty(saleCart, productId, item.quantity + 1);
         renderSaleCart();
+        renderSaleProductCatalog();
       } catch (error) {
         renderSaleFeedback("warning", error.message, saleFeedback);
       }
@@ -2161,11 +2717,133 @@ function renderSaleCart() {
         saleCart = updateCartItemQty(saleCart, productId, item.quantity - 1);
       }
       renderSaleCart();
+      renderSaleProductCatalog();
     },
     onRemove: (productId) => {
       saleCart = removeCartItem(saleCart, productId);
       renderSaleCart();
+      renderSaleProductCatalog();
     },
+  });
+}
+
+function saleProductsList() {
+  return Object.values(productsById || {})
+    .filter((item) => item && item.id && item.active !== false)
+    .sort((a, b) => productCategory(a).localeCompare(productCategory(b), "pt-BR") || String(a.name || "").localeCompare(String(b.name || ""), "pt-BR"));
+}
+
+function setSaleSelectedProduct(productId) {
+  if (!saleProductId) return;
+  saleProductId.value = productId || "";
+  const product = productsById[productId];
+  if (saleSelectedProductName) {
+    saleSelectedProductName.textContent = product ? product.name : "Nenhum produto selecionado";
+  }
+  if (saleSelectedProductMeta) {
+    saleSelectedProductMeta.textContent = product
+      ? `${money(product.salePrice)} · estoque ${Number(product.stockQty ?? product.quantity ?? 0)}`
+      : "Escolha uma categoria e selecione um produto.";
+  }
+  if (saleSelectedProductThumb) {
+    const imageUrl = product ? productImageUrl(product) : "";
+    saleSelectedProductThumb.className = `pdv-product-thumb${imageUrl ? " has-image" : ""}`;
+    saleSelectedProductThumb.innerHTML = product
+      ? imageUrl
+        ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name || "Produto")}" loading="lazy" />`
+        : escapeHtml(productInitials(product))
+      : "+";
+  }
+  renderSaleProductCatalog();
+}
+
+function renderSaleProductCatalog() {
+  if (!saleCategoryList || !saleProductRail) return;
+  const allProducts = saleProductsList();
+  const searchTerm = String(pdvProductSearch?.value || "").trim().toLowerCase();
+  const categories = [...new Set(allProducts.map(productCategory))];
+  if (!saleSelectedCategory || !categories.includes(saleSelectedCategory)) {
+    saleSelectedCategory = categories[0] || "";
+  }
+
+  saleCategoryList.innerHTML = categories.length
+    ? categories
+        .map((category) => {
+          const count = allProducts.filter((p) => productCategory(p) === category).length;
+          return `
+            <button type="button" class="pdv-category-pill ${category === saleSelectedCategory ? "is-active" : ""}" data-sale-category="${escapeHtml(category)}">
+              <span>${escapeHtml(category)}</span>
+              <small>${count}</small>
+            </button>
+          `;
+        })
+        .join("")
+    : `<p class="pdv-helper-text">Cadastre produtos no estoque para vender.</p>`;
+
+  let visibleProducts = searchTerm
+    ? allProducts.filter((p) => String(p.name || "").toLowerCase().includes(searchTerm) || productCategory(p).toLowerCase().includes(searchTerm))
+    : allProducts.filter((p) => productCategory(p) === saleSelectedCategory);
+
+  saleProductRail.innerHTML = visibleProducts.length
+    ? visibleProducts
+        .map((product) => {
+          const stockQty = Number(product.stockQty ?? product.quantity ?? 0);
+          const outOfStock = stockQty <= 0;
+          const cartItem = saleCart.find((i) => i.productId === product.id);
+          const inCart = cartItem ? cartItem.quantity : 0;
+          return `
+            <article class="pdv-mkt-product-card${outOfStock ? " is-out-of-stock" : ""}${inCart ? " is-in-cart" : ""}" data-mkt-product="${escapeHtml(product.id)}">
+              <div class="pdv-mkt-thumb-wrap">
+                ${renderProductThumb(product, "pdv-mkt-thumb")}
+                ${inCart ? `<span class="pdv-mkt-cart-qty-badge">${inCart}</span>` : ""}
+              </div>
+              <div class="pdv-mkt-card-body">
+                <p class="pdv-mkt-card-name">${escapeHtml(product.name || "Produto")}</p>
+                <p class="pdv-mkt-card-price">${money(product.salePrice)}</p>
+                <p class="pdv-mkt-card-stock">${outOfStock ? "Sem estoque" : `${stockQty} disponíveis`}</p>
+              </div>
+              <button
+                type="button"
+                class="pdv-mkt-add-btn"
+                data-pdv-add-product="${escapeHtml(product.id)}"
+                ${outOfStock ? "disabled" : ""}
+                aria-label="Adicionar ${escapeHtml(product.name || "produto")} ao carrinho"
+              >
+                <span class="pdv-mkt-add-icon">+</span>
+                <span class="pdv-mkt-add-label">${outOfStock ? "Sem estoque" : "Adicionar"}</span>
+              </button>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="pdv-mkt-empty">${searchTerm ? `Nenhum produto encontrado para "${escapeHtml(searchTerm)}".` : "Nenhum produto nesta categoria."}</div>`;
+
+  saleCategoryList.querySelectorAll("[data-sale-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      saleSelectedCategory = button.getAttribute("data-sale-category") || "";
+      if (pdvProductSearch) pdvProductSearch.value = "";
+      renderSaleProductCatalog();
+    });
+  });
+
+  saleProductRail.querySelectorAll("[data-pdv-add-product]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const productId = btn.getAttribute("data-pdv-add-product");
+      const product = productsById[productId];
+      try {
+        saleCart = addItemToCart(saleCart, product, 1);
+        renderSaleCart();
+        renderSaleProductCatalog();
+        btn.classList.add("pdv-mkt-add-pulse");
+        setTimeout(() => btn.classList.remove("pdv-mkt-add-pulse"), 500);
+        const saleFeedback = document.getElementById("saleFeedback");
+        renderSaleFeedback("success", `${product.name} adicionado ao carrinho.`, saleFeedback);
+      } catch (error) {
+        const saleFeedback = document.getElementById("saleFeedback");
+        renderSaleFeedback("error", error.message || "Nao foi possivel adicionar item.", saleFeedback);
+      }
+    });
   });
 }
 
@@ -2180,35 +2858,33 @@ function renderRecentSales() {
   }
   saleRecentList.innerHTML = productSalesHistory
     .map(
-      (sale) => `
-      <article class="pdv-history-row rounded-lg border border-gray-200 bg-gray-50 p-3">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <strong class="text-sm text-gray-800">${sale.soldAtLabel}</strong>
-            <p class="text-xs text-gray-500 mt-1">${sale.clientLabel}</p>
-          </div>
-          <div class="text-right">
-            <span class="block text-sm font-extrabold text-emerald-700">${sale.amount}</span>
-            <span class="mt-1 inline-flex">${renderStatusChip(sale.status || "NOT_REFUNDED")}</span>
-          </div>
-        </div>
-        <div class="mt-2 text-xs text-gray-600">
-          ${sale.itemsSummary}
-        </div>
-        <div class="mt-3 flex flex-wrap justify-end gap-2">
-          <button type="button" data-product-sale-detail="${sale.id}" class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-            Ver detalhes
-          </button>
-          ${
-            sale.canRefund !== false
-              ? `<button type="button" data-product-refund-sale="${sale.id}" class="min-h-[40px] rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
-                  Devolver
-                </button>`
-              : ""
-          }
-        </div>
-      </article>
-    `,
+      (sale) => {
+        const previewItems = sale.items.slice(0, 3);
+        return `
+          <article class="pdv-history-row">
+            <div class="pdv-history-main">
+              <div class="pdv-history-products">
+                ${previewItems
+                  .map((item) => renderProductThumb(productsById[item.productId] || item, "pdv-history-thumb"))
+                  .join("")}
+              </div>
+              <div>
+                <div class="pdv-history-date">${sale.soldAtLabel}</div>
+                <div class="pdv-history-client">${sale.clientLabel}</div>
+                <div class="pdv-history-items">${sale.itemsSummary}</div>
+              </div>
+              <div class="pdv-history-total">
+                <strong>${sale.amount}</strong>
+                ${renderStatusChip(sale.status || "NOT_REFUNDED")}
+              </div>
+            </div>
+            <div class="pdv-history-actions">
+              <button type="button" data-product-sale-detail="${sale.id}" class="ux-btn ux-btn-muted">Ver detalhes</button>
+              ${sale.canRefund !== false ? `<button type="button" data-product-refund-sale="${sale.id}" class="ux-btn ux-btn-danger">Devolver</button>` : ""}
+            </div>
+          </article>
+        `;
+      },
     )
     .join("");
 }
@@ -2460,10 +3136,7 @@ async function loadCatalog() {
     (item) => item.active !== false,
   );
 
-  fillSelect(clientId, data.clients, (item) => {
-    const phoneLabel = item.phone ? ` (${item.phone})` : "";
-    return `${item.fullName}${phoneLabel}`;
-  });
+  initClientSearch(data.clients);
   fillSelect(professionalId, data.professionals, (item) => item.name);
   fillSelect(serviceId, activeServices, (item) => `${item.name} - R$ ${item.price}`);
   fillSelect(filterService, data.services, (item) => item.name, {
@@ -2475,6 +3148,9 @@ async function loadCatalog() {
     data.products,
     (item) => `${item.name} (estoque: ${item.stockQty}) - R$ ${item.salePrice}`,
   );
+  const firstProduct = saleProductsList()[0];
+  if (firstProduct) setSaleSelectedProduct(saleProductId.value || firstProduct.id);
+  renderSaleProductCatalog();
   fillSelect(saleClientId, data.clients, (item) => item.fullName, {
     blankLabel: "Sem cliente",
   });
@@ -2491,6 +3167,9 @@ async function loadCatalog() {
     blankLabel: "Todos profissionais",
   });
   fillSelect(appointmentsFilterProfessional, data.professionals, (item) => item.name, {
+    blankLabel: "Todos os profissionais",
+  });
+  fillSelect(alFilterProfessional, data.professionals, (item) => item.name, {
     blankLabel: "Todos os profissionais",
   });
   fillSelect(appointmentsFilterService, data.services, (item) => item.name, {
@@ -2613,44 +3292,44 @@ function ensureCheckoutModal() {
   if (modal) return modal;
   modal = document.createElement("div");
   modal.id = "appointmentCheckoutModal";
-  modal.className = "fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3";
+  modal.className = "ds-modal-backdrop hidden";
   modal.innerHTML = `
-    <article class="checkout-modal w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-      <div class="checkout-modal-header flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+    <div class="ds-modal-panel checkout-modal" style="max-width:660px">
+      <div class="checkout-modal-header ds-modal-head">
         <div>
-          <p class="text-xs font-extrabold uppercase tracking-wide text-slate-500">Checkout do atendimento</p>
-          <h3 class="text-base font-bold text-slate-900">Finalizar atendimento</h3>
+          <p class="ux-label">Checkout do atendimento</p>
+          <h3 class="ux-section-label">Finalizar atendimento</h3>
         </div>
-        <button type="button" data-checkout-close class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+        <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
-      <form id="appointmentCheckoutForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
-        <div class="sm:col-span-2 checkout-total-panel">
+      <form id="appointmentCheckoutForm" class="ds-form-grid">
+        <div class="ds-form-full checkout-total-panel">
           <span>Total do atendimento</span>
           <strong id="checkoutTotalDisplay">R$ 0,00</strong>
         </div>
-        <div class="sm:col-span-2 text-sm text-slate-700" id="checkoutSummary"></div>
-        <details class="sm:col-span-2 checkout-products-panel">
+        <div class="ds-form-full ds-cell-secondary" id="checkoutSummary"></div>
+        <details class="ds-form-full checkout-products-panel">
           <summary>Produtos adicionais</summary>
-          <div id="checkoutProductsList" class="space-y-2"></div>
-          <button type="button" id="checkoutAddProduct" class="mt-2 min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Adicionar produto</button>
+          <div id="checkoutProductsList"></div>
+          <button type="button" id="checkoutAddProduct" class="ux-btn ux-btn-muted">Adicionar produto</button>
         </details>
-        <label class="text-sm font-semibold text-slate-700">Metodo de pagamento
-          <input id="checkoutPaymentMethod" type="text" value="PIX" class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <label class="ds-form-label">Metodo de pagamento
+          <input id="checkoutPaymentMethod" type="text" value="PIX" class="ds-input" />
         </label>
-        <label class="text-sm font-semibold text-slate-700">Valor total
-          <input id="checkoutTotal" type="text" readonly class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+        <label class="ds-form-label">Valor total
+          <input id="checkoutTotal" type="text" readonly class="ds-input" />
         </label>
-        <label class="text-sm font-semibold text-slate-700 sm:col-span-2">Observacoes
-          <textarea id="checkoutNotes" rows="2" maxlength="500" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+        <label class="ds-form-label ds-form-full">Observacoes
+          <textarea id="checkoutNotes" rows="2" maxlength="500" class="ds-input"></textarea>
         </label>
-        <div id="checkoutTechnicalTrace" class="sm:col-span-2"></div>
-        <div id="checkoutFeedback" class="sm:col-span-2"></div>
-        <div class="sm:col-span-2 flex flex-wrap justify-end gap-2">
-          <button type="button" data-checkout-close class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
+        <div id="checkoutTechnicalTrace" class="ds-form-full"></div>
+        <div id="checkoutFeedback" class="ds-form-full panel-msg-host"></div>
+        <div class="ds-form-full catalog-row-actions">
+          <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Cancelar</button>
           ${renderPrimaryAction({ label: "Finalizar atendimento", id: "checkoutSubmitBtn", type: "submit" })}
         </div>
       </form>
-    </article>
+    </div>
   `;
   document.body.appendChild(modal);
   modal.querySelectorAll("[data-checkout-close]").forEach((btn) => {
@@ -2675,7 +3354,7 @@ function renderCheckoutProducts() {
     .join("");
   if (!checkoutModalState.products.length) {
     list.innerHTML = `
-      <div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-600">
+      <div class="ux-empty-dashed">
         Nenhum produto adicional neste checkout.
       </div>
     `;
@@ -2687,14 +3366,14 @@ function renderCheckoutProducts() {
         const product = productsById[row.productId];
         const subtotal = Number(product?.salePrice || 0) * Number(row.quantity || 0);
         return `
-      <div class="checkout-product-row grid grid-cols-12 gap-2">
-        <select data-checkout-product="${index}" class="col-span-8 min-h-[40px] rounded-lg border border-slate-200 px-2 text-sm">
+      <div class="checkout-product-row">
+        <select data-checkout-product="${index}" class="ds-input">
           <option value="">Selecione</option>
           ${productOptions}
         </select>
-        <input data-checkout-qty="${index}" type="number" min="1" max="99" value="${row.quantity}" class="col-span-3 min-h-[40px] rounded-lg border border-slate-200 px-2 text-sm" />
-        <button type="button" data-checkout-remove="${index}" class="col-span-1 min-h-[40px] rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs">X</button>
-        <div class="col-span-12 text-right text-xs font-bold text-slate-600">Subtotal: ${subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
+        <input data-checkout-qty="${index}" type="number" min="1" max="99" value="${row.quantity}" class="ds-input" />
+        <button type="button" data-checkout-remove="${index}" class="ux-btn ux-btn-danger">X</button>
+        <div class="checkout-product-subtotal ds-cell-secondary">Subtotal: ${subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
       </div>
     `;
       },
@@ -2792,7 +3471,7 @@ async function submitCheckoutModal(event) {
   if (!paymentMethod) {
     if (feedback) {
       feedback.innerHTML =
-        '<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Metodo de pagamento obrigatorio.</p>';
+        '<p class="panel-msg panel-msg-warning">Metodo de pagamento obrigatorio.</p>';
     }
     return;
   }
@@ -2802,7 +3481,7 @@ async function submitCheckoutModal(event) {
     if (!product || Number(item.quantity || 0) > stockQty) {
       if (feedback) {
         const name = product?.name || "produto";
-        feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Quantidade maior que o estoque para ${name}. Disponivel=${stockQty}.</p>`;
+        feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Quantidade maior que o estoque para ${name}. Disponivel=${stockQty}.</p>`;
       }
       return;
     }
@@ -2825,7 +3504,7 @@ async function submitCheckoutModal(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">${error.message || "Falha ao finalizar atendimento."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao finalizar atendimento."}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -2838,28 +3517,28 @@ function ensureAppointmentRefundModal() {
   if (modal) return modal;
   modal = document.createElement("div");
   modal.id = "appointmentRefundModal";
-  modal.className = "fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3";
+  modal.className = "ds-modal-backdrop hidden";
   modal.innerHTML = `
-    <article class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-      <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-        <h3 class="text-base font-bold text-slate-900">Estornar atendimento</h3>
-        <button type="button" data-appointment-refund-close class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div class="ds-modal-panel" style="max-width:560px">
+      <div class="ds-modal-head">
+        <h3 class="ux-section-label">Estornar atendimento</h3>
+        <button type="button" data-appointment-refund-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
-      <form id="appointmentRefundForm" class="grid grid-cols-1 gap-3 p-4">
-        <div id="appointmentRefundSummary" class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"></div>
-        <label class="text-sm font-semibold text-slate-700">Motivo
-          <textarea id="appointmentRefundReason" rows="3" maxlength="500" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+      <form id="appointmentRefundForm" class="ds-form-grid">
+        <div id="appointmentRefundSummary" class="ds-form-full ux-kpi ds-cell-secondary"></div>
+        <label class="ds-form-label ds-form-full">Motivo
+          <textarea id="appointmentRefundReason" rows="3" maxlength="500" required class="ds-input"></textarea>
         </label>
-        <label class="text-sm font-semibold text-slate-700">Data do estorno
-          <input id="appointmentRefundedAt" type="datetime-local" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <label class="ds-form-label ds-form-full">Data do estorno
+          <input id="appointmentRefundedAt" type="datetime-local" required class="ds-input" />
         </label>
-        <div id="appointmentRefundFeedback"></div>
-        <div class="flex flex-wrap justify-end gap-2">
-          <button type="button" data-appointment-refund-close class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-          <button type="submit" id="appointmentRefundSubmitBtn" class="min-h-[44px] rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-semibold">Confirmar estorno</button>
+        <div id="appointmentRefundFeedback" class="ds-form-full panel-msg-host"></div>
+        <div class="ds-form-full catalog-row-actions">
+          <button type="button" data-appointment-refund-close class="ux-btn ux-btn-muted">Cancelar</button>
+          <button type="submit" id="appointmentRefundSubmitBtn" class="ux-btn ux-btn-danger">Confirmar estorno</button>
         </div>
       </form>
-    </article>
+    </div>
   `;
   document.body.appendChild(modal);
   modal.querySelectorAll("[data-appointment-refund-close]").forEach((button) => {
@@ -2904,14 +3583,14 @@ async function submitAppointmentRefund(event) {
   const submitBtn = modal.querySelector("#appointmentRefundSubmitBtn");
   if (!reason) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Informe o motivo do estorno.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Informe o motivo do estorno.</p>`;
     }
     return;
   }
   const refundedAt = new Date(refundedAtValue);
   if (Number.isNaN(refundedAt.getTime())) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Informe uma data valida para o estorno.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Informe uma data valida para o estorno.</p>`;
     }
     return;
   }
@@ -2931,7 +3610,7 @@ async function submitAppointmentRefund(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">${error.message || "Falha ao registrar estorno."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao registrar estorno."}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -2943,29 +3622,29 @@ function ensureProductRefundModal() {
   if (modal) return modal;
   modal = document.createElement("div");
   modal.id = "productRefundModal";
-  modal.className = "fixed inset-0 z-50 hidden items-end sm:items-center justify-center bg-slate-900/50 p-3";
+  modal.className = "ds-modal-backdrop hidden";
   modal.innerHTML = `
-    <article class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
-      <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-        <h3 class="text-base font-bold text-slate-900">Devolver produto</h3>
-        <button type="button" data-product-refund-close class="min-h-[40px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Fechar</button>
+    <div class="ds-modal-panel" style="max-width:660px">
+      <div class="ds-modal-head">
+        <h3 class="ux-section-label">Devolver produto</h3>
+        <button type="button" data-product-refund-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
-      <form id="productRefundForm" class="grid grid-cols-1 gap-3 p-4">
-        <div id="productRefundSummary" class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"></div>
-        <div id="productRefundItems" class="space-y-2"></div>
-        <label class="text-sm font-semibold text-slate-700">Motivo
-          <textarea id="productRefundReason" rows="3" maxlength="500" required class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"></textarea>
+      <form id="productRefundForm" class="ds-form-grid">
+        <div id="productRefundSummary" class="ds-form-full ux-kpi ds-cell-secondary"></div>
+        <div id="productRefundItems" class="ds-form-full"></div>
+        <label class="ds-form-label ds-form-full">Motivo
+          <textarea id="productRefundReason" rows="3" maxlength="500" required class="ds-input"></textarea>
         </label>
-        <label class="text-sm font-semibold text-slate-700">Data da devolucao
-          <input id="productRefundedAt" type="datetime-local" required class="mt-1 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <label class="ds-form-label ds-form-full">Data da devolucao
+          <input id="productRefundedAt" type="datetime-local" required class="ds-input" />
         </label>
-        <div id="productRefundFeedback"></div>
-        <div class="flex flex-wrap justify-end gap-2">
-          <button type="button" data-product-refund-close class="min-h-[44px] rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">Cancelar</button>
-          <button type="submit" id="productRefundSubmitBtn" class="min-h-[44px] rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-semibold">Confirmar devolucao</button>
+        <div id="productRefundFeedback" class="ds-form-full panel-msg-host"></div>
+        <div class="ds-form-full catalog-row-actions">
+          <button type="button" data-product-refund-close class="ux-btn ux-btn-muted">Cancelar</button>
+          <button type="submit" id="productRefundSubmitBtn" class="ux-btn ux-btn-danger">Confirmar devolucao</button>
         </div>
       </form>
-    </article>
+    </div>
   `;
   document.body.appendChild(modal);
   modal.querySelectorAll("[data-product-refund-close]").forEach((button) => {
@@ -2995,13 +3674,13 @@ function openProductRefundModal(sale) {
     itemsRoot.innerHTML = saleItems
       .filter((item) => Number(item.refundableQuantity ?? item.quantity ?? 0) > 0)
       .map((item) => `
-        <label class="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_120px] sm:items-center">
-          <span class="text-sm text-slate-700">
-            <strong>${item.name}</strong>
-            <span class="block text-xs text-slate-500">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: R$ ${Number(item.unitPrice || 0).toFixed(2)}</span>
-            <span class="block text-xs font-semibold text-slate-600 mt-1">Quantidade para devolver</span>
+        <label class="ux-kpi" style="display:grid;grid-template-columns:1fr 120px;gap:8px;align-items:center">
+          <span>
+            <strong class="ds-cell-primary">${item.name}</strong>
+            <span class="ds-cell-secondary">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: R$ ${Number(item.unitPrice || 0).toFixed(2)}</span>
+            <span class="ds-cell-secondary">Quantidade para devolver</span>
           </span>
-          <input data-product-refund-product="${item.productId}" type="number" min="0" max="${item.refundableQuantity ?? item.quantity}" step="1" value="0" class="min-h-[44px] rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          <input data-product-refund-product="${item.productId}" type="number" min="0" max="${item.refundableQuantity ?? item.quantity}" step="1" value="0" class="ds-input" />
         </label>
       `)
       .join("");
@@ -3027,7 +3706,7 @@ async function submitProductRefund(event) {
   const submitBtn = modal.querySelector("#productRefundSubmitBtn");
   if (!reason) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Informe o motivo da devolucao.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Informe o motivo da devolucao.</p>`;
     }
     return;
   }
@@ -3041,21 +3720,21 @@ async function submitProductRefund(event) {
   const invalid = rawItems.find((item) => item.quantity < 0 || item.quantity > item.max);
   if (invalid) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Quantidade de devolucao invalida para um item.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Quantidade de devolucao invalida para um item.</p>`;
     }
     return;
   }
   const items = rawItems.filter((item) => item.productId && item.quantity > 0);
   if (!items.length) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Informe ao menos uma quantidade para devolver.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Informe ao menos uma quantidade para devolver.</p>`;
     }
     return;
   }
   const refundedAt = new Date(refundedAtValue);
   if (Number.isNaN(refundedAt.getTime())) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Informe uma data valida para a devolucao.</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Informe uma data valida para a devolucao.</p>`;
     }
     return;
   }
@@ -3079,7 +3758,7 @@ async function submitProductRefund(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">${error.message || "Falha ao registrar devolucao."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao registrar devolucao."}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -3126,11 +3805,24 @@ async function updateStatus(item, action) {
   } else {
     const needsReason = action === "CANCELLED" || action === "NO_SHOW";
     const reason = needsReason ? "Atualizado no painel operacional" : undefined;
-    await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
+    const response = await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
       status: action,
       reason: reason || undefined,
+      changedBy: "owner",
     });
+    const synced = syncLocalAppointmentFromPayload(response?.appointment);
+    if (!synced) updateAppointmentStatusLocal(item.id, action);
+    renderAgendaView();
+    renderAppointmentsView();
+    if (selectedAppointmentId === item.id) renderAppointmentDetailPanel();
     setScheduleFeedback("success", `Status atualizado para ${actionLabel[action] || action}.`);
+    loadAll().catch(() => {
+      setScheduleFeedback(
+        "warning",
+        "Status salvo localmente. Nao foi possivel sincronizar todas as visoes agora.",
+      );
+    });
+    return;
   }
   await loadAll();
 }
@@ -3146,13 +3838,22 @@ function getAgendaFilterState() {
 
 function renderAgendaView() {
   if (currentView === "list") {
-    if (agendaCardsMode) agendaCardsMode.classList.add("hidden");
-    if (agendaListMode) agendaListMode.classList.remove("hidden");
-    renderAppointmentsView();
+    if (agendaCardsMode) agendaCardsMode.classList.remove("hidden");
+    if (agendaCalendarMode) agendaCalendarMode.classList.add("hidden");
+    if (agendaListMode && state.activeModule === "agenda") agendaListMode.classList.remove("hidden");
+    const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
+    renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
+      onAction: updateStatus,
+      onError: (error) => {
+        setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
+      },
+    });
+    renderAgendaListMode();
     return;
   }
 
   if (agendaCardsMode) agendaCardsMode.classList.remove("hidden");
+  if (agendaCalendarMode) agendaCalendarMode.classList.remove("hidden");
   if (agendaListMode) agendaListMode.classList.add("hidden");
   const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
   renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
@@ -3161,6 +3862,262 @@ function renderAgendaView() {
       setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
     },
   });
+  if (!wcLoaded) {
+    if (!wcWeekStart) wcWeekStart = getWeekMonday();
+    loadWeekCalendar();
+  } else {
+    renderWeekCalendar();
+  }
+}
+
+function getAgendaListSourceItems() {
+  const base = wcLoaded && Array.isArray(wcItems) && wcItems.length
+    ? wcItems
+    : (Array.isArray(currentAgenda) ? currentAgenda : []);
+  const normalizeDateValue = (value) => {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+  const normalizeItem = (item) => {
+    if (!item || typeof item !== "object") return null;
+    const startsAt = normalizeDateValue(item.startsAt);
+    const endsAt = normalizeDateValue(item.endsAt);
+    if (!startsAt || !endsAt) return null;
+    return {
+      ...item,
+      startsAt,
+      endsAt,
+      status: String(item.status || "SCHEDULED").trim(),
+    };
+  };
+  const normalizedBase = base.map(normalizeItem).filter(Boolean);
+  if (!Array.isArray(currentAppointments) || !currentAppointments.length) return normalizedBase;
+  const byId = new Map(currentAppointments.map((item) => [item.id, item]));
+  return normalizedBase.map((item) => {
+    const detailed = byId.get(item.id);
+    return normalizeItem(detailed ? { ...item, ...detailed } : item);
+  }).filter(Boolean);
+}
+
+function getAgendaWorkingHoursSummaryHtml() {
+  const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
+  const rows = Array.isArray(currentWorkingHours?.weekly) ? currentWorkingHours.weekly : [];
+  const openRows = rows.filter((row) => row && !row.isClosed && row.start && row.end);
+  if (!openRows.length) return "";
+  const text = openRows
+    .map((row) => `${labels[row.day] || row.day}: ${row.start} - ${row.end}`)
+    .join(" · ");
+  return `
+    <section class="al-hours">
+      <span class="al-hours-label">Horarios de atendimento</span>
+      <p class="al-hours-text">${text}</p>
+    </section>
+  `;
+}
+
+function renderAgendaListMode() {
+  if (!agendaListContent) return;
+
+  const statusFilter = String(alFilterStatus?.value || "").trim();
+  const professionalFilter = String(alFilterProfessional?.value || "").trim();
+  const searchFilter = String(alFilterSearch?.value || "").trim().toLowerCase();
+  const now = new Date();
+
+  const source = getAgendaListSourceItems();
+  const filtered = source
+    .filter((item) => {
+      const useOperationalOnly = !statusFilter || statusFilter === "__OPERATIONAL__";
+      if (useOperationalOnly && !isSlotBlockingStatus(item.status)) return false;
+      if (!useOperationalOnly && item.status !== statusFilter) return false;
+      if (professionalFilter && item.professionalId !== professionalFilter) return false;
+      if (searchFilter) {
+        const blob = `${item.client || ""} ${item.clientPhone || ""} ${item.service || ""}`.toLowerCase();
+        if (!blob.includes(searchFilter)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => a.startsAt - b.startsAt);
+
+  if (!filtered.length) {
+    agendaListContent.innerHTML = `
+      <div class="al-empty">
+        <p class="al-empty-title">Nenhum agendamento encontrado</p>
+        <p class="al-empty-sub">Ajuste os filtros ou volte para a visao semanal.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const statusLabelMap = {
+    SCHEDULED: "Agendado",
+    CONFIRMED: "Confirmado",
+    IN_SERVICE: "Em atendimento",
+    COMPLETED: "Concluido",
+    CANCELLED: "Cancelado",
+    NO_SHOW: "Falta",
+    BLOCKED: "Bloqueado",
+  };
+  const statusColorVar = {
+    SCHEDULED: "#26251e",
+    CONFIRMED: "#26251e",
+    IN_SERVICE: "#c08532",
+    COMPLETED: "#1f8a65",
+    CANCELLED: "#cf2d56",
+    NO_SHOW: "#cf2d56",
+    BLOCKED: "rgba(38,37,30,0.55)",
+  };
+
+  const groups = new Map();
+  for (const item of filtered) {
+    const dayKey = item.startsAt.toISOString().slice(0, 10);
+    if (!groups.has(dayKey)) groups.set(dayKey, []);
+    groups.get(dayKey).push(item);
+  }
+
+  const dayHtml = [...groups.entries()].map(([dayKey, items]) => {
+    const dayDate = new Date(`${dayKey}T00:00:00`);
+    const dayLabel = dayDate.toLocaleDateString("pt-BR", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+    });
+    const cards = items.map((item) => {
+      const startsAtText = item.startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const duration = item.serviceDurationMin || Math.max(15, Math.round((item.endsAt - item.startsAt) / 60000));
+      const isLate = item.startsAt < now && (item.status === "SCHEDULED" || item.status === "CONFIRMED");
+      const isFocused = alFocusedAppointmentId && item.id === alFocusedAppointmentId;
+      const clientPhone =
+        item.clientPhone ||
+        clientsById?.[item.clientId]?.phone ||
+        "Telefone nao informado";
+      const dateTime = item.startsAt.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const serviceLabel = item.service || "Servico";
+      const professionalLabel = item.professional || "Profissional";
+      const priceLabel = money(item.servicePrice || item.price || 0);
+      return `
+        <article class="al-card ${isLate ? "is-late" : ""}" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar[item.status] || "#26251e"};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
+          <div class="al-card-time">
+            <strong>${startsAtText}</strong>
+            <span class="al-dur">${duration} min</span>
+          </div>
+          <div class="al-card-info">
+            <div class="al-card-top">
+              <div class="al-card-client">${item.client || "Cliente sem nome"}</div>
+              <div class="al-price">${priceLabel}</div>
+            </div>
+            <div class="al-card-sub">${serviceLabel} · ${professionalLabel}</div>
+            <div class="al-card-sub al-card-muted">${clientPhone} · ${dateTime}</div>
+          </div>
+          <div class="al-card-right">
+            <span class="al-chip">${statusLabelMap[item.status] || item.status}</span>
+            <div class="al-card-actions">
+              ${isSlotBlockingStatus(item.status) ? `<button class="al-btn al-btn-cancel" data-al-action="CANCELLED" data-al-id="${item.id}">Cancelar</button>` : ""}
+            </div>
+          </div>
+        </article>
+      `;
+    }).join("");
+    return `<section class="al-day-group"><h3 class="al-day-hdr">${dayLabel}</h3>${cards}</section>`;
+  }).join("");
+
+  agendaListContent.innerHTML = dayHtml;
+
+  agendaListContent.querySelectorAll("[data-al-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const appointmentId = btn.getAttribute("data-al-id");
+      const action = btn.getAttribute("data-al-action");
+      if (!appointmentId || !action) return;
+      try {
+        await handleAppointmentsAction(appointmentId, action);
+      } catch (error) {
+        renderAppointmentsFeedback(
+          appointmentsElements,
+          "error",
+          error?.message || "Nao foi possivel atualizar o agendamento.",
+        );
+      }
+    });
+  });
+  agendaListContent.querySelectorAll("[data-al-open]").forEach((card) => {
+    card.addEventListener("click", async (event) => {
+      if (event.target.closest("[data-al-action]")) return;
+      const appointmentId = card.getAttribute("data-al-open");
+      if (!appointmentId) return;
+      await openAgendaAppointmentDetail(appointmentId);
+    });
+  });
+
+  if (alFocusedAppointmentId) {
+    const focusedEl = agendaListContent.querySelector(`[data-al-appt-id="${alFocusedAppointmentId}"]`);
+    if (focusedEl) focusedEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    alFocusedAppointmentId = "";
+  }
+}
+
+async function ensureAppointmentLoaded(appointmentId) {
+  if (!appointmentId) return null;
+  const cached = currentAppointments.find((item) => item.id === appointmentId);
+  if (cached) return cached;
+  const response = await apiFetch(`${API}/appointments/${appointmentId}`);
+  const data = await readResponsePayload(response);
+  if (!response.ok) {
+    throw new Error(extractApiErrorMessage(response, data, "Falha ao carregar detalhe do agendamento"));
+  }
+  const normalized = normalizeAppointmentsPayload([data?.appointment || data]);
+  const item = normalized[0] || null;
+  if (item) {
+    currentAppointments = [item, ...currentAppointments.filter((row) => row.id !== item.id)];
+  }
+  return item;
+}
+
+async function openAgendaAppointmentDetail(appointmentId) {
+  try {
+    const loaded = await ensureAppointmentLoaded(appointmentId);
+    if (!loaded) return;
+    selectedAppointmentId = loaded.id;
+    renderAppointmentDetailPanel();
+  } catch (error) {
+    renderAppointmentsFeedback(
+      appointmentsElements,
+      "error",
+      error?.message || "Nao foi possivel carregar os detalhes do agendamento.",
+    );
+  }
+}
+
+function updateAppointmentStatusLocal(appointmentId, nextStatus) {
+  if (!appointmentId || !nextStatus) return;
+  const apply = (item) => (item && item.id === appointmentId ? { ...item, status: nextStatus } : item);
+  currentAppointments = (currentAppointments || []).map(apply);
+  currentAgenda = (currentAgenda || []).map(apply);
+  wcItems = (wcItems || []).map(apply);
+}
+
+function syncLocalAppointmentFromPayload(rawAppointment) {
+  const normalizedAppointment = normalizeAppointmentsPayload([rawAppointment])[0];
+  if (!normalizedAppointment) return null;
+  const normalizedAgenda = normalizeAgendaItems([rawAppointment])[0] || normalizedAppointment;
+
+  const upsertById = (list, value) => {
+    const rows = Array.isArray(list) ? list : [];
+    const index = rows.findIndex((item) => item && item.id === value.id);
+    if (index === -1) return [...rows, value];
+    const copy = rows.slice();
+    copy[index] = { ...copy[index], ...value };
+    return copy;
+  };
+
+  currentAppointments = upsertById(currentAppointments, normalizedAppointment);
+  currentAgenda = upsertById(currentAgenda, normalizedAgenda);
+  wcItems = upsertById(wcItems, normalizedAgenda);
+  return normalizedAppointment;
 }
 
 function renderAppointmentDetailPanel() {
@@ -3171,7 +4128,10 @@ function renderAppointmentDetailPanel() {
 }
 
 async function handleAppointmentsAction(appointmentId, action) {
-  const item = currentAppointments.find((row) => row.id === appointmentId);
+  let item = currentAppointments.find((row) => row.id === appointmentId);
+  if (!item) {
+    item = await ensureAppointmentLoaded(appointmentId);
+  }
   if (!item) return;
 
   if (action === "DETAIL") {
@@ -3232,15 +4192,13 @@ async function handleAppointmentsAction(appointmentId, action) {
   }
 
   const statusMap = {
-    CONFIRMED: "CONFIRMED",
-    IN_SERVICE: "IN_SERVICE",
     CANCELLED: "CANCELLED",
     NO_SHOW: "NO_SHOW",
   };
   const nextStatus = statusMap[action];
   if (!nextStatus) return;
 
-  await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
+  const response = await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
     status: nextStatus,
     reason:
       nextStatus === "CANCELLED" || nextStatus === "NO_SHOW"
@@ -3248,12 +4206,23 @@ async function handleAppointmentsAction(appointmentId, action) {
         : undefined,
     changedBy: "owner",
   });
+  const synced = syncLocalAppointmentFromPayload(response?.appointment);
+  if (!synced) updateAppointmentStatusLocal(item.id, nextStatus);
+  renderAgendaView();
+  renderAppointmentsView();
+  if (selectedAppointmentId === item.id) renderAppointmentDetailPanel();
   renderAppointmentsFeedback(
     appointmentsElements,
     "success",
     `Status atualizado para ${actionLabel[action] || nextStatus}.`,
   );
-  await loadAll();
+  loadAll().catch(() => {
+    renderAppointmentsFeedback(
+      appointmentsElements,
+      "warning",
+      "Status salvo localmente. Nao foi possivel sincronizar tudo agora.",
+    );
+  });
 }
 
 function renderAppointmentsView() {
@@ -3308,6 +4277,7 @@ async function loadAgendaByPeriod() {
     if (!response.ok) {
       throw new Error(extractApiErrorMessage(response, data, "Falha ao carregar agenda"));
     }
+    updateWorkingHoursFromPayload(data?.workingHours || data);
     return normalizeAgendaItems(data);
   }
   const range = rangeFromPeriod(period);
@@ -3318,6 +4288,7 @@ async function loadAgendaByPeriod() {
   if (!response.ok) {
     throw new Error(extractApiErrorMessage(response, data, "Falha ao carregar agenda"));
   }
+  updateWorkingHoursFromPayload(data?.workingHours || data);
   return normalizeAgendaItems(data);
 }
 
@@ -3375,6 +4346,7 @@ async function loadAppointmentsByFilters() {
     unitId,
     start: range.start.toISOString(),
     end: range.end.toISOString(),
+    limit: String(clientsLimit?.value || "50"),
   });
 
   if (appointmentsFilterStatus.value) query.set("status", appointmentsFilterStatus.value);
@@ -3396,6 +4368,7 @@ async function loadAppointmentsByFilters() {
       extractApiErrorMessage(response, data, "Falha ao carregar lista de agendamentos"),
     );
   }
+  updateWorkingHoursFromPayload(data?.workingHours || data);
   return normalizeAppointmentsPayload(data.appointments);
 }
 
@@ -3703,6 +4676,30 @@ function renderServiceDetailPanel() {
   renderServiceDetail(servicesElements, currentServiceDetail);
 }
 
+function hideProfessionalsModal() {
+  if (!professionalsModal) return;
+  professionalsModal.classList.add("hidden");
+  professionalsModal.classList.remove("flex");
+  if (professionalsFormFeedback) professionalsFormFeedback.innerHTML = "";
+}
+
+function showProfessionalsModal(professional = null) {
+  if (!professionalsModal) return;
+  const editing = Boolean(professional?.professionalId);
+  const modalTitle = document.getElementById("professionalsModalTitle");
+  const submitBtn = document.getElementById("professionalsSubmitBtn");
+  if (modalTitle) modalTitle.textContent = editing ? "Editar profissional" : "Novo profissional";
+  if (submitBtn) submitBtn.textContent = editing ? "Salvar alteracoes" : "Salvar profissional";
+  if (professionalsFormId) professionalsFormId.value = editing ? professional.professionalId : "";
+  if (professionalsFormName) professionalsFormName.value = editing ? (professional.name || "") : "";
+  if (professionalsFormPhone) professionalsFormPhone.value = editing ? (professional.phone || "") : "";
+  if (professionalsFormEmail) professionalsFormEmail.value = editing ? (professional.email || "") : "";
+  if (professionalsFormFeedback) professionalsFormFeedback.innerHTML = "";
+  professionalsModal.classList.remove("hidden");
+  professionalsModal.classList.add("flex");
+  setTimeout(() => professionalsFormName?.focus(), 50);
+}
+
 function hideServicesModal() {
   if (!servicesModal) return;
   servicesModal.classList.add("hidden");
@@ -3712,8 +4709,8 @@ function hideServicesModal() {
 function showServicesModal(service = null) {
   if (!servicesModal) return;
   const editing = Boolean(service?.id);
-  servicesModalTitle.textContent = editing ? "Editar servico" : "Adicionar servico";
-  servicesSubmitBtn.textContent = editing ? "Salvar alteracoes" : "Salvar servico";
+  servicesModalTitle.textContent = editing ? "Editar serviço" : "Adicionar serviço";
+  servicesSubmitBtn.textContent = editing ? "Salvar alterações" : "Salvar serviço";
   servicesId.value = editing ? service.id : "";
   servicesName.value = editing ? service.name || "" : "";
   servicesPrice.value = editing ? Number(service.price || 0) : 0;
@@ -3726,6 +4723,7 @@ function showServicesModal(service = null) {
   servicesEstimatedCost.value = editing ? Number(service.estimatedCost || 0) : "";
   servicesIsActive.value = editing ? (service.isActive ? "true" : "false") : "true";
   servicesNotes.value = editing ? service.notes || "" : "";
+  if (servicesImageUrl) servicesImageUrl.value = editing ? service.imageUrl || "" : "";
 
   const selectedIds = new Set(
     editing && Array.isArray(service.enabledProfessionalIds) ? service.enabledProfessionalIds : [],
@@ -3748,13 +4746,48 @@ function servicePayloadFromForm() {
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     throw new Error("Duracao deve ser maior que zero");
   }
+  const imageUrlVal = servicesImageUrl ? String(servicesImageUrl.value || "").trim() : undefined;
   return {
     unitId,
     name,
     price,
     durationMinutes,
-    isActive: true,
+    category: String(servicesCategory?.value || "").trim() || undefined,
+    description: String(servicesDescription?.value || "").trim() || undefined,
+    defaultCommissionRate: Number(servicesDefaultCommissionRate?.value || 0),
+    estimatedCost: Number(servicesEstimatedCost?.value || 0),
+    isActive: servicesIsActive?.value !== "false",
+    notes: String(servicesNotes?.value || "").trim() || undefined,
+    imageUrl: imageUrlVal || undefined,
+    professionalIds: servicesProfessionalIds ? Array.from(servicesProfessionalIds.selectedOptions).map((o) => o.value) : [],
   };
+}
+
+function showServiceEditPanel(service) {
+  if (!service) return;
+  const allProfessionals = (currentServiceDetail?.professionals || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
+  renderServiceEditPanel(servicesElements, service, allProfessionals, {
+    onCancel() {
+      renderServiceDetailPanel();
+    },
+    async onSubmit(formData) {
+      try {
+        await callJson(`${API}/services/${service.id}`, "PATCH", { unitId, ...formData });
+        renderSaleFeedback("success", "Servico atualizado com sucesso.", servicesFeedback);
+        await loadCatalog();
+        await loadAll();
+        const detail = await loadServiceDetail(service.id);
+        currentServiceDetail = detail;
+        renderServiceDetailPanel();
+      } catch (err) {
+        const fb = servicesDrawerHost?.querySelector("#svcEditFeedback");
+        if (fb) fb.innerHTML = `<p class="svc-edit-error">${String(err.message || "Erro ao salvar").replace(/</g, "&lt;")}</p>`;
+      }
+    },
+  });
 }
 
 async function handleServiceAction(serviceIdValue, action, options = {}) {
@@ -3773,7 +4806,7 @@ async function handleServiceAction(serviceIdValue, action, options = {}) {
   }
 
   if (action === "edit") {
-    showServicesModal(service);
+    showServiceEditPanel(service);
     return;
   }
 
@@ -3828,7 +4861,14 @@ function showInventoryProductModal(product = null) {
   inventoryProductCostPrice.value = editing ? Number(product.costPrice || 0) : "";
   inventoryProductMinimumStock.value = editing ? Number(product.minimumStock || 0) : "";
   inventoryProductCategory.value = editing ? product.category || "" : "";
-  inventoryProductNotes.value = editing ? product.notes || "" : "";
+  if (inventoryProductImageUrl) inventoryProductImageUrl.value = editing ? productImageUrl(product) : "";
+  inventoryProductNotes.value = editing ? stripProductImageNote(product.notes || "") : "";
+  if (inventoryCategorySuggestions) {
+    const categories = [...new Set(saleProductsList().map(productCategory))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    inventoryCategorySuggestions.innerHTML = categories
+      .map((category) => `<option value="${escapeHtml(category)}"></option>`)
+      .join("");
+  }
   inventoryProductModal.classList.remove("hidden");
   inventoryProductModal.classList.add("flex");
 }
@@ -3843,11 +4883,12 @@ function showInventoryStockModal({ productId, productName, type }) {
   if (!inventoryStockModal) return;
   const isAdd = type === "IN";
   const isAdjustment = type === "ADJUSTMENT";
-  inventoryStockModalTitle.textContent = isAdjustment
-    ? `Ajustar saldo - ${productName || "Produto"}`
+  if (inventoryStockModalTitle) inventoryStockModalTitle.textContent = isAdjustment
+    ? "Ajustar saldo"
     : isAdd
-      ? `Registrar entrada - ${productName || "Produto"}`
-      : `Registrar saida - ${productName || "Produto"}`;
+      ? "Registrar entrada"
+      : "Registrar saida";
+  if (inventoryStockModalSubtitle) inventoryStockModalSubtitle.textContent = productName || "";
   inventoryStockSubmitBtn.textContent = isAdjustment
     ? "Confirmar saldo"
     : isAdd
@@ -3908,6 +4949,16 @@ function hideClientsModal() {
   if (!clientsModal) return;
   clientsModal.classList.add("hidden");
   clientsModal.classList.remove("flex");
+}
+
+function formatClientPhoneInput(value) {
+  const digits = normalizePhoneDigits(value).slice(0, 11);
+  if (digits.length <= 2) return digits ? `(${digits}` : "";
+  if (digits.length <= 6) return `(${digits.slice(0, 2)})${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)})${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)})${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
 async function refreshInventoryAndCatalog(message, tone = "success") {
@@ -3993,6 +5044,17 @@ async function loadCommissionsStatement() {
   };
 }
 
+function populateAuditActorFilter(events = []) {
+  const select = document.getElementById("auditActorFilter");
+  if (!select) return;
+  const current = select.value;
+  const actors = [...new Set(
+    events.map((e) => e.actorEmail || e.actorId).filter(Boolean)
+  )].sort();
+  select.innerHTML = `<option value="">Todos os atores</option>` +
+    actors.map((a) => `<option value="${a}"${a === current ? " selected" : ""}>${a}</option>`).join("");
+}
+
 async function loadAuditEvents() {
   const query = new URLSearchParams({
     unitId,
@@ -4024,6 +5086,15 @@ async function loadAuditEvents() {
       .replace(/[_-]+/g, " ")
       .trim()
       .toLowerCase();
+  const ENTITY_PT = {
+    appointment: "agenda", Appointment: "agenda",
+    product_sale: "pdv", product_sale_refund: "pdv",
+    financial_entry: "financeiro", financial_transaction: "financeiro",
+    commission: "comissoes",
+    product: "estoque", inventory: "estoque", stock_movement: "estoque",
+    settings: "configuracoes", business_settings: "configuracoes", business_hours: "configuracoes",
+    service: "servicos", professional: "profissionais", user: "usuarios",
+  };
   const advancedFilters = {
     entity: entity.toLowerCase(),
     action: action.toLowerCase(),
@@ -4034,12 +5105,27 @@ async function loadAuditEvents() {
     route: String(auditRouteFilter?.value || "").trim().toLowerCase(),
     method: String(auditMethodFilter?.value || "").trim().toUpperCase(),
   };
+  const filterStart = auditStartFilter?.value
+    ? new Date(`${auditStartFilter.value}T00:00:00`)
+    : null;
+  const filterEnd = auditEndFilter?.value
+    ? new Date(`${auditEndFilter.value}T23:59:59.999`)
+    : null;
+
   const filteredEvents = events.filter((event) => {
+    if (filterStart || filterEnd) {
+      const eventDate = event.createdAt ? new Date(event.createdAt) : null;
+      if (eventDate) {
+        if (filterStart && eventDate < filterStart) return false;
+        if (filterEnd && eventDate > filterEnd) return false;
+      }
+    }
     if (
       advancedFilters.entity &&
       ![
         event.entity,
         humanizeAuditToken(event.entity),
+        ENTITY_PT[event.entity] || "",
       ]
         .map((value) => String(value || "").toLowerCase())
         .some((value) => value.includes(advancedFilters.entity))
@@ -4080,6 +5166,21 @@ async function loadAuditEvents() {
       total: filteredEvents.length,
     },
   };
+}
+
+async function refreshAuditEvents() {
+  try {
+    renderAuditLoading(auditElements);
+    const data = await loadAuditEvents();
+    currentAuditPayload = data;
+    renderAuditData(auditElements, data);
+    populateAuditActorFilter(Array.isArray(data?.events) ? data.events : []);
+  } catch (error) {
+    renderAuditError(
+      auditElements,
+      error?.message || "Nao foi possivel carregar auditoria.",
+    );
+  }
 }
 
 async function readOptionalJson(response, label) {
@@ -4570,6 +5671,18 @@ async function loadAll() {
 
   if (stockResult.status === "fulfilled") {
     currentStockPayload = stockResult.value;
+    if (Array.isArray(stockResult.value?.products)) {
+      stockResult.value.products.forEach((product) => {
+        const existing = productsById[product.id] || {};
+        productsById[product.id] = {
+          ...existing,
+          ...product,
+          stockQty: product.quantity ?? existing.stockQty ?? 0,
+        };
+      });
+      renderSaleProductCatalog();
+      if (saleProductId?.value) setSaleSelectedProduct(saleProductId.value);
+    }
     renderStockData(stockElements, stockResult.value);
   } else {
     currentStockPayload = null;
@@ -4579,7 +5692,7 @@ async function loadAll() {
   if (productSalesHistoryResult.status !== "fulfilled") {
     productSalesHistory = [];
     if (saleRecentList) {
-      saleRecentList.innerHTML = `<p class="text-sm text-red-600">Nao foi possivel carregar historico de vendas.</p>`;
+      saleRecentList.innerHTML = `<p class="panel-msg panel-msg-error">Nao foi possivel carregar historico de vendas.</p>`;
     }
   }
 
@@ -4642,6 +5755,7 @@ async function loadAll() {
   if (auditResult.status === "fulfilled") {
     currentAuditPayload = auditResult.value;
     renderAuditData(auditElements, auditResult.value);
+    populateAuditActorFilter(Array.isArray(auditResult.value?.events) ? auditResult.value.events : []);
   } else {
     currentAuditPayload = null;
     renderAuditError(
@@ -4690,9 +5804,12 @@ async function loadAll() {
     renderSettingsData(settingsElements, currentSettingsPayload, {
       professionals: Object.values(professionalsById),
       services: allServices,
-    });
+    }, settingsActiveSection);
+    animateSettingsScreen(settingsRoot);
+    applyThemeFromSettingsPayload(currentSettingsPayload);
   } else {
     currentSettingsPayload = null;
+    applyThemeFromSettingsPayload(null);
     renderSettingsError(
       settingsElements,
       settingsResult.reason?.message || "Nao foi possivel carregar configuracoes.",
@@ -4739,7 +5856,7 @@ function settingsBusinessBasePayload() {
     document: String(business.document || "").trim(),
     displayName: String(business.displayName || "").trim(),
     primaryColor: String(business.primaryColor || "#0f172a").trim(),
-    themeMode: String(business.themeMode || "light"),
+    themeMode: String(business.themeMode || "system"),
     defaultAppointmentDuration: Number(business.defaultAppointmentDuration || 45),
     minimumAdvanceMinutes: Number(business.minimumAdvanceMinutes || 30),
     bufferBetweenAppointmentsMinutes: Number(business.bufferBetweenAppointmentsMinutes || 10),
@@ -4771,7 +5888,9 @@ async function refreshSettingsScreen(successMessage) {
     renderSettingsData(settingsElements, currentSettingsPayload, {
       professionals: Object.values(professionalsById),
       services: allServices,
-    });
+    }, settingsActiveSection);
+    animateSettingsScreen(settingsRoot);
+    applyThemeFromSettingsPayload(currentSettingsPayload);
     renderSaleFeedback("success", successMessage, settingsFeedback);
   } catch (error) {
     renderSettingsError(
@@ -4787,6 +5906,40 @@ async function refreshSettingsScreen(successMessage) {
 }
 
 if (settingsRoot) {
+  settingsRoot.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.hasAttribute("data-phone-mask")) return;
+    const pos = target.selectionStart ?? target.value.length;
+    const raw = normalizePhoneDigits(target.value);
+    const formatted = formatPhoneBR(raw);
+    target.value = formatted;
+    const newPos = pos + (formatted.length - target.value.length + (formatted.length - pos > 0 ? 1 : 0));
+    try { target.setSelectionRange(newPos, newPos); } catch (_) {}
+  });
+
+  settingsRoot.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const form = target.closest("form");
+    if (!(form instanceof HTMLFormElement)) return;
+    if (target.name.startsWith("closed_")) {
+      const dayOfWeek = Number(target.name.replace("closed_", ""));
+      if (Number.isInteger(dayOfWeek)) {
+        settingsHoursApplyClosedState(form, dayOfWeek, target.checked);
+      }
+    }
+    if (
+      target.name.startsWith("closed_") ||
+      target.name.startsWith("opensAt_") ||
+      target.name.startsWith("closesAt_") ||
+      target.name.startsWith("breakStart_") ||
+      target.name.startsWith("breakEnd_")
+    ) {
+      refreshSettingsHoursPreview(form);
+    }
+  });
+
   settingsRoot.addEventListener("submit", async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -4797,7 +5950,7 @@ if (settingsRoot) {
         await saveSettingsBusiness({
           businessName: String(formData.get("businessName") || "").trim(),
           segment: String(formData.get("segment") || "barbearia"),
-          phone: String(formData.get("phone") || "").trim(),
+          phone: normalizePhoneDigits(formData.get("phone") || ""),
           email: String(formData.get("email") || "").trim(),
           address: String(formData.get("address") || "").trim(),
           city: String(formData.get("city") || "").trim(),
@@ -4898,14 +6051,15 @@ if (settingsRoot) {
         return;
       }
 
-      if (form.id === "settingsAppearanceForm") {
+      if (form.id === "settingsUserForm") {
         const formData = new FormData(form);
+        const selectedThemeMode = String(formData.get("themeMode") || "system");
         await saveSettingsBusiness({
           displayName: String(formData.get("displayName") || "").trim(),
-          primaryColor: String(formData.get("primaryColor") || "#0f172a").trim(),
-          themeMode: String(formData.get("themeMode") || "light"),
+          themeMode: selectedThemeMode,
         });
-        await refreshSettingsScreen("Aparencia salva com sucesso.");
+        applyThemeMode(selectedThemeMode);
+        await refreshSettingsScreen("Configuracoes do usuario salvas.");
       }
     } catch (error) {
       renderSaleFeedback(
@@ -4916,11 +6070,56 @@ if (settingsRoot) {
     }
   });
 
+  settingsRoot.addEventListener("click", (event) => {
+    const btn = event.target.closest(".cfg-theme-btn[data-theme]");
+    if (!btn) return;
+    const toggle = btn.closest(".cfg-theme-toggle");
+    if (!toggle) return;
+    const hiddenInput = btn.closest("form")?.querySelector('input[name="themeMode"]');
+    const theme = btn.dataset.theme;
+    toggle.querySelectorAll(".cfg-theme-btn").forEach((b) => b.classList.remove("is-active"));
+    btn.classList.add("is-active");
+    toggle.dataset.themeValue = theme;
+    if (hiddenInput) hiddenInput.value = theme;
+    applyThemeMode(theme);
+  });
+
   settingsRoot.addEventListener("click", async (event) => {
     const trigger = event.target.closest("[data-settings-action]");
     if (!trigger) return;
     const action = trigger.getAttribute("data-settings-action");
     try {
+      if (action === "apply-hours-preset") {
+        const form = settingsRoot.querySelector("#settingsHoursForm");
+        if (!(form instanceof HTMLFormElement)) return;
+        const presetId = String(trigger.getAttribute("data-preset") || "").trim();
+        const applied = applySettingsHoursPreset(form, presetId);
+        if (applied) {
+          renderSaleFeedback(
+            "success",
+            "Preset aplicado. Revise os dias e clique em Salvar horarios para publicar.",
+            settingsFeedback,
+          );
+        }
+        return;
+      }
+
+      if (action === "copy-day-hours") {
+        const form = settingsRoot.querySelector("#settingsHoursForm");
+        if (!(form instanceof HTMLFormElement)) return;
+        const sourceDay = Number(trigger.getAttribute("data-source-day"));
+        if (!Number.isInteger(sourceDay)) return;
+        const copied = copyDayHoursToNextDays(form, sourceDay);
+        if (copied) {
+          renderSaleFeedback(
+            "success",
+            "Horario copiado para os proximos dias. Nao esqueça de salvar.",
+            settingsFeedback,
+          );
+        }
+        return;
+      }
+
       if (action === "toggle-team-member") {
         const memberId = trigger.getAttribute("data-member-id");
         if (!memberId) return;
@@ -4969,11 +6168,19 @@ if (settingsRoot) {
         return;
       }
 
-      if (action === "open-section") {
-        renderSettingsSectionDrawer(settingsElements, currentSettingsPayload || {}, {
+      if (action === "select-settings-section" || action === "open-section") {
+        settingsActiveSection = trigger.getAttribute("data-settings-section") || "business";
+        renderShell();
+        renderSettingsData(settingsElements, currentSettingsPayload || {}, {
           professionals: Object.values(professionalsById),
           services: allServices,
-        }, trigger.getAttribute("data-settings-section") || "business");
+        }, settingsActiveSection);
+        animateSettingsScreen(settingsRoot);
+        const hoursForm = settingsRoot.querySelector("#settingsHoursForm");
+        if (hoursForm instanceof HTMLFormElement) {
+          refreshSettingsHoursPreview(hoursForm);
+        }
+        renderSaleFeedback("", "", settingsFeedback);
       }
     } catch (error) {
       renderSaleFeedback(
@@ -5045,8 +6252,17 @@ saleAddItemBtn.addEventListener("click", () => {
   }
 });
 
+saleProductId?.addEventListener("change", () => {
+  setSaleSelectedProduct(saleProductId.value);
+});
+
+pdvProductSearch?.addEventListener("input", () => {
+  renderSaleProductCatalog();
+});
+
 saleClearCartBtn.addEventListener("click", () => {
   clearSaleCart();
+  renderSaleProductCatalog();
   renderSaleFeedback("success", "Carrinho limpo.", saleFeedback);
 });
 
@@ -5066,26 +6282,506 @@ if (saleRecentList) {
   });
 }
 
-[saleHistorySearch, saleHistoryStart, saleHistoryEnd].forEach((input) => {
-  input?.addEventListener("input", () => {
+// Listeners for saleHistorySearch / saleHistoryStart / saleHistoryEnd are
+// attached after DOM injection in renderOperationalChrome (those elements
+// are null here since they're created dynamically).
+
+/* ── Sale history date range picker ─────────────────────────
+   Shopify-style: trigger button → popover with 2-month calendar
+   + preset shortcuts. Updates hidden #saleHistoryStart /
+   #saleHistoryEnd inputs and triggers loadProductSalesHistory.
+   ─────────────────────────────────────────────────────────── */
+function initSaleHistoryDatePicker() {
+  const wrap     = document.getElementById("shfPickerWrap");
+  const trigger  = document.getElementById("saleHistoryDateTrigger");
+  const popover  = document.getElementById("shfPickerPopover");
+  const calsEl   = document.getElementById("shfCals");
+  const labelEl  = document.getElementById("saleHistoryDateLabel");
+  const rangeLbl = document.getElementById("shfRangeLabel");
+  const applyBtn = document.getElementById("shfApplyBtn");
+  const startIn  = document.getElementById("saleHistoryStart");
+  const endIn    = document.getElementById("saleHistoryEnd");
+  if (!trigger || !popover || !calsEl) return;
+
+  const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                  "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  let pickerStart = null; // Date or null
+  let pickerEnd   = null;
+  let hoverDate   = null;
+  let phase       = 0;    // 0 = idle, 1 = waiting for end
+  let leftYear, leftMonth;
+
+  function toYMD(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function sameDayOrBefore(a, b) { return a <= b; }
+  function sameDay(a, b) { return toYMD(a) === toYMD(b); }
+
+  function applyPreset(key) {
+    const now = new Date(); now.setHours(0,0,0,0);
+    let s, e;
+    if (key === "today") {
+      s = new Date(now); e = new Date(now);
+    } else if (key === "7d") {
+      s = new Date(now); s.setDate(s.getDate() - 6); e = new Date(now);
+    } else if (key === "30d") {
+      s = new Date(now); s.setDate(s.getDate() - 29); e = new Date(now);
+    } else if (key === "month") {
+      s = new Date(now.getFullYear(), now.getMonth(), 1);
+      e = new Date(now);
+    } else if (key === "prev-month") {
+      const m = now.getMonth() - 1;
+      const y = m < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const mm = (m + 12) % 12;
+      s = new Date(y, mm, 1);
+      e = new Date(y, mm + 1, 0);
+    }
+    pickerStart = s; pickerEnd = e; phase = 0;
+    popover.querySelectorAll(".shf-preset").forEach(b => {
+      b.classList.toggle("is-active", b.dataset.shfPreset === key);
+    });
+    updateRangeLabel();
+    renderCals();
+  }
+
+  function updateRangeLabel() {
+    if (!pickerStart) { rangeLbl && (rangeLbl.textContent = ""); return; }
+    const fmt = d => d.toLocaleDateString("pt-BR", { day:"2-digit", month:"short" });
+    rangeLbl && (rangeLbl.textContent = pickerEnd && !sameDay(pickerStart, pickerEnd)
+      ? `${fmt(pickerStart)} → ${fmt(pickerEnd)}`
+      : fmt(pickerStart));
+  }
+
+  function renderCal(year, month) {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    let html = `<div class="shf-cal">
+      <div class="shf-cal-head">
+        <button type="button" class="shf-cal-nav" data-shf-nav="-1">&#8249;</button>
+        <span class="shf-cal-title">${MONTHS[month]} ${year}</span>
+        <button type="button" class="shf-cal-nav" data-shf-nav="1">&#8250;</button>
+      </div>
+      <div class="shf-cal-grid">
+        ${["D","S","T","Q","Q","S","S"].map(d=>`<span class="shf-cal-dow">${d}</span>`).join("")}`;
+
+    for (let i = 0; i < firstDay; i++) html += `<span></span>`;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const ymd = toYMD(date);
+      const isToday = sameDay(date, today);
+      const isStart = pickerStart && sameDay(date, pickerStart);
+      const isEnd   = pickerEnd   && sameDay(date, pickerEnd);
+      const endRef  = phase === 1 && hoverDate ? hoverDate : pickerEnd;
+      const inRange = pickerStart && endRef &&
+        sameDayOrBefore(pickerStart, date) && sameDayOrBefore(date, endRef);
+      const isFuture = date > today;
+
+      let cls = "shf-cal-day";
+      if (isFuture) cls += " is-future";
+      if (isToday)  cls += " is-today";
+      if (isStart)  cls += " is-start";
+      if (isEnd && !sameDay(pickerStart, date)) cls += " is-end";
+      if (inRange && !isStart && !isEnd) cls += " in-range";
+      if (isStart && isEnd) cls += " is-single";
+
+      html += `<button type="button" class="${cls}" data-shf-date="${ymd}"${isFuture?" disabled":""}>${d}</button>`;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  function renderCals() {
+    const right = new Date(leftYear, leftMonth + 1, 1);
+    calsEl.innerHTML = renderCal(leftYear, leftMonth) +
+                       renderCal(right.getFullYear(), right.getMonth());
+
+    calsEl.querySelectorAll("[data-shf-nav]").forEach((btn, i) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const dir = Number(btn.dataset.shfNav);
+        const calIdx = Math.floor(i / 2); // 0=left, 1=right
+        if (calIdx === 0 || dir === -1) {
+          leftMonth += dir;
+          if (leftMonth < 0)  { leftMonth = 11; leftYear--; }
+          if (leftMonth > 11) { leftMonth = 0;  leftYear++; }
+        } else {
+          leftMonth += dir;
+          if (leftMonth < 0)  { leftMonth = 11; leftYear--; }
+          if (leftMonth > 11) { leftMonth = 0;  leftYear++; }
+        }
+        renderCals();
+      });
+    });
+
+    calsEl.querySelectorAll("[data-shf-date]").forEach(btn => {
+      btn.addEventListener("mouseenter", () => {
+        if (phase !== 1) return;
+        hoverDate = new Date(btn.dataset.shfDate + "T00:00:00");
+        renderCals();
+      });
+      btn.addEventListener("click", () => {
+        const clicked = new Date(btn.dataset.shfDate + "T00:00:00");
+        if (phase === 0) {
+          pickerStart = clicked; pickerEnd = null; hoverDate = null; phase = 1;
+          popover.querySelectorAll(".shf-preset").forEach(b => b.classList.remove("is-active"));
+        } else {
+          if (clicked < pickerStart) { pickerEnd = pickerStart; pickerStart = clicked; }
+          else pickerEnd = clicked;
+          hoverDate = null; phase = 0;
+        }
+        updateRangeLabel(); renderCals();
+      });
+    });
+
+    calsEl.addEventListener("mouseleave", () => {
+      if (phase !== 1) return;
+      hoverDate = null; renderCals();
+    });
+  }
+
+  function formatTriggerLabel() {
+    if (!pickerStart) return "Últimos 30 dias";
+    const today = new Date(); today.setHours(0,0,0,0);
+    const s = pickerStart, e = pickerEnd || today;
+    const diff = Math.round((e - s) / 864e5);
+    if (sameDay(s, today) && sameDay(e, today)) return "Hoje";
+    if (diff === 6 && sameDay(e, today)) return "Últimos 7 dias";
+    if (diff === 29 && sameDay(e, today)) return "Últimos 30 dias";
+    const opts = { day:"2-digit", month:"short" };
+    const sStr = s.toLocaleDateString("pt-BR", opts);
+    const eStr = e.toLocaleDateString("pt-BR", opts);
+    return sameDay(s, e) ? sStr : `${sStr} – ${eStr}`;
+  }
+
+  function openPicker() {
+    const now = new Date();
+    leftYear  = now.getFullYear();
+    leftMonth = now.getMonth() - 1;
+    if (leftMonth < 0) { leftMonth = 11; leftYear--; }
+    renderCals();
+    popover.classList.remove("hidden");
+    trigger.classList.add("is-active");
+  }
+
+  function closePicker() {
+    popover.classList.add("hidden");
+    trigger.classList.remove("is-active");
+  }
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    popover.classList.contains("hidden") ? openPicker() : closePicker();
+  });
+
+  popover.querySelectorAll("[data-shf-preset]").forEach(btn => {
+    btn.addEventListener("click", () => applyPreset(btn.dataset.shfPreset));
+  });
+
+  applyBtn?.addEventListener("click", () => {
+    if (!pickerStart) return;
+    const e = pickerEnd || pickerStart;
+    startIn.value = toYMD(pickerStart);
+    endIn.value   = toYMD(e);
+    labelEl.textContent = formatTriggerLabel();
+    closePicker();
     window.clearTimeout(saleHistoryDebounce);
     saleHistoryDebounce = window.setTimeout(() => {
       loadProductSalesHistory().catch(() => {
         if (saleRecentList) {
-          saleRecentList.innerHTML = `<p class="text-sm text-red-600">Nao foi possivel carregar historico de vendas.</p>`;
+          saleRecentList.innerHTML = `<p class="panel-msg panel-msg-error">Nao foi possivel carregar historico de vendas.</p>`;
         }
       });
-    }, 300);
+    }, 100);
   });
-});
 
-saleHistoryRefreshBtn?.addEventListener("click", () => {
-  loadProductSalesHistory().catch(() => {
-    if (saleRecentList) {
-      saleRecentList.innerHTML = `<p class="text-sm text-red-600">Nao foi possivel carregar historico de vendas.</p>`;
+  document.addEventListener("click", (e) => {
+    if (!wrap?.contains(e.target)) closePicker();
+  });
+
+  // Init with last 30 days preset
+  applyPreset("30d");
+  const now = new Date(); now.setHours(0,0,0,0);
+  const s30 = new Date(now); s30.setDate(s30.getDate() - 29);
+  startIn.value = toYMD(s30);
+  endIn.value   = toYMD(now);
+  labelEl.textContent = "Últimos 30 dias";
+}
+
+/* ── Audit date range picker ─────────────────────────────────
+   Same pattern as initSaleHistoryDatePicker, wired to
+   auditStartFilter / auditEndFilter hidden inputs and
+   refreshes the audit timeline on apply.
+   ─────────────────────────────────────────────────────────── */
+function initAuditDatePicker() {
+  const wrap     = document.getElementById("audPickerWrap");
+  const trigger  = document.getElementById("auditDateTrigger");
+  const popover  = document.getElementById("audPickerPopover");
+  const calsEl   = document.getElementById("audCals");
+  const labelEl  = document.getElementById("auditDateLabel");
+  const rangeLbl = document.getElementById("audRangeLabel");
+  const applyBtn = document.getElementById("audApplyBtn");
+  const startIn  = document.getElementById("auditStartFilter");
+  const endIn    = document.getElementById("auditEndFilter");
+  if (!trigger || !popover || !calsEl || !startIn || !endIn || !labelEl) return;
+
+  const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                  "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  let pickerStart = null;
+  let pickerEnd = null;
+  let hoverDate = null;
+  let phase = 0;
+  let leftYear, leftMonth;
+
+  function toYMD(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function fromYMD(value) {
+    if (!value) return null;
+    const [year, month, day] = String(value).split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const date = new Date(year, month - 1, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  function startOfToday() {
+    const date = new Date();
+    date.setHours(0,0,0,0);
+    return date;
+  }
+  function sameDay(a, b) { return toYMD(a) === toYMD(b); }
+  function rangeBounds(start, end) {
+    if (!start || !end) return { start, end };
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
+
+  function setPresetActive(key) {
+    popover.querySelectorAll(".shf-preset").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.audPreset === key);
+    });
+  }
+
+  function applyPreset(key) {
+    const now = startOfToday();
+    let s, e;
+    if (key === "today") {
+      s = new Date(now); e = new Date(now);
+    } else if (key === "7d") {
+      s = new Date(now); s.setDate(s.getDate() - 6); e = new Date(now);
+    } else if (key === "30d") {
+      s = new Date(now); s.setDate(s.getDate() - 29); e = new Date(now);
+    } else if (key === "month") {
+      s = new Date(now.getFullYear(), now.getMonth(), 1); e = new Date(now);
+    } else if (key === "prev-month") {
+      const m = now.getMonth() - 1;
+      const y = m < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const mm = (m + 12) % 12;
+      s = new Date(y, mm, 1); e = new Date(y, mm + 1, 0);
+    }
+    pickerStart = s; pickerEnd = e; phase = 0;
+    hoverDate = null;
+    setPresetActive(key);
+    updateRangeLabel();
+    if (Number.isInteger(leftYear) && Number.isInteger(leftMonth)) renderCals();
+  }
+
+  function updateRangeLabel() {
+    if (!pickerStart) { rangeLbl && (rangeLbl.textContent = ""); return; }
+    const fmt = d => d.toLocaleDateString("pt-BR", { day:"2-digit", month:"short" });
+    rangeLbl && (rangeLbl.textContent = pickerEnd && !sameDay(pickerStart, pickerEnd)
+      ? `${fmt(pickerStart)} → ${fmt(pickerEnd)}`
+      : fmt(pickerStart));
+  }
+
+  function presetKeyForRange() {
+    if (!pickerStart || !pickerEnd) return "";
+    const today = startOfToday();
+    const diff = Math.round((pickerEnd - pickerStart) / 864e5);
+    if (sameDay(pickerStart, today) && sameDay(pickerEnd, today)) return "today";
+    if (diff === 6 && sameDay(pickerEnd, today)) return "7d";
+    if (diff === 29 && sameDay(pickerEnd, today)) return "30d";
+    if (
+      pickerStart.getDate() === 1 &&
+      pickerStart.getMonth() === today.getMonth() &&
+      pickerStart.getFullYear() === today.getFullYear() &&
+      sameDay(pickerEnd, today)
+    ) {
+      return "month";
+    }
+    const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const prevMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    if (sameDay(pickerStart, prevMonth) && sameDay(pickerEnd, prevMonthEnd)) return "prev-month";
+    return "";
+  }
+
+  function renderCal(year, month) {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = startOfToday();
+
+    let html = `<div class="shf-cal">
+      <div class="shf-cal-head">
+        <button type="button" class="shf-cal-nav" data-aud-nav="-1">&#8249;</button>
+        <span class="shf-cal-title">${MONTHS[month]} ${year}</span>
+        <button type="button" class="shf-cal-nav" data-aud-nav="1">&#8250;</button>
+      </div>
+      <div class="shf-cal-grid">
+        ${["D","S","T","Q","Q","S","S"].map(d=>`<span class="shf-cal-dow">${d}</span>`).join("")}`;
+
+    for (let i = 0; i < firstDay; i++) html += `<span></span>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const ymd  = toYMD(date);
+      const isToday = sameDay(date, today);
+      const isStart = pickerStart && sameDay(date, pickerStart);
+      const isEnd   = pickerEnd   && sameDay(date, pickerEnd);
+      const endRef  = phase === 1 && hoverDate ? hoverDate : pickerEnd;
+      const visibleRange = rangeBounds(pickerStart, endRef);
+      const inRange = visibleRange.start && visibleRange.end &&
+        visibleRange.start <= date && date <= visibleRange.end;
+      const isFuture = date > today;
+      let cls = "shf-cal-day";
+      if (isFuture) cls += " is-future";
+      if (isToday) cls += " is-today";
+      if (isStart) cls += " is-start";
+      if (isEnd && !sameDay(pickerStart, date)) cls += " is-end";
+      if (inRange && !isStart && !isEnd) cls += " in-range";
+      if (isStart && isEnd) cls += " is-single";
+      html += `<button type="button" class="${cls}" data-aud-date="${ymd}"${isFuture ? " disabled" : ""}>${d}</button>`;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  function renderCals() {
+    const rightYear  = leftMonth === 11 ? leftYear + 1 : leftYear;
+    const rightMonth = leftMonth === 11 ? 0 : leftMonth + 1;
+    calsEl.innerHTML = renderCal(leftYear, leftMonth) + renderCal(rightYear, rightMonth);
+  }
+
+  function formatTriggerLabel() {
+    if (!pickerStart) return "Últimos 30 dias";
+    const today = startOfToday();
+    const s = pickerStart, e = pickerEnd || pickerStart || today;
+    const diff = Math.round((e - s) / 864e5);
+    if (sameDay(s, today) && sameDay(e, today)) return "Hoje";
+    if (diff === 6  && sameDay(e, today)) return "Últimos 7 dias";
+    if (diff === 29 && sameDay(e, today)) return "Últimos 30 dias";
+    const opts = { day:"2-digit", month:"short" };
+    const sStr = s.toLocaleDateString("pt-BR", opts);
+    const eStr = e.toLocaleDateString("pt-BR", opts);
+    return sameDay(s, e) ? sStr : `${sStr} – ${eStr}`;
+  }
+
+  function openPicker() {
+    pickerStart = fromYMD(startIn.value);
+    pickerEnd = fromYMD(endIn.value) || pickerStart;
+    hoverDate = null;
+    phase = 0;
+    const anchor = pickerEnd || pickerStart || startOfToday();
+    leftYear  = anchor.getFullYear();
+    leftMonth = anchor.getMonth() - 1;
+    if (leftMonth < 0) { leftMonth = 11; leftYear--; }
+    setPresetActive(presetKeyForRange());
+    updateRangeLabel();
+    renderCals();
+    popover.classList.remove("hidden");
+    trigger.classList.add("is-active");
+  }
+
+  function closePicker() {
+    popover.classList.add("hidden");
+    trigger.classList.remove("is-active");
+  }
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    popover.classList.contains("hidden") ? openPicker() : closePicker();
+  });
+
+  popover.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const preset = event.target.closest("[data-aud-preset]");
+    if (preset) {
+      applyPreset(preset.dataset.audPreset);
     }
   });
-});
+
+  calsEl.addEventListener("click", (event) => {
+    const nav = event.target.closest("[data-aud-nav]");
+    if (nav) {
+      const dir = Number(nav.dataset.audNav);
+      leftMonth += dir;
+      if (leftMonth < 0)  { leftMonth = 11; leftYear--; }
+      if (leftMonth > 11) { leftMonth = 0;  leftYear++; }
+      renderCals();
+      return;
+    }
+
+    const day = event.target.closest("[data-aud-date]");
+    if (!day || day.disabled) return;
+    const clicked = fromYMD(day.dataset.audDate);
+    if (!clicked) return;
+    if (phase === 0) {
+      pickerStart = clicked;
+      pickerEnd = null;
+      hoverDate = null;
+      phase = 1;
+      setPresetActive("");
+    } else {
+      if (clicked < pickerStart) {
+        pickerEnd = pickerStart;
+        pickerStart = clicked;
+      } else {
+        pickerEnd = clicked;
+      }
+      hoverDate = null;
+      phase = 0;
+    }
+    updateRangeLabel();
+    renderCals();
+  });
+
+  calsEl.addEventListener("mouseover", (event) => {
+    const day = event.target.closest("[data-aud-date]");
+    if (phase !== 1 || !day || day.disabled) return;
+    const nextHoverDate = fromYMD(day.dataset.audDate);
+    if (!nextHoverDate || (hoverDate && sameDay(hoverDate, nextHoverDate))) return;
+    hoverDate = nextHoverDate;
+    renderCals();
+  });
+
+  calsEl.addEventListener("mouseleave", () => {
+    if (phase !== 1 || !hoverDate) return;
+    hoverDate = null;
+    renderCals();
+  });
+
+  applyBtn?.addEventListener("click", () => {
+    if (!pickerStart) return;
+    const e = pickerEnd || pickerStart;
+    startIn.value = toYMD(pickerStart);
+    endIn.value   = toYMD(e);
+    labelEl.textContent = formatTriggerLabel();
+    closePicker();
+    refreshAuditEvents();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!wrap?.contains(e.target)) closePicker();
+  });
+
+  // Init with last 30 days
+  applyPreset("30d");
+  const now = startOfToday();
+  const s30 = new Date(now); s30.setDate(s30.getDate() - 29);
+  if (startIn) startIn.value = toYMD(s30);
+  if (endIn)   endIn.value   = toYMD(now);
+  labelEl.textContent = "Últimos 30 dias";
+}
 
 saleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -5150,6 +6846,27 @@ saleForm.addEventListener("submit", async (event) => {
   }
 });
 
+function syncFinancialCreditTerms() {
+  if (!financialTransactionPaymentMethod || !financialTransactionCreditTerms) return;
+  const isCredit = financialTransactionPaymentMethod.value === "Credito";
+  const termsField = financialTransactionCreditTerms.closest(".fn-field");
+  termsField?.classList.toggle("is-visible", isCredit);
+  termsField?.setAttribute("aria-hidden", String(!isCredit));
+  financialTransactionCreditTerms.required = isCredit;
+  financialTransactionCreditTerms.disabled = !isCredit;
+  if (!isCredit) {
+    financialTransactionCreditTerms.value = "";
+    financialTransactionCreditTerms.setCustomValidity("");
+  }
+}
+
+function getFinancialPaymentMethodValue() {
+  const method = String(financialTransactionPaymentMethod?.value || "").trim();
+  if (method !== "Credito") return method || undefined;
+  const terms = String(financialTransactionCreditTerms?.value || "").trim();
+  return terms ? `Credito ${terms}` : undefined;
+}
+
 function showFinancialTransactionModal(transaction = null) {
   if (!financialTransactionModal) return;
   const isEditing = Boolean(transaction?.id);
@@ -5175,7 +6892,25 @@ function showFinancialTransactionModal(transaction = null) {
     financialTransactionDate.value = asDateInputValue(rawDate);
   }
   if (financialTransactionPaymentMethod) {
-    financialTransactionPaymentMethod.value = transaction?.paymentMethod || "";
+    const savedMethod = String(transaction?.paymentMethod || "").trim();
+    const previousCustom = financialTransactionPaymentMethod.querySelector("[data-custom-payment-method]");
+    if (previousCustom) previousCustom.remove();
+    const creditMatch = savedMethod.match(/^Credito(?:\s+(.+))?$/i);
+    const normalizedCreditTerm = creditMatch?.[1]?.trim() || "";
+    const methodValue = creditMatch ? "Credito" : savedMethod;
+    const hasSavedMethod = Array.from(financialTransactionPaymentMethod.options).some(
+      (option) => option.value === methodValue,
+    );
+    if (methodValue && !hasSavedMethod) {
+      const customOption = new Option(savedMethod, savedMethod);
+      customOption.dataset.customPaymentMethod = "true";
+      financialTransactionPaymentMethod.append(customOption);
+    }
+    financialTransactionPaymentMethod.value = methodValue;
+    if (financialTransactionCreditTerms) {
+      financialTransactionCreditTerms.value = normalizedCreditTerm;
+    }
+    syncFinancialCreditTerms();
   }
   if (financialTransactionProfessional) {
     financialTransactionProfessional.value = transaction?.professionalId || "";
@@ -5200,11 +6935,17 @@ financialAddTransactionBtn?.addEventListener("click", () => {
   showFinancialTransactionModal(null);
 });
 
+financialToolbarMount?.addEventListener("click", (event) => {
+  if (event.target.closest("#financialAddTransactionBtn")) {
+    showFinancialTransactionModal(null);
+  }
+});
+
 financialTransactionModalClose?.addEventListener("click", hideFinancialTransactionModal);
 financialTransactionModalCancel?.addEventListener("click", hideFinancialTransactionModal);
-
-clientsAddBtn?.addEventListener("click", () => {
-  showClientsModal();
+financialTransactionPaymentMethod?.addEventListener("change", syncFinancialCreditTerms);
+financialTransactionCreditTerms?.addEventListener("change", () => {
+  financialTransactionCreditTerms.setCustomValidity("");
 });
 
 clientsModalClose?.addEventListener("click", () => {
@@ -5215,12 +6956,23 @@ clientsModalCancel?.addEventListener("click", () => {
   hideClientsModal();
 });
 
+clientsPhone?.addEventListener("input", () => {
+  clientsPhone.value = formatClientPhoneInput(clientsPhone.value);
+});
+
 financialTransactionForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const amount = Number(financialTransactionAmount?.value || 0);
   if (!Number.isFinite(amount) || amount <= 0) {
     renderSaleFeedback("warning", "Informe um valor válido.", financialFeedback);
     financialTransactionAmount?.focus();
+    return;
+  }
+  if (financialTransactionPaymentMethod?.value === "Credito" && !financialTransactionCreditTerms?.value) {
+    financialTransactionCreditTerms.setCustomValidity("Selecione se o credito foi a vista ou em parcelas.");
+    financialTransactionCreditTerms.reportValidity();
+    renderSaleFeedback("warning", "Informe se o credito foi a vista ou parcelado.", financialFeedback);
+    financialTransactionCreditTerms?.focus();
     return;
   }
   const payload = {
@@ -5230,7 +6982,7 @@ financialTransactionForm?.addEventListener("submit", async (event) => {
     description: String(financialTransactionDescription.value || "").trim(),
     amount,
     date: new Date(`${financialTransactionDate.value}T12:00:00`).toISOString(),
-    paymentMethod: String(financialTransactionPaymentMethod.value || "").trim() || undefined,
+    paymentMethod: getFinancialPaymentMethodValue(),
     professionalId: String(financialTransactionProfessional.value || "").trim() || undefined,
     customerId: String(financialTransactionCustomer.value || "").trim() || undefined,
     notes: String(financialTransactionNotes.value || "").trim() || undefined,
@@ -5269,17 +7021,17 @@ clientsForm?.addEventListener("submit", async (event) => {
   const phone = normalizePhoneDigits(rawPhone);
 
   if (!name) {
-    renderSaleFeedback("warning", "Informe o nome do cliente.", clientsFeedback);
+    renderSaleFeedback("warning", "Informe o nome do cliente.", clientsFormFeedback);
     clientsName?.focus();
     return;
   }
   if (!phone) {
-    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFeedback);
+    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFormFeedback);
     clientsPhone?.focus();
     return;
   }
   if (!isValidClientPhone(phone)) {
-    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFeedback);
+    renderSaleFeedback("warning", "Informe um telefone valido com DDD.", clientsFormFeedback);
     clientsPhone?.focus();
     return;
   }
@@ -5323,7 +7075,7 @@ clientsForm?.addEventListener("submit", async (event) => {
       duplicate
         ? "Ja existe cliente com este telefone."
         : "Nao foi possivel salvar o cliente. Confira os dados e tente novamente.",
-      clientsFeedback,
+      clientsFormFeedback,
     );
   } finally {
     if (clientsSubmitBtn) {
@@ -5349,18 +7101,62 @@ inventoryEmptyState?.addEventListener("click", (event) => {
 
 inventoryProductModalClose?.addEventListener("click", () => {
   hideInventoryProductModal();
+  reopenLastDrawer();
 });
 
 inventoryProductModalCancel?.addEventListener("click", () => {
   hideInventoryProductModal();
+  reopenLastDrawer();
 });
 
 inventoryStockModalClose?.addEventListener("click", () => {
   hideInventoryStockModal();
+  reopenLastDrawer();
 });
 
 inventoryStockModalCancel?.addEventListener("click", () => {
   hideInventoryStockModal();
+  reopenLastDrawer();
+});
+
+document.addEventListener("click", (event) => {
+  const addBtn = event.target.closest("#professionalsAddBtn");
+  if (addBtn) showProfessionalsModal();
+});
+
+professionalsModalClose?.addEventListener("click", hideProfessionalsModal);
+professionalsModalCancel?.addEventListener("click", hideProfessionalsModal);
+
+professionalsModal?.addEventListener("click", (event) => {
+  if (event.target === professionalsModal) hideProfessionalsModal();
+});
+
+professionalsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = String(professionalsFormName?.value || "").trim();
+  if (!name) {
+    renderSaleFeedback("error", "Nome do profissional e obrigatorio.", professionalsFormFeedback);
+    return;
+  }
+  const editId = String(professionalsFormId?.value || "").trim();
+  const phone = String(professionalsFormPhone?.value || "").trim() || undefined;
+  const email = String(professionalsFormEmail?.value || "").trim() || undefined;
+  try {
+    if (editId) {
+      await callJson(`${API}/professionals/${editId}`, "PATCH", { unitId, name, phone, email });
+    } else {
+      await callJson(`${API}/professionals`, "POST", { unitId, name, phone, email });
+    }
+    hideProfessionalsModal();
+    await loadCatalog();
+    await loadAll();
+  } catch (error) {
+    renderSaleFeedback(
+      "error",
+      error.message || "Nao foi possivel salvar o profissional.",
+      professionalsFormFeedback,
+    );
+  }
 });
 
 servicesAddBtn?.addEventListener("click", () => {
@@ -5416,7 +7212,7 @@ inventoryProductForm?.addEventListener("submit", async (event) => {
         ? undefined
         : Number(inventoryProductMinimumStock.value),
     category: String(inventoryProductCategory.value || "").trim() || undefined,
-    notes: String(inventoryProductNotes.value || "").trim() || undefined,
+    notes: composeProductNotes(inventoryProductNotes.value, inventoryProductImageUrl?.value) || undefined,
   };
 
   try {
@@ -5424,11 +7220,13 @@ inventoryProductForm?.addEventListener("submit", async (event) => {
     if (editingId) {
       await callJson(`${API}/inventory/${editingId}`, "PATCH", payload);
       hideInventoryProductModal();
+      lastDrawerProductId = null;
       await refreshInventoryAndCatalog("Produto atualizado com sucesso.");
       return;
     }
     await callJson(`${API}/inventory`, "POST", payload);
     hideInventoryProductModal();
+    lastDrawerProductId = null;
     await refreshInventoryAndCatalog("Produto cadastrado com sucesso.");
   } catch (error) {
     renderSaleFeedback(
@@ -5456,6 +7254,7 @@ inventoryStockForm?.addEventListener("submit", async (event) => {
       reason: String(inventoryStockReason.value || "").trim() || undefined,
     });
     hideInventoryStockModal();
+    lastDrawerProductId = null;
     await refreshInventoryAndCatalog("Estoque ajustado com sucesso.");
   } catch (error) {
     renderSaleFeedback(
@@ -5490,6 +7289,21 @@ servicesForm?.addEventListener("submit", async (event) => {
   }
 });
 
+let lastDrawerProductId = null;
+
+function closeInventoryDrawer(productId = null) {
+  const drawer = document.getElementById("inventoryProductDrawer");
+  if (!drawer) return;
+  drawer.classList.remove("is-open");
+  drawer.setAttribute("aria-hidden", "true");
+  if (productId) lastDrawerProductId = productId;
+}
+
+function reopenLastDrawer() {
+  if (!lastDrawerProductId) return;
+  renderStockProductDrawer(stockElements, currentStockPayload || {}, lastDrawerProductId);
+}
+
 function bindInventoryActionHandlers(container) {
   if (!container) return;
   container.addEventListener("click", async (event) => {
@@ -5511,21 +7325,25 @@ function bindInventoryActionHandlers(container) {
         renderSaleFeedback("warning", "Produto nao encontrado para edicao.", inventoryFeedback);
         return;
       }
+      closeInventoryDrawer(productId);
       showInventoryProductModal(product);
       return;
     }
 
     if (action === "add") {
+      closeInventoryDrawer(productId);
       showInventoryStockModal({ productId, productName, type: "IN" });
       return;
     }
 
     if (action === "remove") {
+      closeInventoryDrawer(productId);
       showInventoryStockModal({ productId, productName, type: "OUT" });
       return;
     }
 
     if (action === "delete") {
+      closeInventoryDrawer(productId);
       const confirmed = window.confirm(
         `Deseja excluir o produto ${productName || "selecionado"} do estoque?`,
       );
@@ -5854,6 +7672,10 @@ const debouncedLoadAll = debounce(() => {
   loadAll();
 }, 260);
 
+const debouncedRefreshAuditEvents = debounce(() => {
+  refreshAuditEvents();
+}, 180);
+
 filterProfessional.addEventListener("change", renderAgendaView);
 filterStatus.addEventListener("change", renderAgendaView);
 filterService.addEventListener("change", renderAgendaView);
@@ -5866,6 +7688,9 @@ if (appointmentsFilterProfessional) appointmentsFilterProfessional.addEventListe
 if (appointmentsFilterService) appointmentsFilterService.addEventListener("change", loadAll);
 if (appointmentsFilterClient) appointmentsFilterClient.addEventListener("change", loadAll);
 if (appointmentsFilterSearch) appointmentsFilterSearch.addEventListener("input", debouncedLoadAll);
+if (alFilterStatus) alFilterStatus.addEventListener("change", renderAgendaListMode);
+if (alFilterProfessional) alFilterProfessional.addEventListener("change", renderAgendaListMode);
+if (alFilterSearch) alFilterSearch.addEventListener("input", renderAgendaListMode);
 if (financialPeriod) financialPeriod.addEventListener("change", loadAll);
 if (financialSearch) financialSearch.addEventListener("input", debouncedLoadAll);
 if (financialTypeFilter) financialTypeFilter.addEventListener("change", loadAll);
@@ -5973,7 +7798,7 @@ if (clientsTable) {
       return;
     }
 
-    const trigger = event.target.closest('[data-clients-action="add-first"]');
+    const trigger = event.target.closest('[data-clients-action="add-first"], [data-clients-action="add-new"]');
     if (trigger) {
       showClientsModal();
       return;
@@ -5990,6 +7815,10 @@ if (clientsTable) {
     );
   });
 }
+clientsToolbarMount?.addEventListener("click", (event) => {
+  const trigger = event.target.closest('[data-clients-action="add-new"]');
+  if (trigger) showClientsModal();
+});
 if (clientsDrawerHost) {
   clientsDrawerHost.addEventListener("click", (event) => {
     const scheduleTarget = event.target.closest('[data-clients-action="schedule"]');
@@ -6030,6 +7859,7 @@ clientsSearch.addEventListener("input", debouncedLoadAll);
 clientsStatusFilter.addEventListener("change", loadAll);
 clientsSegmentFilter.addEventListener("change", loadAll);
 clientsPeriod.addEventListener("change", loadAll);
+clientsLimit?.addEventListener("change", loadAll);
 professionalsFilter.addEventListener("change", loadAll);
 professionalsPeriod.addEventListener("change", loadAll);
 commissionsProfessionalFilter.addEventListener("change", loadAll);
@@ -6045,17 +7875,17 @@ automacoesProviderFilter.addEventListener("change", loadAll);
 if (automacoesRulesFilter) {
   automacoesRulesFilter.addEventListener("change", loadAll);
 }
-if (auditEntityFilter) auditEntityFilter.addEventListener("input", debouncedLoadAll);
-if (auditActionFilter) auditActionFilter.addEventListener("input", debouncedLoadAll);
-if (auditActorFilter) auditActorFilter.addEventListener("input", debouncedLoadAll);
-if (auditStartFilter) auditStartFilter.addEventListener("change", loadAll);
-if (auditEndFilter) auditEndFilter.addEventListener("change", loadAll);
-if (auditLimitFilter) auditLimitFilter.addEventListener("change", loadAll);
-if (auditRequestIdFilter) auditRequestIdFilter.addEventListener("input", debouncedLoadAll);
-if (auditIdempotencyFilter) auditIdempotencyFilter.addEventListener("input", debouncedLoadAll);
-if (auditEntityIdFilter) auditEntityIdFilter.addEventListener("input", debouncedLoadAll);
-if (auditRouteFilter) auditRouteFilter.addEventListener("input", debouncedLoadAll);
-if (auditMethodFilter) auditMethodFilter.addEventListener("change", loadAll);
+if (auditEntityFilter) auditEntityFilter.addEventListener("change", refreshAuditEvents);
+if (auditActionFilter) auditActionFilter.addEventListener("input", debouncedRefreshAuditEvents);
+if (auditActorFilter) auditActorFilter.addEventListener("change", refreshAuditEvents);
+if (auditStartFilter) auditStartFilter.addEventListener("change", refreshAuditEvents);
+if (auditEndFilter) auditEndFilter.addEventListener("change", refreshAuditEvents);
+if (auditLimitFilter) auditLimitFilter.addEventListener("change", refreshAuditEvents);
+if (auditRequestIdFilter) auditRequestIdFilter.addEventListener("input", debouncedRefreshAuditEvents);
+if (auditIdempotencyFilter) auditIdempotencyFilter.addEventListener("input", debouncedRefreshAuditEvents);
+if (auditEntityIdFilter) auditEntityIdFilter.addEventListener("input", debouncedRefreshAuditEvents);
+if (auditRouteFilter) auditRouteFilter.addEventListener("input", debouncedRefreshAuditEvents);
+if (auditMethodFilter) auditMethodFilter.addEventListener("change", refreshAuditEvents);
 if (auditEventsList) {
   auditEventsList.addEventListener("click", (event) => {
     const actionTarget = event.target.closest("[data-audit-action]");
@@ -6217,6 +8047,13 @@ function handleProfessionalAction(professionalIdValue, action) {
     });
     return;
   }
+  if (action === "edit") {
+    const professional = findCurrentProfessional(professionalIdValue);
+    if (!professional) return;
+    professionalsElements.drawerHost?.classList.add("hidden");
+    showProfessionalsModal(professional);
+    return;
+  }
   if (action === "open-agenda") {
     navigate("agenda");
     if (professionalId) professionalId.value = professionalIdValue;
@@ -6252,7 +8089,7 @@ function openClientScheduling(clientIdValue) {
     clientId.value = clientIdValue;
     refreshScheduleAssist();
   }
-  agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  openScheduleDrawer();
   startsAt?.focus();
 }
 
@@ -6373,8 +8210,8 @@ if (appointmentsDetailClose) {
 if (appointmentsEmptyNew) {
   appointmentsEmptyNew.addEventListener("click", () => {
     navigate("agenda");
-    agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
-    clientId?.focus();
+    openScheduleDrawer();
+    clientSearch?.focus();
   });
 }
 
@@ -6403,8 +8240,8 @@ if (appointmentsEmptyState) {
     if (!target) return;
     if (target.id === "appointmentsEmptyNew") {
       navigate("agenda");
-      agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
-      clientId?.focus();
+      openScheduleDrawer();
+      clientSearch?.focus();
       return;
     }
     if (target.id === "appointmentsEmptyToday") {
@@ -6426,15 +8263,15 @@ if (appointmentsEmptyState) {
 
 viewListBtn.addEventListener("click", () => {
   currentView = "list";
-  viewListBtn.className = "px-3 py-2 text-sm bg-gray-900 text-white";
-  viewGridBtn.className = "px-3 py-2 text-sm bg-white text-gray-700";
+  viewListBtn.classList.add("is-active");
+  viewGridBtn.classList.remove("is-active");
   renderAgendaView();
 });
 
 viewGridBtn.addEventListener("click", () => {
   currentView = "cards";
-  viewGridBtn.className = "px-3 py-2 text-sm bg-gray-900 text-white";
-  viewListBtn.className = "px-3 py-2 text-sm bg-white text-gray-700";
+  viewGridBtn.classList.add("is-active");
+  viewListBtn.classList.remove("is-active");
   renderAgendaView();
 });
 
@@ -6447,8 +8284,8 @@ if (mobileFocusSaleBtn) {
 
 if (agendaNewAppointmentBtn) {
   agendaNewAppointmentBtn.addEventListener("click", () => {
-    agendaSchedulePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
-    clientId?.focus();
+    openScheduleDrawer();
+    clientSearch?.focus();
   });
 }
 
@@ -6513,5 +8350,325 @@ async function init() {
   }
 }
 
-init();
+document.addEventListener("click", (event) => {
+  const pdvTab = event.target.closest("[data-pdv-target]");
+  if (!pdvTab) return;
+  navigate(pdvTab.getAttribute("data-pdv-target"));
+});
 
+// ============================================================
+// SCHEDULE DRAWER
+// ============================================================
+function openScheduleDrawer() {
+  const drawer = document.getElementById("scheduleDrawer");
+  if (!drawer) return;
+  drawer.classList.add("is-open");
+  drawer.setAttribute("aria-hidden", "false");
+}
+
+function closeScheduleDrawer() {
+  const drawer = document.getElementById("scheduleDrawer");
+  if (!drawer) return;
+  drawer.classList.remove("is-open");
+  drawer.setAttribute("aria-hidden", "true");
+}
+
+document.getElementById("scheduleDrawerClose")?.addEventListener("click", closeScheduleDrawer);
+document.getElementById("scheduleDrawerScrim")?.addEventListener("click", closeScheduleDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeScheduleDrawer(); });
+
+// ============================================================
+// WEEK CALENDAR
+// ============================================================
+function getWeekMonday(baseDate) {
+  const d = new Date(baseDate || Date.now());
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function updateWcWeekLabel() {
+  const el = document.getElementById("wcWeekLabel");
+  if (!el || !wcWeekStart) return;
+  const end = new Date(wcWeekStart);
+  end.setDate(end.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" });
+  el.textContent = `${fmt(wcWeekStart)} – ${fmt(end)}`;
+}
+
+function animateWeekCalendarTransition(container, direction = 0) {
+  if (!container || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+  const targets = [
+    container.querySelector(".wc-header-row"),
+    container.querySelector(".wc-body-scroll"),
+  ].filter(Boolean);
+  const offset = direction === 0 ? 0 : direction * 18;
+  targets.forEach((target, index) => {
+    target.animate(
+      [
+        { opacity: 0, transform: `translateX(${offset}px) scale(0.995)` },
+        { opacity: 1, transform: "translateX(0) scale(1)" },
+      ],
+      {
+        duration: 360 + index * 45,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+        fill: "both",
+      },
+    );
+  });
+}
+
+async function loadWeekCalendar(options = {}) {
+  const container = document.getElementById("weekCalContainer");
+  if (!container) return;
+  const direction = Number(options.direction || 0);
+  const hasRenderedCalendar = Boolean(container.querySelector(".wc-header-row"));
+  if (hasRenderedCalendar) {
+    container.classList.add("wc-is-loading");
+  } else {
+    container.innerHTML = `<div class="wc-loading">
+      <div class="wc-loading-bar" style="width:80%"></div>
+      <div class="wc-loading-bar" style="width:60%;margin-top:8px"></div>
+      <div class="wc-loading-bar" style="width:72%;margin-top:8px"></div>
+    </div>`;
+  }
+  updateWcWeekLabel();
+  try {
+    const end = new Date(wcWeekStart);
+    end.setDate(end.getDate() + 7);
+    const response = await apiFetch(
+      `${API}/agenda/range?unitId=${unitId}&start=${encodeURIComponent(wcWeekStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+    );
+    const data = await readResponsePayload(response);
+    if (!response.ok) throw new Error("Erro ao carregar agenda semanal");
+    updateWorkingHoursFromPayload(data?.workingHours || data);
+    wcItems = normalizeAgendaItems(data);
+  } catch {
+    wcItems = [];
+  }
+  wcLoaded = true;
+  container.classList.remove("wc-is-loading");
+  renderWeekCalendar({ direction });
+}
+
+function assignWcColumns(items) {
+  const sorted = [...items].sort((a, b) => a.startsAt - b.startsAt);
+  sorted.forEach((item) => { item._col = 0; });
+  for (let i = 0; i < sorted.length; i++) {
+    const item = sorted[i];
+    const usedCols = new Set(
+      sorted.slice(0, i)
+        .filter((o) => o.startsAt < item.endsAt && o.endsAt > item.startsAt)
+        .map((o) => o._col)
+    );
+    let col = 0;
+    while (usedCols.has(col)) col++;
+    item._col = col;
+  }
+  for (const item of sorted) {
+    const overlapping = sorted.filter(
+      (o) => o !== item && o.startsAt < item.endsAt && o.endsAt > item.startsAt
+    );
+    item._totalCols = overlapping.length > 0
+      ? Math.max(item._col, ...overlapping.map((o) => o._col)) + 1
+      : 1;
+  }
+  return sorted;
+}
+
+function renderWeekCalendar(options = {}) {
+  const container = document.getElementById("weekCalContainer");
+  if (!container || !wcWeekStart) return;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const { startHour: HOUR_START, endHour: HOUR_END } = getWeekCalendarBounds();
+  const HOUR_H = 36;
+  const HOURS = HOUR_END - HOUR_START;
+  const TOTAL_H = HOURS * HOUR_H;
+  const DAY_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(wcWeekStart); d.setDate(d.getDate() + i); return d;
+  });
+
+  const headerHtml = days.map((d, i) => {
+    const isToday = d.toDateString() === today.toDateString();
+    return `<div class="wc-hdr-cell${isToday ? " is-today" : ""}">
+      <span class="wc-hdr-dow">${DAY_SHORT[i]}</span>
+      <span class="wc-hdr-num${isToday ? " is-today" : ""}">${d.getDate()}</span>
+    </div>`;
+  }).join("");
+
+  const timeLabels = Array.from({ length: HOURS }, (_, i) =>
+    `<div class="wc-time-slot" style="height:${HOUR_H}px">${String(HOUR_START + i).padStart(2, "0")}h</div>`
+  ).join("");
+
+  const _isDark = !document.body.classList.contains("theme-light");
+  const COLORS = _isDark ? {
+    SCHEDULED:  { b: "rgba(230,229,224,0.35)", bg: "rgba(230,229,224,0.08)" },
+    CONFIRMED:  { b: "rgba(230,229,224,0.45)", bg: "rgba(230,229,224,0.11)" },
+    IN_SERVICE: { b: "#c08532",                bg: "rgba(192,133,50,0.20)"  },
+    COMPLETED:  { b: "#1f8a65",                bg: "rgba(31,138,101,0.18)" },
+    CANCELLED:  { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
+    NO_SHOW:    { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
+  } : {
+    SCHEDULED:  { b: "#26251e", bg: "#e6e5e0" },
+    CONFIRMED:  { b: "#26251e", bg: "#e1e0db" },
+    IN_SERVICE: { b: "#c08532", bg: "#eadfcd" },
+    COMPLETED:  { b: "#1f8a65", bg: "#dce8df" },
+    CANCELLED:  { b: "#cf2d56", bg: "#eadbe0" },
+    NO_SHOW:    { b: "#cf2d56", bg: "#eadbe0" },
+  };
+
+  const dayCols = days.map((d) => {
+    const isToday = d.toDateString() === today.toDateString();
+    const dayItems = wcItems.filter((item) => {
+      const id = new Date(item.startsAt); id.setHours(0, 0, 0, 0);
+      return id.toDateString() === d.toDateString() && isSlotBlockingStatus(item.status);
+    });
+    const dayHours = getWorkingHoursForDay(d.getDay());
+    const dayStartMins = parseTimeToMinutes(dayHours?.start);
+    const dayEndMins = parseTimeToMinutes(dayHours?.end);
+    // Only mark as closed when we have loaded working hours AND the day is explicitly closed.
+    // If currentWorkingHours is null (not yet loaded), treat as open to avoid false "Fechado" masks.
+    const dayClosed = currentWorkingHours !== null && Boolean(
+      !dayHours
+      || dayHours.isClosed
+      || dayStartMins == null
+      || dayEndMins == null
+      || dayEndMins <= dayStartMins,
+    );
+    const laid = assignWcColumns(dayItems);
+
+    const gridLines = Array.from({ length: HOURS }, (_, i) => `
+      <div class="wc-hline" style="top:${i * HOUR_H}px"></div>
+      <div class="wc-hline wc-hline-half" style="top:${i * HOUR_H + HOUR_H / 2}px"></div>
+    `).join("");
+
+    let nowLine = "";
+    if (isToday) {
+      const now = new Date();
+      const mins = (now.getHours() - HOUR_START) * 60 + now.getMinutes();
+      if (mins >= 0 && mins <= HOURS * 60) {
+        nowLine = `<div class="wc-now-line" style="top:${(mins / 60) * HOUR_H}px"></div>`;
+      }
+    }
+
+    let openWindow = "";
+    let dayClosedMask = "";
+    if (dayClosed) {
+      dayClosedMask = `<div class="wc-day-closed-mask"><span>Fechado</span></div>`;
+    } else {
+      const topMins = dayStartMins - HOUR_START * 60;
+      const heightMins = dayEndMins - dayStartMins;
+      const top = Math.max(0, (topMins / 60) * HOUR_H);
+      const height = Math.max(0, Math.min((heightMins / 60) * HOUR_H, TOTAL_H - top));
+      if (height > 0) {
+        openWindow = `<div class="wc-open-window" style="top:${top}px;height:${height}px"></div>`;
+      }
+    }
+
+    const appts = laid.map((item) => {
+      const startMins = (item.startsAt.getHours() - HOUR_START) * 60 + item.startsAt.getMinutes();
+      if (startMins < 0 || startMins > HOURS * 60) return "";
+      const dur = item.serviceDurationMin || Math.round((item.endsAt - item.startsAt) / 60000) || 30;
+      const top = (startMins / 60) * HOUR_H;
+      const ht = Math.max((dur / 60) * HOUR_H, 44);
+      const col = item._col || 0;
+      const total = item._totalCols || 1;
+      const lp = (col / total) * 100;
+      const wp = (1 / total) * 100;
+      const horizontalInset = total > 1 ? 3 : 6;
+      const c = COLORS[item.status] || COLORS.SCHEDULED;
+      const timeStr = item.startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const firstName = String(item.client || "Cliente").split(" ")[0];
+      const priceLabel = Number(item.servicePrice || 0) > 0
+        ? Number(item.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+        : "";
+      return `<div class="wc-appt" data-wc-appt-id="${item.id}"
+        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
+        title="${timeStr} — ${item.client} — ${item.service}${priceLabel ? ` — ${priceLabel}` : ""}">
+        <span class="wc-appt-name">${timeStr} · ${firstName}</span>
+        <span class="wc-appt-svc">${item.service}</span>
+        ${priceLabel ? `<span class="wc-appt-time">${priceLabel}</span>` : ""}
+      </div>`;
+    }).join("");
+
+    return `<div class="wc-day-col${isToday ? " is-today" : ""}" style="height:${TOTAL_H}px">
+      ${gridLines}${openWindow}${dayClosedMask}${nowLine}${appts}
+    </div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="wc-header-row">
+      <div class="wc-hdr-cell wc-hdr-time"></div>
+      ${headerHtml}
+    </div>
+    <div class="wc-body-scroll">
+      <div class="wc-body-inner">
+        <div class="wc-times-col">${timeLabels}</div>
+        ${dayCols}
+      </div>
+    </div>`;
+
+  animateWeekCalendarTransition(container, Number(options.direction || 0));
+
+  container.querySelectorAll("[data-wc-appt-id]").forEach((el) => {
+    el.addEventListener("click", async () => {
+      const appointmentId = el.getAttribute("data-wc-appt-id") || "";
+      if (!appointmentId) return;
+      alFocusedAppointmentId = appointmentId;
+      currentView = "list";
+      viewGridBtn.classList.remove("is-active");
+      viewListBtn.classList.add("is-active");
+      renderAgendaView();
+      await openAgendaAppointmentDetail(appointmentId);
+    });
+  });
+}
+
+function changeWeekCalendar(delta) {
+  if (!wcWeekStart) wcWeekStart = getWeekMonday();
+  const d = new Date(wcWeekStart); d.setDate(d.getDate() + delta * 7);
+  wcWeekStart = d; wcLoaded = false;
+  loadWeekCalendar({ direction: delta > 0 ? 1 : -1 });
+}
+
+document.getElementById("wcPrevWeekBtn")?.addEventListener("click", () => {
+  changeWeekCalendar(-1);
+});
+document.getElementById("wcNextWeekBtn")?.addEventListener("click", () => {
+  changeWeekCalendar(1);
+});
+
+let whatsappMounted = false;
+function initWhatsAppSection() {
+  if (whatsappMounted) return;
+  whatsappMounted = true;
+  const mount = document.getElementById("whatsappMount");
+  if (mount) renderWhatsAppSection(mount, { getToken: () => localStorage.getItem("authToken") });
+}
+
+function initBookingLinkSection() {
+  const base = window.location.origin;
+  const link = `${base}/agendamento`;
+  const linkText = document.getElementById("bookingLinkText");
+  const copyBtn = document.getElementById("copyBookingLink");
+  const openLink = document.getElementById("bookingLinkOpen");
+  if (linkText) linkText.textContent = link;
+  if (openLink) openLink.href = link;
+  if (copyBtn && !copyBtn.dataset.wired) {
+    copyBtn.dataset.wired = "1";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(link).then(() => {
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = "Copiado!";
+        setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+      });
+    });
+  }
+}
+
+init();

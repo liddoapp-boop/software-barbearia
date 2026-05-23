@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Entrar — Liddo Barber</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --color-bg:           #f2f1ed;
+        --color-surface:      #ffffff;
+        --color-bg-elevated:  #ebeae5;
+        --color-border:       rgba(38, 37, 30, 0.12);
+        --color-text-primary: #26251e;
+        --color-text-secondary: #4a4840;
+        --color-text-muted:   #6e6b63;
+        --color-accent:       #26251e;
+        --color-accent-hover: #141410;
+        --color-danger:       #cf2d56;
+        --color-danger-soft:  rgba(207, 45, 86, 0.08);
+        --color-danger-border: rgba(207, 45, 86, 0.20);
+        --radius-lg: 14px;
+        --radius-md: 10px;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: 'Manrope', sans-serif;
+        background: var(--color-bg);
+        color: var(--color-text-primary);
+        min-height: 100svh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .card {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        width: 100%;
+        max-width: 400px;
+        padding: 40px 36px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 10px 20px -3px rgba(38,37,30,0.06), 0 20px 40px -5px rgba(38,37,30,0.08);
+      }
+
+      .logo {
+        font-family: 'Bebas Neue', sans-serif;
+        font-size: 32px;
+        letter-spacing: 3px;
+        color: var(--color-text-primary);
+        text-align: center;
+        margin-bottom: 4px;
+      }
+
+      .subtitle {
+        text-align: center;
+        color: var(--color-text-muted);
+        font-size: 13px;
+        margin-bottom: 36px;
+      }
+
+      label {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--color-text-secondary);
+        margin-bottom: 6px;
+        margin-top: 20px;
+      }
+
+      input {
+        width: 100%;
+        background: var(--color-bg);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        font-family: 'Manrope', sans-serif;
+        font-size: 15px;
+        padding: 12px 14px;
+        outline: none;
+        transition: border-color .15s, box-shadow .15s;
+      }
+      input::placeholder { color: var(--color-text-muted); }
+      input:focus {
+        border-color: var(--color-accent);
+        box-shadow: 0 0 0 3px rgba(38, 37, 30, 0.08);
+      }
+
+      .btn {
+        display: block;
+        width: 100%;
+        margin-top: 28px;
+        padding: 14px;
+        background: #26251e;
+        color: #ffffff;
+        border: none;
+        border-radius: var(--radius-md);
+        font-family: 'Manrope', sans-serif;
+        font-size: 15px;
+        font-weight: 800;
+        cursor: pointer;
+        letter-spacing: .3px;
+        transition: background .15s, opacity .15s;
+      }
+      .btn:hover:not(:disabled) { background: #141410; }
+      .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+      .error {
+        margin-top: 16px;
+        background: var(--color-danger-soft);
+        border: 1px solid var(--color-danger-border);
+        border-radius: var(--radius-md);
+        color: var(--color-danger);
+        font-size: 13px;
+        padding: 10px 14px;
+        display: none;
+      }
+      .error.show { display: block; }
+
+      .spinner {
+        display: inline-block;
+        width: 16px; height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: spin .6s linear infinite;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">✂ LIDDO BARBER</div>
+      <p class="subtitle">Painel de gestão — acesso restrito</p>
+
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="seu@email.com" required autocomplete="email" />
+
+        <label for="password">Senha</label>
+        <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password" />
+
+        <button type="submit" class="btn" id="submitBtn">Entrar</button>
+      </form>
+
+      <div class="error" id="errorMsg"></div>
+    </div>
+
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+      import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyCXtxVz8lYUGdiTNBCkXX7ynOUSBJRUouw",
+        authDomain: "liddo-barber.firebaseapp.com",
+        projectId: "liddo-barber",
+        storageBucket: "liddo-barber.firebasestorage.app",
+        messagingSenderId: "924661107864",
+        appId: "1:924661107864:web:f0f3014844e0e2555814ed",
+      };
+
+      const fbApp = initializeApp(firebaseConfig);
+      const auth = getAuth(fbApp);
+
+      const form = document.getElementById("loginForm");
+      const submitBtn = document.getElementById("submitBtn");
+      const errorMsg = document.getElementById("errorMsg");
+
+      function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.classList.add("show");
+      }
+
+      function hideError() {
+        errorMsg.classList.remove("show");
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        hideError();
+
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner"></span>Entrando...';
+
+        try {
+          const credential = await signInWithEmailAndPassword(auth, email, password);
+          const idToken = await credential.user.getIdToken();
+
+          const res = await fetch("/auth/firebase", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error ?? "Erro ao autenticar");
+          }
+
+          const data = await res.json();
+          localStorage.setItem("sb.authSession", JSON.stringify({
+            accessToken: data.accessToken,
+            expiresAt: data.expiresAt,
+            user: data.user,
+          }));
+          localStorage.setItem("authToken", data.accessToken);
+
+          window.location.href = "/";
+        } catch (err) {
+          const msg = err?.code === "auth/invalid-credential" || err?.code === "auth/wrong-password" || err?.code === "auth/user-not-found"
+            ? "Email ou senha incorretos."
+            : err?.code === "auth/too-many-requests"
+            ? "Muitas tentativas. Aguarde alguns minutos."
+            : err?.message ?? "Erro ao entrar. Tente novamente.";
+          showError(msg);
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Entrar";
+        }
+      });
+    </script>
+  </body>
+</html>

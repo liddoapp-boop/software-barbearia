@@ -157,7 +157,7 @@ function renderClientInsights(state, elements) {
     : "Sem atendimento concluido no periodo carregado";
 
   elements.clientInsights.innerHTML = `
-    <strong class="text-gray-800">${safeText(client.fullName, "Cliente")}</strong><br/>
+    <strong class="ds-cell-primary">${safeText(client.fullName, "Cliente")}</strong><br/>
     Perfil: ${tags.join(", ") || "Sem classificacao"}<br/>
     Profissional preferido: ${preferred}<br/>
     Historico (periodo atual): ${clientSummary?.completed ?? 0} concluidos, ${clientSummary?.noShow ?? 0} faltas, ${clientSummary?.cancelled ?? 0} cancelados<br/>
@@ -176,52 +176,42 @@ function renderServiceSuggestions(state, elements) {
     .map((item) => `${safeText(item.name, "Servico")} (R$ ${asNumber(item.price).toFixed(2)})`)
     .join(" | ");
   elements.serviceSuggestions.innerHTML = `
-    <strong class="text-gray-800">Relacionados a ${safeText(selectedService.name, "servico")}:</strong><br/>
+    <strong class="ds-cell-primary">Relacionados a ${safeText(selectedService.name, "servico")}:</strong><br/>
     ${lines || "Sem sugestoes no momento"}
   `;
 }
 
 function renderFeedback(state, elements) {
   const feedback = state.feedback || { type: "neutral", message: "" };
+  const base = "sched-info-block";
   if (!feedback.message) {
-    elements.appointmentFeedback.className =
-      "md:col-span-2 rounded-lg border px-3 py-2 text-sm bg-gray-50 border-gray-200 text-gray-600";
+    elements.appointmentFeedback.className = base;
     elements.appointmentFeedback.textContent =
       "Selecione cliente, profissional, servico e horario para validar disponibilidade.";
     return;
   }
-
-  if (feedback.type === "error") {
-    elements.appointmentFeedback.className =
-      "md:col-span-2 rounded-lg border px-3 py-2 text-sm bg-red-50 border-red-200 text-red-700";
-  } else if (feedback.type === "success") {
-    elements.appointmentFeedback.className =
-      "md:col-span-2 rounded-lg border px-3 py-2 text-sm bg-emerald-50 border-emerald-200 text-emerald-700";
-  } else {
-    elements.appointmentFeedback.className =
-      "md:col-span-2 rounded-lg border px-3 py-2 text-sm bg-amber-50 border-amber-200 text-amber-700";
-  }
+  const modifier =
+    feedback.type === "error" ? "sched-info-block-error"
+    : feedback.type === "success" ? "sched-info-block-success"
+    : "sched-info-block-warning";
+  elements.appointmentFeedback.className = `${base} ${modifier}`;
   elements.appointmentFeedback.textContent = feedback.message;
 }
 
 export function renderAlternativeSlots(slots, onSelect, container) {
   const list = Array.isArray(slots) ? slots : [];
   if (!list.length) {
-    container.innerHTML = `
-      <div class="text-sm text-gray-500">
-        Sem horarios alternativos no recorte atual. Tente outro profissional ou periodo.
-      </div>
-    `;
+    container.innerHTML = `<p class="ds-text-muted">Sem horarios alternativos no recorte atual. Tente outro profissional ou periodo.</p>`;
     return;
   }
 
   container.innerHTML = `
-    <div class="flex flex-wrap gap-2">
+    <div class="al-slot-list">
       ${list
         .map((slot) => {
           const startsAt = asDate(slot.startsAt);
           if (!startsAt) return "";
-          return `<button type="button" data-slot="${startsAt.toISOString()}" class="min-h-[44px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">${formatDateTime(startsAt)}</button>`;
+          return `<button type="button" data-slot="${startsAt.toISOString()}" class="ux-btn ux-btn-muted al-slot-btn">${formatDateTime(startsAt)}</button>`;
         })
         .join("")}
     </div>

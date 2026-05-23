@@ -26,6 +26,16 @@ import {
   verifyBillingWebhookSignature,
   verifyAccessToken,
 } from "./security";
+import { verifyFirebaseIdToken, isFirebaseToken } from "./firebase-auth";
+import {
+  sendWhatsAppMessage,
+  sendEmail,
+  getWhatsAppConnectionState,
+  connectWhatsApp,
+  disconnectWhatsApp,
+  buildBookingWhatsApp,
+  buildBookingEmailHtml,
+} from "../notifications";
 
 type RequestWithAuth = FastifyRequest & {
   auth?: AuthSession;
@@ -77,12 +87,131 @@ function getAllowedCorsOrigins() {
   return values.length > 0 ? values : true;
 }
 
+const DEFAULT_WORKING_HOURS = {
+  timezone: "America/Sao_Paulo",
+  weekly: [
+    { day: 1, label: "Segunda", start: "14:00", end: "20:00" },
+    { day: 2, label: "Terca", start: "14:00", end: "18:00" },
+    { day: 3, label: "Quarta", start: "11:30", end: "20:00" },
+    { day: 4, label: "Quinta", start: "11:30", end: "19:30" },
+    { day: 5, label: "Sexta", start: "13:30", end: "21:00" },
+    { day: 6, label: "Sabado", start: "07:00", end: "20:00" },
+    { day: 0, label: "Domingo", start: "09:00", end: "12:00" },
+  ],
+} as const;
+
+function parseHmToMinutes(value: string) {
+  const [h, m] = value.split(":").map((part) => Number(part));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function getWeekdayAndMinutes(date: Date, timezone: string) {
+  const dayText = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    timeZone: timezone,
+  }).format(date);
+  const timeText = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: timezone,
+  }).format(date);
+  const dayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  const day = dayMap[dayText] ?? 0;
+  const timeMins = parseHmToMinutes(timeText);
+  return { day, minutes: timeMins ?? 0 };
+}
+
+function normalizeWorkingHoursRows(
+  rows: Array<{ dayOfWeek: number; opensAt?: string | null; closesAt?: string | null; isClosed?: boolean }>,
+  timezone = DEFAULT_WORKING_HOURS.timezone,
+) {
+  const labels = ["Domingo", "Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado"];
+  const map = new Map(rows.map((item) => [item.dayOfWeek, item]));
+  return {
+    timezone,
+    weekly: Array.from({ length: 7 }, (_, day) => {
+      const row = map.get(day);
+      if (!row || row.isClosed || !row.opensAt || !row.closesAt) {
+        return { day, label: labels[day], start: "", end: "", isClosed: true };
+      }
+      return {
+        day,
+        label: labels[day],
+        start: row.opensAt,
+        end: row.closesAt,
+        isClosed: false,
+      };
+    }),
+  };
+}
+
+async function resolveWorkingHoursForUnit(unitId: string, operations: any) {
+  if (
+    operations &&
+    "getBusinessHours" in operations &&
+    typeof operations.getBusinessHours === "function"
+  ) {
+    try {
+      const result = await operations.getBusinessHours({ unitId });
+      const rows = Array.isArray(result?.businessHours) ? result.businessHours : [];
+      if (rows.length) return normalizeWorkingHoursRows(rows);
+    } catch {
+      // fallback below
+    }
+  }
+  return {
+    timezone: DEFAULT_WORKING_HOURS.timezone,
+    weekly: DEFAULT_WORKING_HOURS.weekly.map((item) => ({ ...item, isClosed: false })),
+  };
+}
+
+function isWithinWorkingHours(
+  startsAt: Date,
+  endsAt: Date,
+  workingHours: { timezone?: string; weekly?: Array<{ day: number; start: string; end: string; isClosed?: boolean }> },
+) {
+  const timezone = workingHours?.timezone || DEFAULT_WORKING_HOURS.timezone;
+  const weekly = Array.isArray(workingHours?.weekly) ? workingHours.weekly : [];
+  const startRef = getWeekdayAndMinutes(startsAt, timezone);
+  const endRef = getWeekdayAndMinutes(endsAt, timezone);
+  if (startRef.day !== endRef.day) return false;
+  const slot = weekly.find((item) => item.day === startRef.day);
+  if (!slot || slot.isClosed || !slot.start || !slot.end) return false;
+  const from = parseHmToMinutes(slot.start);
+  const to = parseHmToMinutes(slot.end);
+  if (from == null || to == null) return false;
+  return startRef.minutes >= from && endRef.minutes <= to;
+}
+
 function getPolicyForRoute(method: string, route: string): AccessPolicy {
-  if (route === "/health" || route === "/" || route === "/catalog" || route === "/*") {
+  if (
+    route === "/health" ||
+    route === "/" ||
+    route === "/login" ||
+    route === "/agendamento" ||
+    route === "/login.html" ||
+    route === "/booking.html" ||
+    route === "/catalog" ||
+    route === "/*"
+  ) {
     return { isPublic: true };
   }
-  if (route === "/auth/login") return { isPublic: true };
+  if (route.startsWith("/public/")) return { isPublic: true };
+  if (route === "/auth/login" || route === "/auth/firebase") return { isPublic: true };
   if (route === "/integrations/billing/webhooks/:provider") return { isPublic: true };
+  if (route === "/whatsapp/status" || route === "/whatsapp/connect" || route === "/whatsapp/disconnect") {
+    return { isPublic: false, roles: ["owner"] };
+  }
   if (route === "/auth/me") {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"] };
   }
@@ -326,6 +455,73 @@ async function authenticateLogin(input: {
     throw new Error("Nao autenticado");
   }
   return user;
+}
+
+function loadFirebaseUsers(): Array<{ email: string; role: UserRole; unitIds: string[] }> {
+  const raw = process.env.FIREBASE_USERS_JSON?.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as Array<{ email?: string; role?: string; unitIds?: string[] }>;
+    return parsed
+      .filter((item) => item.email && item.role && Array.isArray(item.unitIds) && item.unitIds.length > 0)
+      .map((item) => ({
+        email: String(item.email).trim().toLowerCase(),
+        role: (item.role as UserRole) ?? "owner",
+        unitIds: item.unitIds!.map(String),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function resolveFirebaseUser(
+  uid: string,
+  email: string | undefined,
+  backend: string,
+): Promise<AuthSession | null> {
+  const activeUnitId = process.env.PUBLIC_BOOKING_UNIT_ID ?? "unit-01";
+
+  if (backend === "prisma" && email) {
+    try {
+      const dbUser = await findPersistentAuthUser(email);
+      if (dbUser) {
+        return {
+          userId: dbUser.id,
+          email: dbUser.email,
+          role: dbUser.role,
+          unitIds: dbUser.unitIds,
+          activeUnitId: dbUser.unitIds[0] ?? activeUnitId,
+          expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
+        };
+      }
+    } catch {
+      // fall through to FIREBASE_USERS_JSON mapping
+    }
+  }
+
+  const firebaseUsers = loadFirebaseUsers();
+  const match = email ? firebaseUsers.find((u) => u.email === email.toLowerCase()) : undefined;
+
+  if (match) {
+    return {
+      userId: uid,
+      email: email ?? "",
+      role: match.role,
+      unitIds: match.unitIds,
+      activeUnitId: match.unitIds[0] ?? activeUnitId,
+      expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
+    };
+  }
+
+  // Fallback: treat any authenticated Firebase user as owner with default unit
+  return {
+    userId: uid,
+    email: email ?? "",
+    role: "owner",
+    unitIds: [activeUnitId],
+    activeUnitId,
+    expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString(),
+  };
 }
 
 export function createApp() {
@@ -691,6 +887,21 @@ export function createApp() {
       .array(z.enum(["NEW", "RECURRING", "VIP", "INACTIVE"]))
       .max(6)
       .optional(),
+  });
+
+  const professionalCreateSchema = z.object({
+    unitId: z.string().min(1),
+    name: z.string().min(2).max(120),
+    phone: z.string().max(30).optional(),
+    email: z.string().email().max(120).optional().or(z.literal("")),
+  });
+
+  const professionalUpdateSchema = z.object({
+    unitId: z.string().min(1),
+    name: z.string().min(2).max(120).optional(),
+    phone: z.string().max(30).optional(),
+    email: z.string().email().max(120).optional().or(z.literal("")),
+    active: z.boolean().optional(),
   });
 
   const professionalsPerformanceQuerySchema = z.object({
@@ -1200,6 +1411,7 @@ export function createApp() {
     isActive: z.boolean().optional(),
     estimatedCost: z.number().min(0).optional(),
     notes: z.string().max(1000).optional(),
+    imageUrl: z.string().max(500).optional().or(z.literal("")),
   });
 
   const serviceUpdateSchema = z
@@ -1215,6 +1427,7 @@ export function createApp() {
       isActive: z.boolean().optional(),
       estimatedCost: z.number().min(0).optional(),
       notes: z.string().max(1000).optional(),
+      imageUrl: z.string().max(500).optional().or(z.literal("")),
     })
     .refine(
       (value) =>
@@ -1227,7 +1440,8 @@ export function createApp() {
         value.professionalIds != null ||
         value.isActive != null ||
         value.estimatedCost != null ||
-        value.notes != null,
+        value.notes != null ||
+        value.imageUrl != null,
       {
         message: "Informe ao menos um campo para atualizar o servico",
       },
@@ -1338,6 +1552,25 @@ export function createApp() {
       req.hasInvalidToken = true;
       return;
     }
+
+    // Firebase ID token (RS256) — verificação via Google public certs
+    if (isFirebaseToken(token)) {
+      try {
+        const firebasePayload = await verifyFirebaseIdToken(token);
+        const session = await resolveFirebaseUser(firebasePayload.uid, firebasePayload.email, backend);
+        if (session) {
+          req.auth = session;
+          req.hasInvalidToken = false;
+        } else {
+          req.hasInvalidToken = true;
+        }
+      } catch {
+        req.hasInvalidToken = true;
+      }
+      return;
+    }
+
+    // Token customizado legado (HS256)
     try {
       req.auth = verifyAccessToken(token);
       req.hasInvalidToken = false;
@@ -1635,6 +1868,49 @@ export function createApp() {
     };
   });
 
+  // Troca token Firebase por JWT customizado (mantém dashboard sem alterações)
+  app.post("/auth/firebase", async (request, reply) => {
+    const body = z
+      .object({ idToken: z.string().min(10) })
+      .parse(request.body);
+
+    let firebasePayload: Awaited<ReturnType<typeof verifyFirebaseIdToken>>;
+    try {
+      firebasePayload = await verifyFirebaseIdToken(body.idToken);
+    } catch {
+      reply.status(401).send({ error: "Token Firebase invalido" });
+      return;
+    }
+
+    const session = await resolveFirebaseUser(firebasePayload.uid, firebasePayload.email, backend);
+    if (!session) {
+      reply.status(401).send({ error: "Usuario nao autorizado" });
+      return;
+    }
+
+    const authUser: AuthUser = {
+      id: session.userId,
+      email: session.email,
+      name: firebasePayload.name,
+      role: session.role,
+      unitIds: session.unitIds,
+    };
+
+    const token = issueAccessToken({ user: authUser, activeUnitId: session.activeUnitId });
+    return {
+      accessToken: token.accessToken,
+      expiresAt: token.expiresAt,
+      user: {
+        id: authUser.id,
+        email: authUser.email,
+        name: authUser.name,
+        role: authUser.role,
+        unitIds: authUser.unitIds,
+        activeUnitId: session.activeUnitId,
+      },
+    };
+  });
+
   app.get("/auth/me", async (request) => {
     const req = request as RequestWithAuth;
     if (!req.auth) {
@@ -1818,6 +2094,18 @@ export function createApp() {
   app.get("/", async (_request, reply) => {
     return reply.sendFile("index.html");
   });
+  app.get("/login", async (_request, reply) => {
+    return reply.sendFile("login.html");
+  });
+  app.get("/agendamento", async (_request, reply) => {
+    return reply.sendFile("booking.html");
+  });
+  app.get("/login.html", async (_request, reply) => {
+    return reply.redirect("/login");
+  });
+  app.get("/booking.html", async (_request, reply) => {
+    return reply.redirect("/agendamento");
+  });
   app.get("/catalog", async () => await operations.getCatalog());
 
   app.get("/clients", async (request) => {
@@ -1870,10 +2158,12 @@ export function createApp() {
       })
       .parse(request.query);
 
-    return await operations.getDailyAgenda({
+    const appointments = await operations.getDailyAgenda({
       unitId: query.unitId,
       date: new Date(query.date),
     });
+    const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
+    return { appointments, workingHours };
   });
 
   app.get("/agenda/range", async (request) => {
@@ -1889,11 +2179,13 @@ export function createApp() {
       throw new Error("Operacao de agenda por periodo indisponivel");
     }
 
-    return await operations.getAgendaRange({
+    const appointments = await operations.getAgendaRange({
       unitId: query.unitId,
       start: new Date(query.start),
       end: new Date(query.end),
     });
+    const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
+    return { appointments, workingHours };
   });
 
   app.get("/dashboard", async (request) => {
@@ -2149,7 +2441,8 @@ export function createApp() {
       serviceId: query.serviceId,
       search: query.search,
     });
-    return { appointments };
+    const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
+    return { appointments, workingHours };
   });
 
   app.get("/appointments/:id", async (request) => {
@@ -2165,7 +2458,8 @@ export function createApp() {
       appointmentId: params.id,
       unitId: req.auth?.activeUnitId,
     });
-    return { appointment };
+    const workingHours = await resolveWorkingHoursForUnit(req.auth?.activeUnitId || appointment.unitId, operations);
+    return { appointment, workingHours };
   });
 
   app.patch("/appointments/:id", async (request) => {
@@ -2836,6 +3130,7 @@ export function createApp() {
       isActive: body.isActive,
       estimatedCost: body.estimatedCost,
       notes: body.notes,
+      imageUrl: body.imageUrl,
     });
     await recordAudit(request, {
       unitId: body.unitId,
@@ -2870,6 +3165,7 @@ export function createApp() {
       isActive: body.isActive,
       estimatedCost: body.estimatedCost,
       notes: body.notes,
+      imageUrl: body.imageUrl,
     });
     await recordAudit(request, {
       unitId: body.unitId,
@@ -3015,6 +3311,38 @@ export function createApp() {
       segment: query.segment,
       limit: query.limit,
     });
+  });
+
+  app.post("/professionals", async (request) => {
+    const body = professionalCreateSchema.parse(request.body);
+    const result = await operations.createProfessional({
+      unitId: body.unitId,
+      name: body.name,
+      phone: body.phone,
+      email: body.email || undefined,
+    });
+    await recordAudit(request, {
+      unitId: body.unitId,
+      action: "PROFESSIONAL_CREATED",
+      entity: "professional",
+      entityId: result.professional.id,
+      after: { name: result.professional.name },
+    });
+    return result;
+  });
+
+  app.patch("/professionals/:id", async (request) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = professionalUpdateSchema.parse(request.body);
+    const result = await operations.updateProfessional({ id, ...body, email: body.email || undefined });
+    await recordAudit(request, {
+      unitId: body.unitId,
+      action: "PROFESSIONAL_UPDATED",
+      entity: "professional",
+      entityId: id,
+      after: { name: body.name, phone: body.phone, email: body.email },
+    });
+    return result;
   });
 
   app.get("/professionals/performance", async (request) => {
@@ -3761,6 +4089,301 @@ export function createApp() {
     });
 
     return result;
+  });
+
+  // ─── Rotas públicas de agendamento (sem autenticação) ──────────────────────
+
+  const publicUnitId = () => process.env.PUBLIC_BOOKING_UNIT_ID ?? "unit-01";
+
+  app.get("/public/services", async () => {
+    if (backend === "prisma") {
+      const services = await prisma.service.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          category: true,
+          price: true,
+          durationMin: true,
+        },
+      });
+      return services.map((s) => ({ ...s, price: Number(s.price) }));
+    }
+    const result = await operations.getServices({ unitId: publicUnitId(), status: "ACTIVE" });
+    return (result.services ?? []);
+  });
+
+  app.get("/public/working-hours", async () => {
+    const unitId = publicUnitId();
+    const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
+    return { workingHours };
+  });
+
+  app.get("/public/slots", async (request) => {
+    const query = z
+      .object({
+        serviceId: z.string().min(1),
+        weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+      .parse(request.query);
+
+    const unitId = publicUnitId();
+    const weekStartDate = new Date(`${query.weekStart}T00:00:00.000-03:00`);
+
+    // Busca serviço para duração
+    let durationMin = 30;
+    if (backend === "prisma") {
+      const svc = await prisma.service.findUnique({
+        where: { id: query.serviceId },
+        select: { durationMin: true },
+      });
+      if (svc) durationMin = svc.durationMin;
+    }
+
+    // Horários de funcionamento por dia da semana
+    let businessHours: Array<{
+      dayOfWeek: number;
+      opensAt: string | null;
+      closesAt: string | null;
+      isClosed: boolean;
+    }> = [];
+    if (backend === "prisma") {
+      businessHours = await prisma.businessHour.findMany({ where: { unitId } });
+    }
+
+    // Agendamentos da semana
+    const weekEnd = new Date(weekStartDate.getTime() + 7 * 24 * 3600_000);
+    let busySlots: Array<{ startsAt: Date; endsAt: Date }> = [];
+    if (backend === "prisma") {
+      busySlots = await prisma.appointment.findMany({
+        where: {
+          unitId,
+          startsAt: { gte: weekStartDate, lt: weekEnd },
+          status: { in: ["SCHEDULED", "CONFIRMED", "IN_SERVICE", "BLOCKED"] },
+        },
+        select: { startsAt: true, endsAt: true },
+      });
+    }
+
+    const now = new Date();
+    const minAdvanceMs = 30 * 60_000;
+    const result: Record<string, { time: string; available: boolean }[]> = {};
+
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(weekStartDate.getTime() + d * 24 * 3600_000);
+      const dateKey = day.toISOString().slice(0, 10);
+      const dayOfWeek = day.getDay(); // 0=dom
+
+      const bh = businessHours.find((h) => h.dayOfWeek === dayOfWeek);
+      if (bh?.isClosed || (!bh && businessHours.length > 0)) {
+        result[dateKey] = [];
+        continue;
+      }
+
+      const opensAt = bh?.opensAt ?? "08:00";
+      const closesAt = bh?.closesAt ?? "20:00";
+      const [openH, openM] = opensAt.split(":").map(Number) as [number, number];
+      const [closeH, closeM] = closesAt.split(":").map(Number) as [number, number];
+
+      const slots: { time: string; available: boolean }[] = [];
+      let slotMin = openH * 60 + openM;
+      const endMin = closeH * 60 + closeM - durationMin;
+
+      while (slotMin <= endMin) {
+        const h = Math.floor(slotMin / 60).toString().padStart(2, "0");
+        const m = (slotMin % 60).toString().padStart(2, "0");
+        const slotDate = new Date(
+          `${dateKey}T${h}:${m}:00.000-03:00`,
+        );
+
+        const isPast = slotDate.getTime() - now.getTime() < minAdvanceMs;
+        const hasConflict = busySlots.some(
+          (b) => slotDate < b.endsAt && new Date(slotDate.getTime() + durationMin * 60_000) > b.startsAt,
+        );
+
+        slots.push({ time: `${h}:${m}`, available: !isPast && !hasConflict });
+        slotMin += 30;
+      }
+
+      result[dateKey] = slots;
+    }
+
+    return result;
+  });
+
+  const publicBookingSchema = z.object({
+    clientName: z.string().min(2).max(120),
+    clientPhone: z.string().min(8).max(20),
+    clientEmail: z.string().email().optional(),
+    serviceId: z.string().min(1),
+    startsAt: z.string().datetime(),
+  });
+
+  app.post("/public/booking", async (request, reply) => {
+    const body = publicBookingSchema.parse(request.body);
+    const unitId = publicUnitId();
+    const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
+
+    const phone = body.clientPhone.replace(/\D/g, "");
+
+    let service: { id: string; name: string; price: number | bigint | { toNumber(): number }; durationMin: number; active: boolean };
+    let clientId: string;
+    let profId: string;
+    let profName: string | undefined;
+    let startsAt: Date;
+    let endsAt: Date;
+    let appointmentId: string;
+
+    if (backend === "prisma") {
+      // Busca ou cria cliente pelo telefone
+      let client = await prisma.client.findFirst({
+        where: { businessId: unitId, phone: { contains: phone } },
+      });
+      if (!client) {
+        client = await prisma.client.create({
+          data: {
+            id: crypto.randomUUID(),
+            businessId: unitId,
+            fullName: body.clientName,
+            phone: body.clientPhone,
+            email: body.clientEmail,
+          },
+        });
+      }
+
+      const svc = await prisma.service.findUnique({ where: { id: body.serviceId } });
+      if (!svc || !svc.active) { reply.status(404).send({ error: "Servico nao encontrado" }); return; }
+      service = svc;
+      clientId = client.id;
+
+      const sp = await prisma.serviceProfessional.findFirst({
+        where: { serviceId: body.serviceId },
+        include: { professional: { select: { id: true, name: true, active: true } } },
+      });
+      const prof = sp?.professional?.active ? sp.professional : await prisma.professional.findFirst({ where: { active: true } });
+      if (!prof) { reply.status(409).send({ error: "Nenhum profissional disponivel" }); return; }
+      profId = prof.id; profName = prof.name;
+
+      startsAt = new Date(body.startsAt);
+      endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
+      if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
+        reply.status(409).send({
+          error:
+            "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
+          workingHours,
+        });
+        return;
+      }
+
+      const conflict = await prisma.appointment.findFirst({
+        where: { unitId, professionalId: profId, status: { in: ["SCHEDULED","CONFIRMED","IN_SERVICE","BLOCKED"] },
+          AND: [{ startsAt: { lt: endsAt } }, { endsAt: { gt: startsAt } }] },
+      });
+      if (conflict) { reply.status(409).send({ error: "Horario indisponivel. Por favor escolha outro horario." }); return; }
+
+      appointmentId = crypto.randomUUID();
+      await prisma.appointment.create({
+        data: { id: appointmentId, unitId, clientId, professionalId: profId, serviceId: service.id,
+          startsAt, endsAt, status: "SCHEDULED", notes: `Agendamento online — ${body.clientName}` },
+      });
+    } else {
+      // Memory backend
+      const svc = memoryStore.services.find(s => s.id === body.serviceId && s.active);
+      if (!svc) { reply.status(404).send({ error: "Servico nao encontrado" }); return; }
+      service = svc;
+
+      let memClient = memoryStore.clients.find(c => c.phone?.replace(/\D/g,"") === phone);
+      if (!memClient) {
+        memClient = { id: crypto.randomUUID(), fullName: body.clientName, phone: body.clientPhone, tags: ["NEW"] };
+        memoryStore.clients.push(memClient);
+      }
+      clientId = memClient.id;
+
+      const assign = memoryStore.serviceProfessionalAssignments.find(a => a.serviceId === body.serviceId);
+      const prof = assign
+        ? memoryStore.professionals.find(p => p.id === assign.professionalId && p.active)
+        : memoryStore.professionals.find(p => p.active);
+      if (!prof) { reply.status(409).send({ error: "Nenhum profissional disponivel" }); return; }
+      profId = prof.id; profName = prof.name;
+
+      startsAt = new Date(body.startsAt);
+      endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
+      if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
+        reply.status(409).send({
+          error:
+            "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
+          workingHours,
+        });
+        return;
+      }
+
+      const conflict = memoryStore.appointments.find(a =>
+        a.unitId === unitId && a.professionalId === profId &&
+        ["SCHEDULED","CONFIRMED","IN_SERVICE","BLOCKED"].includes(a.status) &&
+        a.startsAt < endsAt && a.endsAt > startsAt
+      );
+      if (conflict) { reply.status(409).send({ error: "Horario indisponivel. Por favor escolha outro horario." }); return; }
+
+      appointmentId = crypto.randomUUID();
+      memoryStore.appointments.push({
+        id: appointmentId, unitId, clientId, professionalId: profId, serviceId: service.id,
+        startsAt, endsAt, status: "SCHEDULED", isFitting: false,
+        notes: `Agendamento online — ${body.clientName}`, history: [],
+      });
+    }
+
+    const appointment = { id: appointmentId, startsAt, endsAt };
+
+    // Notificações assíncronas (não bloqueia a resposta)
+    const bookingData = {
+      clientName: body.clientName,
+      clientPhone: body.clientPhone,
+      clientEmail: body.clientEmail,
+      serviceName: service.name,
+      servicePrice: Number(service.price),
+      startsAt,
+      professionalName: profName,
+    };
+
+    setImmediate(async () => {
+      try {
+        await sendWhatsAppMessage(body.clientPhone, buildBookingWhatsApp(bookingData));
+      } catch { /* ignora falha de WhatsApp */ }
+      if (body.clientEmail) {
+        try {
+          await sendEmail(
+            body.clientEmail,
+            `Agendamento confirmado — ${service.name}`,
+            buildBookingEmailHtml(bookingData),
+          );
+        } catch { /* ignora falha de email */ }
+      }
+    });
+
+    reply.status(201).send({
+      id: appointment.id,
+      message: "Agendamento confirmado! Voce receberá uma confirmação no WhatsApp.",
+      startsAt: appointment.startsAt,
+      endsAt: appointment.endsAt,
+      workingHours,
+    });
+  });
+
+  // ─── Rotas de gerenciamento WhatsApp (admin) ─────────────────────────────
+
+  app.get("/whatsapp/status", async () => {
+    return getWhatsAppConnectionState();
+  });
+
+  app.post("/whatsapp/connect", async () => {
+    return connectWhatsApp();
+  });
+
+  app.delete("/whatsapp/disconnect", async () => {
+    await disconnectWhatsApp();
+    return { ok: true };
   });
 
   app.setErrorHandler(

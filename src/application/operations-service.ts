@@ -1,4 +1,4 @@
-﻿import { BarbershopEngine } from "./barbershop-engine";
+import { BarbershopEngine } from "./barbershop-engine";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import {
   Appointment,
@@ -409,7 +409,7 @@ export class OperationsService {
       allowOverbooking: false,
       houseCommissionType: "PERCENTAGE",
       houseCommissionValue: 40,
-      themeMode: "light",
+      themeMode: "system",
       createdAt: now,
       updatedAt: now,
     };
@@ -492,7 +492,7 @@ export class OperationsService {
       document: settings.document ?? "",
       displayName: settings.displayName ?? "",
       primaryColor: settings.primaryColor ?? "#0f172a",
-      themeMode: settings.themeMode ?? "light",
+      themeMode: settings.themeMode ?? "system",
       defaultAppointmentDuration: settings.defaultAppointmentDuration,
       minimumAdvanceMinutes: settings.minimumAdvanceMinutes,
       bufferBetweenAppointmentsMinutes: settings.bufferBetweenAppointmentsMinutes,
@@ -647,7 +647,7 @@ export class OperationsService {
     settings.document = String(input.document ?? "").trim() || undefined;
     settings.displayName = String(input.displayName ?? "").trim() || undefined;
     settings.primaryColor = String(input.primaryColor ?? "").trim() || settings.primaryColor;
-    settings.themeMode = input.themeMode ?? settings.themeMode ?? "light";
+    settings.themeMode = input.themeMode ?? settings.themeMode ?? "system";
     settings.defaultAppointmentDuration = defaultAppointmentDuration;
     settings.minimumAdvanceMinutes =
       input.minimumAdvanceMinutes != null
@@ -1102,6 +1102,7 @@ export class OperationsService {
       estimatedMarginPct: marginPct,
       isActive: Boolean(service.active),
       notes: service.notes ?? "",
+      imageUrl: service.imageUrl ?? "",
       enabledProfessionalIds,
       enabledProfessionals,
       salesCount: usageStats?.salesCount ?? 0,
@@ -1235,6 +1236,7 @@ export class OperationsService {
     isActive?: boolean;
     estimatedCost?: number;
     notes?: string;
+    imageUrl?: string;
   }) {
     const name = String(input.name ?? "").trim();
     if (!name) throw new Error("Nome do servico obrigatorio");
@@ -1272,6 +1274,7 @@ export class OperationsService {
       defaultCommissionRate: Number(commissionRate.toFixed(2)),
       costEstimate: Number(estimatedCost.toFixed(2)),
       notes: String(input.notes ?? "").trim() || undefined,
+      imageUrl: String(input.imageUrl ?? "").trim() || undefined,
       active: input.isActive !== false,
       createdAt: now,
       updatedAt: now,
@@ -1308,6 +1311,7 @@ export class OperationsService {
     defaultCommissionRate?: number;
     estimatedCost?: number;
     notes?: string;
+    imageUrl?: string;
     isActive?: boolean;
     professionalIds?: string[];
   }) {
@@ -1355,6 +1359,9 @@ export class OperationsService {
     }
     if (input.notes !== undefined) {
       service.notes = String(input.notes || "").trim() || undefined;
+    }
+    if (input.imageUrl !== undefined) {
+      service.imageUrl = String(input.imageUrl || "").trim() || undefined;
     }
     if (input.isActive != null) {
       service.active = Boolean(input.isActive);
@@ -4148,6 +4155,64 @@ export class OperationsService {
     });
   }
 
+  updateProfessional(input: {
+    id: string;
+    unitId: string;
+    name?: string;
+    phone?: string;
+    email?: string;
+    active?: boolean;
+  }) {
+    const professional = this.store.professionals.find((p) => p.id === input.id);
+    if (!professional) throw new Error("Profissional não encontrado");
+    if (input.name !== undefined) {
+      const name = String(input.name).trim();
+      if (name.length < 2) throw new Error("Nome deve ter ao menos 2 caracteres");
+      professional.name = name;
+    }
+    if (input.active !== undefined) professional.active = input.active;
+    const member = this.store.businessTeamMembers.find((m) => m.id === input.id);
+    if (member) {
+      if (input.name !== undefined) member.name = String(input.name).trim();
+      if (input.phone !== undefined) member.phone = String(input.phone).trim() || undefined;
+      if (input.email !== undefined) member.email = String(input.email).trim() || undefined;
+      if (input.active !== undefined) member.isActive = input.active;
+      member.updatedAt = new Date();
+    }
+    return { professional: { id: professional.id, name: professional.name, active: professional.active } };
+  }
+
+  createProfessional(input: {
+    unitId: string;
+    name: string;
+    phone?: string;
+    email?: string;
+  }) {
+    const name = String(input.name ?? "").trim();
+    if (name.length < 2) throw new Error("Nome do profissional deve ter ao menos 2 caracteres");
+    const newProfessional = {
+      id: crypto.randomUUID(),
+      name,
+      active: true,
+      commissionRules: [] as Array<{ id: string; appliesTo: "SERVICE" | "PRODUCT"; percentage: number }>,
+    };
+    this.store.professionals.push(newProfessional);
+    const now = new Date();
+    this.store.businessTeamMembers.push({
+      id: newProfessional.id,
+      unitId: input.unitId,
+      name,
+      role: "PROFESSIONAL" as const,
+      accessProfile: "profissional" as const,
+      email: String(input.email ?? "").trim() || undefined,
+      phone: String(input.phone ?? "").trim() || undefined,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { professional: newProfessional };
+  }
+
   getProfessionalsPerformance(input: {
     unitId: string;
     start: Date;
@@ -4175,9 +4240,12 @@ export class OperationsService {
           return acc + (service?.price ?? 0);
         }, 0);
 
+        const member = this.store.businessTeamMembers.find((m) => m.id === professional.id);
         return {
           professionalId: professional.id,
           name: professional.name,
+          phone: member?.phone,
+          email: member?.email,
           completed: completed.length,
           total: total.length,
           occupancyRate: total.length

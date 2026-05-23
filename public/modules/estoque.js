@@ -4,7 +4,6 @@ import {
   renderEntityDrawer,
   renderPrimaryAction,
   renderStatusChip,
-  renderTechnicalTrace,
 } from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
 
@@ -27,6 +26,31 @@ function money(value) {
     style: "currency",
     currency: "BRL",
   });
+}
+
+function productImageUrl(product = {}) {
+  const direct = String(product.imageUrl || product.imageURL || product.image || "").trim();
+  if (direct) return direct;
+  const match = String(product.notes || "").match(/(?:Imagem|Image|imageUrl):\s*(https?:\/\/\S+)/i);
+  return match ? match[1].trim() : "";
+}
+
+function productInitials(product = {}) {
+  return String(product.name || "Produto")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "P";
+}
+
+function renderInventoryThumb(product = {}) {
+  const imageUrl = productImageUrl(product);
+  if (imageUrl) {
+    return `<div class="inventory-product-thumb has-image"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name || "Produto")}" loading="lazy" /></div>`;
+  }
+  return `<div class="inventory-product-thumb">${escapeHtml(productInitials(product))}</div>`;
 }
 
 function formatDateTime(value) {
@@ -144,11 +168,11 @@ function renderSummaryCards(container, products = [], payload = {}) {
   const estimatedValue = toNumber(payload.summary?.estimatedStockValue);
 
   const cards = [
-    { title: "Sem estoque", value: outOfStock, tone: outOfStock ? "text-red-700" : "text-slate-900" },
-    { title: "Criticos", value: critical, tone: critical ? "text-red-700" : "text-slate-900" },
-    { title: "Estoque baixo", value: lowStock, tone: lowStock ? "text-amber-700" : "text-slate-900" },
-    { title: "Reposicao sugerida", value: suggestions, tone: suggestions ? "text-amber-700" : "text-slate-900" },
-    { title: "Valor estimado", value: money(estimatedValue), tone: "text-slate-900" },
+    { title: "Sem estoque", value: outOfStock, hint: "Produtos indisponíveis", tone: outOfStock ? "ds-kpi-tone-danger" : "" },
+    { title: "Críticos", value: critical, hint: "Precisam de ação", tone: critical ? "ds-kpi-tone-danger" : "" },
+    { title: "Estoque baixo", value: lowStock, hint: "Abaixo do mínimo", tone: lowStock ? "ds-kpi-tone-warning" : "" },
+    { title: "Reposição", value: suggestions, hint: "Sugestões ativas", tone: suggestions ? "ds-kpi-tone-warning" : "" },
+    { title: "Valor estimado", value: money(estimatedValue), hint: "Preço em estoque", tone: "" },
   ];
 
   container.innerHTML = cards
@@ -157,68 +181,73 @@ function renderSummaryCards(container, products = [], payload = {}) {
         <article class="ux-kpi inventory-attention-card">
           <p class="ux-label">${escapeHtml(card.title)}</p>
           <p class="ux-value-sm ${card.tone}">${escapeHtml(card.value)}</p>
+          <p class="ux-hint">${escapeHtml(card.hint)}</p>
         </article>
       `,
     )
     .join("");
 }
 
-function renderActionButtons(product) {
-  return `
-    <div class="inventory-row-actions">
-      <button type="button" data-inventory-action="detail" data-product-id="${escapeHtml(product.id)}" class="ux-btn ux-btn-muted">Ver detalhes</button>
-      <button type="button" data-inventory-action="add" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-success">Ajustar estoque</button>
-    </div>
-  `;
-}
+function renderDesktopRows() { /* lista unificada substituiu a tabela */ }
 
-function renderDesktopRows(container, products = []) {
+function renderProductList(container, products = []) {
   if (!container) return;
   container.innerHTML = products
     .map((item) => {
       const displayStatus = getDisplayStatus(item);
+      const initials = item.name
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((w) => w[0]?.toUpperCase() ?? "")
+        .join("");
+      const statusClass = displayStatus.toLowerCase();
+      const chipClass =
+        statusClass === "out_of_stock" || statusClass === "critical"
+          ? "inv-chip-danger"
+          : statusClass === "low_stock"
+          ? "inv-chip-warn"
+          : "inv-chip-ok";
+      const suggestion = getActionSuggestion(item);
       return `
-        <tr class="inventory-row inventory-row-${displayStatus.toLowerCase()}">
-          <td class="px-3 py-3 align-top">
-            <div class="text-sm font-semibold text-slate-100">${escapeHtml(item.name)}</div>
-            <div class="text-xs text-slate-400 mt-1">${escapeHtml(item.category || "Sem categoria")}</div>
-          </td>
-          <td class="px-3 py-3 align-top">
-            <div class="text-sm text-slate-100">Atual: <strong>${toNumber(item.quantity)}</strong></div>
-            <div class="text-xs text-slate-400 mt-1">Minimo: ${toNumber(item.minimumStock)}</div>
-          </td>
-          <td class="px-3 py-3 align-top">
-            <div class="text-sm font-semibold text-slate-100">${escapeHtml(getActionSuggestion(item))}</div>
-            <div class="text-xs text-slate-400 mt-1">Venda: ${money(item.salePrice)}</div>
-          </td>
-          <td class="px-3 py-3 align-top">${renderStatusChip(displayStatus)}</td>
-          <td class="px-3 py-3 align-top">${renderActionButtons(item)}</td>
-        </tr>
-      `;
-    })
-    .join("");
-}
-
-function renderMobileCards(container, products = []) {
-  if (!container) return;
-  container.innerHTML = products
-    .map((item) => {
-      const displayStatus = getDisplayStatus(item);
-      return `
-        <article class="ux-card inventory-product-card inventory-row-${displayStatus.toLowerCase()}">
-          <div class="inventory-product-card-head">
-            <div>
-              <div class="text-sm font-semibold text-slate-100">${escapeHtml(item.name)}</div>
-              <div class="text-xs text-slate-400 mt-1">${escapeHtml(item.category || "Sem categoria")}</div>
+        <article class="inv-row inv-row-${statusClass}">
+          <div class="inv-row-main"
+               data-inventory-action="detail"
+               data-product-id="${escapeHtml(item.id)}">
+            <div class="inv-avatar">${escapeHtml(initials)}</div>
+            <div class="inv-copy">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(item.category || "Sem categoria")}</span>
+              <div class="inv-chips">
+                <span class="inv-chip ${chipClass}">${escapeHtml(displayStatus.replace(/_/g, " "))}</span>
+                ${suggestion ? `<span class="inv-chip">${escapeHtml(suggestion)}</span>` : ""}
+              </div>
             </div>
-            ${renderStatusChip(displayStatus)}
+            <div class="inv-metric">
+              <strong>${toNumber(item.quantity)}</strong>
+              <span>Atual</span>
+            </div>
+            <div class="inv-metric">
+              <strong>${toNumber(item.minimumStock)}</strong>
+              <span>Mínimo</span>
+            </div>
+            <div class="inv-metric">
+              <strong>${money(item.salePrice)}</strong>
+              <span>Venda</span>
+            </div>
           </div>
-          <div class="inventory-product-stock">
-            <div><span>Atual</span><strong>${toNumber(item.quantity)}</strong></div>
-            <div><span>Minimo</span><strong>${toNumber(item.minimumStock)}</strong></div>
+          <div class="inv-row-actions">
+            <button type="button"
+                    data-inventory-action="detail"
+                    data-product-id="${escapeHtml(item.id)}"
+                    class="inv-arrow-btn" title="Ver detalhes">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2.5"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="m9 18 6-6-6-6"/>
+              </svg>
+            </button>
           </div>
-          <p class="inventory-action-suggestion">${escapeHtml(getActionSuggestion(item))}</p>
-          ${renderActionButtons(item)}
         </article>
       `;
     })
@@ -232,7 +261,7 @@ export function renderStockLoading(elements) {
   if (elements.tableBody) {
     elements.tableBody.innerHTML = `
       <tr>
-        <td colspan="5" class="px-3 py-6 text-center text-sm text-slate-500">Carregando produtos...</td>
+        <td colspan="5" class="appts-td appts-td-center ds-text-muted">Carregando produtos...</td>
       </tr>
     `;
   }
@@ -246,7 +275,7 @@ export function renderStockError(elements, message = "Falha ao carregar estoque.
   if (elements.tableBody) {
     elements.tableBody.innerHTML = `
       <tr>
-        <td colspan="5" class="px-3 py-6 text-center text-sm text-red-700">${escapeHtml(message)}</td>
+        <td colspan="5" class="appts-td appts-td-center ds-kpi-tone-danger">${escapeHtml(message)}</td>
       </tr>
     `;
   }
@@ -284,7 +313,6 @@ export function renderStockData(elements, payload = {}) {
   }
   if (elements.tableWrap) {
     elements.tableWrap.classList.toggle("hidden", products.length === 0);
-    elements.tableWrap.classList.toggle("xl:block", products.length > 0);
   }
 
   if (!products.length) {
@@ -293,8 +321,8 @@ export function renderStockData(elements, payload = {}) {
     return;
   }
 
-  renderDesktopRows(elements.tableBody, products);
-  renderMobileCards(elements.mobileList, products);
+  renderDesktopRows();
+  renderProductList(elements.mobileList, products);
 }
 
 export function renderStockProductDrawer(elements, payload = {}, productId) {
@@ -304,7 +332,6 @@ export function renderStockProductDrawer(elements, payload = {}, productId) {
   const displayStatus = getDisplayStatus(product);
   const movements = relatedMovements(payload, productId);
   const suggestion = suggestionForProduct(payload, productId);
-  const latestMovement = movements[0] || {};
 
   const summary = `
     <dl class="op-summary-grid">
@@ -357,16 +384,7 @@ export function renderStockProductDrawer(elements, payload = {}, productId) {
           .join("")}
       </div>
     `
-    : `<p class="text-sm text-slate-400">Sem movimentacoes recentes para este produto.</p>`;
-
-  const technicalTrace = renderTechnicalTrace({
-    productId: product.id,
-    stockMovementId: latestMovement.id,
-    referenceType: latestMovement.referenceType,
-    referenceId: latestMovement.referenceId,
-    auditEntity: "stock_movement",
-    auditAction: latestMovement.referenceType === "ADJUSTMENT" ? "STOCK_MANUAL_MOVEMENT" : latestMovement.referenceType,
-  });
+    : `<p class="ds-text-muted">Sem movimentacoes recentes para este produto.</p>`;
 
   elements.drawerHost.innerHTML = renderEntityDrawer({
     id: "inventoryProductDrawer",
@@ -377,7 +395,6 @@ export function renderStockProductDrawer(elements, payload = {}, productId) {
     summary,
     details,
     history,
-    technicalTrace,
   });
   bindEntityDrawers(elements.drawerHost);
 }

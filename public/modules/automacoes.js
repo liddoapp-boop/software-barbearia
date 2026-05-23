@@ -1,3 +1,4 @@
+import { renderStatusChip } from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
 
 function toNumber(value, fallback = 0) {
@@ -5,15 +6,20 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function statusBadge(status) {
-  if (status === "SUCCESS") return "bg-teal-100 text-teal-800";
-  if (status === "FAILED") return "bg-red-100 text-red-800";
-  return "bg-amber-100 text-amber-800";
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
-function webhookStatusBadge(status) {
-  if (status === "SUCCESS") return "bg-teal-100 text-teal-800";
-  return "bg-red-100 text-red-800";
+function executionChipStatus(status = "") {
+  const s = String(status).toUpperCase();
+  if (s === "SUCCESS") return "PAID";
+  if (s === "FAILED") return "CANCELED";
+  return "WARNING";
 }
 
 function ruleTriggerLabel(triggerType) {
@@ -37,220 +43,171 @@ function ruleTargetLabel(target) {
   return target || "-";
 }
 
+function kpi(title, value, subtitle = "", tone = "") {
+  return `
+    <article class="ux-kpi">
+      <div class="ux-label">${escapeHtml(title)}</div>
+      <div class="ux-value-sm ${tone}">${escapeHtml(String(value))}</div>
+      ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
+    </article>
+  `;
+}
+
+function emptyItem(message) {
+  return `<p class="ds-text-muted">${escapeHtml(message)}</p>`;
+}
+
 export function renderAutomacoesLoading(elements) {
-  if (elements.rules) {
-    renderPanelMessage(elements.rules, "Carregando regras de automacao...");
-  }
-  if (elements.summary) {
-    renderPanelMessage(elements.summary, "Carregando saude de automacoes...");
-  }
-  if (elements.executions) {
-    renderPanelMessage(elements.executions, "Carregando execucoes...");
-  }
-  if (elements.scoring) {
-    renderPanelMessage(elements.scoring, "Carregando scoring...");
-  }
-  if (elements.logs) {
-    renderPanelMessage(elements.logs, "Carregando logs de integracoes...");
-  }
+  if (elements.rules) renderPanelMessage(elements.rules, "Carregando regras de automacao...");
+  if (elements.summary) renderPanelMessage(elements.summary, "Carregando saude de automacoes...");
+  if (elements.executions) renderPanelMessage(elements.executions, "Carregando execucoes...");
+  if (elements.scoring) renderPanelMessage(elements.scoring, "Carregando scoring...");
+  if (elements.logs) renderPanelMessage(elements.logs, "Carregando logs de integracoes...");
 }
 
 export function renderAutomacoesError(elements, message = "Falha ao carregar modulo de automacoes.") {
-  if (elements.rules) {
-    renderPanelMessage(elements.rules, "Regras de automacao indisponiveis.", "error");
-  }
-  if (elements.summary) {
-    renderPanelMessage(elements.summary, message, "error");
-  }
-  if (elements.executions) {
-    renderPanelMessage(elements.executions, "Execucoes indisponiveis.", "error");
-  }
-  if (elements.scoring) {
-    renderPanelMessage(elements.scoring, "Scoring indisponivel.", "error");
-  }
-  if (elements.logs) {
-    renderPanelMessage(elements.logs, "Logs indisponiveis.", "error");
-  }
+  if (elements.rules) renderPanelMessage(elements.rules, "Regras de automacao indisponiveis.", "error");
+  if (elements.summary) renderPanelMessage(elements.summary, message, "error");
+  if (elements.executions) renderPanelMessage(elements.executions, "Execucoes indisponiveis.", "error");
+  if (elements.scoring) renderPanelMessage(elements.scoring, "Scoring indisponivel.", "error");
+  if (elements.logs) renderPanelMessage(elements.logs, "Logs indisponiveis.", "error");
 }
 
 export function renderAutomacoesData(elements, payload) {
   const rulesRows = Array.isArray(payload?.rules?.rules) ? payload.rules.rules : [];
   const executionsSummary = payload?.executions?.summary ?? {};
-  const executionRows = Array.isArray(payload?.executions?.executions)
-    ? payload.executions.executions
-    : [];
+  const executionRows = Array.isArray(payload?.executions?.executions) ? payload.executions.executions : [];
   const scoringRows = Array.isArray(payload?.scoring?.clients) ? payload.scoring.clients : [];
   const webhookSummary = payload?.webhookLogs?.summary ?? {};
   const webhookRows = Array.isArray(payload?.webhookLogs?.logs) ? payload.webhookLogs.logs : [];
 
   if (elements.rules) {
     elements.rules.innerHTML = rulesRows.length
-      ? rulesRows
-          .map(
-            (row) => `
-              <article class="rounded-lg border border-gray-200 bg-white p-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <strong class="text-sm text-gray-900">${row.name}</strong>
-                  <span class="text-xs px-2 py-0.5 rounded-full ${row.isActive ? "bg-teal-100 text-teal-800" : "bg-gray-100 text-gray-700"}">
-                    ${row.isActive ? "Ativa" : "Inativa"}
-                  </span>
-                </div>
-                <div class="mt-1 text-xs text-gray-600">
-                  Trigger: ${ruleTriggerLabel(row.triggerType)} | Canal: ${ruleChannelLabel(row.channel)} | Alvo: ${ruleTargetLabel(row.target)}
-                </div>
-                <div class="text-xs text-gray-600 mt-1">
-                  Template: ${row.messageTemplate || "-"}
-                </div>
-                <div class="text-xs text-gray-500 mt-1">
-                  Atualizada em: ${row.updatedAt ? new Date(row.updatedAt).toLocaleString("pt-BR") : "-"}
-                </div>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    data-edit-rule="${row.id}"
-                    class="rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-800 px-3 py-1.5 text-xs font-semibold"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    data-toggle-rule="${row.id}"
-                    data-next-active="${row.isActive ? "false" : "true"}"
-                    class="rounded-lg ${row.isActive ? "bg-amber-600 hover:bg-amber-700" : "bg-teal-700 hover:bg-teal-800"} text-white px-3 py-1.5 text-xs font-semibold"
-                  >
-                    ${row.isActive ? "Desativar" : "Ativar"}
-                  </button>
-                </div>
-              </article>
-            `,
-          )
-          .join("")
-      : emptyMessage("Sem regras para os filtros atuais.");
+      ? `
+        <section class="catalog-list">
+          ${rulesRows
+            .map(
+              (row) => `
+                <article class="catalog-row">
+                  <div class="catalog-row-main">
+                    <div class="catalog-row-copy">
+                      <div class="catalog-row-meta">
+                        ${renderStatusChip(row.isActive ? "ACTIVE" : "CANCELED", { label: row.isActive ? "Ativa" : "Inativa" })}
+                      </div>
+                      <strong>${escapeHtml(row.name)}</strong>
+                      <span>Trigger: ${escapeHtml(ruleTriggerLabel(row.triggerType))} | Canal: ${escapeHtml(ruleChannelLabel(row.channel))} | Alvo: ${escapeHtml(ruleTargetLabel(row.target))}</span>
+                      <span>${escapeHtml(row.messageTemplate || "-")}</span>
+                    </div>
+                  </div>
+                  <div class="catalog-row-action-strip">
+                    <p>Atualizada em: ${escapeHtml(row.updatedAt ? new Date(row.updatedAt).toLocaleString("pt-BR") : "-")}</p>
+                    <div class="catalog-row-actions">
+                      <button type="button" data-edit-rule="${escapeHtml(row.id)}" class="ux-btn ux-btn-muted">Editar</button>
+                      <button type="button" data-toggle-rule="${escapeHtml(row.id)}" data-next-active="${row.isActive ? "false" : "true"}" class="ux-btn ${row.isActive ? "ux-btn-muted" : "ux-btn-primary"}">${row.isActive ? "Desativar" : "Ativar"}</button>
+                    </div>
+                  </div>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      `
+      : emptyItem("Sem regras para os filtros atuais.");
   }
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-8 gap-2">
-        <article class="rounded-lg border border-gray-200 bg-white p-3">
-          <div class="text-xs text-gray-500">Regras</div>
-          <div class="text-lg font-bold text-gray-900">${rulesRows.length}</div>
-        </article>
-        <article class="rounded-lg border border-teal-200 bg-teal-50 p-3">
-          <div class="text-xs text-teal-700">Regras ativas</div>
-          <div class="text-lg font-bold text-teal-800">${rulesRows.filter((item) => item.isActive).length}</div>
-        </article>
-        <article class="rounded-lg border border-gray-200 bg-white p-3">
-          <div class="text-xs text-gray-500">Execucoes</div>
-          <div class="text-lg font-bold text-gray-900">${toNumber(executionsSummary.total)}</div>
-        </article>
-        <article class="rounded-lg border border-teal-200 bg-teal-50 p-3">
-          <div class="text-xs text-teal-700">Sucesso</div>
-          <div class="text-lg font-bold text-teal-800">${toNumber(executionsSummary.success)}</div>
-        </article>
-        <article class="rounded-lg border border-red-200 bg-red-50 p-3">
-          <div class="text-xs text-red-700">Falha</div>
-          <div class="text-lg font-bold text-red-800">${toNumber(executionsSummary.failed)}</div>
-        </article>
-        <article class="rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <div class="text-xs text-amber-700">Pendentes</div>
-          <div class="text-lg font-bold text-amber-800">${toNumber(executionsSummary.pending)}</div>
-        </article>
-        <article class="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-          <div class="text-xs text-indigo-700">Logs webhooks</div>
-          <div class="text-lg font-bold text-indigo-800">${toNumber(webhookSummary.total)}</div>
-        </article>
-        <article class="rounded-lg border border-gray-200 bg-white p-3">
-          <div class="text-xs text-gray-500">Clientes em score</div>
-          <div class="text-lg font-bold text-gray-900">${scoringRows.length}</div>
-        </article>
+      <div class="ds-kpi-row">
+        ${kpi("Regras", rulesRows.length, "Cadastradas")}
+        ${kpi("Ativas", rulesRows.filter((row) => row.isActive).length, "", "ds-kpi-tone-success")}
+        ${kpi("Execucoes", toNumber(executionsSummary.total), "No periodo")}
+        ${kpi("Sucesso", toNumber(executionsSummary.success), "", "ds-kpi-tone-success")}
+        ${kpi("Falha", toNumber(executionsSummary.failed), "", "ds-kpi-tone-danger")}
+        ${kpi("Pendentes", toNumber(executionsSummary.pending), "", "ds-kpi-tone-warning")}
+        ${kpi("Logs webhooks", toNumber(webhookSummary.total), "Integracoes")}
+        ${kpi("Clientes em score", scoringRows.length, "")}
       </div>
     `;
   }
 
   if (elements.executions) {
     elements.executions.innerHTML = executionRows.length
-      ? executionRows
-          .slice(0, 20)
-          .map(
-            (row) => `
-              <article class="rounded-lg border border-gray-200 bg-white p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <strong class="text-sm text-gray-800">${row.campaignType}</strong>
-                  <span class="text-xs px-2 py-0.5 rounded-full ${statusBadge(row.status)}">${row.status}</span>
-                </div>
-                <div class="mt-1 text-xs text-gray-600">
-                  Cliente: ${row.clientName || row.clientId || "N/A"} | Tentativas: ${toNumber(row.attempts)}
-                </div>
-                <div class="text-xs text-gray-500 mt-1">
-                  Inicio: ${row.startedAt ? new Date(row.startedAt).toLocaleString("pt-BR") : "-"}
-                </div>
-                ${
-                  row.errorMessage
-                    ? `<div class="text-xs text-red-700 mt-1">${row.errorMessage}</div>`
-                    : ""
-                }
-                ${
-                  row.status === "FAILED"
-                    ? `<button type="button" data-reprocess-execution="${row.id}" class="mt-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 text-xs font-semibold">Reprocessar</button>`
-                    : ""
-                }
-              </article>
-            `,
-          )
-          .join("")
-      : emptyMessage("Sem execucoes para os filtros atuais.");
+      ? `
+        <section class="reports-detail-list">
+          ${executionRows
+            .slice(0, 20)
+            .map(
+              (row) => `
+                <article class="reports-detail-row">
+                  <div>
+                    <strong>${escapeHtml(row.campaignType)}</strong>
+                    <span>Cliente: ${escapeHtml(row.clientName || row.clientId || "N/A")} · Tentativas: ${toNumber(row.attempts)}</span>
+                    <span>Inicio: ${escapeHtml(row.startedAt ? new Date(row.startedAt).toLocaleString("pt-BR") : "-")}</span>
+                    ${row.errorMessage ? `<span class="ds-text-muted">${escapeHtml(row.errorMessage)}</span>` : ""}
+                  </div>
+                  <div class="reports-row-value">
+                    ${renderStatusChip(executionChipStatus(row.status), { label: row.status })}
+                    ${row.status === "FAILED" ? `<button type="button" data-reprocess-execution="${escapeHtml(row.id)}" class="ux-btn ux-btn-muted">Reprocessar</button>` : ""}
+                  </div>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      `
+      : emptyItem("Sem execucoes para os filtros atuais.");
   }
 
   if (elements.scoring) {
     elements.scoring.innerHTML = scoringRows.length
-      ? scoringRows
-          .slice(0, 20)
-          .map(
-            (row) => `
-              <article class="rounded-lg border border-gray-200 bg-white p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <strong class="text-sm text-gray-800">${row.clientName || row.clientId}</strong>
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">${row.riskLevel}</span>
-                </div>
-                <div class="text-xs text-gray-600 mt-1">Score: ${toNumber(row.riskScore).toFixed(2)} | Retorno: ${toNumber(row.returnProbability).toFixed(2)}%</div>
-                <div class="text-xs text-gray-500 mt-1">${Array.isArray(row.reasons) ? row.reasons.join(" | ") : "-"}</div>
-              </article>
-            `,
-          )
-          .join("")
-      : emptyMessage("Sem clientes no scoring para os filtros atuais.");
+      ? `
+        <section class="reports-detail-list">
+          ${scoringRows
+            .slice(0, 20)
+            .map(
+              (row) => `
+                <article class="reports-detail-row">
+                  <div>
+                    <strong>${escapeHtml(row.clientName || row.clientId)}</strong>
+                    <span>Score: ${toNumber(row.riskScore).toFixed(2)} · Retorno: ${toNumber(row.returnProbability).toFixed(2)}%</span>
+                    <span>${escapeHtml(Array.isArray(row.reasons) ? row.reasons.join(" | ") : "-")}</span>
+                  </div>
+                  <div class="reports-row-value">
+                    ${renderStatusChip("WARNING", { label: row.riskLevel || "Risco" })}
+                  </div>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      `
+      : emptyItem("Sem clientes no scoring para os filtros atuais.");
   }
 
   if (elements.logs) {
     elements.logs.innerHTML = webhookRows.length
-      ? webhookRows
-          .slice(0, 20)
-          .map(
-            (row) => `
-              <article class="rounded-lg border border-gray-200 bg-white p-3">
-                <div class="flex items-center justify-between gap-2">
-                  <strong class="text-sm text-gray-800">${row.provider}</strong>
-                  <span class="text-xs px-2 py-0.5 rounded-full ${webhookStatusBadge(row.status)}">${row.status}</span>
-                </div>
-                <div class="mt-1 text-xs text-gray-600">
-                  ${row.direction} | HTTP ${toNumber(row.httpStatus)} | Tentativa ${toNumber(row.attempt)}
-                </div>
-                <div class="text-xs text-gray-500 mt-1">
-                  Correlation: ${row.correlationId || "-"}
-                </div>
-                ${
-                  row.errorMessage
-                    ? `<div class="text-xs text-red-700 mt-1">${row.errorMessage}</div>`
-                    : ""
-                }
-              </article>
-            `,
-          )
-          .join("")
-      : emptyMessage("Sem logs de integracao para os filtros atuais.");
+      ? `
+        <section class="reports-detail-list">
+          ${webhookRows
+            .slice(0, 20)
+            .map(
+              (row) => `
+                <article class="reports-detail-row">
+                  <div>
+                    <strong>${escapeHtml(row.provider)}</strong>
+                    <span>${escapeHtml(row.direction)} · HTTP ${toNumber(row.httpStatus)} · Tentativa ${toNumber(row.attempt)}</span>
+                    <span>Correlation: ${escapeHtml(row.correlationId || "-")}</span>
+                    ${row.errorMessage ? `<span class="ds-text-muted">${escapeHtml(row.errorMessage)}</span>` : ""}
+                  </div>
+                  <div class="reports-row-value">
+                    ${renderStatusChip(row.status === "SUCCESS" ? "PAID" : "CANCELED", { label: row.status })}
+                  </div>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      `
+      : emptyItem("Sem logs de integracao para os filtros atuais.");
   }
-}
-
-function emptyMessage(message) {
-  return `<div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">${message}</div>`;
 }

@@ -5632,6 +5632,32 @@ export class PrismaOperationsService {
     });
   }
 
+  async updateProfessional(input: {
+    id: string;
+    unitId: string;
+    name?: string;
+    phone?: string;
+    email?: string;
+    active?: boolean;
+  }) {
+    throw new Error("updateProfessional not implemented for Prisma");
+  }
+
+  async createProfessional(input: {
+    unitId: string;
+    name: string;
+    phone?: string;
+    email?: string;
+  }) {
+    const name = String(input.name ?? "").trim();
+    if (name.length < 2) throw new Error("Nome do profissional deve ter ao menos 2 caracteres");
+    const { randomUUID } = await import("node:crypto");
+    const professional = await this.prisma.professional.create({
+      data: { id: randomUUID(), name, active: true },
+    });
+    return { professional: { id: professional.id, name: professional.name, active: professional.active } };
+  }
+
   async getProfessionalsPerformance(input: {
     unitId: string;
     start: Date;

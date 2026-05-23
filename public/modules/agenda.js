@@ -28,15 +28,6 @@ const statusLabel = {
   BLOCKED: "Bloqueado",
 };
 
-const statusClass = {
-  SCHEDULED: "bg-slate-700/50 text-slate-200 border-slate-600",
-  CONFIRMED: "bg-indigo-950/40 text-indigo-200 border-indigo-700",
-  IN_SERVICE: "bg-amber-900/40 text-amber-200 border-amber-700",
-  COMPLETED: "bg-emerald-900/40 text-emerald-200 border-emerald-700",
-  CANCELLED: "bg-red-900/40 text-red-200 border-red-700",
-  NO_SHOW: "bg-rose-900/40 text-rose-200 border-rose-700",
-  BLOCKED: "bg-slate-700/50 text-slate-200 border-slate-600",
-};
 
 const actionLabel = {
   DETAIL: "Detalhes",
@@ -80,17 +71,19 @@ function actionButtonClass(action) {
 }
 
 function actionsForStatus(status) {
-  if (status === "SCHEDULED") return ["DETAIL", "CONFIRMED", "RESCHEDULE", "CANCELLED"];
-  if (status === "CONFIRMED") {
-    return ["DETAIL", "IN_SERVICE", "RESCHEDULE", "CANCELLED", "NO_SHOW"];
+  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") {
+    return ["CANCELLED"];
   }
-  if (status === "IN_SERVICE") return ["DETAIL", "COMPLETE", "CANCELLED"];
   if (status === "COMPLETED") return ["DETAIL", "REFUND"];
   return ["DETAIL"];
 }
 
 export function normalizeAgendaItems(payload) {
-  const rows = Array.isArray(payload) ? payload : [];
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.appointments)
+      ? payload.appointments
+      : [];
   return rows
     .map((item) => {
       const startsAt = normalizeDate(item.startsAt);
@@ -154,29 +147,20 @@ export function computeAgendaMetrics(items, now = new Date()) {
 }
 
 export function renderAgendaLoading(elements) {
-  elements.metricsGrid.innerHTML = Array.from({ length: 4 }, () => {
-    return `
-      <article class="rounded-xl border border-gray-200 bg-white p-4 animate-pulse">
-        <div class="h-3 w-20 bg-gray-200 rounded"></div>
-        <div class="h-8 w-10 bg-gray-200 rounded mt-3"></div>
-      </article>
-    `;
-  }).join("");
-  elements.list.innerHTML = "<p class='text-sm text-gray-500'>Carregando agenda...</p>";
-  elements.queue.innerHTML = "<p class='text-sm text-gray-500'>Carregando fila...</p>";
+  elements.metricsGrid.innerHTML = Array.from({ length: 4 }, () => `<article class="ux-kpi agenda-kpi-loading"></article>`).join("");
+  elements.list.innerHTML = `<p class="ds-text-muted">Carregando agenda...</p>`;
+  elements.queue.innerHTML = `<p class="ds-text-muted">Carregando fila...</p>`;
 }
 
 export function renderAgendaError(elements, onRetry) {
   elements.metricsGrid.innerHTML = `
-    <article class="col-span-full rounded-xl border border-red-200 bg-red-50 p-4">
-      <p class="text-sm font-semibold text-red-700">Falha ao carregar agenda operacional.</p>
-      <button type="button" data-agenda-retry class="mt-2 rounded-lg bg-red-700 hover:bg-red-800 text-white px-3 py-1.5 text-xs font-semibold">
-        Tentar novamente
-      </button>
-    </article>
+    <div class="panel-msg panel-msg-error agenda-error-block">
+      <p>Falha ao carregar agenda operacional.</p>
+      <button type="button" data-agenda-retry class="ux-btn ux-btn-muted">Tentar novamente</button>
+    </div>
   `;
-  elements.list.innerHTML = "<p class='text-sm text-red-600'>Nao foi possivel carregar os agendamentos.</p>";
-  elements.queue.innerHTML = "<p class='text-sm text-red-600'>Fila indisponivel no momento.</p>";
+  elements.list.innerHTML = `<p class="ds-text-muted">Nao foi possivel carregar os agendamentos.</p>`;
+  elements.queue.innerHTML = `<p class="ds-text-muted">Fila indisponivel no momento.</p>`;
   const retryBtn = elements.metricsGrid.querySelector("[data-agenda-retry]");
   if (retryBtn && typeof onRetry === "function") {
     retryBtn.addEventListener("click", onRetry);
@@ -201,12 +185,12 @@ function renderAgendaMetrics(elements, metrics, items = []) {
     </article>
     <article class="ux-kpi">
       <div class="ux-label">Agenda do dia</div>
-      <div class="ux-value-sm text-slate-100">${metrics.totalCount}</div>
+      <div class="ux-value-sm">${metrics.totalCount}</div>
       <div class="ux-hint">Atendimentos no recorte</div>
     </article>
     <article class="ux-kpi">
       <div class="ux-label">Atencao</div>
-      <div class="ux-value-sm ${metrics.lateCount > 0 ? "text-amber-300" : "text-slate-100"}">${metrics.lateCount}</div>
+      <div class="ux-value-sm ${metrics.lateCount > 0 ? "ds-kpi-tone-warning" : ""}">${metrics.lateCount}</div>
       <div class="ux-hint">Atrasados agora</div>
     </article>
   `;
@@ -225,12 +209,12 @@ function renderQueue(elements, items) {
   elements.queue.innerHTML = queue
     .map(
       (item) => `
-      <article class="ux-kpi">
-        <div class="flex items-start justify-between gap-2">
-          <strong class="text-slate-100">${item.client}</strong>
+      <article class="ux-kpi agenda-queue-item">
+        <div class="agenda-queue-head">
+          <strong>${item.client}</strong>
           ${renderStatusChip(item.status)}
         </div>
-        <div class="mt-1 text-sm text-slate-300">${item.service} - ${item.professional}</div>
+        <div class="ux-hint">${item.service} - ${item.professional}</div>
       </article>
     `,
     )
@@ -265,23 +249,23 @@ function renderAgendaList(elements, list, handlers) {
       const late = (item.status === "SCHEDULED" || item.status === "CONFIRMED") && item.startsAt < new Date();
 
       return `
-        <article class="ux-card ${late ? "border-amber-500" : ""}">
-          <div class="flex items-start justify-between gap-2">
-            <strong class="text-slate-100">${time} - ${item.client}</strong>
+        <article class="ux-card agenda-appt-card ${late ? "agenda-appt-card-late" : ""}">
+          <div class="agenda-appt-head">
+            <strong>${time} - ${item.client}</strong>
             ${renderStatusChip(item.status)}
           </div>
-          <div class="mt-1 text-sm text-slate-300">${item.service} - ${item.professional}</div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300 agenda-card-facts">
-            <div><span class="text-slate-400">Valor</span> <strong class="text-slate-100">R$ ${item.servicePrice.toFixed(2)}</strong></div>
-            <div><span class="text-slate-400">Sinal</span> <strong class="${late ? "text-amber-300" : "text-slate-100"}">${late ? "Atrasado" : item.isFitting ? "Encaixe" : "No prazo"}</strong></div>
+          <div class="ux-hint">${item.service} - ${item.professional}</div>
+          <div class="agenda-card-facts">
+            <div><span>Valor</span> <strong>R$ ${item.servicePrice.toFixed(2)}</strong></div>
+            <div><span>Sinal</span> <strong class="${late ? "ds-kpi-tone-warning" : ""}">${late ? "Atrasado" : item.isFitting ? "Encaixe" : "No prazo"}</strong></div>
           </div>
           ${
             item.hasProductSale
-              ? `<div class="mt-2 ux-badge ux-badge-success" title="Venda de produto registrada para este cliente no dia">Produto vendido (${item.productItemsSoldCount} item(ns))</div>`
+              ? `<div class="ux-badge ux-badge-success" title="Venda de produto registrada para este cliente no dia">Produto vendido (${item.productItemsSoldCount} item(ns))</div>`
               : ""
           }
-          <div class="mt-2 text-xs text-slate-400">Perfil: <strong class="text-slate-200">${clientTagLabel}</strong></div>
-          <div class="mt-2 flex flex-wrap gap-2">
+          <div class="ux-hint">Perfil: <strong>${clientTagLabel}</strong></div>
+          <div class="catalog-row-actions">
             ${actions
               .map(
                 (action) =>
@@ -318,31 +302,27 @@ function renderAgendaGrid(elements, list) {
   }
 
   elements.list.innerHTML = `
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+    <div class="agenda-grid-wrap">
       ${slots
         .map((hour) => {
           const events = byHour[hour] || [];
           return `
-            <section class="rounded-xl border border-gray-200 p-2 bg-gray-50">
-              <header class="text-xs font-bold text-gray-600 mb-1">${String(hour).padStart(2, "0")}:00</header>
+            <section class="agenda-grid-slot">
+              <header class="agenda-grid-slot-hour">${String(hour).padStart(2, "0")}:00</header>
               ${
                 events.length
                   ? events
                       .map(
                         (item) => `
-                    <div class="rounded-lg border border-gray-200 bg-white p-2 mb-1">
-                      <div class="text-xs font-semibold text-gray-800">${item.client}</div>
-                      <div class="text-[11px] text-gray-500">${item.service} | R$ ${item.servicePrice.toFixed(2)}</div>
-                      ${
-                        item.hasProductSale
-                          ? '<div class="mt-1 text-[10px] font-semibold text-emerald-700">SALE produto vendido</div>'
-                          : ""
-                      }
+                    <div class="agenda-grid-event">
+                      <div class="ds-cell-primary">${item.client}</div>
+                      <div class="ds-cell-secondary">${item.service} | R$ ${item.servicePrice.toFixed(2)}</div>
+                      ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido</div>` : ""}
                     </div>
                   `,
                       )
                       .join("")
-                  : "<div class='text-[11px] text-gray-400'>Horario livre</div>"
+                  : `<div class="ds-text-muted">Horario livre</div>`
               }
             </section>
           `;

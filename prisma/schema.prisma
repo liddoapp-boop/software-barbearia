@@ -168,7 +168,7 @@ model BusinessSettings {
   document                       String?
   displayName                    String?
   primaryColor                   String?
-  themeMode                      String   @default("light")
+  themeMode                      String   @default("system")
   defaultAppointmentDuration     Int      @default(45)
   minimumAdvanceMinutes          Int      @default(30)
   bufferBetweenAppointmentsMinutes Int    @default(10)

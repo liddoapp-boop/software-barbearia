@@ -9,6 +9,39 @@ function toMoney(value) {
   return `R$ ${toNumber(value).toFixed(2)}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function productImageUrl(product = {}) {
+  const direct = String(product.imageUrl || product.image || "").trim();
+  if (direct) return direct;
+  const match = String(product.notes || "").match(/(?:Imagem|Image|imageUrl):\s*(https?:\/\/\S+)/i);
+  return match ? match[1].trim() : "";
+}
+
+function productInitials(product = {}) {
+  return String(product.name || "Produto")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "P";
+}
+
+function renderCartThumb(item = {}) {
+  const imageUrl = productImageUrl(item);
+  if (imageUrl) {
+    return `<div class="pdv-cart-thumb has-image"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.name || "Produto")}" loading="lazy" /></div>`;
+  }
+  return `<div class="pdv-cart-thumb">${escapeHtml(productInitials(item))}</div>`;
+}
+
 function normalizeQty(value) {
   const parsed = Math.trunc(toNumber(value, 0));
   return parsed > 0 ? parsed : 1;
@@ -58,6 +91,9 @@ export function addItemToCart(cart, product, quantity) {
       quantity: safeQty,
       unitPrice: toNumber(product.salePrice),
       stockQty: toNumber(product.stockQty),
+      category: product.category || "Sem categoria",
+      notes: product.notes || "",
+      imageUrl: product.imageUrl || product.image || "",
     },
   ];
 }
@@ -93,9 +129,9 @@ export function renderCart(cart, elements, handlers) {
   if (!list) return;
   if (!items.length) {
     list.innerHTML = `
-      <div class="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-center">
-        <p class="text-sm font-semibold text-gray-700">Carrinho vazio.</p>
-        <p class="text-xs text-gray-500 mt-1">Adicione produtos para registrar a venda.</p>
+      <div class="pdv-cart-empty">
+        <p class="op-empty-title">Carrinho vazio</p>
+        <p class="op-empty-description">Adicione produtos para registrar a venda.</p>
       </div>
     `;
     return;
@@ -105,22 +141,24 @@ export function renderCart(cart, elements, handlers) {
     .map((item) => {
       const lineTotal = Number((item.unitPrice * item.quantity).toFixed(2));
       return `
-        <article class="rounded-lg border border-gray-200 bg-white p-3">
-          <div class="flex items-start justify-between gap-2">
-            <strong class="text-sm text-gray-800">${item.name}</strong>
-            <button type="button" data-cart-remove="${item.productId}" class="rounded-md border border-red-200 bg-red-50 text-red-700 px-2 py-1 text-xs font-semibold">
+        <article class="pdv-cart-item">
+          <div class="pdv-cart-item-head">
+            ${renderCartThumb(item)}
+            <div>
+              <strong class="pdv-cart-item-name">${escapeHtml(item.name)}</strong>
+              <span class="pdv-cart-item-meta">Unitário ${toMoney(item.unitPrice)} · estoque ${escapeHtml(item.stockQty)}</span>
+            </div>
+            <button type="button" data-cart-remove="${item.productId}" class="ux-btn ux-btn-danger ux-btn-sm">
               Remover
             </button>
           </div>
-          <div class="mt-2 flex items-center justify-between gap-2">
-            <div class="inline-flex items-center rounded-lg border border-gray-200 overflow-hidden">
-              <button type="button" data-cart-dec="${item.productId}" class="px-3 py-2 text-sm bg-white text-gray-700">-</button>
-              <span class="px-3 py-2 text-sm bg-gray-50 text-gray-800 min-w-[48px] text-center">${item.quantity}</span>
-              <button type="button" data-cart-inc="${item.productId}" class="px-3 py-2 text-sm bg-white text-gray-700">+</button>
+          <div class="pdv-cart-qty-row">
+            <div class="pdv-cart-stepper">
+              <button type="button" data-cart-dec="${item.productId}" class="pdv-cart-stepper-btn">&#8722;</button>
+              <span class="pdv-cart-stepper-qty">${item.quantity}</span>
+              <button type="button" data-cart-inc="${item.productId}" class="pdv-cart-stepper-btn">&#43;</button>
             </div>
-            <div class="text-right">
-              <div class="text-sm font-bold text-gray-900">Subtotal: ${toMoney(lineTotal)}</div>
-            </div>
+            <div class="pdv-cart-subtotal">Subtotal: ${toMoney(lineTotal)}</div>
           </div>
         </article>
       `;
