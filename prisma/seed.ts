@@ -4,6 +4,14 @@ import { hashPassword } from "../src/http/security";
 
 const prisma = new PrismaClient();
 
+function requireProductionEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (process.env.NODE_ENV === "production" && !value) {
+    throw new Error(`${name} e obrigatorio para rodar seed em producao`);
+  }
+  return value;
+}
+
 async function main() {
   // Limpa dados operacionais para iniciar base zerada.
   await prisma.billingSubscriptionEvent.deleteMany();
@@ -50,32 +58,50 @@ async function main() {
     },
   });
 
-  const defaultUsers = [
-    {
-      id: "usr-owner",
-      email: "owner@barbearia.local",
-      password: "owner123",
-      name: "Dono",
-      role: "owner",
-      unitIds: ["unit-01", "unit-02"],
-    },
-    {
-      id: "usr-recepcao",
-      email: "recepcao@barbearia.local",
-      password: "recepcao123",
-      name: "Recepcao",
-      role: "recepcao",
-      unitIds: ["unit-01"],
-    },
-    {
-      id: "usr-profissional",
-      email: "profissional@barbearia.local",
-      password: "profissional123",
-      name: "Profissional",
-      role: "profissional",
-      unitIds: ["unit-01"],
-    },
-  ];
+  const seedOwnerEmail = requireProductionEnv("SEED_OWNER_EMAIL") ?? "owner@barbearia.local";
+  const seedOwnerPassword = requireProductionEnv("SEED_OWNER_PASSWORD") ?? "owner123";
+  const seedOwnerUnitIds = (process.env.SEED_OWNER_UNIT_IDS ?? "unit-01,unit-02")
+    .split(",")
+    .map((unitId) => unitId.trim())
+    .filter(Boolean);
+  const defaultUsers =
+    process.env.NODE_ENV === "production"
+      ? [
+          {
+            id: process.env.SEED_OWNER_ID ?? "usr-owner",
+            email: seedOwnerEmail,
+            password: seedOwnerPassword,
+            name: process.env.SEED_OWNER_NAME ?? "Dono",
+            role: "owner",
+            unitIds: seedOwnerUnitIds.length ? seedOwnerUnitIds : ["unit-01"],
+          },
+        ]
+      : [
+          {
+            id: "usr-owner",
+            email: "owner@barbearia.local",
+            password: "owner123",
+            name: "Dono",
+            role: "owner",
+            unitIds: ["unit-01", "unit-02"],
+          },
+          {
+            id: "usr-recepcao",
+            email: "recepcao@barbearia.local",
+            password: "recepcao123",
+            name: "Recepcao",
+            role: "recepcao",
+            unitIds: ["unit-01"],
+          },
+          {
+            id: "usr-profissional",
+            email: "profissional@barbearia.local",
+            password: "profissional123",
+            name: "Profissional",
+            role: "profissional",
+            unitIds: ["unit-01"],
+          },
+        ];
 
   for (const user of defaultUsers) {
     await prisma.user.upsert({

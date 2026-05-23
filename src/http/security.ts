@@ -156,7 +156,8 @@ export function isAuthEnforced() {
 
 export function loadAuthUsers(): AuthUser[] {
   const raw = process.env.AUTH_USERS_JSON?.trim();
-  if (!raw) return DEFAULT_USERS;
+  const isProduction = process.env.NODE_ENV === "production";
+  if (!raw) return isProduction ? [] : DEFAULT_USERS;
 
   try {
     const parsed = JSON.parse(raw) as Array<Partial<AuthUser>>;
@@ -182,9 +183,9 @@ export function loadAuthUsers(): AuthUser[] {
       );
 
     if (users.length > 0) return users;
-    return DEFAULT_USERS;
+    return isProduction ? [] : DEFAULT_USERS;
   } catch {
-    return DEFAULT_USERS;
+    return isProduction ? [] : DEFAULT_USERS;
   }
 }
 

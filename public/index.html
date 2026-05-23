@@ -26,7 +26,18 @@
     />
     <link rel="stylesheet" href="/styles/layout.css" />
   </head>
-  <body class="theme-dark overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
+  <body class="overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
+    <script>
+      (function () {
+        var mode = localStorage.getItem("sb.themeMode") || "system";
+        var isDark = mode === "dark" || (mode === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.setAttribute("data-theme-mode", mode);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+        document.body.classList.add(isDark ? "theme-dark" : "theme-light");
+        var themeMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeMeta) themeMeta.setAttribute("content", isDark ? "#0B0F14" : "#f2f1ed");
+      })();
+    </script>
     <div id="appShell">
       <aside id="appSidebar" aria-label="Navegacao principal"></aside>
 

@@ -142,20 +142,6 @@ const unitId = "unit-01";
 const STORAGE_ACTIVE_MODULE = "sb.activeModule";
 const STORAGE_ACTIVE_ROLE = "sb.activeRole";
 const STORAGE_AUTH_SESSION = "sb.authSession";
-const FRONTEND_AUTH_CREDENTIALS = {
-  owner: {
-    email: "owner@barbearia.local",
-    password: "owner123",
-  },
-  recepcao: {
-    email: "recepcao@barbearia.local",
-    password: "recepcao123",
-  },
-  profissional: {
-    email: "profissional@barbearia.local",
-    password: "profissional123",
-  },
-};
 
 function renderOperationalChrome() {
   const dashboardHeaderMount = document.getElementById("dashboardHeaderMount");
@@ -1375,18 +1361,9 @@ function applyThemeMode(themeMode, options = {}) {
   }
 }
 
-function applyThemeFromSettingsPayload(payload) {
-  const saved = payload?.business?.themeMode;
+function applyThemeFromSettingsPayload() {
   const localPreference = localStorage.getItem(STORAGE_THEME_MODE);
-  if (!localPreference && saved === "light") {
-    applyThemeMode("system", { persist: false });
-    return;
-  }
-  if (saved) {
-    applyThemeMode(saved);
-    return;
-  }
-  applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "system", { persist: false });
+  applyThemeMode(localPreference || "system", { persist: Boolean(localPreference) });
 }
 
 if (systemThemeQuery) {
@@ -1442,6 +1419,18 @@ function restoreAuthSession() {
 function persistAuthSession(session) {
   authSession = session;
   localStorage.setItem(STORAGE_AUTH_SESSION, JSON.stringify(session));
+  localStorage.setItem("authToken", session.accessToken);
+}
+
+function clearAuthSession() {
+  authSession = null;
+  localStorage.removeItem(STORAGE_AUTH_SESSION);
+  localStorage.removeItem("authToken");
+}
+
+function redirectToLogin() {
+  clearAuthSession();
+  window.location.replace("/login");
 }
 
 function isAuthSessionValid(session = authSession) {
@@ -1477,34 +1466,10 @@ function getCurrentActorId() {
   return authSession?.user?.id || authSession?.user?.email || state.role || "owner";
 }
 
-async function ensureAuthSession(forceRefresh = false) {
-  if (!forceRefresh && isAuthSessionValid()) return authSession;
-  const credentials = FRONTEND_AUTH_CREDENTIALS[state.role] || FRONTEND_AUTH_CREDENTIALS.owner;
-
-  const response = await window.fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-correlation-id": buildCorrelationId(),
-    },
-    body: JSON.stringify({
-      email: credentials.email,
-      password: credentials.password,
-      activeUnitId: unitId,
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok || !data?.accessToken) {
-    throw new Error(data?.error || "Falha ao autenticar sessao da aplicacao.");
-  }
-
-  persistAuthSession({
-    accessToken: data.accessToken,
-    expiresAt: data.expiresAt,
-    user: data.user,
-  });
-  return authSession;
+async function ensureAuthSession() {
+  if (isAuthSessionValid()) return authSession;
+  redirectToLogin();
+  throw new Error("Sessao expirada. Faca login novamente.");
 }
 
 async function apiFetch(url, options = {}) {
@@ -1518,8 +1483,7 @@ async function apiFetch(url, options = {}) {
 
   let response = await execute();
   if (response.status === 401) {
-    await ensureAuthSession(true);
-    response = await execute();
+    redirectToLogin();
   }
   return response;
 }

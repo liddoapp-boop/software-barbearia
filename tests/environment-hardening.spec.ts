@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/http/app";
-import { getAuthSecret } from "../src/http/security";
+import { getAuthSecret, loadAuthUsers } from "../src/http/security";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -19,6 +19,12 @@ describe("Environment hardening", () => {
     process.env.NODE_ENV = "production";
     process.env.AUTH_SECRET = "01234567890123456789012345678901";
     expect(getAuthSecret()).toBe("01234567890123456789012345678901");
+  });
+
+  it("nao carrega usuarios padrao em producao sem AUTH_USERS_JSON explicito", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.AUTH_USERS_JSON;
+    expect(loadAuthUsers()).toEqual([]);
   });
 
   it("retorna CORS restrito quando CORS_ORIGIN esta definido", async () => {
