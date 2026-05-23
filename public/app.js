@@ -1327,10 +1327,15 @@ if (!isAllowedModule(state.activeModule)) {
 }
 
 const STORAGE_THEME_MODE = "sb.themeMode";
+const STORAGE_THEME_MODE_USER_SET = "sb.themeModeUserSet";
 const systemThemeQuery =
   typeof window !== "undefined" && typeof window.matchMedia === "function"
     ? window.matchMedia("(prefers-color-scheme: dark)")
     : null;
+
+if (localStorage.getItem(STORAGE_THEME_MODE) && localStorage.getItem(STORAGE_THEME_MODE_USER_SET) !== "true") {
+  localStorage.removeItem(STORAGE_THEME_MODE);
+}
 
 function normalizeThemeMode(mode) {
   const value = String(mode || "").trim().toLowerCase();
@@ -1358,6 +1363,9 @@ function applyThemeMode(themeMode, options = {}) {
   }
   if (persist) {
     localStorage.setItem(STORAGE_THEME_MODE, normalized);
+    if (options.userSet) {
+      localStorage.setItem(STORAGE_THEME_MODE_USER_SET, "true");
+    }
   }
 }
 
@@ -6022,7 +6030,7 @@ if (settingsRoot) {
           displayName: String(formData.get("displayName") || "").trim(),
           themeMode: selectedThemeMode,
         });
-        applyThemeMode(selectedThemeMode);
+        applyThemeMode(selectedThemeMode, { userSet: true });
         await refreshSettingsScreen("Configuracoes do usuario salvas.");
       }
     } catch (error) {
@@ -6045,7 +6053,7 @@ if (settingsRoot) {
     btn.classList.add("is-active");
     toggle.dataset.themeValue = theme;
     if (hiddenInput) hiddenInput.value = theme;
-    applyThemeMode(theme);
+    applyThemeMode(theme, { userSet: true });
   });
 
   settingsRoot.addEventListener("click", async (event) => {
