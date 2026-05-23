@@ -4,6 +4,17 @@ import { hashPassword } from "../src/http/security";
 
 const prisma = new PrismaClient();
 
+type SeedUserRole = "owner" | "recepcao" | "profissional";
+
+type SeedUser = {
+  id: string;
+  email: string;
+  password: string;
+  name: string;
+  role: SeedUserRole;
+  unitIds: string[];
+};
+
 function requireProductionEnv(name: string) {
   const value = process.env[name]?.trim();
   if (process.env.NODE_ENV === "production" && !value) {
@@ -62,9 +73,9 @@ async function main() {
   const seedOwnerPassword = requireProductionEnv("SEED_OWNER_PASSWORD") ?? "owner123";
   const seedOwnerUnitIds = (process.env.SEED_OWNER_UNIT_IDS ?? "unit-01,unit-02")
     .split(",")
-    .map((unitId) => unitId.trim())
+    .map((unitId: string) => unitId.trim())
     .filter(Boolean);
-  const defaultUsers =
+  const defaultUsers: SeedUser[] =
     process.env.NODE_ENV === "production"
       ? [
           {
