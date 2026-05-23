@@ -124,6 +124,7 @@ model Unit {
   idempotencyRecords IdempotencyRecord[]
   auditLogs       AuditLog[]
   userAccesses    UserUnitAccess[]
+  professionals   Professional[]
 }
 
 model User {
@@ -293,16 +294,20 @@ model Service {
 
 model Professional {
   id              String           @id
+  businessId      String           @default("unit-01")
   name            String
   active          Boolean          @default(true)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+  business        Unit             @relation(fields: [businessId], references: [id], onDelete: Restrict)
   appointments    Appointment[]
   commissionRules CommissionRule[]
   businessCommissionRules BusinessCommissionRule[]
   commissions     CommissionEntry[]
   productSales    ProductSale[]
   services        ServiceProfessional[]
+
+  @@index([businessId, active])
 }
 
 model ServiceProfessional {

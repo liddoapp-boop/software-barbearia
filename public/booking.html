@@ -668,6 +668,7 @@
 <script src="https://unpkg.com/imask@7.6.1/dist/imask.min.js"></script>
 <script>
 const API   = '';
+const BOOKING_UNIT_ID = new URLSearchParams(window.location.search).get('unitId') || '';
 const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFIRM:6, DONE:7 };
 
 let step = STEPS.NAME;
@@ -688,6 +689,11 @@ const getAppts  = () => { try { return JSON.parse(localStorage.getItem('liddo_ap
 const saveAppt  = a  => { const l = getAppts(); l.unshift(a); localStorage.setItem('liddo_appts', JSON.stringify(l)); };
 
 const scrollEnd = () => requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+
+function publicUrl(path) {
+  if (!BOOKING_UNIT_ID) return API + path;
+  return API + path + (path.includes('?') ? '&' : '?') + 'unitId=' + encodeURIComponent(BOOKING_UNIT_ID);
+}
 
 function fmtBRL(v) {
   const n = v > 200 ? v / 100 : v;
@@ -717,7 +723,7 @@ async function fetchPublicWorkingHours() {
   const token = localStorage.getItem('authToken');
   const h = token ? { Authorization: 'Bearer ' + token } : {};
   try {
-    const r = await fetch(API + '/public/working-hours', { headers: h });
+    const r = await fetch(publicUrl('/public/working-hours'), { headers: h });
     if (!r.ok) return;
     const data = await r.json();
     publicWorkingHours = normalizeWorkingHoursPayload(data?.workingHours || data);
@@ -858,7 +864,7 @@ async function loadServices() {
   try {
     const token = localStorage.getItem('authToken');
     const h = token ? { Authorization: 'Bearer ' + token } : {};
-    const r = await fetch(API + '/public/services', { headers: h });
+    const r = await fetch(publicUrl('/public/services'), { headers: h });
     if (r.ok) services = (await r.json()).map(s => ({ ...s, duration: s.durationMinutes ?? s.duration }));
     else throw 0;
   } catch {
@@ -919,7 +925,7 @@ async function fetchSlotsForWeek(ws) {
   const token = localStorage.getItem('authToken');
   const h = token ? { Authorization: 'Bearer ' + token } : {};
   try {
-    const r = await fetch(API + `/public/slots?serviceId=${selectedService.id}&weekStart=${key}`, { headers: h });
+    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}`), { headers: h });
     if (r.ok) Object.assign(slots, await r.json());
   } catch {}
 }
@@ -1085,9 +1091,9 @@ async function submitBooking() {
     const token = localStorage.getItem('authToken');
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    const r = await fetch(API + '/public/booking', {
+    const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
-      body: JSON.stringify({ clientName:confirmData.clientName, clientPhone:confirmData.phone, clientEmail:confirmData.email, serviceId:confirmData.serviceId, startsAt:iso }),
+      body: JSON.stringify({ unitId: BOOKING_UNIT_ID || undefined, clientName:confirmData.clientName, clientPhone:confirmData.phone, clientEmail:confirmData.email, serviceId:confirmData.serviceId, startsAt:iso }),
     });
     if (!r.ok) throw 0;
     saveAppt({ id:Date.now(), service:confirmData.serviceName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });

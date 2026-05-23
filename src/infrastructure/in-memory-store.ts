@@ -78,6 +78,7 @@ export class InMemoryStore {
   professionals: Professional[] = [
     {
       id: "pro-01",
+      businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
       commissionRules: [

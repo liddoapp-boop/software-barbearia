@@ -58,6 +58,7 @@ export interface ServiceProfessionalAssignment {
 
 export interface Professional {
   id: UUID;
+  businessId?: UUID;
   name: string;
   active: boolean;
   commissionRules: CommissionRule[];

@@ -215,6 +215,7 @@ async function main() {
   await prisma.professional.upsert({
     where: { id: "pro-01" },
     update: {
+      businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
       commissionRules: {
@@ -232,6 +233,7 @@ async function main() {
     },
     create: {
       id: "pro-01",
+      businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
       commissionRules: {

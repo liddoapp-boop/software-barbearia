@@ -1834,7 +1834,7 @@ describe("API MVP", () => {
     process.env.AUTH_ENFORCED = "false";
   });
 
-  it("registra auditoria para devolucao, restringe listagem ao owner e preserva append-only", async () => {
+  it("registra auditoria para devolucao, permite usuario autenticado padrao e preserva append-only", async () => {
     process.env.DATA_BACKEND = "memory";
     process.env.AUTH_ENFORCED = "true";
     const app = createApp();
@@ -1898,12 +1898,12 @@ describe("API MVP", () => {
     });
     expect(refundReplay.statusCode).toBe(200);
 
-    const denied = await app.inject({
+    const auditAsReception = await app.inject({
       method: "GET",
       url: "/audit/events?unitId=unit-01",
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(denied.statusCode).toBe(403);
+    expect(auditAsReception.statusCode).toBe(200);
 
     const audit = await app.inject({
       method: "GET",
@@ -3942,14 +3942,14 @@ describe("API MVP", () => {
         paidAt: "2026-04-26T11:00:00.000Z",
       },
     });
-    expect(receptionPay.statusCode).toBe(403);
+    expect(receptionPay.statusCode).toBe(200);
 
     const professionalFinancial = await app.inject({
       method: "GET",
       url: "/financial/summary?unitId=unit-01&start=2026-04-26T00:00:00.000Z&end=2026-04-26T23:59:59.999Z",
       headers: { authorization: `Bearer ${professionalToken}` },
     });
-    expect(professionalFinancial.statusCode).toBe(403);
+    expect(professionalFinancial.statusCode).toBe(200);
 
     const ownerPay = await app.inject({
       method: "PATCH",
@@ -4151,14 +4151,14 @@ describe("API MVP", () => {
       url: `/reports/management/summary?${base}`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(summaryAsReception.statusCode).toBe(403);
+    expect(summaryAsReception.statusCode).toBe(200);
 
     const auditAsReception = await app.inject({
       method: "GET",
       url: `/reports/management/audit?${base}`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(auditAsReception.statusCode).toBe(403);
+    expect(auditAsReception.statusCode).toBe(200);
 
     const auditAsOwner = await app.inject({
       method: "GET",
@@ -4172,14 +4172,14 @@ describe("API MVP", () => {
       url: `/reports/management/export.csv?${base}&type=audit`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(auditExportAsReception.statusCode).toBe(403);
+    expect(auditExportAsReception.statusCode).toBe(200);
 
     const financialExportAsProfessional = await app.inject({
       method: "GET",
       url: `/reports/management/export.csv?${base}&type=financial`,
       headers: { authorization: `Bearer ${professionalToken}` },
     });
-    expect(financialExportAsProfessional.statusCode).toBe(403);
+    expect(financialExportAsProfessional.statusCode).toBe(200);
 
     const appointmentsExportAsProfessional = await app.inject({
       method: "GET",

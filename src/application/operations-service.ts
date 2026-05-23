@@ -250,12 +250,34 @@ export class OperationsService {
     };
   }
 
-  getCatalog() {
+  getCatalog(input?: { unitId?: string }) {
+    const unitId = input?.unitId;
+    const serviceIds = new Set(
+      this.store.services
+        .filter((service) => !unitId || this.isServiceFromUnit(service, unitId))
+        .map((service) => service.id),
+    );
+    const professionalIds = new Set(
+      this.store.serviceProfessionalAssignments
+        .filter((assignment) => serviceIds.has(assignment.serviceId))
+        .map((assignment) => assignment.professionalId),
+    );
     return {
-      services: this.store.services,
-      professionals: this.store.professionals,
-      clients: this.store.clients,
-      products: this.store.products,
+      services: unitId
+        ? this.store.services.filter((service) => this.isServiceFromUnit(service, unitId))
+        : this.store.services,
+      professionals: unitId
+        ? this.store.professionals.filter(
+            (professional) =>
+              professional.businessId === unitId || professionalIds.has(professional.id),
+          )
+        : this.store.professionals,
+      clients: unitId
+        ? this.store.clients.filter((client) => ((client as typeof client & { businessId?: string }).businessId ?? unitId) === unitId)
+        : this.store.clients,
+      products: unitId
+        ? this.store.products.filter((product) => ((product as typeof product & { businessId?: string }).businessId ?? unitId) === unitId)
+        : this.store.products,
     };
   }
 
@@ -4192,6 +4214,7 @@ export class OperationsService {
     if (name.length < 2) throw new Error("Nome do profissional deve ter ao menos 2 caracteres");
     const newProfessional = {
       id: crypto.randomUUID(),
+      businessId: input.unitId,
       name,
       active: true,
       commissionRules: [] as Array<{ id: string; appliesTo: "SERVICE" | "PRODUCT"; percentage: number }>,

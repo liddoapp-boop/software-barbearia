@@ -138,9 +138,8 @@ import {
 } from "./components/operational-ui.js";
 
 const API = "";
-const unitId = "unit-01";
+let unitId = "unit-01";
 const STORAGE_ACTIVE_MODULE = "sb.activeModule";
-const STORAGE_ACTIVE_ROLE = "sb.activeRole";
 const STORAGE_AUTH_SESSION = "sb.authSession";
 
 function renderOperationalChrome() {
@@ -1312,7 +1311,7 @@ const agendaElements = {
 };
 
 const state = {
-  role: restoreRole(),
+  role: "owner",
   activeModule: restoreActiveModule(),
   viewport: getViewport(),
   mobileTab: "inicio",
@@ -1407,6 +1406,7 @@ if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
 }
 
 let authSession = restoreAuthSession();
+unitId = getSessionUnitId(authSession);
 if (inventorySearch) inventoryFilters.search = String(inventorySearch.value || "").trim();
 if (inventoryCategoryFilter) inventoryFilters.category = inventoryCategoryFilter.value || "";
 if (inventoryStatusFilter) inventoryFilters.status = inventoryStatusFilter.value || "ALL";
@@ -1426,14 +1426,20 @@ function restoreAuthSession() {
 
 function persistAuthSession(session) {
   authSession = session;
+  unitId = getSessionUnitId(session);
   localStorage.setItem(STORAGE_AUTH_SESSION, JSON.stringify(session));
   localStorage.setItem("authToken", session.accessToken);
 }
 
 function clearAuthSession() {
   authSession = null;
+  unitId = "unit-01";
   localStorage.removeItem(STORAGE_AUTH_SESSION);
   localStorage.removeItem("authToken");
+}
+
+function getSessionUnitId(session) {
+  return session?.user?.activeUnitId || session?.user?.unitIds?.[0] || "unit-01";
 }
 
 function redirectToLogin() {
@@ -1445,7 +1451,6 @@ function isAuthSessionValid(session = authSession) {
   if (!session?.accessToken || !session?.expiresAt) return false;
   const expiresAtMs = new Date(session.expiresAt).getTime();
   if (!Number.isFinite(expiresAtMs)) return false;
-  if (session.user?.role && session.user.role !== state.role) return false;
   return expiresAtMs > Date.now() + 30_000;
 }
 
@@ -1471,7 +1476,7 @@ function buildAuthHeaders(baseHeaders) {
 }
 
 function getCurrentActorId() {
-  return authSession?.user?.id || authSession?.user?.email || state.role || "owner";
+  return authSession?.user?.id || authSession?.user?.email || "system";
 }
 
 async function ensureAuthSession() {
@@ -1504,16 +1509,6 @@ function restoreActiveModule() {
   return "financeiro";
 }
 
-function restoreRole() {
-  const queryRole = new URLSearchParams(window.location.search).get("role");
-  if (queryRole && ["owner", "recepcao", "profissional"].includes(queryRole)) {
-    return queryRole;
-  }
-  const stored = localStorage.getItem(STORAGE_ACTIVE_ROLE);
-  if (stored && ["owner", "recepcao", "profissional"].includes(stored)) return stored;
-  return "owner";
-}
-
 function getViewport() {
   const width = window.innerWidth;
   if (width < 768) return "mobile";
@@ -1523,15 +1518,14 @@ function getViewport() {
 
 function persistNavigationState() {
   localStorage.setItem(STORAGE_ACTIVE_MODULE, state.activeModule);
-  localStorage.setItem(STORAGE_ACTIVE_ROLE, state.role);
 }
 
 function getRoleMenuGroups() {
-  return filterMenuGroupsByRole(MENU_GROUPS, state.role);
+  return filterMenuGroupsByRole(MENU_GROUPS, "owner");
 }
 
 function getAllowedModules() {
-  return getAllowedModulesForRole(state.role);
+  return getAllowedModulesForRole("owner");
 }
 
 function isAllowedModule(moduleId) {
@@ -1541,7 +1535,7 @@ function isAllowedModule(moduleId) {
 }
 
 function firstAllowedModule() {
-  const preferred = getDefaultModuleForRole(state.role);
+  const preferred = getDefaultModuleForRole("owner");
   if (isAllowedModule(preferred)) return preferred;
   const allowed = getAllowedModules();
   if (allowed.length) return allowed[0];
@@ -1681,27 +1675,6 @@ function bindShellEvents() {
       }
     });
   });
-
-  const roleSelect = document.getElementById("globalRoleSelect");
-  if (roleSelect) {
-    roleSelect.addEventListener("change", () => {
-      const nextRole = roleSelect.value;
-      if (!["owner", "recepcao", "profissional"].includes(nextRole)) return;
-      state.role = nextRole;
-      if (!isAllowedModule(state.activeModule)) {
-        state.activeModule = firstAllowedModule();
-      }
-      state.mobileTab = mapModuleToMobileTab(state.activeModule);
-      state.mobileMoreOpen = false;
-      state.agendaFiltersOpen = false;
-      authSession = null;
-      localStorage.removeItem(STORAGE_AUTH_SESSION);
-      persistNavigationState();
-      renderShell();
-      applySectionVisibility();
-      loadAll();
-    });
-  }
 
   if (toggleAgendaFiltersBtn) {
     toggleAgendaFiltersBtn.onclick = () => {
@@ -3094,7 +3067,7 @@ async function validateScheduleSlot() {
 }
 
 async function loadCatalog() {
-  const response = await apiFetch(`${API}/catalog`);
+  const response = await apiFetch(`${API}/catalog?unitId=${encodeURIComponent(unitId)}`);
   const data = await response.json();
 
   const normalized = normalizeCatalogForScheduling(data);
@@ -5717,7 +5690,7 @@ async function loadAll() {
   if (commissionsResult.status === "fulfilled") {
     currentCommissionsPayload = commissionsResult.value;
     renderCommissionsData(commissionsElements, commissionsResult.value, {
-      canPayCommissions: state.role === "owner",
+      canPayCommissions: true,
     });
   } else {
     currentCommissionsPayload = null;
@@ -8069,14 +8042,6 @@ async function payCurrentCommission(commissionId, button) {
   const commission = findCurrentCommission(commissionId);
   if (!commissionId || !commission) return;
 
-  if (state.role !== "owner") {
-    renderSaleFeedback(
-      "error",
-      "Voce nao tem permissao para pagar comissoes.",
-      commissionsFeedback || financialFeedback,
-    );
-    return;
-  }
   if (commission.status === "PAID") {
     renderSaleFeedback("info", "Esta comissao ja foi paga.", commissionsFeedback || financialFeedback);
     return;
@@ -8131,7 +8096,7 @@ if (commissionsTable) {
         id: commission.id || commission.commissionId,
         occurredAt: commission.occurredAt || commission.createdAt,
       }, {
-        canPayCommissions: state.role === "owner",
+        canPayCommissions: true,
       });
       return;
     }
@@ -8625,7 +8590,7 @@ function initWhatsAppSection() {
 
 function initBookingLinkSection() {
   const base = window.location.origin;
-  const link = `${base}/agendamento`;
+  const link = `${base}/agendamento?unitId=${encodeURIComponent(unitId)}`;
   const linkText = document.getElementById("bookingLinkText");
   const copyBtn = document.getElementById("copyBookingLink");
   const openLink = document.getElementById("bookingLinkOpen");

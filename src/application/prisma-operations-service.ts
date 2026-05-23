@@ -269,16 +269,26 @@ export class PrismaOperationsService {
     await writePrismaAuditEvent(tx, event);
   }
 
-  async getCatalog() {
+  async getCatalog(input?: { unitId?: string }) {
+    const unitId = input?.unitId;
     const [services, professionals, clients, products] = await Promise.all([
-      this.prisma.service.findMany({ orderBy: { name: "asc" } }),
+      this.prisma.service.findMany({
+        where: unitId ? { businessId: unitId } : undefined,
+        orderBy: { name: "asc" },
+      }),
       this.prisma.professional.findMany({
-        where: { active: true },
+        where: { active: true, ...(unitId ? { businessId: unitId } : {}) },
         include: { commissionRules: true },
         orderBy: { name: "asc" },
       }),
-      this.prisma.client.findMany({ orderBy: { fullName: "asc" } }),
-      this.prisma.product.findMany({ orderBy: { name: "asc" } }),
+      this.prisma.client.findMany({
+        where: unitId ? { businessId: unitId } : undefined,
+        orderBy: { fullName: "asc" },
+      }),
+      this.prisma.product.findMany({
+        where: unitId ? { businessId: unitId } : undefined,
+        orderBy: { name: "asc" },
+      }),
     ]);
 
     return {
@@ -509,7 +519,7 @@ export class PrismaOperationsService {
     if (existing.length) return existing;
 
     const professionals = await this.prisma.professional.findMany({
-      where: { active: true },
+      where: { active: true, businessId: unitId },
       orderBy: { name: "asc" },
     });
     await this.prisma.teamMember.create({
@@ -1019,8 +1029,8 @@ export class PrismaOperationsService {
       throw new Error("Comissao percentual deve ficar entre 0 e 100");
     }
     if (input.professionalId) {
-      const existsProfessional = await this.prisma.professional.findUnique({
-        where: { id: input.professionalId },
+      const existsProfessional = await this.prisma.professional.findFirst({
+        where: { id: input.professionalId, businessId: input.unitId },
         select: { id: true },
       });
       if (!existsProfessional) throw new Error("Profissional nao encontrado");
@@ -1060,8 +1070,8 @@ export class PrismaOperationsService {
     });
     if (!current) throw new Error("Regra de comissao nao encontrada");
     if (input.professionalId != null && input.professionalId) {
-      const existsProfessional = await this.prisma.professional.findUnique({
-        where: { id: input.professionalId },
+      const existsProfessional = await this.prisma.professional.findFirst({
+        where: { id: input.professionalId, businessId: input.unitId },
         select: { id: true },
       });
       if (!existsProfessional) throw new Error("Profissional nao encontrado");
@@ -1246,7 +1256,7 @@ export class PrismaOperationsService {
     const enabledProfessionalIds = await this.getServiceProfessionalIds(service.id);
     const enabledProfessionalsRows = enabledProfessionalIds.length
       ? await this.prisma.professional.findMany({
-          where: { id: { in: enabledProfessionalIds } },
+          where: { id: { in: enabledProfessionalIds }, businessId: service.businessId },
           orderBy: { name: "asc" },
         })
       : [];
@@ -1396,7 +1406,7 @@ export class PrismaOperationsService {
       },
       professionals: (
         await this.prisma.professional.findMany({
-          where: { active: true },
+          where: { active: true, businessId: service.businessId },
           orderBy: { name: "asc" },
         })
       ).map((item) => ({
@@ -1458,7 +1468,7 @@ export class PrismaOperationsService {
     );
     if (professionalIds.length) {
       const professionals = await this.prisma.professional.findMany({
-        where: { id: { in: professionalIds }, active: true },
+        where: { id: { in: professionalIds }, businessId: input.unitId, active: true },
         select: { id: true },
       });
       if (professionals.length) {
@@ -1544,7 +1554,7 @@ export class PrismaOperationsService {
       const professionalIds = Array.from(new Set(input.professionalIds.map((item) => String(item))));
       const professionals = professionalIds.length
         ? await this.prisma.professional.findMany({
-            where: { id: { in: professionalIds }, active: true },
+            where: { id: { in: professionalIds }, businessId: input.unitId, active: true },
             select: { id: true },
           })
         : [];
@@ -2245,8 +2255,8 @@ export class PrismaOperationsService {
       throw new Error("Servico nao encontrado ou inativo");
     }
 
-    const professionalRow = await this.prisma.professional.findUnique({
-      where: { id: input.professionalId },
+    const professionalRow = await this.prisma.professional.findFirst({
+      where: { id: input.professionalId, businessId: input.unitId },
       include: { commissionRules: true },
     });
     if (!professionalRow || !professionalRow.active) {
@@ -2698,8 +2708,8 @@ export class PrismaOperationsService {
 
     let professional: Professional | undefined;
     if (input.professionalId) {
-      const row = await this.prisma.professional.findUnique({
-        where: { id: input.professionalId },
+      const row = await this.prisma.professional.findFirst({
+        where: { id: input.professionalId, businessId: input.unitId },
         include: { commissionRules: true },
       });
       if (!row) throw new Error("Profissional nao encontrado");
@@ -4191,7 +4201,7 @@ export class PrismaOperationsService {
     const [professionals, customers] = await Promise.all([
       professionalIds.length
         ? this.prisma.professional.findMany({
-            where: { id: { in: professionalIds } },
+            where: { id: { in: professionalIds }, businessId: input.unitId },
             select: { id: true, name: true },
           })
         : Promise.resolve([]),
@@ -5653,7 +5663,7 @@ export class PrismaOperationsService {
     if (name.length < 2) throw new Error("Nome do profissional deve ter ao menos 2 caracteres");
     const { randomUUID } = await import("node:crypto");
     const professional = await this.prisma.professional.create({
-      data: { id: randomUUID(), name, active: true },
+      data: { id: randomUUID(), businessId: input.unitId, name, active: true },
     });
     return { professional: { id: professional.id, name: professional.name, active: professional.active } };
   }
@@ -5667,6 +5677,7 @@ export class PrismaOperationsService {
     const professionals = await this.prisma.professional.findMany({
       where: {
         active: true,
+        businessId: input.unitId,
         ...(input.professionalId ? { id: input.professionalId } : {}),
       },
       select: {
@@ -6069,7 +6080,7 @@ export class PrismaOperationsService {
 
     const [professionals, appointments, commissionsByProfessional] = await Promise.all([
       this.prisma.professional.findMany({
-        where: { active: true },
+        where: { active: true, businessId: input.unitId },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       }),
@@ -6269,7 +6280,7 @@ export class PrismaOperationsService {
         },
       }),
       this.prisma.professional.findMany({
-        where: { id: { in: professionalIds } },
+        where: { id: { in: professionalIds }, businessId: input.unitId },
         select: { id: true, name: true },
       }),
     ]);
@@ -8253,7 +8264,7 @@ export class PrismaOperationsService {
       this.prisma.service.findFirst({
         where: { id: nextServiceId, businessId: current.unitId },
       }),
-      this.prisma.professional.findUnique({ where: { id: nextProfessionalId } }),
+      this.prisma.professional.findFirst({ where: { id: nextProfessionalId, businessId: current.unitId } }),
       this.prisma.client.findFirst({
         where: { id: nextClientId, businessId: current.unitId },
       }),
@@ -8375,12 +8386,12 @@ export class PrismaOperationsService {
     windowHours?: number;
   }) {
     const [serviceRow, professionalRow] = await Promise.all([
-      this.prisma.service.findUnique({
-        where: { id: input.serviceId },
+      this.prisma.service.findFirst({
+        where: { id: input.serviceId, businessId: input.unitId },
         select: { id: true, active: true, durationMin: true },
       }),
-      this.prisma.professional.findUnique({
-        where: { id: input.professionalId },
+      this.prisma.professional.findFirst({
+        where: { id: input.professionalId, businessId: input.unitId },
         select: { id: true, active: true },
       }),
     ]);
@@ -8634,7 +8645,7 @@ export class PrismaOperationsService {
         },
       }),
       this.prisma.professional.findMany({
-        where: { active: true },
+        where: { active: true, businessId: input.unitId },
         select: { id: true, name: true },
       }),
       this.prisma.appointment.findMany({
@@ -9337,7 +9348,7 @@ export class PrismaOperationsService {
           },
         }),
         this.prisma.professional.findMany({
-          where: { active: true },
+          where: { active: true, businessId: input.unitId },
           select: { id: true, name: true },
         }),
       ]);
