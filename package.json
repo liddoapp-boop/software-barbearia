@@ -16,6 +16,7 @@
     "db:deploy": "prisma migrate deploy",
     "deploy": "npm run build && npx prisma generate && npx prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:demo": "tsx prisma/demo-seed.ts",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "test:db": "cross-env RUN_DB_TESTS=1 DATA_BACKEND=prisma vitest run tests/db.integration.spec.ts",
