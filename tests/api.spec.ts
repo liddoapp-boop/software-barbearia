@@ -1903,7 +1903,7 @@ describe("API MVP", () => {
       url: "/audit/events?unitId=unit-01",
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(auditAsReception.statusCode).toBe(200);
+    expect(auditAsReception.statusCode).toBe(403);
 
     const audit = await app.inject({
       method: "GET",
@@ -3801,33 +3801,145 @@ describe("API MVP", () => {
     process.env.AUTH_ENFORCED = "false";
   });
 
-  it("autentica e retorna identidade em /auth/me", async () => {
+  it("mantem fluxo publico de agendamento sem exigir login", async () => {
     process.env.DATA_BACKEND = "memory";
     process.env.AUTH_ENFORCED = "true";
     const app = createApp();
 
-    const login = await app.inject({
+    const favicon = await app.inject({
+      method: "GET",
+      url: "/favicon.ico",
+    });
+    expect(favicon.statusCode).toBe(204);
+
+    const services = await app.inject({
+      method: "GET",
+      url: "/public/services?unitId=unit-01",
+      headers: { authorization: "Bearer token-invalido" },
+    });
+    expect(services.statusCode).toBe(200);
+    expect(services.json()[0].durationMinutes).toBeGreaterThan(0);
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      headers: { authorization: "Bearer token-invalido" },
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Publico",
+        clientPhone: "(11) 97777-6666",
+        clientEmail: "",
+        serviceId: "svc-corte",
+        startsAt: "2026-06-05T19:00:00.000Z",
+      },
+    });
+
+    expect(booking.statusCode).toBe(201);
+    expect(booking.json().id).toBeTruthy();
+
+    const secondBooking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      headers: { authorization: "Bearer token-invalido" },
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Publico",
+        clientPhone: "(11) 97777-6666",
+        serviceId: "svc-barba",
+        startsAt: "2026-06-07T13:00:00.000Z",
+      },
+    });
+
+    expect(secondBooking.statusCode).toBe(201);
+    expect(secondBooking.json().id).toBeTruthy();
+    expect(secondBooking.json().id).not.toBe(booking.json().id);
+    process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("autentica e preserva perfis em /auth/me", async () => {
+    process.env.DATA_BACKEND = "memory";
+    process.env.AUTH_ENFORCED = "true";
+    const app = createApp();
+
+    for (const credentials of [
+      { email: "owner@barbearia.local", password: "owner123", role: "owner" },
+      { email: "recepcao@barbearia.local", password: "recepcao123", role: "recepcao" },
+      { email: "profissional@barbearia.local", password: "profissional123", role: "profissional" },
+    ]) {
+      const login = await app.inject({
+        method: "POST",
+        url: "/auth/login",
+        payload: {
+          email: credentials.email,
+          password: credentials.password,
+          activeUnitId: "unit-01",
+        },
+      });
+      expect(login.statusCode).toBe(200);
+      expect(login.json().user.role).toBe(credentials.role);
+      const token = login.json().accessToken as string;
+
+      const me = await app.inject({
+        method: "GET",
+        url: "/auth/me",
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+      });
+      expect(me.statusCode).toBe(200);
+      expect(me.json().user.role).toBe(credentials.role);
+      expect(me.json().user.activeUnitId).toBe("unit-01");
+    }
+    process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("nao promove role invalida para owner em usuarios configurados", async () => {
+    const previousUsersJson = process.env.AUTH_USERS_JSON;
+    process.env.DATA_BACKEND = "memory";
+    process.env.AUTH_ENFORCED = "true";
+    process.env.AUTH_USERS_JSON = JSON.stringify([
+      {
+        id: "usr-invalid-role",
+        email: "invalid-role@barbearia.local",
+        password: "invalid123",
+        role: "gerente",
+        unitIds: ["unit-01"],
+      },
+      {
+        id: "usr-valid-owner",
+        email: "valid-owner@barbearia.local",
+        password: "owner123",
+        role: "owner",
+        unitIds: ["unit-01"],
+      },
+    ]);
+    const app = createApp();
+
+    const invalidLogin = await app.inject({
       method: "POST",
       url: "/auth/login",
       payload: {
-        email: "owner@barbearia.local",
+        email: "invalid-role@barbearia.local",
+        password: "invalid123",
+        activeUnitId: "unit-01",
+      },
+    });
+    expect(invalidLogin.statusCode).toBe(401);
+
+    const ownerLogin = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: {
+        email: "valid-owner@barbearia.local",
         password: "owner123",
         activeUnitId: "unit-01",
       },
     });
-    expect(login.statusCode).toBe(200);
-    const token = login.json().accessToken as string;
+    expect(ownerLogin.statusCode).toBe(200);
+    expect(ownerLogin.json().user.role).toBe("owner");
 
-    const me = await app.inject({
-      method: "GET",
-      url: "/auth/me",
-      headers: {
-        authorization: `Bearer ${token}`,
-      },
-    });
-    expect(me.statusCode).toBe(200);
-    expect(me.json().user.role).toBe("owner");
-    expect(me.json().user.activeUnitId).toBe("unit-01");
+    if (previousUsersJson == null) delete process.env.AUTH_USERS_JSON;
+    else process.env.AUTH_USERS_JSON = previousUsersJson;
     process.env.AUTH_ENFORCED = "false";
   });
 
@@ -3856,6 +3968,94 @@ describe("API MVP", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("bloqueia probes reais de RBAC em rotas sensiveis", async () => {
+    process.env.DATA_BACKEND = "memory";
+    process.env.AUTH_ENFORCED = "true";
+    const app = createApp();
+    const ownerToken = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+    const receptionToken = await loginAs(app, {
+      email: "recepcao@barbearia.local",
+      password: "recepcao123",
+      activeUnitId: "unit-01",
+    });
+    const professionalToken = await loginAs(app, {
+      email: "profissional@barbearia.local",
+      password: "profissional123",
+      activeUnitId: "unit-01",
+    });
+
+    const base = "unitId=unit-01&start=2026-04-01T00:00:00.000Z&end=2026-04-30T23:59:59.999Z";
+    const ownerUsers = await app.inject({
+      method: "GET",
+      url: "/users?unitId=unit-01",
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(ownerUsers.statusCode).toBe(200);
+
+    const professionalUsers = await app.inject({
+      method: "GET",
+      url: "/users?unitId=unit-01",
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(professionalUsers.statusCode).toBe(403);
+
+    const ownerAudit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01",
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(ownerAudit.statusCode).toBe(200);
+
+    const receptionAudit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01",
+      headers: { authorization: `Bearer ${receptionToken}` },
+    });
+    expect(receptionAudit.statusCode).toBe(403);
+
+    const professionalAudit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01",
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(professionalAudit.statusCode).toBe(403);
+
+    const ownerSettings = await app.inject({
+      method: "GET",
+      url: "/settings?unitId=unit-01",
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(ownerSettings.statusCode).toBe(200);
+
+    const professionalSettings = await app.inject({
+      method: "GET",
+      url: "/settings?unitId=unit-01",
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(professionalSettings.statusCode).toBe(403);
+
+    const ownerFinancialReport = await app.inject({
+      method: "GET",
+      url: `/reports/management/financial?${base}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(ownerFinancialReport.statusCode).toBe(200);
+
+    const professionalFinancialReport = await app.inject({
+      method: "GET",
+      url: `/reports/management/financial?${base}`,
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(professionalFinancialReport.statusCode).toBe(403);
+    expect(professionalFinancialReport.json().error).toBe("Acesso negado");
+
     process.env.AUTH_ENFORCED = "false";
   });
 
@@ -3942,14 +4142,28 @@ describe("API MVP", () => {
         paidAt: "2026-04-26T11:00:00.000Z",
       },
     });
-    expect(receptionPay.statusCode).toBe(200);
+    expect(receptionPay.statusCode).toBe(403);
+
+    const professionalPay = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${pending.id}/pay`,
+      headers: {
+        authorization: `Bearer ${professionalToken}`,
+        "idempotency-key": "permissions-professional-pay",
+      },
+      payload: {
+        unitId: "unit-01",
+        paidAt: "2026-04-26T11:01:00.000Z",
+      },
+    });
+    expect(professionalPay.statusCode).toBe(403);
 
     const professionalFinancial = await app.inject({
       method: "GET",
       url: "/financial/summary?unitId=unit-01&start=2026-04-26T00:00:00.000Z&end=2026-04-26T23:59:59.999Z",
       headers: { authorization: `Bearer ${professionalToken}` },
     });
-    expect(professionalFinancial.statusCode).toBe(200);
+    expect(professionalFinancial.statusCode).toBe(403);
 
     const ownerPay = await app.inject({
       method: "PATCH",
@@ -4151,14 +4365,21 @@ describe("API MVP", () => {
       url: `/reports/management/summary?${base}`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(summaryAsReception.statusCode).toBe(200);
+    expect(summaryAsReception.statusCode).toBe(403);
 
     const auditAsReception = await app.inject({
       method: "GET",
       url: `/reports/management/audit?${base}`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(auditAsReception.statusCode).toBe(200);
+    expect(auditAsReception.statusCode).toBe(403);
+
+    const auditAsProfessional = await app.inject({
+      method: "GET",
+      url: `/reports/management/audit?${base}`,
+      headers: { authorization: `Bearer ${professionalToken}` },
+    });
+    expect(auditAsProfessional.statusCode).toBe(403);
 
     const auditAsOwner = await app.inject({
       method: "GET",
@@ -4172,22 +4393,29 @@ describe("API MVP", () => {
       url: `/reports/management/export.csv?${base}&type=audit`,
       headers: { authorization: `Bearer ${receptionToken}` },
     });
-    expect(auditExportAsReception.statusCode).toBe(200);
+    expect(auditExportAsReception.statusCode).toBe(403);
 
     const financialExportAsProfessional = await app.inject({
       method: "GET",
       url: `/reports/management/export.csv?${base}&type=financial`,
       headers: { authorization: `Bearer ${professionalToken}` },
     });
-    expect(financialExportAsProfessional.statusCode).toBe(200);
+    expect(financialExportAsProfessional.statusCode).toBe(403);
 
     const appointmentsExportAsProfessional = await app.inject({
       method: "GET",
       url: `/reports/management/export.csv?${base}&type=appointments`,
       headers: { authorization: `Bearer ${professionalToken}` },
     });
-    expect(appointmentsExportAsProfessional.statusCode).toBe(200);
-    expect(appointmentsExportAsProfessional.headers["content-type"]).toContain("text/csv");
+    expect(appointmentsExportAsProfessional.statusCode).toBe(403);
+
+    const financialExportAsOwner = await app.inject({
+      method: "GET",
+      url: `/reports/management/export.csv?${base}&type=financial`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(financialExportAsOwner.statusCode).toBe(200);
+    expect(financialExportAsOwner.headers["content-type"]).toContain("text/csv");
 
     const crossUnit = await app.inject({
       method: "GET",

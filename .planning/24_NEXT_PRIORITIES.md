@@ -1,3 +1,27 @@
+## Atualizacao 2026-06-06 (Fase 0.9.4 - Correcao critica de RBAC)
+- Criado `.planning/98_CORRECAO_RBAC_PERMISSOES.md`.
+- Decisao final: aprovado localmente com ressalvas de ambiente.
+- Corrigida a falha critica em que roles declaradas na politica de rota nao eram aplicadas pelo `preHandler`.
+- Corrigida a promocao indevida de `recepcao` e `profissional` para `owner` em `normalizeUserRole()`.
+- Relatorios gerenciais, exportacao CSV, auditoria, configuracoes, usuarios, financeiro e pagamento de comissao agora possuem probes de bloqueio por perfil.
+- Validacoes locais passaram em build, suite completa e testes focados de API.
+- `smoke:api` ficou pendente neste Linux por ausencia de `powershell`.
+- `test:db` ficou pendente porque `DATABASE_URL` nao esta definido e nao ha banco isolado comprovado.
+
+Prioridade imediata:
+1. Reexecutar `npm.cmd run smoke:api` em ambiente com PowerShell ou ajustar o smoke para alternativa multiplataforma.
+2. Reexecutar `npm.cmd run test:db` apenas com `DATABASE_URL` local/isolado e proprio para teste.
+3. Rodar probes de RBAC no ambiente alvo real com `AUTH_ENFORCED=true`.
+4. Empacotar a correcao critica de RBAC em commit limpo, separando alteracoes pre-existentes do working tree.
+5. Manter release bloqueado ate smoke e DB terem evidencia no ambiente adequado.
+
+Nao priorizar agora:
+1. IA/WhatsApp.
+2. Novas features comerciais.
+3. Redesign ou mudancas de layout.
+4. Regras financeiras novas.
+5. Seed, migration destrutiva ou auditoria ampla fora do escopo.
+
 ## Atualizacao 2026-05-06 (Fase 1.22 - Execucao assistida no host interno real)
 - Criado `.planning/122_EXECUCAO_ASSISTIDA_HOST_INTERNO_REAL.md`.
 - Decisao final: bloqueado para release controlado interno real.

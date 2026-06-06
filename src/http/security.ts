@@ -31,6 +31,10 @@ export type AuthUser = {
   unitIds: string[];
 };
 
+function isUserRole(value: unknown): value is UserRole {
+  return value === "owner" || value === "recepcao" || value === "profissional";
+}
+
 const DEFAULT_USERS: AuthUser[] = [
   {
     id: "usr-owner",
@@ -241,6 +245,10 @@ export function verifyAccessToken(token: string): AuthSession {
   }
 
   if (!Array.isArray(payload.unitIds) || payload.unitIds.length === 0) {
+    throw new Error("Token invalido");
+  }
+
+  if (!isUserRole(payload.role)) {
     throw new Error("Token invalido");
   }
 

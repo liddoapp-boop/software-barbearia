@@ -56,7 +56,13 @@ function asRecord(input: unknown): Record<string, unknown> | null {
 }
 
 function routePattern(request: FastifyRequest) {
-  return request.routeOptions.url ?? "";
+  const configuredRoute = request.routeOptions.url;
+  if (configuredRoute) return configuredRoute;
+  try {
+    return new URL(request.url, "http://localhost").pathname;
+  } catch {
+    return "";
+  }
 }
 
 function getIdempotencyKey(request: FastifyRequest, bodyKey?: string) {
@@ -202,6 +208,7 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
     route === "/agendamento" ||
     route === "/login.html" ||
     route === "/booking.html" ||
+    route === "/favicon.ico" ||
     route === "/*"
   ) {
     return { isPublic: true };
@@ -240,16 +247,13 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/reports/management/financial" || route === "/reports/management/summary") {
     return { isPublic: false, roles: ["owner"], unitSource: "query" };
   }
-  if (route === "/reports/management/product-sales") {
-    return { isPublic: false, roles: ["owner", "recepcao"], unitSource: "query" };
-  }
   if (route === "/reports/management/export.csv") {
-    return { isPublic: false, roles: ["owner", "recepcao", "profissional"], unitSource: "query" };
+    return { isPublic: false, roles: ["owner"], unitSource: "query" };
   }
   if (route.startsWith("/reports/management/")) {
     return {
       isPublic: false,
-      roles: ["owner", "recepcao", "profissional"],
+      roles: ["owner"],
       unitSource: "query",
     };
   }
@@ -367,8 +371,8 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
 
 function normalizeUserRole(value: unknown): UserRole {
   const role = String(value ?? "").trim().toLowerCase();
-  if (role === "owner" || role === "recepcao" || role === "profissional") return "owner";
-  return "owner";
+  if (role === "owner" || role === "recepcao" || role === "profissional") return role;
+  throw new Error("Perfil de usuario invalido");
 }
 
 async function countPersistentUsers() {
@@ -597,6 +601,10 @@ export function createApp() {
   app.register(fastifyStatic, {
     root: path.join(process.cwd(), "public"),
     prefix: "/",
+  });
+
+  app.get("/favicon.ico", async (_request, reply) => {
+    reply.status(204).send();
   });
 
   const auditRecorder = new AuditRecorder({
@@ -1652,6 +1660,20 @@ export function createApp() {
       return;
     }
 
+    if (policy.roles && !policy.roles.includes(req.auth.role)) {
+      app.log.warn({
+        event: "auth.denied",
+        reason: "role_not_allowed",
+        method,
+        route,
+        requestId: req.correlationId,
+        userId: req.auth.userId,
+        role: req.auth.role,
+        allowedRoles: policy.roles,
+      });
+      throw new Error("Acesso negado");
+    }
+
     if (policy.unitSource) {
       const target = policy.unitSource === "query" ? request.query : request.body;
       const record = asRecord(target);
@@ -1742,7 +1764,10 @@ export function createApp() {
   }
 
   function assertManagementReportAccess(request: FastifyRequest, type: ReportExportType) {
-    void request;
+    const req = request as RequestWithAuth;
+    if (req.auth && req.auth.role !== "owner") {
+      throw new Error("Acesso negado");
+    }
     void type;
   }
 
@@ -4154,10 +4179,48 @@ export function createApp() {
           durationMin: true,
         },
       });
-      return services.map((s) => ({ ...s, price: Number(s.price) }));
+      return services.map((s) => ({
+        ...s,
+        price: Number(s.price),
+        durationMinutes: s.durationMin,
+      }));
     }
     const result = await operations.getServices({ unitId, status: "ACTIVE" });
-    return (result.services ?? []);
+    return (result.services ?? []).map((service: any) => ({
+      ...service,
+      durationMinutes: service.durationMinutes ?? service.durationMin ?? service.duration,
+    }));
+  });
+
+  app.get("/public/business", async (request) => {
+    const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
+    const unitId = publicUnitId(query.unitId);
+    if (backend === "prisma") {
+      const settings = await prisma.businessSettings.findUnique({
+        where: { unitId },
+        select: { businessName: true, displayName: true, segment: true },
+      });
+      const fallbackName = (await prisma.unit.findUnique({
+        where: { id: unitId },
+        select: { name: true },
+      }))?.name ?? "Agendamento";
+      return {
+        name: settings?.displayName?.trim() || settings?.businessName?.trim() || fallbackName,
+        segment: settings?.segment ?? null,
+      };
+    }
+    let settings: unknown = null;
+    try {
+      settings = await operations.getBusinessSettings({ unitId });
+    } catch (_) {
+      settings = null;
+    }
+    const business = (settings as { business?: { displayName?: string; businessName?: string; segment?: string } } | null)?.business
+      ?? (settings as { displayName?: string; businessName?: string; segment?: string } | null);
+    return {
+      name: business?.displayName?.trim() || business?.businessName?.trim() || "Agendamento",
+      segment: business?.segment ?? null,
+    };
   });
 
   app.get("/public/working-hours", async (request) => {
@@ -4263,7 +4326,10 @@ export function createApp() {
   const publicBookingSchema = z.object({
     clientName: z.string().min(2).max(120),
     clientPhone: z.string().min(8).max(20),
-    clientEmail: z.string().email().optional(),
+    clientEmail: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().email().optional(),
+    ),
     serviceId: z.string().min(1),
     startsAt: z.string().datetime(),
     unitId: z.string().min(1).optional(),

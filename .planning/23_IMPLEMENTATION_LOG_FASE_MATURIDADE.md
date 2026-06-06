@@ -1,3 +1,32 @@
+Data: 2026-06-06
+Escopo: Fase 0.9.4 - Correcao critica de RBAC, permissoes e relatorios sensiveis.
+
+## Entregas executadas
+1. Criado `.planning/98_CORRECAO_RBAC_PERMISSOES.md` com estado inicial do working tree, causa raiz, matriz final, validacoes e pendencias reais.
+2. Corrigido enforcement de `policy.roles` no `preHandler`, bloqueando perfis fora da politica da rota com `Acesso negado`.
+3. Corrigido `normalizeUserRole()` para preservar `owner`, `recepcao` e `profissional`, rejeitando roles invalidas sem promocao indevida.
+4. Reforcado `verifyAccessToken()` para validar roles carregadas em tokens.
+5. Relatorios gerenciais e exportacao CSV em `/reports/management/*` foram travados como owner-only.
+6. Testes de RBAC foram ampliados e corrigidos para usuarios, auditoria, configuracoes, financeiro, comissoes, relatorios gerenciais e exportacao CSV.
+7. Nenhuma feature de IA/WhatsApp, regra financeira nova, migration, seed, auditoria estrutural, deploy ou alteracao destrutiva foi implementada.
+
+## Validacao
+- `npx vitest run tests/api.spec.ts -t "autentica e preserva|role invalida|bloqueia probes|refina permissoes|preserva permissoes"`: passou (`5 passed`, `61 skipped`).
+- `npx vitest run tests/api.spec.ts`: passou (`66 passed`).
+- `npm run build`: passou.
+- `npm run test`: passou (`3 passed | 1 skipped`, `74 passed | 11 skipped`).
+- `npm run smoke:api`: bloqueado no ambiente Linux atual por ausencia de `powershell`.
+- `npm run test:db`: nao executado porque `DATABASE_URL` nao esta definido; nao ha banco local/isolado comprovado.
+
+## Resultado
+- Decisao da Fase 0.9.4: aprovado localmente com ressalvas de ambiente.
+- A falha critica de promocao/permissao foi corrigida para modo autenticado/enforced.
+- Release ainda exige reexecucao de smoke e teste DB em ambiente apropriado.
+
+Documento: `.planning/98_CORRECAO_RBAC_PERMISSOES.md`.
+
+---
+
 Data: 2026-05-06
 Escopo: Fase 1.23 - Polimento visual premium, consistencia UI e experiencia SaaS.
 
