@@ -1,3 +1,27 @@
+# Next Priorities
+
+## Atualizacao 2026-06-07 (Fase 0.9.8 - Reconciliacao worktree/commits)
+- Criado `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
+- Decisao final: aprovado para organizar commits, sem commit/push executado nesta fase.
+- Branch atual `main` esta `ahead 1` de `origin/main`; HEAD local e `7407bd1 fix: aplicar rbac e corrigir permissoes criticas`.
+- `.env` nao aparece no status; `.planning/README.md` nao tem diff; GitHub/origin ainda nao recebeu o commit local.
+- Alteracoes foram classificadas em grupos: 0.9.5 hardening producao/env/dependencias, 0.9.6 test:db/smoke, 0.9.7 XSS/localStorage e alteracoes antigas/preexistentes.
+- Validacoes passaram: `npm run build`, `npm run test`, `npm audit`, `npm audit --omit=dev`, `git diff --check`, smoke dev isolado e `npm run test:db`.
+
+Prioridade imediata:
+1. Organizar commits com staging seletivo por grupo de fase; nao usar `git add .`.
+2. Manter alteracoes antigas/preexistentes de frontend/servicos fora dos commits de hardening ate revisao separada.
+3. Enviar `7407bd1` e os novos commits ao origin somente apos autorizacao.
+4. Rodar smoke remoto no ambiente alvo real com credenciais de smoke validas.
+5. Planejar migracao de `authToken` em `localStorage` para cookie httpOnly/SameSite com mitigacao CSRF.
+
+Nao priorizar agora:
+1. IA/WhatsApp.
+2. Novas features comerciais.
+3. Redesign amplo.
+4. Seed/migration destrutiva.
+5. Deploy antes de commits organizados e smoke remoto autenticado.
+
 ## Atualizacao 2026-06-06 (Fase 0.9.4 - Correcao critica de RBAC)
 - Criado `.planning/98_CORRECAO_RBAC_PERMISSOES.md`.
 - Decisao final: aprovado localmente com ressalvas de ambiente.

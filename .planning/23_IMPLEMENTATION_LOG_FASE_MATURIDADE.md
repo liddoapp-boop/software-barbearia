@@ -1,3 +1,30 @@
+Data: 2026-06-07
+Escopo: Fase 0.9.8 - Reconciliacao do worktree, commits e documentacao real.
+
+## Entregas executadas
+1. Criado `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md` com estado Git/local/remoto, arquivos modificados e untracked, classificacao por origem provavel, grupos de commit sugeridos, riscos e decisao final.
+2. Confirmado que o branch atual e `main`, esta `ahead 1` de `origin/main` e HEAD local e `7407bd1 fix: aplicar rbac e corrigir permissoes criticas`.
+3. Confirmado que `.env` nao aparece no status, `.planning/README.md` nao tem diff e o origin ainda nao recebeu o commit local.
+4. Revalidado no codigo atual que RBAC owner-only, hardening de producao, guards de seed/test:db/smoke e mitigacoes XSS/localStorage continuam presentes.
+5. Classificados os arquivos das Fases 0.9.5, 0.9.6, 0.9.7 e alteracoes antigas/preexistentes, com recomendacao de staging seletivo.
+6. Nenhum codigo de produto, regra de negocio, layout, seed, migration, `git add`, commit, push, revert ou delecao foi executado.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`83 passed | 11 skipped`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou sem saida.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: passou.
+- `npm run test:db`: passou (`11 passed`) contra `DATABASE_URL` local em `127.0.0.1` sem marcador obvio de producao.
+
+## Resultado
+- Decisao da Fase 0.9.8: aprovado para organizar commits.
+- Proxima etapa recomendada: criar commits por grupos de fase com staging seletivo; manter alteracoes antigas/preexistentes em revisao separada e nao usar `git add .`.
+
+Documento: `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
+
+---
 Data: 2026-06-06
 Escopo: Fase 0.9.4 - Correcao critica de RBAC, permissoes e relatorios sensiveis.
 
