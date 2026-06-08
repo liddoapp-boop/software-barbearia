@@ -12,6 +12,7 @@
           var p = JSON.parse(atob(t.split(".")[1]));
           if (p.exp && p.exp < Date.now() / 1000) {
             localStorage.removeItem("authToken");
+            localStorage.removeItem("sb.authSession");
             window.location.replace("/login");
           }
         } catch (_) {}

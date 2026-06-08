@@ -207,10 +207,18 @@
       }
 
       function persistSession(data) {
+        const user = data.user || {};
         localStorage.setItem("sb.authSession", JSON.stringify({
           accessToken: data.accessToken,
           expiresAt: data.expiresAt,
-          user: data.user,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            activeUnitId: user.activeUnitId,
+            unitIds: Array.isArray(user.unitIds) ? user.unitIds : [],
+          },
         }));
         localStorage.setItem("authToken", data.accessToken);
       }

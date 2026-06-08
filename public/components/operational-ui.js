@@ -1,3 +1,14 @@
+import { escapeHtml } from "../modules/sanitize.js";
+
+export {
+  escapeHtml,
+  safeAttr,
+  safeCurrency,
+  safeDate,
+  safeNumber,
+  safeText,
+} from "../modules/sanitize.js";
+
 const STATUS_MAP = {
   INFO: ["Informativo", "info"],
   WARNING: ["Atencao", "warning"],
@@ -45,15 +56,6 @@ const STATUS_MAP = {
   AT_RISK: ["Em risco", "warning"],
   EM_RISCO: ["Em risco", "warning"],
 };
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
 
 function attrsToString(attrs = {}) {
   return Object.entries(attrs)

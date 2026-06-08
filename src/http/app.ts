@@ -129,6 +129,21 @@ function getAllowedCorsOrigins() {
   return allowedOrigins.length ? allowedOrigins : values;
 }
 
+function getContentSecurityPolicy() {
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://unpkg.com https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: https:",
+    "connect-src 'self' https:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}
+
 const DEFAULT_WORKING_HOURS = {
   timezone: "America/Sao_Paulo",
   weekly: [
@@ -647,6 +662,12 @@ export function createApp() {
   app.register(fastifyStatic, {
     root: path.join(process.cwd(), "public"),
     prefix: "/",
+  });
+
+  app.addHook("onRequest", async (_request, reply) => {
+    reply.header("Content-Security-Policy", getContentSecurityPolicy());
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
   });
 
   app.get("/favicon.ico", async (_request, reply) => {

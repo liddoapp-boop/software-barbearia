@@ -28,6 +28,22 @@ describe("API MVP", () => {
     process.env.AUTH_ENFORCED = "false";
   });
 
+  it("envia headers minimos de seguranca para reduzir impacto de XSS", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/health",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    expect(String(response.headers["content-security-policy"])).toContain("object-src 'none'");
+    expect(String(response.headers["content-security-policy"])).toContain("base-uri 'self'");
+  });
+
   it("executa fluxo de agendamento ate conclusao com receita", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();

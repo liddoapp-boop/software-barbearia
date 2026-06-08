@@ -736,7 +736,7 @@ function renderWorkingHoursBlock() {
   const items = publicWorkingHours.map((row) => {
     const label = labels[row.day] || row.day;
     const value = row.isClosed ? 'Fechado' : `${row.start} - ${row.end}`;
-    return `<div class="booking-hours-item"><strong>${label}:</strong> ${value}</div>`;
+    return `<div class="booking-hours-item"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</div>`;
   }).join('');
   return `
     <section class="booking-hours" aria-label="Horarios de atendimento da semana">
@@ -758,12 +758,13 @@ const AV = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wi
 function appendBubble(html, isUser = false) {
   const row = document.createElement('div');
   row.className = 'row' + (isUser ? ' user' : '');
+  const content = isUser ? escapeHtml(html) : html;
   row.innerHTML = isUser
-    ? `<div class="bub user">${html}</div>`
-    : `<div class="bub">${html}</div>`;
+    ? `<div class="bub user">${content}</div>`
+    : `<div class="bub">${content}</div>`;
   chat.appendChild(row);
   scrollEnd();
-  liveRgn.textContent = html.replace(/<[^>]+>/g, '');
+  liveRgn.textContent = String(html).replace(/<[^>]+>/g, '');
   return row;
 }
 
@@ -824,7 +825,7 @@ async function handleSend() {
     const name = raw.replace(/[<>&]/g, '');
     appendBubble(name, true);
     setClient({ name });
-    await say(`Prazer, <strong>${name}</strong>! Qual é o seu WhatsApp com DDD?`);
+    await say(`Prazer, <strong>${escapeHtml(name)}</strong>! Qual é o seu WhatsApp com DDD?`);
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
     const _sp = getClient().phone;
@@ -883,17 +884,21 @@ const IMG_PH = `<svg class="svc-img-icon" viewBox="0 0 24 24" fill="none" stroke
 
 function renderServices() {
   const cards = services.map((s, i) => {
+    const safeName = escapeHtml(s.name);
+    const safeId = escapeHtml(s.id);
+    const safeImageUrl = escapeHtml(s.imageUrl);
+    const safeDuration = escapeHtml(s.duration);
     const hasImg = s.imageUrl && s.imageUrl.length > 0;
     return `<div class="svc-card" role="button" tabindex="0"
-      aria-label="${s.name}, ${fmtBRL(s.price)}, ${s.duration} minutos"
-      data-id="${s.id}" style="animation-delay:${i*.04}s">
+      aria-label="${safeName}, ${fmtBRL(s.price)}, ${safeDuration} minutos"
+      data-id="${safeId}" style="animation-delay:${i*.04}s">
       <div class="svc-img">
-        ${hasImg ? `<img src="${s.imageUrl}" alt="${s.name}" loading="lazy" onerror="this.parentNode.innerHTML='${IMG_PH.replace(/"/g,"'")}'">` : IMG_PH}
+        ${hasImg ? `<img src="${safeImageUrl}" alt="${safeName}" loading="lazy" onerror="this.parentNode.innerHTML='${IMG_PH.replace(/"/g,"'")}'">` : IMG_PH}
       </div>
       <div class="svc-body">
-        <div class="svc-name">${s.name}</div>
+        <div class="svc-name">${safeName}</div>
         <div class="svc-price">${fmtBRL(s.price)}</div>
-        <div class="svc-dur">${s.duration} min</div>
+        <div class="svc-dur">${safeDuration} min</div>
       </div>
     </div>`;
   }).join('');
@@ -914,7 +919,7 @@ async function onPickService(id) {
   if (!svc) return;
   selectedService = svc;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
-  await say(`<strong>${svc.name}</strong> — ótima escolha! Selecione uma data:`, 400);
+  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Selecione uma data:`, 400);
   step = STEPS.CALENDAR;
   await loadCalendar();
 }
@@ -1035,7 +1040,7 @@ function onPickDay(key) {
   } else {
     const all = [...avail,...taken].sort((a,b) => a.time.localeCompare(b.time));
     grid.innerHTML = all.map(s =>
-      `<button class="slot-btn${s.available===false?' taken':''}" data-time="${s.time}">${s.time}</button>`
+      `<button class="slot-btn${s.available===false?' taken':''}" data-time="${escapeHtml(s.time)}">${escapeHtml(s.time)}</button>`
     ).join('');
     grid.querySelectorAll('.slot-btn:not(.taken)').forEach(b => b.addEventListener('click', () => onPickSlot(b.dataset.time)));
   }
@@ -1069,10 +1074,10 @@ async function showConfirm() {
   await say('Confirme seu agendamento:', 400);
   const w = appendWidget(`
     <div class="confirm-card">
-      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${confirmData.serviceName}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${dateStr}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${confirmData.time}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${confirmData.duration} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(confirmData.serviceName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(dateStr)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
       <button class="btn-confirm" id="btnConfirm" aria-label="Confirmar agendamento">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
@@ -1098,7 +1103,7 @@ async function submitBooking() {
     if (!r.ok) throw 0;
     saveAppt({ id:Date.now(), service:confirmData.serviceName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
     step = STEPS.DONE;
-    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">Até ${confirmData.time} — ${confirmData.dateStr}.</span>`);
+    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">Até ${escapeHtml(confirmData.time)} — ${escapeHtml(confirmData.dateStr)}.</span>`);
     await say('Para agendar novamente, é só me chamar. 😊', 800);
   } catch {
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar Novamente`; }
@@ -1120,9 +1125,9 @@ function openSheet() {
   sheetBody.innerHTML = appts.length === 0
     ? `<p style="color:var(--tx2);font-size:14px;text-align:center;padding:40px 0">Nenhum agendamento ainda.</p>`
     : appts.map(a => `<div class="appt-item">
-        <div class="appt-svc">${a.service}</div>
-        <div class="appt-meta">${a.date} &bull; ${a.time}</div>
-        <div class="appt-price">${a.price}</div>
+        <div class="appt-svc">${escapeHtml(a.service)}</div>
+        <div class="appt-meta">${escapeHtml(a.date)} &bull; ${escapeHtml(a.time)}</div>
+        <div class="appt-price">${escapeHtml(a.price)}</div>
         <span class="appt-badge ${a.status==='pending'?'pending':'done'}">${a.status==='pending'?'Pendente':'Concluído'}</span>
       </div>`).join('');
   sheet.classList.add('open'); overlay.classList.add('open');
@@ -1146,9 +1151,9 @@ function showVerifyCard(c) {
   disableInput();
   const w = appendWidget(`
     <div class="verify-card">
-      <div class="verify-row"><span class="verify-lbl">Nome</span><span class="verify-val">${c.name}</span></div>
-      <div class="verify-row"><span class="verify-lbl">WhatsApp</span><span class="verify-val">${fmtPhone(c.phone)}</span></div>
-      ${c.email ? `<div class="verify-row"><span class="verify-lbl">E-mail</span><span class="verify-val">${c.email}</span></div>` : ''}
+      <div class="verify-row"><span class="verify-lbl">Nome</span><span class="verify-val">${escapeHtml(c.name)}</span></div>
+      <div class="verify-row"><span class="verify-lbl">WhatsApp</span><span class="verify-val">${escapeHtml(fmtPhone(c.phone))}</span></div>
+      ${c.email ? `<div class="verify-row"><span class="verify-lbl">E-mail</span><span class="verify-val">${escapeHtml(c.email)}</span></div>` : ''}
       <div class="verify-actions">
         <button class="btn-v-ok" id="btnVOk">Está correto, continuar</button>
         <button class="btn-v-alt" id="btnVAlt">Alterar dados</button>
@@ -1164,7 +1169,7 @@ function showVerifyCard(c) {
 
   w.querySelector('#btnVAlt').addEventListener('click', async () => {
     appendBubble('Quero alterar os dados', true);
-    await say(`Ok! Vamos atualizar. Qual é o seu nome? <span style="color:var(--tx3);font-size:13px">atual: ${c.name}</span>`, 400);
+    await say(`Ok! Vamos atualizar. Qual é o seu nome? <span style="color:var(--tx3);font-size:13px">atual: ${escapeHtml(c.name)}</span>`, 400);
     step = STEPS.NAME;
     enableInput('Seu nome…');
     chatInput.value = c.name;
@@ -1172,16 +1177,22 @@ function showVerifyCard(c) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
 /* ─ Init ─ */
 async function init() {
   const c = getClient();
   if (c.name && c.phone) {
-    await say(`Olá de novo, <strong>${c.name}</strong>! Que bom te ver. 👋`);
+    await say(`Olá de novo, <strong>${escapeHtml(c.name)}</strong>! Que bom te ver. 👋`);
     await say('Seus dados estão salvos. Confirme antes de continuar:', 400);
     step = STEPS.VERIFY;
     showVerifyCard(c);
   } else if (c.name) {
-    await say(`Olá, <strong>${c.name}</strong>! Qual é o seu WhatsApp com DDD?`);
+    await say(`Olá, <strong>${escapeHtml(c.name)}</strong>! Qual é o seu WhatsApp com DDD?`);
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
   } else {

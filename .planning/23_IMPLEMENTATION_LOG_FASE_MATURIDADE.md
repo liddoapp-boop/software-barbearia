@@ -26,6 +26,39 @@ Documento: `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
 
 ---
 Data: 2026-06-07
+Escopo: Fase 0.9.7 - Hardening XSS, localStorage e sanitizacao do frontend.
+
+## Entregas executadas
+1. Criado `.planning/101_HARDENING_XSS_LOCALSTORAGE_FRONTEND.md` com baseline Git, inventario de risco, decisoes, validacoes, limites e proximos passos.
+2. Criado helper central `public/modules/sanitize.js` e reexportado via `public/components/operational-ui.js`.
+3. Corrigido `public/modules/feedback.js` para escapar mensagens antes de renderizar `innerHTML`, reduzindo risco em erros de API.
+4. Aplicados escapes nos pontos de maior risco de `public/app.js`: busca de cliente, selects, checkout, estornos, devolucoes, historico/drawer de vendas, auditoria e feedbacks.
+5. Aplicados escapes no fluxo publico de `public/booking.html`: nome, servico, horarios, slots, confirmacao, historico local e mensagens de erro vindas do backend.
+6. `public/components/topbar.js` agora escapa label de modulo.
+7. `public/login.html` persiste payload menor de usuario em `localStorage`; `public/index.html` limpa sessao local ao detectar token expirado.
+8. Adicionados headers minimos de seguranca em `src/http/app.ts`: CSP compativel, `X-Content-Type-Options` e `Referrer-Policy`.
+9. Nenhuma migracao para cookie httpOnly foi feita nesta fase; risco de token em `localStorage` ficou documentado.
+10. Nenhuma IA/WhatsApp, feature comercial, regra financeira, migration, seed destrutivo ou redesign amplo foi implementado.
+
+## Validacao
+- `node --input-type=module --check` nos JS alterados e scripts inline alterados: passou.
+- `npm test -- --run tests/frontend-sanitize.spec.ts tests/api.spec.ts -t "frontend sanitize helpers|headers minimos"`: passou (`3 passed | 66 skipped`).
+- `npm run build`: passou.
+- `npm run test`: passou (`83 passed | 11 skipped`).
+- `npm audit --audit-level=moderate`: passou com 0 vulnerabilidades.
+- Probe `NODE_ENV=development DATA_BACKEND=memory app.inject('/app.js')`: passou, confirmando CSP e `nosniff` em asset estatico.
+- `DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: falhou cedo porque o ambiente atual estava production-like e exigiu credenciais explicitas; comportamento esperado.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: passou.
+- Porta `3334` verificada como fechada apos o smoke.
+
+## Resultado
+- Decisao da Fase 0.9.7: aprovado localmente para reducao de risco XSS/frontend.
+- Release/deploy continua bloqueado ate smoke remoto autenticado, ambiente real validado e decisao de auth por cookie httpOnly/SameSite.
+
+Documento: `.planning/101_HARDENING_XSS_LOCALSTORAGE_FRONTEND.md`.
+
+---
+Data: 2026-06-07
 Escopo: Fase 0.9.6 - Correcao da suite Prisma/test:db e smoke com ambiente isolado.
 
 ## Entregas executadas

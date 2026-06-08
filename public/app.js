@@ -126,6 +126,7 @@ import {
   renderReportsLoading,
 } from "./modules/relatorios.js";
 import {
+  escapeHtml,
   bindEntityDrawers,
   bindFilterBars,
   renderEmptyState,
@@ -1669,8 +1670,7 @@ function bindShellEvents() {
         return;
       }
       if (action === "logout") {
-        localStorage.removeItem("authToken");
-        localStorage.removeItem(STORAGE_AUTH_SESSION);
+        clearAuthSession();
         window.location.replace("/login");
       }
     });
@@ -2327,9 +2327,9 @@ function initClientSearch(clients) {
     ).slice(0, 8);
     if (!matches.length) { clientSearchDropdown.classList.add("hidden"); return; }
     clientSearchDropdown.innerHTML = matches.map(c =>
-      `<li class="cs-opt" data-id="${c.id}" data-name="${escapeHtml(c.fullName)}">
+      `<li class="cs-opt" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.fullName)}">
         <span class="cs-name">${escapeHtml(c.fullName)}</span>
-        ${c.phone ? `<span class="cs-phone">${c.phone}</span>` : ""}
+        ${c.phone ? `<span class="cs-phone">${escapeHtml(c.phone)}</span>` : ""}
       </li>`
     ).join("");
     clientSearchDropdown.querySelectorAll(".cs-opt").forEach(li => {
@@ -2346,10 +2346,6 @@ function initClientSearch(clients) {
     if (clientSearch && !clientSearch.contains(e.target) && !clientSearchDropdown.contains(e.target))
       clientSearchDropdown.classList.add("hidden");
   }, { once: false });
-}
-
-function escapeHtml(str) {
-  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 function money(value) {
@@ -2595,15 +2591,15 @@ function getWeekCalendarBounds() {
 
 function fillSelect(select, items, label, options = {}) {
   if (!select) return;
-  const blank = options.blankLabel ? `<option value="">${options.blankLabel}</option>` : "";
+  const blank = options.blankLabel ? `<option value="">${escapeHtml(options.blankLabel)}</option>` : "";
   select.innerHTML =
-    blank + items.map((item) => `<option value="${item.id}">${label(item)}</option>`).join("");
+    blank + items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join("");
 }
 
 function fillMultiSelect(select, items, label) {
   if (!select) return;
   select.innerHTML = items
-    .map((item) => `<option value="${item.id}">${label(item)}</option>`)
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`)
     .join("");
 }
 
@@ -3295,7 +3291,7 @@ function renderCheckoutProducts() {
   const list = modal.querySelector("#checkoutProductsList");
   if (!list) return;
   const productOptions = Object.values(productsById)
-    .map((item) => `<option value="${item.id}">${item.name} (Estoque: ${item.stockQty})</option>`)
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} (Estoque: ${escapeHtml(item.stockQty)})</option>`)
     .join("");
   if (!checkoutModalState.products.length) {
     list.innerHTML = `
@@ -3372,9 +3368,9 @@ function openCheckoutModal(appointment) {
   if (summary) {
     summary.innerHTML = `
       <dl class="checkout-summary-grid">
-        <div><dt>Cliente</dt><dd>${appointment.client}</dd></div>
-        <div><dt>Servico</dt><dd>${appointment.service}</dd></div>
-        <div><dt>Profissional</dt><dd>${appointment.professional}</dd></div>
+        <div><dt>Cliente</dt><dd>${escapeHtml(appointment.client)}</dd></div>
+        <div><dt>Servico</dt><dd>${escapeHtml(appointment.service)}</dd></div>
+        <div><dt>Profissional</dt><dd>${escapeHtml(appointment.professional)}</dd></div>
         <div><dt>Valor do servico</dt><dd>${Number(appointment.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd></div>
       </dl>
     `;
@@ -3426,7 +3422,7 @@ async function submitCheckoutModal(event) {
     if (!product || Number(item.quantity || 0) > stockQty) {
       if (feedback) {
         const name = product?.name || "produto";
-        feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Quantidade maior que o estoque para ${name}. Disponivel=${stockQty}.</p>`;
+        feedback.innerHTML = `<p class="panel-msg panel-msg-warning">Quantidade maior que o estoque para ${escapeHtml(name)}. Disponivel=${stockQty}.</p>`;
       }
       return;
     }
@@ -3449,7 +3445,7 @@ async function submitCheckoutModal(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao finalizar atendimento."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error.message || "Falha ao finalizar atendimento.")}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -3502,8 +3498,8 @@ function openAppointmentRefundModal(appointment) {
   const summary = modal.querySelector("#appointmentRefundSummary");
   if (summary) {
     summary.innerHTML = `
-      <div><strong>Cliente:</strong> ${appointment.client}</div>
-      <div><strong>Servico:</strong> ${appointment.service}</div>
+      <div><strong>Cliente:</strong> ${escapeHtml(appointment.client)}</div>
+      <div><strong>Servico:</strong> ${escapeHtml(appointment.service)}</div>
       <div><strong>Valor:</strong> ${Number(appointment.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
     `;
   }
@@ -3555,7 +3551,7 @@ async function submitAppointmentRefund(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao registrar estorno."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error.message || "Falha ao registrar estorno.")}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -3608,9 +3604,9 @@ function openProductRefundModal(sale) {
   const summary = modal.querySelector("#productRefundSummary");
   if (summary) {
     summary.innerHTML = `
-      <div><strong>Venda:</strong> ${sale.soldAtLabel || "Venda selecionada"}</div>
-      <div><strong>Total:</strong> ${sale.amount}</div>
-      <div><strong>Cliente:</strong> ${sale.clientLabel || "Nao vinculado"}</div>
+      <div><strong>Venda:</strong> ${escapeHtml(sale.soldAtLabel || "Venda selecionada")}</div>
+      <div><strong>Total:</strong> ${escapeHtml(sale.amount)}</div>
+      <div><strong>Cliente:</strong> ${escapeHtml(sale.clientLabel || "Nao vinculado")}</div>
     `;
   }
   const itemsRoot = modal.querySelector("#productRefundItems");
@@ -3621,11 +3617,11 @@ function openProductRefundModal(sale) {
       .map((item) => `
         <label class="ux-kpi" style="display:grid;grid-template-columns:1fr 120px;gap:8px;align-items:center">
           <span>
-            <strong class="ds-cell-primary">${item.name}</strong>
+            <strong class="ds-cell-primary">${escapeHtml(item.name)}</strong>
             <span class="ds-cell-secondary">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: R$ ${Number(item.unitPrice || 0).toFixed(2)}</span>
             <span class="ds-cell-secondary">Quantidade para devolver</span>
           </span>
-          <input data-product-refund-product="${item.productId}" type="number" min="0" max="${item.refundableQuantity ?? item.quantity}" step="1" value="0" class="ds-input" />
+          <input data-product-refund-product="${escapeHtml(item.productId)}" type="number" min="0" max="${Number(item.refundableQuantity ?? item.quantity ?? 0)}" step="1" value="0" class="ds-input" />
         </label>
       `)
       .join("");
@@ -3703,7 +3699,7 @@ async function submitProductRefund(event) {
     await loadAll();
   } catch (error) {
     if (feedback) {
-      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${error.message || "Falha ao registrar devolucao."}</p>`;
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error.message || "Falha ao registrar devolucao.")}</p>`;
     }
   } finally {
     if (submitBtn) submitBtn.disabled = false;
@@ -4729,7 +4725,7 @@ function showServiceEditPanel(service) {
         renderServiceDetailPanel();
       } catch (err) {
         const fb = servicesDrawerHost?.querySelector("#svcEditFeedback");
-        if (fb) fb.innerHTML = `<p class="svc-edit-error">${String(err.message || "Erro ao salvar").replace(/</g, "&lt;")}</p>`;
+        if (fb) fb.innerHTML = `<p class="svc-edit-error">${escapeHtml(err.message || "Erro ao salvar")}</p>`;
       }
     },
   });
@@ -4997,7 +4993,7 @@ function populateAuditActorFilter(events = []) {
     events.map((e) => e.actorEmail || e.actorId).filter(Boolean)
   )].sort();
   select.innerHTML = `<option value="">Todos os atores</option>` +
-    actors.map((a) => `<option value="${a}"${a === current ? " selected" : ""}>${a}</option>`).join("");
+    actors.map((a) => `<option value="${escapeHtml(a)}"${a === current ? " selected" : ""}>${escapeHtml(a)}</option>`).join("");
 }
 
 async function loadAuditEvents() {

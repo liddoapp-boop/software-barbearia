@@ -1,3 +1,5 @@
+import { escapeHtml } from "./sanitize.js";
+
 function toneClass(tone) {
   if (tone === "error") return "panel-msg-error";
   if (tone === "warning") return "panel-msg-warning";
@@ -6,7 +8,7 @@ function toneClass(tone) {
 }
 
 export function feedbackPanel(message, tone = "neutral") {
-  return `<div class="panel-msg ${toneClass(tone)}">${message}</div>`;
+  return `<div class="panel-msg ${toneClass(tone)}">${escapeHtml(message)}</div>`;
 }
 
 export function renderPanelMessage(element, message, tone = "neutral") {

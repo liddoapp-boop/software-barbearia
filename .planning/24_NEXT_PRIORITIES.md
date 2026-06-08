@@ -23,6 +23,31 @@ Nao priorizar agora:
 5. Deploy antes de commits organizados e smoke remoto autenticado.
 
 
+
+## Atualizacao 2026-06-07 (Fase 0.9.7 - Hardening XSS/localStorage/frontend)
+- Criado `.planning/101_HARDENING_XSS_LOCALSTORAGE_FRONTEND.md`.
+- Decisao final: aprovado localmente para reducao de risco XSS/frontend; release/deploy continua bloqueado.
+- Criado helper central `public/modules/sanitize.js` e reexport via `public/components/operational-ui.js`.
+- Escapes aplicados em feedbacks de erro, booking publico, checkout, estornos, devolucoes, historico/drawer de vendas, busca de cliente, selects e filtro de auditoria.
+- Headers minimos adicionados: CSP compativel, `X-Content-Type-Options: nosniff` e `Referrer-Policy: strict-origin-when-cross-origin`.
+- `localStorage` continua guardando JWT; payload de usuario persistido foi reduzido e limpeza de sessao foi reforcada.
+- `npm run build`, `npm run test`, syntax checks de frontend, smoke dev isolado e `npm audit --audit-level=moderate` passaram.
+
+Prioridade imediata:
+1. Definir e implementar migracao de auth para cookie httpOnly/SameSite com mitigacao CSRF.
+2. Remover scripts/styles inline e CDNs para permitir CSP mais forte sem `unsafe-inline`.
+3. Rodar smoke remoto no ambiente alvo real com `SMOKE_BASE_URL`, `SMOKE_UNIT_ID`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD` validos.
+4. Continuar centralizacao de helpers locais de escape nos modulos restantes, sem refatoracao ampla de `public/app.js`.
+5. Separar commits sem misturar alteracoes preexistentes do worktree; nao usar `git add .`.
+
+Nao priorizar agora:
+1. IA/WhatsApp.
+2. Novas features comerciais.
+3. Redesign ou mudancas visuais amplas.
+4. Regras financeiras novas.
+5. Deploy antes de smoke remoto autenticado e decisao de estrategia de token.
+
+
 ## Atualizacao 2026-06-07 (Fase 0.9.6 - Correcao test:db/smoke isolado)
 - Criado `.planning/100_CORRECAO_TESTDB_SMOKE_ISOLADO.md`.
 - Decisao final: aprovado localmente para `test:db` e smoke dev isolado; release/deploy continua bloqueado.
