@@ -1,3 +1,32 @@
+Data: 2026-06-08
+Escopo: Fase 0.9.9 - Auditoria das alteracoes preexistentes do Grupo E.
+
+## Entregas executadas
+1. Criado `.planning/103_AUDITORIA_GRUPO_E_ALTERACOES_PREEXISTENTES.md` com estado Git inicial, arquivos auditados, analise por arquivo, riscos, recomendacoes e decisao final.
+2. Confirmado branch `main`, `origin/main...HEAD = 0 behind / 2 ahead`, commits locais `2f31868` e `7407bd1` ainda nao enviados.
+3. Confirmado que `.env` nao aparece no status e `.planning/README.md` nao tem diff.
+4. Auditados arquivos Grupo E em frontend, CSS e servicos: sidebar, WhatsApp, agendamentos, configuracoes, financeiro, `public/app.js`, booking, operational UI e services memory/Prisma.
+5. Identificado que os servicos financeiros tiveram mudanca aditiva de resumo, sem alteracao de persistencia, checkout, venda, refund, idempotencia, tenant guard ou auditoria backend.
+6. Identificado risco P2 em mudancas visuais amplas e no `renderTechnicalTrace()` como no-op; requer decisao humana/fase propria antes de commit do Grupo E.
+7. Nenhum codigo de produto, regra de negocio, seed, migration, `git add`, commit, push, restore, reset ou delecao foi executado.
+
+## Validacao
+- `git diff --check`: passou.
+- `npm run build`: passou.
+- `npm run test`: passou (`83 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: passou.
+
+## Resultado
+- Decisao da Fase 0.9.9: aprovado com ressalvas.
+- Grupo E nao deve ser misturado com commits criticos de hardening.
+- Proxima etapa recomendada: fase/commit proprio para Grupo E, com validacao manual de Agenda mobile, Financeiro, PDV, Configuracoes, Booking publico e decisao explicita sobre `renderTechnicalTrace()`.
+
+Documento: `.planning/103_AUDITORIA_GRUPO_E_ALTERACOES_PREEXISTENTES.md`.
+
+---
 Data: 2026-06-07
 Escopo: Fase 0.9.8 - Reconciliacao do worktree, commits e documentacao real.
 

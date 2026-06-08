@@ -1,5 +1,29 @@
 # Next Priorities
 
+## Atualizacao 2026-06-08 (Fase 0.9.9 - Auditoria Grupo E)
+- Criado `.planning/103_AUDITORIA_GRUPO_E_ALTERACOES_PREEXISTENTES.md`.
+- Decisao final: aprovado com ressalvas.
+- Branch atual `main` esta `ahead 2` de `origin/main`; commits locais ainda nao enviados: `2f31868` e `7407bd1`.
+- `.env` nao aparece no status; `.planning/README.md` nao tem diff.
+- Grupo E auditado: frontend visual/responsivo, Financeiro, Booking publico, PDV, Configuracoes, WhatsApp UI, sidebar e services de resumo financeiro.
+- Nenhum P0/P1 aberto foi confirmado; riscos P2 exigem validacao manual e fase/commit proprio.
+- Validacoes passaram: `git diff --check`, `npm run build`, `npm run test`, `npm run test:db`, `npm audit`, `npm audit --omit=dev` e smoke dev isolado.
+
+Prioridade imediata:
+1. Nao usar `git add .`.
+2. Separar commits das fases 0.9.5, 0.9.6 e 0.9.7 antes de qualquer commit do Grupo E.
+3. Criar fase/commit proprio para Grupo E com validacao manual de Agenda mobile, Financeiro, PDV, Configuracoes, Booking publico e sidebar mobile.
+4. Decidir se `renderTechnicalTrace()` deve continuar oculto ou ser restaurado antes do commit.
+5. Adicionar teste focado para os novos campos de resumo financeiro se os services do Grupo E forem promovidos.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Deploy.
+3. Seed/migration destrutiva.
+4. Novas features comerciais.
+5. Misturar Grupo E com hardening critico.
+
+
 ## Atualizacao 2026-06-07 (Fase 0.9.8 - Reconciliacao worktree/commits)
 - Criado `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
 - Decisao final: aprovado para organizar commits, sem commit/push executado nesta fase.
@@ -21,7 +45,6 @@ Nao priorizar agora:
 3. Redesign amplo.
 4. Seed/migration destrutiva.
 5. Deploy antes de commits organizados e smoke remoto autenticado.
-
 
 
 ## Atualizacao 2026-06-07 (Fase 0.9.7 - Hardening XSS/localStorage/frontend)
