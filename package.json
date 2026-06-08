@@ -20,7 +20,8 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "test:db": "cross-env RUN_DB_TESTS=1 DATA_BACKEND=prisma vitest run tests/db.integration.spec.ts",
-    "smoke:api": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"
+    "smoke:api": "node scripts/smoke-api-flow.mjs",
+    "smoke:api:ps": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"
   },
   "keywords": [
     "barbearia",

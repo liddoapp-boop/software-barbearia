@@ -25,6 +25,35 @@ Escopo: Fase 0.9.8 - Reconciliacao do worktree, commits e documentacao real.
 Documento: `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
 
 ---
+Data: 2026-06-07
+Escopo: Fase 0.9.6 - Correcao da suite Prisma/test:db e smoke com ambiente isolado.
+
+## Entregas executadas
+1. Criado `.planning/100_CORRECAO_TESTDB_SMOKE_ISOLADO.md` com baseline Git, diagnostico dos 8 `404`, causa raiz, correcoes, comandos, pendencias e decisao final.
+2. Corrigida a fixture Prisma de `tests/db.integration.spec.ts`: `Professional` agora e criado com `businessId` igual ao `unitId` isolado do cenario.
+3. Confirmado que as 8 falhas vinham de massa Prisma inconsistente, nao de rota ausente, auth, tenant guard, hardening de producao ou regra financeira.
+4. Ajustado `scripts/smoke-api-flow.mjs` para carregar `.env` sem ruido, exigir `SMOKE_OWNER_EMAIL`/`SMOKE_OWNER_PASSWORD` em producao/remoto, manter default apenas em dev local e retornar erro claro em `401`/`403`.
+5. Corrigido cleanup do smoke Node em Unix para encerrar o grupo de processos iniciado por `npm run dev:api`.
+6. Atualizado `.env.example` com variaveis e exemplos de smoke local/remoto.
+7. Nenhuma IA/WhatsApp, feature nova, regra financeira, schema, migration, seed destrutivo ou frontend visual foi alterado.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`80 passed | 11 skipped`).
+- `npm run test:db -- --reporter=verbose`: passou (`11 passed`).
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: passou.
+- `npm run smoke:api`: falhou cedo no ambiente atual exigindo `SMOKE_OWNER_EMAIL`/`SMOKE_OWNER_PASSWORD`, sem imprimir senha; comportamento esperado para contexto que nao deve usar defaults.
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `node --check scripts/smoke-api-flow.mjs`: passou.
+
+## Resultado
+- Decisao da Fase 0.9.6: aprovado localmente para `test:db` e smoke dev isolado.
+- Release/deploy continua bloqueado ate smoke remoto passar com `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL`, `SMOKE_OWNER_PASSWORD` e `SMOKE_UNIT_ID` reais.
+
+Documento: `.planning/100_CORRECAO_TESTDB_SMOKE_ISOLADO.md`.
+
+---
 Data: 2026-06-06
 Escopo: Fase 0.9.5 - Hardening critico de producao, ambiente e dependencias.
 

@@ -22,6 +22,31 @@ Nao priorizar agora:
 4. Seed/migration destrutiva.
 5. Deploy antes de commits organizados e smoke remoto autenticado.
 
+
+## Atualizacao 2026-06-07 (Fase 0.9.6 - Correcao test:db/smoke isolado)
+- Criado `.planning/100_CORRECAO_TESTDB_SMOKE_ISOLADO.md`.
+- Decisao final: aprovado localmente para `test:db` e smoke dev isolado; release/deploy continua bloqueado.
+- Corrigida a causa dos 8 `404` do `test:db`: fixture Prisma criava `Professional` fora da unidade isolada do cenario (`businessId` default `unit-01`).
+- `npm run test:db -- --reporter=verbose` passou (`11 passed`) usando fixtures proprias e sem seed destrutivo.
+- Smoke Node agora le `.env`, exige `SMOKE_OWNER_EMAIL`/`SMOKE_OWNER_PASSWORD` em producao/remoto, mantem defaults apenas em dev local e retorna erro claro em `401`/`403` sem imprimir senha.
+- Smoke local/dev isolado passou com `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`.
+- `npm run smoke:api` padrao no ambiente atual falha cedo exigindo credenciais explicitas; isso e esperado quando o contexto nao deve usar defaults.
+- `npm run build`, `npm run test`, `npm audit` e `npm audit --omit=dev` passaram.
+
+Prioridade imediata:
+1. Rodar smoke remoto no ambiente alvo real com `SMOKE_BASE_URL`, `SMOKE_UNIT_ID`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD` validos.
+2. Garantir `DATABASE_URL` de CI/homologacao apontando para banco dedicado de teste antes de promover `test:db` como gate permanente.
+3. Validar `.env` real do alvo sem expor segredos: `NODE_ENV=production`, `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `AUTH_SECRET` forte, `CORS_ORIGIN` restrito e `DATABASE_URL` correta.
+4. Separar commits sem misturar alteracoes preexistentes do worktree; nao usar `git add .`.
+5. Planejar fase critica de XSS/localStorage e armazenamento de token no frontend.
+
+Nao priorizar agora:
+1. IA/WhatsApp.
+2. Novas features comerciais.
+3. Redesign ou mudancas visuais.
+4. Regras financeiras novas.
+5. Deploy antes do smoke remoto autenticado.
+
 ## Atualizacao 2026-06-06 (Fase 0.9.5 - Hardening producao/ambiente/dependencias)
 - Criado `.planning/99_HARDENING_PRODUCAO_AMBIENTE_DEPENDENCIAS.md`.
 - Decisao final: aprovado localmente com ressalvas; release/deploy continua bloqueado.

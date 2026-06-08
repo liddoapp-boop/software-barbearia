@@ -1,14 +1,38 @@
 import crypto from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
 import { prisma } from "../src/infrastructure/database/prisma";
 import { hashPassword } from "../src/http/security";
 
+const SENSITIVE_DATABASE_URL_PATTERNS = [
+  /(^|[^a-z])prod([^a-z]|$)/i,
+  /production/i,
+  /render/i,
+  /railway/i,
+];
+
+function assertDbTestsAreSafe() {
+  if (process.env.RUN_DB_TESTS !== "1") return false;
+
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error("test:db exige DATABASE_URL de banco isolado de teste");
+  }
+
+  const decodedUrl = decodeURIComponent(databaseUrl);
+  if (SENSITIVE_DATABASE_URL_PATTERNS.some((pattern) => pattern.test(decodedUrl))) {
+    throw new Error("test:db recusou DATABASE_URL com indicio de producao");
+  }
+
+  return true;
+}
+
 const runDbTests =
-  process.env.RUN_DB_TESTS === "1" && Boolean(process.env.DATABASE_URL);
+  assertDbTestsAreSafe();
 
 const suite = runDbTests ? describe : describe.skip;
+const DB_TEST_TIMEOUT_MS = 60_000;
 
 type DbScenario = {
   unitId: string;
@@ -78,6 +102,7 @@ async function createScenario(): Promise<DbScenario> {
   await prisma.professional.create({
     data: {
       id: professionalId,
+      businessId: unitId,
       name: "Profissional DB",
       commissionRules: {
         create: [
@@ -198,9 +223,13 @@ async function createProductSale(app: FastifyInstance, scenario: DbScenario, ide
 }
 
 suite("DB integration (Prisma/PostgreSQL robustness)", () => {
-  beforeAll(() => {
+  beforeEach(() => {
     process.env.AUTH_ENFORCED = "false";
     process.env.DATA_BACKEND = "prisma";
+  });
+
+  afterEach(() => {
+    process.env.AUTH_ENFORCED = "false";
   });
 
   afterAll(async () => {
@@ -658,7 +687,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(csv.headers["content-type"]).toContain("text/csv");
     expect(csv.body).toContain("Atendimento finalizado");
   });
-});
+}, DB_TEST_TIMEOUT_MS);
 
 async function expectSingleRefundSideEffect(
   unitId: string,
