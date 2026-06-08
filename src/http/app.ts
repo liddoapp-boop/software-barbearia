@@ -19,6 +19,8 @@ import {
   AuthUser,
   UserRole,
   getBillingWebhookSecret,
+  getAuthSecret,
+  getDataBackend,
   hashPassword,
   isAuthEnforced,
   issueAccessToken,
@@ -86,12 +88,45 @@ function getIdempotencyPayloadHash(payload: unknown) {
 
 function getAllowedCorsOrigins() {
   const raw = process.env.CORS_ORIGIN?.trim();
-  if (!raw) return true;
+  const isProduction = process.env.NODE_ENV === "production";
+  if (!raw) {
+    if (isProduction) {
+      throw new Error("CORS_ORIGIN restrito e obrigatorio em producao");
+    }
+    return true;
+  }
   const values = raw
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  return values.length > 0 ? values : true;
+  if (!values.length) {
+    if (isProduction) {
+      throw new Error("CORS_ORIGIN restrito e obrigatorio em producao");
+    }
+    return true;
+  }
+  if (!isProduction && values.includes("*")) {
+    return true;
+  }
+  if (isProduction && values.includes("*")) {
+    throw new Error("CORS_ORIGIN='*' nao e permitido em producao");
+  }
+  const allowedOrigins: string[] = [];
+  if (isProduction) {
+    for (const value of values) {
+      try {
+        const url = new URL(value);
+        const normalized = value.endsWith("/") ? value.slice(0, -1) : value;
+        if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== normalized) {
+          throw new Error("invalid-origin");
+        }
+        allowedOrigins.push(url.origin);
+      } catch {
+        throw new Error("CORS_ORIGIN deve conter apenas origens http/https validas");
+      }
+    }
+  }
+  return allowedOrigins.length ? allowedOrigins : values;
 }
 
 const DEFAULT_WORKING_HOURS = {
@@ -425,6 +460,7 @@ async function authenticateLogin(input: {
   password: string;
 }) {
   const fallbackUser = input.authUsers.find((item) => item.email === input.email);
+  const isProduction = process.env.NODE_ENV === "production";
   if (input.backend === "prisma") {
     try {
       const persistentUser = await findPersistentAuthUser(input.email);
@@ -442,8 +478,14 @@ async function authenticateLogin(input: {
         }
         throw new Error("Nao autenticado");
       }
+      if (isProduction) {
+        throw new Error("Nao autenticado");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isProduction) {
+        throw new Error("Nao autenticado");
+      }
       if (
         message === "Nao autenticado" ||
         message.includes("Perfil de usuario invalido") ||
@@ -575,9 +617,13 @@ async function resolveFirebaseUser(
 }
 
 export function createApp() {
-  const backend = process.env.DATA_BACKEND ?? "memory";
+  const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
+  if (process.env.NODE_ENV === "production") {
+    getAuthSecret();
+  }
   const authUsers = loadAuthUsers();
+  const corsOrigin = getAllowedCorsOrigins();
   const memoryStore = new InMemoryStore();
   const httpLogEnabled =
     String(
@@ -597,7 +643,7 @@ export function createApp() {
       : false,
   });
 
-  app.register(cors, { origin: getAllowedCorsOrigins() });
+  app.register(cors, { origin: corsOrigin });
   app.register(fastifyStatic, {
     root: path.join(process.cwd(), "public"),
     prefix: "/",

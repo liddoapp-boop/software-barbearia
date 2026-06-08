@@ -26,6 +26,42 @@ Documento: `.planning/102_RECONCILIACAO_WORKTREE_COMMITS.md`.
 
 ---
 Data: 2026-06-06
+Escopo: Fase 0.9.5 - Hardening critico de producao, ambiente e dependencias.
+
+## Entregas executadas
+1. Criado `.planning/99_HARDENING_PRODUCAO_AMBIENTE_DEPENDENCIAS.md` com baseline Git, guards, auditoria npm, validacoes, pendencias e decisao final.
+2. Adicionados guards de startup para `AUTH_SECRET`, `DATA_BACKEND`, `AUTH_ENFORCED` e `CORS_ORIGIN` em producao.
+3. Bloqueado fallback de usuarios default/dev em producao e fechado fallback de login Prisma para usuarios em memoria/dev.
+4. Protegido `prisma/seed.ts` contra execucao em producao e contra banco nao-local/sensivel sem confirmacao explicita.
+5. Protegido `test:db` com `RUN_DB_TESTS=1`, `DATABASE_URL` e recusa de URLs com indicios obvios de producao.
+6. Criado smoke multiplataforma em Node.js (`scripts/smoke-api-flow.mjs`) e mantido PowerShell como `smoke:api:ps`.
+7. Executado `npm audit fix` sem `--force` e alinhado `prisma`/`@prisma/client` para `6.19.3`, zerando vulnerabilidades reportadas.
+8. Nenhuma IA/WhatsApp, feature nova, layout/frontend visual, migration, seed ou deploy foi executado.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`80 passed | 11 skipped`).
+- `npx vitest run tests/environment-hardening.spec.ts`: passou (`10 passed`).
+- `npx vitest run tests/api.spec.ts -t "bloqueia probes reais de RBAC"`: passou.
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `node --check scripts/smoke-api-flow.mjs`: passou.
+- `git diff --check`: passou.
+- `npm.cmd run build` e `npm.cmd run test`: nao executaveis neste Linux (`npm.cmd: command not found`); equivalentes `npm run build` e `npm run test` passaram.
+- `npm run smoke:api`: runner Node executou, mas alvo local ativo retornou `401` no login default; requer credenciais de smoke validas ou API dev isolada.
+- `RUN_DB_TESTS=1 DATA_BACKEND=prisma npx vitest run tests/db.integration.spec.ts`: falhou em 8 testes operacionais Prisma com `404` no banco local disponivel.
+
+## Resultado
+- Decisao da Fase 0.9.5: aprovado localmente com ressalvas.
+- Startup inseguro em producao agora falha cedo para auth, backend, CORS e auth bypass.
+- Release/deploy segue bloqueado ate smoke autenticado e `test:db` passarem em ambiente isolado.
+- XSS/localStorage foi mantido fora do escopo e deve ser tratado como proxima fase critica.
+
+Documento: `.planning/99_HARDENING_PRODUCAO_AMBIENTE_DEPENDENCIAS.md`.
+
+---
+
+Data: 2026-06-06
 Escopo: Fase 0.9.4 - Correcao critica de RBAC, permissoes e relatorios sensiveis.
 
 ## Entregas executadas

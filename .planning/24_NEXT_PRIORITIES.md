@@ -22,6 +22,33 @@ Nao priorizar agora:
 4. Seed/migration destrutiva.
 5. Deploy antes de commits organizados e smoke remoto autenticado.
 
+## Atualizacao 2026-06-06 (Fase 0.9.5 - Hardening producao/ambiente/dependencias)
+- Criado `.planning/99_HARDENING_PRODUCAO_AMBIENTE_DEPENDENCIAS.md`.
+- Decisao final: aprovado localmente com ressalvas; release/deploy continua bloqueado.
+- Guards criticos adicionados: `AUTH_SECRET` forte, `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `CORS_ORIGIN` restrito, bloqueio de usuarios default/dev em producao e login Prisma sem fallback dev em producao.
+- `prisma/seed.ts` agora aborta em producao e exige confirmacao para banco nao-local/sensivel.
+- `test:db` agora exige opt-in e recusa URLs com indicios obvios de producao.
+- `smoke:api` agora e Node.js multiplataforma; PowerShell ficou em `smoke:api:ps`.
+- `npm audit` e `npm audit --omit=dev` ficaram com 0 vulnerabilidades apos fix sem `--force` e update Prisma 6.19.3.
+- `npm run build`, `npm run test`, testes de hardening e probe RBAC passaram.
+- `npm run smoke:api` falhou no alvo local ativo por `401` no login default; precisa credenciais reais de smoke ou API dev isolada.
+- `test:db` explicito falhou em 8 testes Prisma com `404` no banco local disponivel; precisa banco isolado/fixtures ajustadas antes de release.
+
+Prioridade imediata:
+1. Rodar `npm run smoke:api` contra ambiente isolado com `SMOKE_OWNER_EMAIL`/`SMOKE_OWNER_PASSWORD` validos.
+2. Preparar banco de teste isolado e corrigir os 404s da suite Prisma antes de considerar release.
+3. Validar `.env` real do alvo sem expor segredos: `NODE_ENV=production`, `DATA_BACKEND=prisma`, `AUTH_ENFORCED=true`, `AUTH_SECRET` forte, `CORS_ORIGIN` restrito e `DATABASE_URL` correta.
+4. Reexecutar smoke, `test:db`, build e suite principal no ambiente alvo.
+5. Planejar proxima fase critica para XSS/localStorage e armazenamento de token no frontend.
+6. Separar commits sem misturar alteracoes pre-existentes do worktree; nao usar `git add .`.
+
+Nao priorizar agora:
+1. IA/WhatsApp.
+2. Novas features comerciais.
+3. Redesign ou mudancas visuais.
+4. Seed/migration destrutiva.
+5. Deploy antes das validacoes bloqueantes.
+
 ## Atualizacao 2026-06-06 (Fase 0.9.4 - Correcao critica de RBAC)
 - Criado `.planning/98_CORRECAO_RBAC_PERMISSOES.md`.
 - Decisao final: aprovado localmente com ressalvas de ambiente.

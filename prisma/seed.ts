@@ -4,6 +4,13 @@ import { hashPassword } from "../src/http/security";
 
 const prisma = new PrismaClient();
 
+const SENSITIVE_DATABASE_MARKERS = [
+  "prod",
+  "production",
+  "render",
+  "railway",
+];
+
 type SeedUserRole = "owner" | "recepcao" | "profissional";
 
 type SeedUser = {
@@ -23,7 +30,44 @@ function requireProductionEnv(name: string) {
   return value;
 }
 
+function isLocalDatabaseUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function assertSeedIsAllowed() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("prisma/seed.ts e destrutivo e nao pode rodar com NODE_ENV=production");
+  }
+
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) return;
+
+  const normalizedUrl = decodeURIComponent(databaseUrl).toLowerCase();
+  const hasSensitiveMarker = SENSITIVE_DATABASE_MARKERS.some((marker) =>
+    normalizedUrl.includes(marker),
+  );
+  const allowDestructiveSeed = process.env.ALLOW_DESTRUCTIVE_SEED === "true";
+  if (hasSensitiveMarker && !allowDestructiveSeed) {
+    throw new Error(
+      "DATABASE_URL parece sensivel; defina ALLOW_DESTRUCTIVE_SEED=true apenas para base isolada de dev/test",
+    );
+  }
+
+  if (!isLocalDatabaseUrl(databaseUrl) && !allowDestructiveSeed) {
+    throw new Error(
+      "Seed destrutivo em banco nao-local exige ALLOW_DESTRUCTIVE_SEED=true e base isolada",
+    );
+  }
+}
+
 async function main() {
+  assertSeedIsAllowed();
+
   // Limpa dados operacionais para iniciar base zerada.
   await prisma.billingSubscriptionEvent.deleteMany();
   await prisma.integrationWebhookLog.deleteMany();

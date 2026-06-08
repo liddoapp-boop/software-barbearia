@@ -31,8 +31,28 @@ export type AuthUser = {
   unitIds: string[];
 };
 
+export type DataBackend = "memory" | "prisma";
+
+const KNOWN_DEV_AUTH_SECRETS = new Set([
+  "dev-secret-change-me",
+  "uma-chave-aleatoria-e-segura-com-32-ou-mais-caracteres",
+  "replace-with-a-strong-secret",
+  "change-me",
+  "your-secret-here",
+]);
+
+const DEV_USER_PASSWORDS = new Map([
+  ["owner@barbearia.local", "owner123"],
+  ["recepcao@barbearia.local", "recepcao123"],
+  ["profissional@barbearia.local", "profissional123"],
+]);
+
 function isUserRole(value: unknown): value is UserRole {
   return value === "owner" || value === "recepcao" || value === "profissional";
+}
+
+function isProduction() {
+  return process.env.NODE_ENV === "production";
 }
 
 const DEFAULT_USERS: AuthUser[] = [
@@ -111,12 +131,21 @@ export function verifyPassword(password: string, stored: string) {
 
 export function getAuthSecret() {
   const secret = process.env.AUTH_SECRET?.trim() || "dev-secret-change-me";
-  const isProduction = process.env.NODE_ENV === "production";
-  const isWeakDevSecret = secret === "dev-secret-change-me" || secret.length < 32;
-  if (isProduction && isWeakDevSecret) {
+  const isWeakProductionSecret =
+    secret.length < 32 || KNOWN_DEV_AUTH_SECRETS.has(secret);
+  if (isProduction() && isWeakProductionSecret) {
     throw new Error("AUTH_SECRET forte e obrigatorio em producao");
   }
   return secret;
+}
+
+export function getDataBackend(): DataBackend {
+  const backend = (process.env.DATA_BACKEND ?? "memory").trim().toLowerCase();
+  if (isProduction() && backend !== "prisma") {
+    throw new Error("DATA_BACKEND=prisma e obrigatorio em producao");
+  }
+  if (backend === "memory" || backend === "prisma") return backend;
+  throw new Error("DATA_BACKEND invalido");
 }
 
 export function getBillingWebhookSecret(provider?: string) {
@@ -155,16 +184,23 @@ export function verifyBillingWebhookSignature(input: {
 }
 
 export function isAuthEnforced() {
-  return String(process.env.AUTH_ENFORCED ?? "true").toLowerCase() === "true";
+  const enforced = String(process.env.AUTH_ENFORCED ?? "true").toLowerCase() === "true";
+  if (isProduction() && !enforced) {
+    throw new Error("AUTH_ENFORCED=false nao e permitido em producao");
+  }
+  return enforced;
 }
 
 export function loadAuthUsers(): AuthUser[] {
   const raw = process.env.AUTH_USERS_JSON?.trim();
-  const isProduction = process.env.NODE_ENV === "production";
-  if (!raw) return isProduction ? [] : DEFAULT_USERS;
+  const production = isProduction();
+  if (!raw) return production ? [] : DEFAULT_USERS;
 
   try {
     const parsed = JSON.parse(raw) as Array<Partial<AuthUser>>;
+    if (!Array.isArray(parsed)) {
+      throw new Error("AUTH_USERS_JSON deve ser uma lista de usuarios");
+    }
     const users = parsed
       .map((item) => ({
         id: String(item.id ?? "").trim(),
@@ -186,10 +222,25 @@ export function loadAuthUsers(): AuthUser[] {
           item.role === "owner" || item.role === "recepcao" || item.role === "profissional",
       );
 
+    if (production) {
+      if (users.length !== parsed.length || users.length === 0) {
+        throw new Error("AUTH_USERS_JSON invalido em producao");
+      }
+
+      for (const user of users) {
+        const devPassword = DEV_USER_PASSWORDS.get(user.email);
+        const storedPassword = user.passwordHash ?? user.password ?? "";
+        if (devPassword && verifyPassword(devPassword, storedPassword)) {
+          throw new Error("Usuarios padrao de desenvolvimento nao sao permitidos em producao");
+        }
+      }
+    }
+
     if (users.length > 0) return users;
-    return isProduction ? [] : DEFAULT_USERS;
-  } catch {
-    return isProduction ? [] : DEFAULT_USERS;
+    return production ? [] : DEFAULT_USERS;
+  } catch (error) {
+    if (production) throw error;
+    return DEFAULT_USERS;
   }
 }
 
