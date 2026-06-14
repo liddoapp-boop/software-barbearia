@@ -1,5 +1,6 @@
 import {
   bindEntityDrawers,
+  escapeHtml,
   renderEmptyState,
   renderEntityDrawer,
   renderStatusChip,
@@ -198,9 +199,9 @@ export function renderAppointmentsLoading(elements) {
 
 export function renderAppointmentsError(elements, message) {
   const text = normalizeErrorMessage(message);
-  elements.summary.innerHTML = `<div class="panel-msg panel-msg-error">${text}</div>`;
-  elements.tableBody.innerHTML = `<tr><td colspan="8" class="appts-td-loading panel-msg-error">${text}</td></tr>`;
-  elements.mobileList.innerHTML = `<p class="ds-text-muted">${text}</p>`;
+  elements.summary.innerHTML = `<div class="panel-msg panel-msg-error">${escapeHtml(text)}</div>`;
+  elements.tableBody.innerHTML = `<tr><td colspan="8" class="appts-td-loading panel-msg-error">${escapeHtml(text)}</td></tr>`;
+  elements.mobileList.innerHTML = `<p class="ds-text-muted">${escapeHtml(text)}</p>`;
 }
 
 export function renderAppointmentsFeedback(elements, type, message) {
@@ -234,8 +235,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
   elements.summary.innerHTML = `
     <article class="ux-kpi agenda-next-card">
       <div class="ux-label">Proximo atendimento</div>
-      <div class="ux-value-sm">${next ? `${formatTime(next.startsAt)} - ${next.client}` : "Sem proximo atendimento"}</div>
-      <div class="ux-hint">${next ? `${next.service} com ${next.professional}` : "Nenhuma acao imediata no recorte."}</div>
+      <div class="ux-value-sm">${next ? `${formatTime(next.startsAt)} - ${escapeHtml(next.client)}` : "Sem proximo atendimento"}</div>
+      <div class="ux-hint">${next ? `${escapeHtml(next.service)} com ${escapeHtml(next.professional)}` : "Nenhuma acao imediata no recorte."}</div>
     </article>
     <article class="ux-kpi">
       <div class="ux-label">Agenda do periodo</div>
@@ -280,12 +281,12 @@ export function renderAppointmentsData(elements, items, options = {}) {
         <tr class="${late ? "appts-row-late" : ""}">
           <td class="appts-td">${formatTime(item.startsAt)}</td>
           <td class="appts-td">
-            <div class="ds-cell-primary">${item.client}</div>
-            <div class="ds-cell-secondary">${item.clientPhone || "Sem telefone"}</div>
+            <div class="ds-cell-primary">${escapeHtml(item.client)}</div>
+            <div class="ds-cell-secondary">${escapeHtml(item.clientPhone || "Sem telefone")}</div>
             ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido</div>` : ""}
           </td>
-          <td class="appts-td">${item.service}</td>
-          <td class="appts-td">${item.professional}</td>
+          <td class="appts-td">${escapeHtml(item.service)}</td>
+          <td class="appts-td">${escapeHtml(item.professional)}</td>
           <td class="appts-td">${item.serviceDurationMin} min</td>
           <td class="appts-td">${money(item.servicePrice)}</td>
           <td class="appts-td">
@@ -319,8 +320,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
         <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
           <div class="appts-mobile-head">
             <div>
-              <div class="ds-cell-primary">${formatTime(item.startsAt)} - ${item.client}</div>
-              <div class="ds-cell-secondary">${item.service} | ${item.professional}</div>
+              <div class="ds-cell-primary">${formatTime(item.startsAt)} - ${escapeHtml(item.client)}</div>
+              <div class="ds-cell-secondary">${escapeHtml(item.service)} | ${escapeHtml(item.professional)}</div>
             </div>
             ${renderStatusChip(item.status)}
           </div>
@@ -328,7 +329,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
             ${profileChip(profile)}
             ${flags.map((flag) => renderStatusChip(flag.status, { label: flag.label })).join("")}
           </div>
-          <div class="ds-cell-secondary">Telefone: ${item.clientPhone || "Nao informado"} | Valor: ${money(item.servicePrice)}</div>
+          <div class="ds-cell-secondary">Telefone: ${escapeHtml(item.clientPhone || "Nao informado")} | Valor: ${money(item.servicePrice)}</div>
           ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido (${item.productItemsSoldCount} item(ns))</div>` : ""}
           <div class="catalog-row-actions">
             ${actions
@@ -386,9 +387,9 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
     status: item.status,
     summary: `
       <dl class="op-summary-grid">
-        <div><dt>Cliente</dt><dd>${item.client}</dd></div>
-        <div><dt>Servico</dt><dd>${item.service}</dd></div>
-        <div><dt>Profissional</dt><dd>${item.professional}</dd></div>
+        <div><dt>Cliente</dt><dd>${escapeHtml(item.client)}</dd></div>
+        <div><dt>Servico</dt><dd>${escapeHtml(item.service)}</dd></div>
+        <div><dt>Profissional</dt><dd>${escapeHtml(item.professional)}</dd></div>
         <div><dt>Horario</dt><dd>${formatDateTime(item.startsAt)} - ${formatTime(item.endsAt)}</dd></div>
         <div><dt>Status</dt><dd>${renderStatusChip(item.status)}</dd></div>
         <div><dt>Valor</dt><dd>${money(item.servicePrice)}</dd></div>
@@ -399,8 +400,8 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
         <p>Perfil: <strong>${profileLabel(profile)}</strong></p>
         <p>Historico do cliente no recorte: ${completedCount} concluidos, ${noShowCount} faltas, ${cancelledCount} cancelados.</p>
         <p>Produtos adicionais: <strong>${item.hasProductSale ? `sim (${item.productItemsSoldCount} item(ns))` : "nao registrados"}</strong></p>
-        <p>Origem: <strong>${safeText(item.origin, "MANUAL")}</strong></p>
-        <p>Observacoes: ${item.notes || "Sem observacoes"}</p>
+        <p>Origem: <strong>${escapeHtml(safeText(item.origin, "MANUAL"))}</strong></p>
+        <p>Observacoes: ${escapeHtml(item.notes || "Sem observacoes")}</p>
       </div>
     `,
     history: `
@@ -409,7 +410,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
           .map((entry) => {
             const label = safeText(entry.label || entry.action || entry.status || entry.type, "Movimento");
             const at = asDate(entry.at || entry.createdAt || entry.timestamp || entry.date);
-            return `<li><strong>${label}</strong><span>${at ? formatDateTime(at) : "Sem data registrada"}</span></li>`;
+            return `<li><strong>${escapeHtml(label)}</strong><span>${at ? formatDateTime(at) : "Sem data registrada"}</span></li>`;
           })
           .join("")}
       </ol>

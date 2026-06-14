@@ -1162,6 +1162,9 @@ describe("API MVP", () => {
     });
     expect(summary.json().summary.grossRevenue).toBe(75);
     expect(summary.json().summary.expenses).toBe(75);
+    expect(summary.json().summary.refundsTotal).toBe(75);
+    expect(summary.json().summary.paidCommissionsTotal).toBe(0);
+    expect(summary.json().summary.operationalExpenses).toBe(0);
     expect(summary.json().cashFlow.balance).toBe(0);
 
     const notCompleted = await app.inject({
@@ -1720,6 +1723,9 @@ describe("API MVP", () => {
     });
     expect(summary.statusCode).toBe(200);
     expect(summary.json().summary.expenses).toBe(pending.commissionAmount);
+    expect(summary.json().summary.paidCommissionsTotal).toBe(pending.commissionAmount);
+    expect(summary.json().summary.refundsTotal).toBe(0);
+    expect(summary.json().summary.operationalExpenses).toBe(0);
     expect(summary.json().cashFlow.outgoing).toBe(pending.commissionAmount);
   });
 

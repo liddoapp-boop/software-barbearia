@@ -4057,7 +4057,8 @@ export class PrismaOperationsService {
         incomeAgg,
         expenseAgg,
         commissionsPendingAgg,
-        commissionsTotalAgg,
+        paidCommissionsExpenseAgg,
+        refundsExpenseAgg,
         completedCount,
       ] = await Promise.all([
         this.prisma.financialEntry.aggregate({
@@ -4076,13 +4077,23 @@ export class PrismaOperationsService {
           },
           _sum: { commissionAmount: true },
         }),
-        this.prisma.commissionEntry.aggregate({
+        this.prisma.financialEntry.aggregate({
           where: {
             unitId: input.unitId,
+            kind: "EXPENSE",
+            source: "COMMISSION",
             occurredAt: { gte: start, lte: end },
-            status: "PENDING",
           },
-          _sum: { commissionAmount: true },
+          _sum: { amount: true },
+        }),
+        this.prisma.financialEntry.aggregate({
+          where: {
+            unitId: input.unitId,
+            kind: "EXPENSE",
+            source: "REFUND",
+            occurredAt: { gte: start, lte: end },
+          },
+          _sum: { amount: true },
         }),
         this.prisma.appointment.count({
           where: {
@@ -4095,14 +4106,19 @@ export class PrismaOperationsService {
       const income = asNumber(incomeAgg._sum.amount);
       const expenses = asNumber(expenseAgg._sum.amount);
       const pendingCommissions = asNumber(commissionsPendingAgg._sum.commissionAmount);
-      const totalCommissions = asNumber(commissionsTotalAgg._sum.commissionAmount);
+      const paidCommissionsTotal = asNumber(paidCommissionsExpenseAgg._sum.amount);
+      const refundsTotal = asNumber(refundsExpenseAgg._sum.amount);
+      const operationalExpenses = expenses - paidCommissionsTotal - refundsTotal;
       const net = income - expenses;
       return {
         income: Number(income.toFixed(2)),
         expenses: Number(expenses.toFixed(2)),
         net: Number(net.toFixed(2)),
-        estimatedProfit: Number((income - expenses - totalCommissions).toFixed(2)),
+        estimatedProfit: Number((income - expenses - pendingCommissions).toFixed(2)),
         pendingCommissions: Number(pendingCommissions.toFixed(2)),
+        paidCommissionsTotal: Number(paidCommissionsTotal.toFixed(2)),
+        refundsTotal: Number(refundsTotal.toFixed(2)),
+        operationalExpenses: Number(operationalExpenses.toFixed(2)),
         ticketAverage: Number((completedCount > 0 ? income / completedCount : 0).toFixed(2)),
       };
     };
@@ -4125,6 +4141,9 @@ export class PrismaOperationsService {
         estimatedProfit: current.estimatedProfit,
         netBalance: current.net,
         pendingCommissions: current.pendingCommissions,
+        paidCommissionsTotal: current.paidCommissionsTotal,
+        refundsTotal: current.refundsTotal,
+        operationalExpenses: current.operationalExpenses,
         ticketAverage: current.ticketAverage,
       },
       cashFlow: {

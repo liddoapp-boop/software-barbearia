@@ -12,26 +12,26 @@ import { formatPhoneBR, normalizePhoneDigits } from "./phone.js";
 const DAY_LABELS = [
   "Domingo",
   "Segunda",
-  "Terca",
+  "Terça",
   "Quarta",
   "Quinta",
   "Sexta",
-  "Sabado",
+  "Sábado",
 ];
 
 const SETTINGS_SECTIONS = [
-  { id: "business", title: "Empresa", description: "Dados institucionais e identidade publica da operacao." },
-  { id: "hours", title: "Horarios", description: "Funcionamento semanal usado pela agenda." },
-  { id: "payments", title: "Pagamentos", description: "Metodos aceitos, status e padrao de recebimento." },
-  { id: "team", title: "Equipe", description: "Pessoas, funcoes e perfis de acesso cadastrados." },
-  { id: "commissions", title: "Comissoes", description: "Regra da casa e excecoes por profissional ou servico." },
-  { id: "schedule", title: "Agenda", description: "Preferencias operacionais de duracao, antecedencia e encaixes." },
-  { id: "operations", title: "Parametros", description: "Clientes em risco, inativos, lembretes e sobreposicoes." },
-  { id: "usuario", title: "Usuario", description: "Perfil, aparencia e seguranca da conta." },
+  { id: "business", title: "Empresa", description: "Dados institucionais e identidade pública da operação." },
+  { id: "hours", title: "Horários", description: "Funcionamento semanal usado pela agenda." },
+  { id: "payments", title: "Pagamentos", description: "Métodos aceitos, status e padrão de recebimento." },
+  { id: "team", title: "Equipe", description: "Pessoas, funções e perfis de acesso cadastrados." },
+  { id: "commissions", title: "Comissões", description: "Regra da casa e exceções por profissional ou serviço." },
+  { id: "schedule", title: "Agenda", description: "Preferências operacionais de duração, antecedência e encaixes." },
+  { id: "operations", title: "Parâmetros", description: "Clientes em risco, inativos, lembretes e sobreposições." },
+  { id: "usuario", title: "Usuário", description: "Perfil, aparência e segurança da conta." },
 ];
 
 const SETTINGS_GROUPS = [
-  { title: "Operacao", sections: ["business", "hours", "schedule", "operations"] },
+  { title: "Operação", sections: ["business", "hours", "schedule", "operations"] },
   { title: "Recebimento", sections: ["payments", "commissions"] },
   { title: "Conta e sistema", sections: ["team", "usuario"] },
 ];
@@ -90,10 +90,10 @@ function formatDateTime(value) {
 function segmentLabel(value = "barbearia") {
   const labels = {
     barbearia: "Barbearia",
-    estetica: "Estetica",
-    salao: "Salao",
+    estetica: "Estética",
+    salao: "Salão",
     pet_shop: "Pet shop",
-    clinica: "Clinica",
+    clinica: "Clínica",
     outro: "Outro segmento",
   };
   return labels[value] || "Outro segmento";
@@ -104,23 +104,23 @@ function roleLabel(value = "") {
     OWNER: "Dono",
     MANAGER: "Gerente",
     PROFESSIONAL: "Profissional",
-    RECEPTION: "Recepcao",
+    RECEPTION: "Recepção",
   };
   return labels[value] || value || "Equipe";
 }
 
 function accessLabel(value = "") {
   const labels = {
-    owner: "Administracao",
-    gerente: "Gestao",
+    owner: "Administração",
+    gerente: "Gestão",
     profissional: "Atendimento",
-    recepcao: "Recepcao",
+    recepcao: "Recepção",
   };
-  return labels[value] || value || "Perfil nao informado";
+  return labels[value] || value || "Perfil não informado";
 }
 
 function commissionTypeLabel(type = "") {
-  return type === "FIXED" ? "Comissao fixa" : "Comissao percentual";
+  return type === "FIXED" ? "Comissão fixa" : "Comissão percentual";
 }
 
 function commissionValueLabel(item = {}) {
@@ -128,9 +128,9 @@ function commissionValueLabel(item = {}) {
 }
 
 function ruleScopeLabel(item = {}) {
-  if (item.professionalName && item.serviceName) return "Regra por profissional e servico";
+  if (item.professionalName && item.serviceName) return "Regra por profissional e serviço";
   if (item.professionalName) return "Regra por profissional";
-  if (item.serviceName) return "Regra por servico";
+  if (item.serviceName) return "Regra por serviço";
   return "Regra geral";
 }
 
@@ -188,7 +188,7 @@ function settingsSectionRow({ id, title, description, status = "", facts = [], w
       </span>
       <span class="settings-row-primary">
         <span>${escapeHtml(primaryFact?.label || "Status")}</span>
-        <strong>${escapeHtml(primaryFact?.value || "Nao configurado")}</strong>
+        <strong>${escapeHtml(primaryFact?.value || "Não configurado")}</strong>
       </span>
       <span class="settings-row-secondary">
         <span class="settings-row-pills">
@@ -206,30 +206,30 @@ function settingsSectionRow({ id, title, description, status = "", facts = [], w
 
 function renderSettingsNavigator(sectionMap = {}, business = {}) {
   const groups = [
-    { title: "Operacao", count: 4, sections: ["business", "hours", "schedule", "operations"] },
+    { title: "Operação", count: 4, sections: ["business", "hours", "schedule", "operations"] },
     { title: "Recebimento", count: 2, sections: ["payments", "commissions"] },
     { title: "Time e sistema", count: 3, sections: ["team", "security", "appearance"] },
   ];
   const openDays = sectionMap.hours?.facts?.[0]?.value || "0 dia(s)";
-  const defaultPayment = sectionMap.payments?.facts?.[1]?.value || "Sem metodo";
+  const defaultPayment = sectionMap.payments?.facts?.[1]?.value || "Sem método";
   const activeTeam = sectionMap.team?.facts?.[0]?.value || "0 membro(s)";
 
   return `
     <section class="settings-overview-strip">
       <article class="settings-overview-card settings-overview-card-wide">
-        <span>Operacao</span>
+        <span>Operação</span>
         <strong>${escapeHtml(business.displayName || business.businessName || "Minha empresa")}</strong>
         <small>${escapeHtml(segmentLabel(business.segment))}</small>
       </article>
       <article class="settings-overview-card">
         <span>Agenda</span>
         <strong>${escapeHtml(openDays)}</strong>
-        <small>${escapeHtml(sectionMap.schedule?.facts?.[0]?.value || "Duracao padrao")}</small>
+        <small>${escapeHtml(sectionMap.schedule?.facts?.[0]?.value || "Duração padrão")}</small>
       </article>
       <article class="settings-overview-card">
         <span>Recebimento</span>
         <strong>${escapeHtml(defaultPayment)}</strong>
-        <small>${escapeHtml(sectionMap.payments?.facts?.[0]?.value || "0 metodo(s)")}</small>
+        <small>${escapeHtml(sectionMap.payments?.facts?.[0]?.value || "0 método(s)")}</small>
       </article>
       <article class="settings-overview-card">
         <span>Equipe</span>
@@ -241,7 +241,7 @@ function renderSettingsNavigator(sectionMap = {}, business = {}) {
     <section class="settings-command-panel">
       <header class="settings-command-head">
         <div>
-          <p class="ux-label">Menu de configuracoes</p>
+          <p class="ux-label">Menu de configurações</p>
           <h2>Ajustes operacionais</h2>
         </div>
         <span>${SETTINGS_SECTIONS.length} blocos</span>
@@ -287,11 +287,11 @@ function renderHub(payload = {}) {
     business: {
       status: business.businessName ? "ACTIVE" : "WARNING",
       facts: [
-        { label: "Nome", value: business.businessName || "Nome nao configurado" },
+        { label: "Nome", value: business.businessName || "Nome não configurado" },
         { label: "Segmento", value: segmentLabel(business.segment) },
-        { label: "Contato", value: business.phone || business.email || "Contato nao informado" },
+        { label: "Contato", value: business.phone || business.email || "Contato não informado" },
       ],
-      warning: !business.email ? "E-mail da empresa ainda nao foi informado." : "",
+      warning: !business.email ? "E-mail da empresa ainda não foi informado." : "",
     },
     hours: {
       status: openDays ? "ACTIVE" : "WARNING",
@@ -305,8 +305,8 @@ function renderHub(payload = {}) {
     payments: {
       status: defaultPayment ? "ACTIVE" : "WARNING",
       facts: [
-        { label: "Ativos", value: `${activePayments} metodo(s)` },
-        { label: "Padrao", value: defaultPayment?.name || "Sem metodo padrao" },
+        { label: "Ativos", value: `${activePayments} método(s)` },
+        { label: "Padrão", value: defaultPayment?.name || "Sem método padrão" },
         { label: "Total", value: `${paymentMethods.length} cadastrado(s)` },
       ],
     },
@@ -329,23 +329,23 @@ function renderHub(payload = {}) {
     schedule: {
       status: "ACTIVE",
       facts: [
-        { label: "Duracao padrao", value: `${toNumber(business.defaultAppointmentDuration, 45)} min` },
-        { label: "Antecedencia", value: `${toNumber(business.minimumAdvanceMinutes, 30)} min` },
+        { label: "Duração padrão", value: `${toNumber(business.defaultAppointmentDuration, 45)} min` },
+        { label: "Antecedência", value: `${toNumber(business.minimumAdvanceMinutes, 30)} min` },
         { label: "Encaixes", value: business.allowWalkIns ? "Permitidos" : "Desativados" },
       ],
     },
     security: {
       status: security.passwordChangeSupported ? "ACTIVE" : "INFO",
       facts: [
-        { label: "Usuario", value: security.currentSession?.email || "Sessao local" },
+        { label: "Usuário", value: security.currentSession?.email || "Sessão local" },
         { label: "Perfil", value: accessLabel(security.currentSession?.role || "owner") },
-        { label: "Senha", value: security.passwordChangeSupported ? "Alteracao disponivel" : "Nao disponivel nesta versao" },
+        { label: "Senha", value: security.passwordChangeSupported ? "Alteração disponível" : "Não disponível nesta versão" },
       ],
     },
     appearance: {
       status: "INFO",
       facts: [
-        { label: "Nome exibido", value: business.displayName || business.businessName || "Nao definido" },
+        { label: "Nome exibido", value: business.displayName || business.businessName || "Não definido" },
         { label: "Tema", value: themeLabel(business.themeMode) },
         { label: "Cor principal", value: business.primaryColor || "#0f172a" },
       ],
@@ -369,7 +369,7 @@ function field(label, value) {
   return `
     <div>
       <dt>${escapeHtml(label)}</dt>
-      <dd>${escapeHtml(value || "Nao informado")}</dd>
+      <dd>${escapeHtml(value || "Não informado")}</dd>
     </div>
   `;
 }
@@ -388,10 +388,10 @@ function renderBusinessForm(business = {}) {
           <span>Segmento</span>
           <select class="cfg-input" name="segment">
             ${option("barbearia", "Barbearia", segment === "barbearia")}
-            ${option("estetica", "Estetica", segment === "estetica")}
-            ${option("salao", "Salao", segment === "salao")}
+            ${option("estetica", "Estética", segment === "estetica")}
+            ${option("salao", "Salão", segment === "salao")}
             ${option("pet_shop", "Pet Shop", segment === "pet_shop")}
-            ${option("clinica", "Clinica", segment === "clinica")}
+            ${option("clinica", "Clínica", segment === "clinica")}
             ${option("outro", "Outro", segment === "outro")}
           </select>
         </label>
@@ -408,7 +408,7 @@ function renderBusinessForm(business = {}) {
           <input class="cfg-input" name="document" value="${escapeHtml(business.document || "")}" />
         </label>
         <label class="cfg-field">
-          <span>Endereco</span>
+          <span>Endereço</span>
           <input class="cfg-input" name="address" value="${escapeHtml(business.address || "")}" />
         </label>
         <label class="cfg-field">
@@ -437,7 +437,7 @@ function renderHoursForm(hours = []) {
     },
     {
       id: "commercial_day",
-      title: "Comercial padrao",
+      title: "Comercial padrão",
       description: "Seg a Sex 09:00-19:00, Sab 09:00-14:00 e Domingo fechado.",
     },
     {
@@ -460,7 +460,7 @@ function renderHoursForm(hours = []) {
           <small>total aberto</small>
         </article>
         <article class="cfg-kpi">
-          <span>Primeiro horario</span>
+          <span>Primeiro horário</span>
           <strong>${summary.earliestOpen}</strong>
           <small>mais cedo</small>
         </article>
@@ -780,17 +780,6 @@ function renderUserForm(business = {}, security = {}) {
   const email = escapeHtml(security.currentSession?.email || "—");
   const role = escapeHtml(accessLabel(security.currentSession?.role || "owner"));
 
-  const themeBtn = (value, label, icon) => `
-    <button type="button" class="cfg-theme-btn${themeMode === value ? " is-active" : ""}" data-theme="${escapeHtml(value)}">
-      ${icon}
-      ${escapeHtml(label)}
-    </button>
-  `;
-
-  const iconSystem = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>`;
-  const iconLight = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
-  const iconDark = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
-
   return `
     <form id="settingsUserForm" class="cfg-form">
 
@@ -816,12 +805,14 @@ function renderUserForm(business = {}, security = {}) {
 
       <div class="cfg-user-block">
         <p class="cfg-block-label">Aparencia</p>
-        <div class="cfg-theme-toggle" data-theme-value="${escapeHtml(themeMode)}">
-          ${themeBtn("system", "Sistema", iconSystem)}
-          ${themeBtn("light", "Claro", iconLight)}
-          ${themeBtn("dark", "Escuro", iconDark)}
-        </div>
-        <input type="hidden" name="themeMode" value="${escapeHtml(themeMode)}" />
+        <label class="cfg-field">
+          <span>Tema</span>
+          <select class="cfg-input" name="themeMode" data-theme-select>
+            ${option("system", "Sistema", themeMode === "system")}
+            ${option("light", "Claro", themeMode === "light")}
+            ${option("dark", "Escuro", themeMode === "dark")}
+          </select>
+        </label>
       </div>
 
       <div class="cfg-user-block">
@@ -969,43 +960,43 @@ export function renderSettingsSidebar({ activeSection = "business", user = null,
     : "business";
   const userName = String(user?.name || user?.displayName || user?.fullName || user?.email || "Usuario").split("@")[0];
   const userInitial = userName.charAt(0).toUpperCase() || "U";
-  const menu = SETTINGS_GROUPS.map((group) => {
-    const items = group.sections
-      .map((sectionId) => {
-        const section = SETTINGS_SECTIONS.find((item) => item.id === sectionId);
-        if (!section) return "";
-        const isActive = section.id === selectedSection;
-        return `
-          <button type="button" class="sb-item ${isActive ? "is-active" : ""}" data-settings-action="select-settings-section" data-settings-section="${escapeHtml(section.id)}" data-motion-item>
-            <span class="sb-item-icon" aria-hidden="true">${SETTINGS_ICONS[section.id] || ""}</span>
-            <span class="sb-label">${escapeHtml(section.title)}</span>
-          </button>
-        `;
-      })
-      .join("");
-    return `
-      <section class="settings-shell-group">
-        <h3>${escapeHtml(group.title)}</h3>
-        <div>${items}</div>
-      </section>
-    `;
-  }).join("");
+  const menu = SETTINGS_GROUPS.flatMap((group) => group.sections)
+    .map((sectionId) => {
+      const section = SETTINGS_SECTIONS.find((item) => item.id === sectionId);
+      if (!section) return "";
+      const isActive = section.id === selectedSection;
+      return `
+        <button type="button" class="sb-item ${isActive ? "is-active" : ""}" data-settings-action="select-settings-section" data-settings-section="${escapeHtml(section.id)}" data-motion-item title="${escapeHtml(section.title)}">
+          <span class="sb-item-icon" aria-hidden="true">${SETTINGS_ICONS[section.id] || ""}</span>
+          <span class="sb-label">${escapeHtml(section.title)}</span>
+        </button>
+      `;
+    })
+    .join("");
 
   return `
-    <div class="settings-shell-sidebar">
-      <button type="button" class="settings-shell-back" data-settings-shell-action="back">
-        <span aria-hidden="true">←</span>
-        Voltar
-      </button>
-      <div class="settings-shell-title">
-        <span>Ajustes</span>
-        <strong>Configuracoes</strong>
+    <div class="sidebar-wrap settings-sidebar-wrap">
+      <div class="sb-brand" aria-label="LIDDO BARBER">
+        <div class="sb-brand-inner">
+          <span class="sb-brand-name">LIDDO</span>
+          <span class="sb-brand-subtitle">BARBER</span>
+        </div>
       </div>
-      <nav class="settings-shell-nav" aria-label="Menu de configuracoes">
-        ${menu}
-      </nav>
-      <div class="settings-shell-footer">
-        <div class="sb-account ${accountMenuOpen ? "is-open" : ""}">
+
+      <div class="sb-scroll">
+        <nav class="sb-nav" aria-label="Menu de configuracoes">
+          <button type="button" class="sb-item settings-back-item" data-settings-shell-action="back" title="Voltar">
+            <span class="sb-item-icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+            </span>
+            <span class="sb-label">Voltar</span>
+          </button>
+          ${menu}
+        </nav>
+      </div>
+
+      <div class="sb-footer">
+        <div class="sb-account ${accountMenuOpen ? "is-open" : ""} is-active">
           <div class="sb-account-menu" aria-label="Menu do usuario">
             <button type="button" data-account-action="settings">
               <span class="sb-menu-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>

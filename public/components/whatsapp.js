@@ -134,23 +134,15 @@ export async function renderWhatsAppSection(container, { getToken }) {
       <!-- ── Automation templates ──────────────────────────────────── -->
       <section class="wz-tpl-section">
         <p class="ux-section-label">AUTOMAÇÕES DE MENSAGEM</p>
+        <div class="wz-tpl-grid">
 
         <!-- Confirmation template -->
         <div class="wz-tpl-card">
           <div class="wz-tpl-head">
-            <div class="wz-tpl-icon-wrap wz-tpl-icon-success" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                   fill="none" stroke="currentColor" stroke-width="2.5"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 6 9 17l-5-5"/>
-              </svg>
-            </div>
-            <div>
-              <strong class="wz-tpl-title">Confirmação de Agendamento</strong>
-              <span class="wz-tpl-sub">
-                Enviada quando o cliente confirma o agendamento pelo link público.
-              </span>
-            </div>
+            <strong class="wz-tpl-title">Confirmação de Agendamento</strong>
+            <span class="wz-tpl-sub">
+              Enviada quando o cliente confirma o agendamento pelo link público.
+            </span>
           </div>
           <div>
             <p class="wz-tpl-vars-label">Clique em uma variável para inserir no cursor</p>
@@ -165,7 +157,7 @@ export async function renderWhatsAppSection(container, { getToken }) {
           <textarea
             id="wzTplConfirm"
             class="wz-tpl-textarea"
-            rows="11"
+            rows="8"
             maxlength="${MAX_CONFIRM}"
             placeholder="Digite a mensagem de confirmação..."
             aria-label="Mensagem de confirmação de agendamento"
@@ -183,20 +175,10 @@ export async function renderWhatsAppSection(container, { getToken }) {
         <!-- Reminder template -->
         <div class="wz-tpl-card">
           <div class="wz-tpl-head">
-            <div class="wz-tpl-icon-wrap wz-tpl-icon-warning" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                   fill="none" stroke="currentColor" stroke-width="2.5"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <div>
-              <strong class="wz-tpl-title">Lembrete — 2h antes</strong>
-              <span class="wz-tpl-sub">
-                Enviada 2 horas antes do horário marcado para reduzir faltas.
-              </span>
-            </div>
+            <strong class="wz-tpl-title">Lembrete — 2h antes</strong>
+            <span class="wz-tpl-sub">
+              Enviada 2 horas antes do horário marcado para reduzir faltas.
+            </span>
           </div>
           <div>
             <p class="wz-tpl-vars-label">Clique em uma variável para inserir no cursor</p>
@@ -222,6 +204,8 @@ export async function renderWhatsAppSection(container, { getToken }) {
             </div>
           </div>
           <p id="wzTplReminderFeedback" class="wz-tpl-feedback" style="display:none"></p>
+        </div>
+
         </div>
       </section>
 

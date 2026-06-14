@@ -332,25 +332,41 @@ function renderOperationalChrome() {
   if (financialFilterMount) {
     financialFilterMount.innerHTML = `
       <div class="fn-filter-bar" id="financialOperationalFilters">
-        <select id="financialPeriod" class="fn-filter-select" aria-label="Periodo">
-          <option value="today">Hoje</option>
-          <option value="week">Semana</option>
-          <option value="month" selected>Mes</option>
-          <option value="custom">Personalizado</option>
-        </select>
+        <div class="fn-picker-wrap" id="fnPickerWrap">
+          <input id="financialCustomStart" type="hidden" />
+          <input id="financialCustomEnd" type="hidden" />
+          <button type="button" id="financialDateTrigger" class="shf-trigger">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+            <span id="financialDateLabel">Este mês</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div id="fnPickerPopover" class="shf-popover hidden" role="dialog" aria-label="Selecionar período">
+            <div class="shf-presets">
+              <button type="button" class="shf-preset" data-fn-preset="today">Hoje</button>
+              <button type="button" class="shf-preset" data-fn-preset="7d">Últimos 7 dias</button>
+              <button type="button" class="shf-preset" data-fn-preset="30d">Últimos 30 dias</button>
+              <button type="button" class="shf-preset is-active" data-fn-preset="month">Este mês</button>
+              <button type="button" class="shf-preset" data-fn-preset="prev-month">Mês anterior</button>
+            </div>
+            <div class="shf-cals" id="fnCals"></div>
+            <div class="shf-popover-foot">
+              <span id="fnRangeLabel" class="shf-range-label"></span>
+              <button type="button" id="fnApplyBtn" class="shf-apply-btn">Aplicar</button>
+            </div>
+          </div>
+        </div>
         <select id="financialTypeFilter" class="fn-filter-select" aria-label="Tipo de lancamento">
           <option value="">Entradas e saidas</option>
           <option value="INCOME">Entradas</option>
           <option value="EXPENSE">Saidas</option>
         </select>
-        <input id="financialCustomStart" type="date" class="fn-filter-select fn-custom-date hidden" aria-label="Inicio do periodo" />
-        <input id="financialCustomEnd" type="date" class="fn-filter-select fn-custom-date hidden" aria-label="Fim do periodo" />
         <div class="fn-filter-search-wrap">
           <svg class="fn-filter-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           <input id="financialSearch" type="search" placeholder="Buscar descricao, categoria ou observacao..." class="fn-filter-search" autocomplete="off" />
         </div>
       </div>
     `;
+    initFinancialDatePicker();
   }
 
   const commissionsHeaderMount = document.getElementById("commissionsHeaderMount");
@@ -1412,8 +1428,6 @@ if (systemThemeQuery) {
 applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "system", { persist: false });
 
 startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
-if (financialCustomStart) financialCustomStart.value = asDateInputValue(new Date());
-if (financialCustomEnd) financialCustomEnd.value = asDateInputValue(new Date());
 if (reportsCustomStart) reportsCustomStart.value = asDateInputValue(new Date());
 if (reportsCustomEnd) reportsCustomEnd.value = asDateInputValue(new Date());
 if (metasGoalMonth) metasGoalMonth.value = asMonthInputValue(new Date());
@@ -2785,13 +2799,20 @@ function renderSaleProductCatalog() {
   const allProducts = saleProductsList();
   const searchTerm = String(pdvProductSearch?.value || "").trim().toLowerCase();
   const categories = [...new Set(allProducts.map(productCategory))];
-  if (!saleSelectedCategory || !categories.includes(saleSelectedCategory)) {
-    saleSelectedCategory = categories[0] || "";
+  if (saleSelectedCategory && saleSelectedCategory !== "__ALL__" && !categories.includes(saleSelectedCategory)) {
+    saleSelectedCategory = "__ALL__";
   }
+  if (!saleSelectedCategory) saleSelectedCategory = "__ALL__";
 
-  saleCategoryList.innerHTML = categories.length
-    ? categories
-        .map((category) => {
+  const pills = categories.length
+    ? [
+        `
+          <button type="button" class="pdv-category-pill ${saleSelectedCategory === "__ALL__" ? "is-active" : ""}" data-sale-category="__ALL__">
+            <span>Todos</span>
+            <small>${allProducts.length}</small>
+          </button>
+        `,
+        ...categories.map((category) => {
           const count = allProducts.filter((p) => productCategory(p) === category).length;
           return `
             <button type="button" class="pdv-category-pill ${category === saleSelectedCategory ? "is-active" : ""}" data-sale-category="${escapeHtml(category)}">
@@ -2799,13 +2820,17 @@ function renderSaleProductCatalog() {
               <small>${count}</small>
             </button>
           `;
-        })
-        .join("")
+        }),
+      ].join("")
     : `<p class="pdv-helper-text">Cadastre produtos no estoque para vender.</p>`;
+
+  saleCategoryList.innerHTML = pills;
 
   let visibleProducts = searchTerm
     ? allProducts.filter((p) => String(p.name || "").toLowerCase().includes(searchTerm) || productCategory(p).toLowerCase().includes(searchTerm))
-    : allProducts.filter((p) => productCategory(p) === saleSelectedCategory);
+    : saleSelectedCategory === "__ALL__"
+      ? allProducts
+      : allProducts.filter((p) => productCategory(p) === saleSelectedCategory);
 
   saleProductRail.innerHTML = visibleProducts.length
     ? visibleProducts
@@ -2879,37 +2904,24 @@ function renderRecentSales() {
     });
     return;
   }
-  saleRecentList.innerHTML = productSalesHistory
+  saleRecentList.innerHTML = `<div class="pdv-history-list">${productSalesHistory
     .map(
-      (sale) => {
-        const previewItems = sale.items.slice(0, 3);
-        return `
-          <article class="pdv-history-row">
-            <div class="pdv-history-main">
-              <div class="pdv-history-products">
-                ${previewItems
-                  .map((item) => renderProductThumb(productsById[item.productId] || item, "pdv-history-thumb"))
-                  .join("")}
-              </div>
-              <div>
-                <div class="pdv-history-date">${sale.soldAtLabel}</div>
-                <div class="pdv-history-client">${sale.clientLabel}</div>
-                <div class="pdv-history-items">${sale.itemsSummary}</div>
-              </div>
-              <div class="pdv-history-total">
-                <strong>${sale.amount}</strong>
-                ${renderStatusChip(sale.status || "NOT_REFUNDED")}
-              </div>
-            </div>
-            <div class="pdv-history-actions">
-              <button type="button" data-product-sale-detail="${sale.id}" class="ux-btn ux-btn-muted">Ver detalhes</button>
-              ${sale.canRefund !== false ? `<button type="button" data-product-refund-sale="${sale.id}" class="ux-btn ux-btn-danger">Devolver</button>` : ""}
-            </div>
-          </article>
-        `;
-      },
+      (sale) => `
+        <button type="button" class="pdv-history-row" data-product-sale-detail="${sale.id}">
+          <div class="pdv-history-identity">
+            <strong class="pdv-history-name">${escapeHtml(sale.clientLabel)}</strong>
+            <span class="pdv-history-meta">${escapeHtml(sale.soldAtLabel)} · ${escapeHtml(sale.itemsSummary)}</span>
+          </div>
+          <div class="pdv-history-chips">
+            ${renderStatusChip(sale.status || "NOT_REFUNDED")}
+          </div>
+          <div class="pdv-history-total">
+            <strong>${escapeHtml(sale.amount)}</strong>
+          </div>
+        </button>
+      `,
     )
-    .join("");
+    .join("")}</div>`;
 }
 
 function productSaleStatusMeta(status) {
@@ -2935,12 +2947,12 @@ function renderSaleDrawer(sale) {
     status: sale.status || "NOT_REFUNDED",
     summary: `
       <dl class="op-summary-grid">
-        <div><dt>Data</dt><dd>${sale.soldAtLabel}</dd></div>
-        <div><dt>Cliente</dt><dd>${sale.clientLabel}</dd></div>
-        <div><dt>Profissional</dt><dd>${sale.professionalLabel}</dd></div>
-        <div><dt>Total</dt><dd>${sale.amount}</dd></div>
+        <div><dt>Data</dt><dd>${escapeHtml(sale.soldAtLabel)}</dd></div>
+        <div><dt>Cliente</dt><dd>${escapeHtml(sale.clientLabel)}</dd></div>
+        <div><dt>Profissional</dt><dd>${escapeHtml(sale.professionalLabel)}</dd></div>
+        <div><dt>Total</dt><dd>${escapeHtml(sale.amount)}</dd></div>
         <div><dt>Devolucao</dt><dd>${renderStatusChip(sale.status || "NOT_REFUNDED")}</dd></div>
-        <div><dt>Itens</dt><dd>${sale.label}</dd></div>
+        <div><dt>Itens</dt><dd>${escapeHtml(sale.label)}</dd></div>
       </dl>
     `,
     details: `
@@ -2951,7 +2963,7 @@ function renderSaleDrawer(sale) {
             .map(
               (item) => `
                 <div class="pdv-drawer-item">
-                  <strong>${item.name}</strong>
+                  <strong>${escapeHtml(item.name)}</strong>
                   <span>Vendido: ${item.quantity}</span>
                   <span>Devolvido: ${item.refundedQuantity || 0}</span>
                   <span>Disponivel para devolucao: ${item.refundableQuantity || 0}</span>
@@ -2961,24 +2973,14 @@ function renderSaleDrawer(sale) {
             )
             .join("")}
         </div>
-        <details class="pdv-impact-details">
-          <summary>Ver impacto financeiro</summary>
-          <p>Esta venda gerou entrada financeira.</p>
-          ${sale.totalRefundedAmount > 0 ? `<p>Esta devolucao gerou reverso financeiro de R$ ${Number(sale.totalRefundedAmount).toFixed(2)}.</p>` : ""}
-        </details>
-        <details class="pdv-impact-details">
-          <summary>Ver impacto no estoque</summary>
-          <p>Esta venda baixou o estoque.</p>
-          ${sale.totalRefundedAmount > 0 ? "<p>Esta devolucao retornou item ao estoque.</p>" : ""}
-        </details>
       </div>
     `,
     history: `
       <ol class="op-history-list">
-        <li><strong>Venda registrada</strong><span>${sale.soldAtLabel}</span></li>
+        <li><strong>Venda registrada</strong><span>${escapeHtml(sale.soldAtLabel)}</span></li>
         ${
           sale.totalRefundedAmount > 0
-            ? `<li><strong>Devolucao registrada</strong><span>Total devolvido: R$ ${Number(sale.totalRefundedAmount).toFixed(2)}</span></li>`
+          ? `<li><strong>Devolucao registrada</strong><span>Total devolvido: R$ ${Number(sale.totalRefundedAmount).toFixed(2)}</span></li>`
             : "<li><strong>Sem devolucao registrada</strong><span>Todos os itens seguem como venda ativa.</span></li>"
         }
       </ol>
@@ -2997,7 +2999,7 @@ function renderSaleDrawer(sale) {
     actions: `
       ${
         refundableItems.length
-          ? `<button type="button" data-drawer-product-refund-sale="${sale.id}" class="ux-btn ux-btn-danger">Devolver produto</button>`
+          ? `<button type="button" data-drawer-product-refund-sale="${escapeHtml(sale.id)}" class="ux-btn ux-btn-danger">Devolver produto</button>`
           : ""
       }
       <button type="button" data-drawer-close class="ux-btn ux-btn-muted">Fechar</button>
@@ -4407,8 +4409,13 @@ async function loadDashboard() {
 }
 
 async function loadFinancialEntries() {
-  const period = (financialPeriod && financialPeriod.value) || "month";
-  const range = rangeFromPeriod(period);
+  const startIn = document.getElementById("financialCustomStart");
+  const endIn = document.getElementById("financialCustomEnd");
+  const startVal = startIn?.value;
+  const endVal = endIn?.value;
+  const range = (startVal && endVal)
+    ? { start: new Date(`${startVal}T00:00:00`), end: new Date(`${endVal}T23:59:59.999`) }
+    : rangeFromPeriod("month");
   const previous = previousRangeFromCurrent(range);
   const transactionsQuery = new URLSearchParams({
     unitId,
@@ -6131,17 +6138,10 @@ if (settingsRoot) {
     }
   });
 
-  settingsRoot.addEventListener("click", (event) => {
-    const btn = event.target.closest(".cfg-theme-btn[data-theme]");
-    if (!btn) return;
-    const toggle = btn.closest(".cfg-theme-toggle");
-    if (!toggle) return;
-    const hiddenInput = btn.closest("form")?.querySelector('input[name="themeMode"]');
-    const theme = btn.dataset.theme;
-    toggle.querySelectorAll(".cfg-theme-btn").forEach((b) => b.classList.remove("is-active"));
-    btn.classList.add("is-active");
-    toggle.dataset.themeValue = theme;
-    if (hiddenInput) hiddenInput.value = theme;
+  settingsRoot.addEventListener("change", (event) => {
+    const select = event.target.closest("select[data-theme-select]");
+    if (!select) return;
+    const theme = String(select.value || "system");
     applyThemeMode(theme, { userSet: true });
   });
 
@@ -6347,6 +6347,22 @@ if (saleRecentList) {
 // attached after DOM injection in renderOperationalChrome (those elements
 // are null here since they're created dynamically).
 
+function positionPopoverAdaptive(trigger, popover) {
+  if (!trigger || !popover) return;
+  const rect = trigger.getBoundingClientRect();
+  const popoverHeight = 420;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const spaceAbove = rect.top;
+
+  if (spaceBelow >= popoverHeight || spaceBelow >= spaceAbove) {
+    popover.style.top = "calc(100% + 6px)";
+    popover.style.bottom = "auto";
+  } else {
+    popover.style.bottom = "calc(100% + 6px)";
+    popover.style.top = "auto";
+  }
+}
+
 /* ── Sale history date range picker ─────────────────────────
    Shopify-style: trigger button → popover with 2-month calendar
    + preset shortcuts. Updates hidden #saleHistoryStart /
@@ -6524,6 +6540,7 @@ function initSaleHistoryDatePicker() {
     leftMonth = now.getMonth() - 1;
     if (leftMonth < 0) { leftMonth = 11; leftYear--; }
     renderCals();
+    positionPopoverAdaptive(trigger, popover);
     popover.classList.remove("hidden");
     trigger.classList.add("is-active");
   }
@@ -6749,6 +6766,7 @@ function initAuditDatePicker() {
     setPresetActive(presetKeyForRange());
     updateRangeLabel();
     renderCals();
+    positionPopoverAdaptive(trigger, popover);
     popover.classList.remove("hidden");
     trigger.classList.add("is-active");
   }
@@ -6842,6 +6860,288 @@ function initAuditDatePicker() {
   if (startIn) startIn.value = toYMD(s30);
   if (endIn)   endIn.value   = toYMD(now);
   labelEl.textContent = "Últimos 30 dias";
+}
+
+/* ── Financial date range picker ──────────────────────────────
+   Shopify-style: trigger button → popover with 2-month calendar
+   + preset shortcuts. Updates hidden #financialCustomStart /
+   #financialCustomEnd inputs and triggers loadAll.
+   ─────────────────────────────────────────────────────────── */
+function initFinancialDatePicker() {
+  const wrap     = document.getElementById("fnPickerWrap");
+  const trigger  = document.getElementById("financialDateTrigger");
+  const popover  = document.getElementById("fnPickerPopover");
+  const calsEl   = document.getElementById("fnCals");
+  const labelEl  = document.getElementById("financialDateLabel");
+  const rangeLbl = document.getElementById("fnRangeLabel");
+  const applyBtn = document.getElementById("fnApplyBtn");
+  const startIn  = document.getElementById("financialCustomStart");
+  const endIn    = document.getElementById("financialCustomEnd");
+  if (!trigger || !popover || !calsEl || !startIn || !endIn || !labelEl) return;
+
+  const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                  "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+  let pickerStart = null;
+  let pickerEnd = null;
+  let hoverDate = null;
+  let phase = 0;
+  let leftYear, leftMonth;
+
+  function toYMD(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function fromYMD(value) {
+    if (!value) return null;
+    const [year, month, day] = String(value).split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const date = new Date(year, month - 1, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  function startOfToday() {
+    const date = new Date();
+    date.setHours(0,0,0,0);
+    return date;
+  }
+  function sameDay(a, b) { return toYMD(a) === toYMD(b); }
+  function rangeBounds(start, end) {
+    if (!start || !end) return { start, end };
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
+
+  function setPresetActive(key) {
+    popover.querySelectorAll(".shf-preset").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.fnPreset === key);
+    });
+  }
+
+  function applyPreset(key) {
+    const now = startOfToday();
+    let s, e;
+    if (key === "today") {
+      s = new Date(now); e = new Date(now);
+    } else if (key === "7d") {
+      s = new Date(now); s.setDate(s.getDate() - 6); e = new Date(now);
+    } else if (key === "30d") {
+      s = new Date(now); s.setDate(s.getDate() - 29); e = new Date(now);
+    } else if (key === "month") {
+      s = new Date(now.getFullYear(), now.getMonth(), 1);
+      e = new Date(now);
+    } else if (key === "prev-month") {
+      const m = now.getMonth() - 1;
+      const y = m < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const mm = (m + 12) % 12;
+      s = new Date(y, mm, 1);
+      e = new Date(y, mm + 1, 0);
+    }
+    pickerStart = s; pickerEnd = e; phase = 0;
+    setPresetActive(key);
+    updateRangeLabel();
+    renderCals();
+  }
+
+  function presetKeyForRange() {
+    if (!pickerStart || !pickerEnd) return "";
+    const today = startOfToday();
+    const s = pickerStart, e = pickerEnd;
+    const diff = Math.round((e - s) / 864e5);
+    if (sameDay(s, today) && sameDay(e, today)) return "today";
+    if (diff === 6 && sameDay(e, today)) return "7d";
+    if (diff === 29 && sameDay(e, today)) return "30d";
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    if (sameDay(s, thisMonthStart) && sameDay(e, today)) return "month";
+    const m = today.getMonth() - 1;
+    const y = m < 0 ? today.getFullYear() - 1 : today.getFullYear();
+    const mm = (m + 12) % 12;
+    const prevMonthStart = new Date(y, mm, 1);
+    const prevMonthEnd = new Date(y, mm + 1, 0);
+    if (sameDay(s, prevMonthStart) && sameDay(e, prevMonthEnd)) return "prev-month";
+    return "";
+  }
+
+  function updateRangeLabel() {
+    if (!pickerStart) { rangeLbl && (rangeLbl.textContent = ""); return; }
+    const fmt = d => d.toLocaleDateString("pt-BR", { day:"2-digit", month:"short" });
+    rangeLbl && (rangeLbl.textContent = pickerEnd && !sameDay(pickerStart, pickerEnd)
+      ? `${fmt(pickerStart)} → ${fmt(pickerEnd)}`
+      : fmt(pickerStart));
+  }
+
+  function renderCal(year, month) {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = startOfToday();
+
+    let html = `<div class="shf-cal">
+      <div class="shf-cal-head">
+        <button type="button" class="shf-cal-nav" data-fn-nav="-1">&#8249;</button>
+        <span class="shf-cal-title">${MONTHS[month]} ${year}</span>
+        <button type="button" class="shf-cal-nav" data-fn-nav="1">&#8250;</button>
+      </div>
+      <div class="shf-cal-grid">
+        ${["D","S","T","Q","Q","S","S"].map(d=>`<span class="shf-cal-dow">${d}</span>`).join("")}`;
+
+    for (let i = 0; i < firstDay; i++) html += `<span></span>`;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const ymd = toYMD(date);
+      const isToday = sameDay(date, today);
+      const isStart = pickerStart && sameDay(date, pickerStart);
+      const isEnd   = pickerEnd   && sameDay(date, pickerEnd);
+      const endRef  = phase === 1 && hoverDate ? hoverDate : pickerEnd;
+      const inRange = pickerStart && endRef &&
+        (pickerStart <= date) && (date <= endRef);
+      const isFuture = date > today;
+
+      let cls = "shf-cal-day";
+      if (isFuture) cls += " is-future";
+      if (isToday)  cls += " is-today";
+      if (isStart)  cls += " is-start";
+      if (isEnd && !sameDay(pickerStart, date)) cls += " is-end";
+      if (inRange && !isStart && !isEnd) cls += " in-range";
+      if (isStart && isEnd) cls += " is-single";
+
+      html += `<button type="button" class="${cls}" data-fn-date="${ymd}"${isFuture?" disabled":""}>${d}</button>`;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  function renderCals() {
+    const rightYear  = leftMonth === 11 ? leftYear + 1 : leftYear;
+    const rightMonth = leftMonth === 11 ? 0 : leftMonth + 1;
+    calsEl.innerHTML = renderCal(leftYear, leftMonth) + renderCal(rightYear, rightMonth);
+  }
+
+  function formatTriggerLabel() {
+    if (!pickerStart) return "Este mês";
+    const today = startOfToday();
+    const s = pickerStart, e = pickerEnd || pickerStart || today;
+    const diff = Math.round((e - s) / 864e5);
+    if (sameDay(s, today) && sameDay(e, today)) return "Hoje";
+    if (diff === 6  && sameDay(e, today)) return "Últimos 7 dias";
+    if (diff === 29 && sameDay(e, today)) return "Últimos 30 dias";
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    if (sameDay(s, thisMonthStart) && sameDay(e, today)) return "Este mês";
+    const m = today.getMonth() - 1;
+    const y = m < 0 ? today.getFullYear() - 1 : today.getFullYear();
+    const mm = (m + 12) % 12;
+    const prevMonthStart = new Date(y, mm, 1);
+    const prevMonthEnd = new Date(y, mm + 1, 0);
+    if (sameDay(s, prevMonthStart) && sameDay(e, prevMonthEnd)) return "Mês anterior";
+    const opts = { day:"2-digit", month:"short" };
+    const sStr = s.toLocaleDateString("pt-BR", opts);
+    const eStr = e.toLocaleDateString("pt-BR", opts);
+    return sameDay(s, e) ? sStr : `${sStr} – ${eStr}`;
+  }
+
+  function openPicker() {
+    pickerStart = fromYMD(startIn.value);
+    pickerEnd = fromYMD(endIn.value) || pickerStart;
+    hoverDate = null;
+    phase = 0;
+    const anchor = pickerEnd || pickerStart || startOfToday();
+    leftYear  = anchor.getFullYear();
+    leftMonth = anchor.getMonth() - 1;
+    if (leftMonth < 0) { leftMonth = 11; leftYear--; }
+    setPresetActive(presetKeyForRange());
+    updateRangeLabel();
+    renderCals();
+    positionPopoverAdaptive(trigger, popover);
+    popover.classList.remove("hidden");
+    trigger.classList.add("is-active");
+  }
+
+  function closePicker() {
+    popover.classList.add("hidden");
+    trigger.classList.remove("is-active");
+  }
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    popover.classList.contains("hidden") ? openPicker() : closePicker();
+  });
+
+  popover.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const preset = event.target.closest("[data-fn-preset]");
+    if (preset) {
+      applyPreset(preset.dataset.fnPreset);
+    }
+  });
+
+  calsEl.addEventListener("click", (event) => {
+    const nav = event.target.closest("[data-fn-nav]");
+    if (nav) {
+      const dir = Number(nav.dataset.fnNav);
+      leftMonth += dir;
+      if (leftMonth < 0)  { leftMonth = 11; leftYear--; }
+      if (leftMonth > 11) { leftMonth = 0;  leftYear++; }
+      renderCals();
+      return;
+    }
+
+    const day = event.target.closest("[data-fn-date]");
+    if (!day || day.disabled) return;
+    const clicked = fromYMD(day.dataset.fnDate);
+    if (!clicked) return;
+    if (phase === 0) {
+      pickerStart = clicked;
+      pickerEnd = null;
+      hoverDate = null;
+      phase = 1;
+      setPresetActive("");
+    } else {
+      if (clicked < pickerStart) {
+        pickerEnd = pickerStart;
+        pickerStart = clicked;
+      } else {
+        pickerEnd = clicked;
+      }
+      hoverDate = null;
+      phase = 0;
+    }
+    updateRangeLabel();
+    renderCals();
+  });
+
+  calsEl.addEventListener("mouseover", (event) => {
+    const day = event.target.closest("[data-fn-date]");
+    if (phase !== 1 || !day || day.disabled) return;
+    const nextHoverDate = fromYMD(day.dataset.fnDate);
+    if (!nextHoverDate || (hoverDate && sameDay(hoverDate, nextHoverDate))) return;
+    hoverDate = nextHoverDate;
+    renderCals();
+  });
+
+  calsEl.addEventListener("mouseleave", () => {
+    if (phase !== 1 || !hoverDate) return;
+    hoverDate = null;
+    renderCals();
+  });
+
+  applyBtn?.addEventListener("click", () => {
+    if (!pickerStart) return;
+    const e = pickerEnd || pickerStart;
+    startIn.value = toYMD(pickerStart);
+    endIn.value   = toYMD(e);
+    labelEl.textContent = formatTriggerLabel();
+    closePicker();
+    loadAll();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!wrap?.contains(e.target)) closePicker();
+  });
+
+  // Init with month preset (Mês atual)
+  applyPreset("month");
+  const now = startOfToday();
+  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  startIn.value = toYMD(startMonth);
+  endIn.value   = toYMD(now);
+  labelEl.textContent = "Este mês";
 }
 
 saleForm.addEventListener("submit", async (event) => {
@@ -7430,6 +7730,7 @@ bindInventoryActionHandlers(inventoryDrawerHost);
 function bindServicesActionHandlers(container) {
   if (!container) return;
   container.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-svc-prof-toggle], [data-svc-prof-list]")) return;
     const target = event.target.closest("[data-service-action]");
     if (!target) return;
     const action = target.dataset.serviceAction;
@@ -8721,12 +9022,42 @@ function initBookingLinkSection() {
   if (openLink) openLink.href = link;
   if (copyBtn && !copyBtn.dataset.wired) {
     copyBtn.dataset.wired = "1";
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(link).then(() => {
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = "Copiado!";
-        setTimeout(() => { copyBtn.textContent = orig; }, 1500);
-      });
+    const label = copyBtn.querySelector(".bkl-copy-label");
+    const defaultLabel = label?.textContent ?? "Copiar link";
+
+    async function copyToClipboard(text) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (_) { /* fallthrough */ }
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "0";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        return ok;
+      } catch (_) { return false; }
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      const copied = await copyToClipboard(link);
+      if (!copied) return;
+      copyBtn.classList.add("is-copied");
+      if (label) label.textContent = "Copiado";
+      window.clearTimeout(copyBtn._copyTimer);
+      copyBtn._copyTimer = window.setTimeout(() => {
+        copyBtn.classList.remove("is-copied");
+        if (label) label.textContent = defaultLabel;
+      }, 1600);
     });
   }
 }

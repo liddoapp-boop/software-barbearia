@@ -31,7 +31,7 @@ const STATUS_MAP = {
   CANCELED: ["Cancelada", "danger"],
   REFUNDED: ["Devolvido", "danger"],
   DEVOLVIDO: ["Devolvido", "danger"],
-  NOT_REFUNDED: ["Sem devolucao", "success"],
+  NOT_REFUNDED: ["Sem devolucao", "muted"],
   PARTIALLY_REFUNDED: ["Parcialmente devolvido", "warning"],
   PARCIALMENTE_DEVOLVIDO: ["Parcialmente devolvido", "warning"],
   LOW_STOCK: ["Estoque baixo", "warning"],
@@ -197,116 +197,8 @@ export function renderEmptyState({
   `;
 }
 
-export function renderTechnicalTrace(trace = {}, options = {}) {
-  const stringifyTraceValue = (value) => {
-    if (value == null || value === "") return "";
-    if (typeof value === "string") {
-      try {
-        return JSON.stringify(JSON.parse(value), null, 2);
-      } catch (_error) {
-        return value;
-      }
-    }
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch (_error) {
-      return String(value);
-    }
-  };
-
-  const fields = [
-    ["ID interno", trace.id || trace.internalId],
-    ["businessSettingsId", trace.businessSettingsId],
-    ["paymentMethodId", trace.paymentMethodId],
-    ["teamMemberId", trace.teamMemberId],
-    ["commissionRuleId", trace.commissionRuleId],
-    ["auditLogId", trace.auditLogId],
-    ["financialEntryId", trace.financialEntryId],
-    ["source", trace.source],
-    ["productId", trace.productId],
-    ["stockMovementId", trace.stockMovementId],
-    ["serviceId", trace.serviceId],
-    ["enabledProfessionalIds", Array.isArray(trace.enabledProfessionalIds) ? trace.enabledProfessionalIds.join(", ") : trace.enabledProfessionalIds],
-    ["clientId", trace.clientId],
-    ["businessId", trace.businessId],
-    ["unitId", trace.unitId],
-    ["preferredProfessionalId", trace.preferredProfessionalId],
-    ["saleId", trace.saleId],
-    ["productSaleId", trace.productSaleId],
-    ["productSaleItemId", trace.productSaleItemId],
-    ["refundId", trace.refundId],
-    ["appointmentId", trace.appointmentId],
-    ["commissionId", trace.commissionId],
-    ["professionalId", trace.professionalId],
-    ["userId", trace.userId],
-    ["ruleId", trace.ruleId],
-    ["commissionRuleIds", Array.isArray(trace.commissionRuleIds) ? trace.commissionRuleIds.join(", ") : trace.commissionRuleIds],
-    ["serviceIds", Array.isArray(trace.serviceIds) ? trace.serviceIds.join(", ") : trace.serviceIds],
-    ["status", trace.status],
-    ["createdAt", trace.createdAt],
-    ["updatedAt", trace.updatedAt],
-    ["customerId", trace.customerId],
-    ["referenceType", trace.referenceType],
-    ["referenceId", trace.referenceId],
-    ["entity", trace.entity],
-    ["entityId", trace.entityId],
-    ["action", trace.action],
-    ["route", trace.route],
-    ["method", trace.method],
-    ["requestId", trace.requestId],
-    ["idempotencyKey", trace.idempotencyKey],
-    ["correlationId", trace.correlationId || trace.requestId],
-    ["Entidade de auditoria", trace.auditEntity || trace.entity],
-    ["Evento relacionado", trace.auditAction || trace.event],
-  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
-  const rawFields = [
-    ["tags", trace.tags],
-    ["beforeJson", trace.beforeJson],
-    ["afterJson", trace.afterJson],
-    ["metadataJson", trace.metadataJson],
-  ]
-    .map(([label, value]) => [label, stringifyTraceValue(value)])
-    .filter(([, value]) => value);
-
-  if (!fields.length && !rawFields.length) return "";
-
-  return `
-    <details class="op-technical-trace" ${options.open ? "open" : ""}>
-      <summary>${escapeHtml(options.title || "Rastreabilidade tecnica")}</summary>
-      ${
-        fields.length
-          ? `<dl>
-              ${fields
-                .map(
-                  ([label, value]) => `
-                    <div>
-                      <dt>${escapeHtml(label)}</dt>
-                      <dd>${escapeHtml(value)}</dd>
-                    </div>
-                  `,
-                )
-                .join("")}
-            </dl>`
-          : ""
-      }
-      ${
-        rawFields.length
-          ? `<div class="op-technical-raw">
-              ${rawFields
-                .map(
-                  ([label, value]) => `
-                    <details>
-                      <summary>${escapeHtml(label)}</summary>
-                      <pre>${escapeHtml(value)}</pre>
-                    </details>
-                  `,
-                )
-                .join("")}
-            </div>`
-          : ""
-      }
-    </details>
-  `;
+export function renderTechnicalTrace(_trace = {}, _options = {}) {
+  return "";
 }
 
 export function renderEntityDrawer({

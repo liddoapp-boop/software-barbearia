@@ -2,7 +2,6 @@ import {
   bindEntityDrawers,
   renderEmptyState,
   renderEntityDrawer,
-  renderTechnicalTrace,
 } from "../components/operational-ui.js";
 import { renderPanelMessage } from "./feedback.js";
 
@@ -333,6 +332,11 @@ export function renderFinancialData(elements, payload) {
     expenses: 0,
     estimatedProfit: 0,
     netBalance: 0,
+    pendingCommissions: 0,
+    paidCommissionsTotal: 0,
+    refundsTotal: 0,
+    operationalExpenses: 0,
+    ticketAverage: 0,
   };
   const cashFlow = payload?.summary?.cashFlow ?? {
     incoming: 0,
@@ -344,15 +348,51 @@ export function renderFinancialData(elements, payload) {
     : [];
 
   if (elements.summary) {
+    const balance = toNumber(cashFlow.balance);
+    const incoming = toNumber(cashFlow.incoming);
+    const outgoing = toNumber(cashFlow.outgoing);
+    const ticketAverage = toNumber(summary.ticketAverage);
+    const pendingCommissions = toNumber(summary.pendingCommissions);
+    const paidCommissions = toNumber(summary.paidCommissionsTotal);
+    const refunds = toNumber(summary.refundsTotal);
+    const operational = toNumber(
+      summary.operationalExpenses != null
+        ? summary.operationalExpenses
+        : outgoing - paidCommissions - refunds,
+    );
+    const projected = toNumber(summary.estimatedProfit ?? balance - pendingCommissions);
+
+    const outgoingParts = [];
+    if (operational > 0) outgoingParts.push(`${money(operational)} operacional`);
+    if (paidCommissions > 0) outgoingParts.push(`${money(paidCommissions)} comissoes`);
+    if (refunds > 0) outgoingParts.push(`${money(refunds)} estornos`);
+    const outgoingSubtitle = outgoingParts.length
+      ? outgoingParts.join(" · ")
+      : "Sem saidas no recorte";
+
+    const projectedSubtitle = pendingCommissions > 0
+      ? `Apos ${money(pendingCommissions)} de comissoes a pagar`
+      : "Sem comissoes pendentes";
+
+    const incomingSubtitle = ticketAverage > 0
+      ? `Ticket medio ${money(ticketAverage)}`
+      : "Receitas no recorte";
+
     elements.summary.innerHTML = [
       renderCard(
-        "Resultado",
-        money(summary.estimatedProfit ?? cashFlow.balance),
-        toNumber(summary.estimatedProfit ?? cashFlow.balance) >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
-        `Saldo ${money(cashFlow.balance)}`,
+        "Saldo de caixa",
+        money(balance),
+        balance >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
+        `${money(incoming)} entradas − ${money(outgoing)} saidas`,
       ),
-      renderCard("Entradas", money(cashFlow.incoming), "fn-kpi-positive", "Receitas no recorte"),
-      renderCard("Saidas", money(cashFlow.outgoing), "fn-kpi-negative", "Despesas e reversos"),
+      renderCard("Receitas", money(incoming), "fn-kpi-positive", incomingSubtitle),
+      renderCard("Saidas", money(outgoing), "fn-kpi-negative", outgoingSubtitle),
+      renderCard(
+        "Resultado projetado",
+        money(projected),
+        projected >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
+        projectedSubtitle,
+      ),
     ].join("");
   }
 
@@ -371,13 +411,40 @@ export function renderFinancialData(elements, payload) {
         description: "Ajuste o periodo ou registre um lancamento manual para compor o caixa.",
       });
     } else {
+      const PAGE_SIZE = 10;
+      let visibleCount = Math.min(PAGE_SIZE, transactions.length);
+      const remaining = transactions.length - visibleCount;
+
       elements.list.innerHTML = `
         <div class="fn-list-head">
           <span>Lancamentos no recorte</span>
           <strong>${transactions.length} ${transactions.length === 1 ? "registro" : "registros"}</strong>
         </div>
-        <div class="fn-list">${transactions.map((item) => renderTransactionRow(item)).join("")}</div>
+        <div class="fn-list" id="fnTransactionsList">
+          ${transactions.slice(0, visibleCount).map((item) => renderTransactionRow(item)).join("")}
+        </div>
+        ${remaining > 0 ? `
+          <button type="button" id="fnLoadMoreBtn" class="fn-load-more-btn">
+            Ver mais (${remaining} restantes)
+          </button>
+        ` : ""}
       `;
+
+      const loadMoreBtn = elements.list.querySelector("#fnLoadMoreBtn");
+      const listEl = elements.list.querySelector("#fnTransactionsList");
+      if (loadMoreBtn && listEl) {
+        loadMoreBtn.addEventListener("click", () => {
+          const nextBatch = transactions.slice(visibleCount, visibleCount + PAGE_SIZE);
+          listEl.insertAdjacentHTML("beforeend", nextBatch.map((item) => renderTransactionRow(item)).join(""));
+          visibleCount += nextBatch.length;
+          const newRemaining = transactions.length - visibleCount;
+          if (newRemaining <= 0) {
+            loadMoreBtn.remove();
+          } else {
+            loadMoreBtn.textContent = `Ver mais (${newRemaining} restantes)`;
+          }
+        });
+      }
     }
   }
   if (elements.commissions) elements.commissions.innerHTML = "";
@@ -408,24 +475,8 @@ export function renderFinancialEntryDrawer(elements, item = {}) {
   const history = `
     <div class="op-detail-list">
       <p>${escapeHtml(impactMessage(item))}</p>
-      <p>O impacto foi conciliado visualmente com a origem operacional e a rastreabilidade completa fica recolhida abaixo.</p>
     </div>
   `;
-
-  const technicalTrace = renderTechnicalTrace({
-    financialEntryId: item.id,
-    source: item.source,
-    referenceType: item.referenceType,
-    referenceId: item.referenceId,
-    appointmentId: item.appointmentId || parseRelatedId(item.notes, "appointmentId"),
-    productSaleId: item.productSaleId || parseRelatedId(item.notes, "productSaleId"),
-    commissionId: item.commissionId,
-    professionalId: item.professionalId,
-    customerId: item.customerId,
-    idempotencyKey: item.idempotencyKey,
-    auditEntity: "financial_entry",
-    auditAction: item.referenceType === "MANUAL" ? "FINANCIAL_MANUAL_ENTRY" : item.referenceType,
-  });
 
   elements.drawerHost.innerHTML = renderEntityDrawer({
     id: "financialEntryDrawer",
@@ -436,7 +487,6 @@ export function renderFinancialEntryDrawer(elements, item = {}) {
     summary,
     details,
     history,
-    technicalTrace,
     actions:
       item.referenceType === "MANUAL"
         ? `

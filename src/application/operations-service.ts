@@ -2758,6 +2758,13 @@ export class OperationsService {
       const expenses = transactions
         .filter((item) => item.kind === "EXPENSE")
         .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
+      const paidCommissionsTotal = transactions
+        .filter((item) => item.kind === "EXPENSE" && item.source === "COMMISSION")
+        .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
+      const refundsTotal = transactions
+        .filter((item) => item.kind === "EXPENSE" && item.source === "REFUND")
+        .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
+      const operationalExpenses = expenses - paidCommissionsTotal - refundsTotal;
       const commissions = this.store.commissionEntries
         .filter(
           (item) =>
@@ -2782,18 +2789,10 @@ export class OperationsService {
         expenses: Number(expenses.toFixed(2)),
         net: Number(net.toFixed(2)),
         estimatedProfit: Number(estimatedProfit.toFixed(2)),
-        pendingCommissions: Number(
-          this.store.commissionEntries
-            .filter(
-              (item) =>
-                item.unitId === input.unitId &&
-                item.occurredAt >= start &&
-                item.occurredAt <= end &&
-                (item.status ?? "PENDING") === "PENDING",
-            )
-            .reduce((acc, item) => acc + Number(item.commissionAmount ?? 0), 0)
-            .toFixed(2),
-        ),
+        pendingCommissions: Number(commissions.toFixed(2)),
+        paidCommissionsTotal: Number(paidCommissionsTotal.toFixed(2)),
+        refundsTotal: Number(refundsTotal.toFixed(2)),
+        operationalExpenses: Number(operationalExpenses.toFixed(2)),
         ticketAverage: Number(ticketAverage.toFixed(2)),
       };
     };
@@ -2814,6 +2813,9 @@ export class OperationsService {
         estimatedProfit: current.estimatedProfit,
         netBalance: current.net,
         pendingCommissions: current.pendingCommissions,
+        paidCommissionsTotal: current.paidCommissionsTotal,
+        refundsTotal: current.refundsTotal,
+        operationalExpenses: current.operationalExpenses,
         ticketAverage: current.ticketAverage,
       },
       cashFlow: {

@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Liddo Barber — Agendar</title>
+  <title>Agendar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231a1915'/%3E%3Cpath d='M18 18l28 28M46 18L18 46' stroke='%23e6e5e0' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap" rel="stylesheet">
@@ -627,7 +628,7 @@
       <line x1="8.12" y1="8.12" x2="12" y2="12"/>
     </svg>
     <div>
-      <div class="brand-name">LIDDO BARBER</div>
+      <div class="brand-name" id="brandName">Agendamento</div>
       <div class="brand-sub">chat</div>
     </div>
   </div>
@@ -676,6 +677,9 @@ let services = [], slots = {};
 let selectedService = null, selectedDate = null, selectedSlot = null;
 let weekStart = null, phoneMask = null, confirmData = {};
 let publicWorkingHours = null;
+let bookingSubmitting = false;
+let bookingSubmitted = false;
+let bookingRunId = 0;
 
 const chat      = document.getElementById('chat');
 const chatInput = document.getElementById('chatInput');
@@ -720,10 +724,8 @@ function normalizeWorkingHoursPayload(payload) {
 }
 
 async function fetchPublicWorkingHours() {
-  const token = localStorage.getItem('authToken');
-  const h = token ? { Authorization: 'Bearer ' + token } : {};
   try {
-    const r = await fetch(publicUrl('/public/working-hours'), { headers: h });
+    const r = await fetch(publicUrl('/public/working-hours'));
     if (!r.ok) return;
     const data = await r.json();
     publicWorkingHours = normalizeWorkingHoursPayload(data?.workingHours || data);
@@ -815,6 +817,31 @@ function disableInput() {
   chatInput.placeholder = '…';
 }
 
+function resetBookingFlowState() {
+  bookingRunId += 1;
+  selectedService = null;
+  selectedDate = null;
+  selectedSlot = null;
+  weekStart = null;
+  slots = {};
+  confirmData = {};
+  bookingSubmitting = false;
+  bookingSubmitted = false;
+}
+
+function isCurrentBookingRun(runId) {
+  return runId === bookingRunId;
+}
+
+async function beginNewBooking(fromUserAction = false) {
+  disableInput();
+  resetBookingFlowState();
+  if (fromUserAction) appendBubble('Quero agendar novamente', true);
+  await say('Claro! Escolha o serviço:', 300);
+  step = STEPS.SERVICE;
+  await loadServices();
+}
+
 /* ─ Handle send ─ */
 async function handleSend() {
   const raw = chatInput.value.trim();
@@ -863,10 +890,8 @@ async function loadServices() {
   disableInput();
   showTyping();
   try {
-    const token = localStorage.getItem('authToken');
-    const h = token ? { Authorization: 'Bearer ' + token } : {};
-    const r = await fetch(publicUrl('/public/services'), { headers: h });
-    if (r.ok) services = (await r.json()).map(s => ({ ...s, duration: s.durationMinutes ?? s.duration }));
+    const r = await fetch(publicUrl('/public/services'));
+    if (r.ok) services = (await r.json()).map(s => ({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
     else throw 0;
   } catch {
     services = [
@@ -883,12 +908,13 @@ async function loadServices() {
 const IMG_PH = `<svg class="svc-img-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
 
 function renderServices() {
+  const runId = bookingRunId;
   const cards = services.map((s, i) => {
+    const hasImg = s.imageUrl && s.imageUrl.length > 0;
     const safeName = escapeHtml(s.name);
     const safeId = escapeHtml(s.id);
     const safeImageUrl = escapeHtml(s.imageUrl);
     const safeDuration = escapeHtml(s.duration);
-    const hasImg = s.imageUrl && s.imageUrl.length > 0;
     return `<div class="svc-card" role="button" tabindex="0"
       aria-label="${safeName}, ${fmtBRL(s.price)}, ${safeDuration} minutos"
       data-id="${safeId}" style="animation-delay:${i*.04}s">
@@ -909,15 +935,21 @@ function renderServices() {
     </div>`);
 
   w.querySelectorAll('.svc-card').forEach(c => {
-    c.addEventListener('click', () => onPickService(c.dataset.id));
-    c.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); onPickService(c.dataset.id); } });
+    c.addEventListener('click', () => onPickService(c.dataset.id, runId));
+    c.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); onPickService(c.dataset.id, runId); } });
   });
 }
 
-async function onPickService(id) {
+async function onPickService(id, runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
   const svc = services.find(s => String(s.id) === String(id));
   if (!svc) return;
   selectedService = svc;
+  selectedDate = null;
+  selectedSlot = null;
+  confirmData = {};
+  bookingSubmitting = false;
+  bookingSubmitted = false;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
   await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Selecione uma data:`, 400);
   step = STEPS.CALENDAR;
@@ -927,10 +959,8 @@ async function onPickService(id) {
 /* ═══ Calendar ════════════════════════════════════════════ */
 async function fetchSlotsForWeek(ws) {
   const key = toKey(ws);
-  const token = localStorage.getItem('authToken');
-  const h = token ? { Authorization: 'Bearer ' + token } : {};
   try {
-    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}`), { headers: h });
+    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}`));
     if (r.ok) Object.assign(slots, await r.json());
   } catch {}
 }
@@ -958,6 +988,7 @@ function weekDates(s) {
 }
 
 function renderCalendar() {
+  const runId = bookingRunId;
   const prev = document.getElementById('calWidgetWrap');
   if (prev) prev.remove();
 
@@ -1007,6 +1038,7 @@ function renderCalendar() {
     </div>`);
 
   document.getElementById('calPrev').addEventListener('click', async () => {
+    if (!isCurrentBookingRun(runId)) return;
     const t = new Date(); t.setHours(0,0,0,0);
     const p = new Date(weekStart); p.setDate(p.getDate()-7);
     if (p < t) return;
@@ -1015,16 +1047,20 @@ function renderCalendar() {
     renderCalendar();
   });
   document.getElementById('calNext').addEventListener('click', async () => {
+    if (!isCurrentBookingRun(runId)) return;
     const n = new Date(weekStart); n.setDate(n.getDate()+7);
     weekStart = n; selectedDate = null; selectedSlot = null;
     if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
     renderCalendar();
   });
-  w.querySelectorAll('.cal-day:not(.unavail)').forEach(b => b.addEventListener('click', () => onPickDay(b.dataset.key)));
+  w.querySelectorAll('.cal-day:not(.unavail)').forEach(b => b.addEventListener('click', () => onPickDay(b.dataset.key, runId)));
 }
 
-function onPickDay(key) {
+function onPickDay(key, runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
   selectedDate = key; selectedSlot = null;
+  bookingSubmitting = false;
+  bookingSubmitted = false;
   document.querySelectorAll('.cal-day').forEach(b => {
     const s = b.dataset.key === key;
     b.classList.toggle('sel', s);
@@ -1042,25 +1078,29 @@ function onPickDay(key) {
     grid.innerHTML = all.map(s =>
       `<button class="slot-btn${s.available===false?' taken':''}" data-time="${escapeHtml(s.time)}">${escapeHtml(s.time)}</button>`
     ).join('');
-    grid.querySelectorAll('.slot-btn:not(.taken)').forEach(b => b.addEventListener('click', () => onPickSlot(b.dataset.time)));
+    grid.querySelectorAll('.slot-btn:not(.taken)').forEach(b => b.addEventListener('click', () => onPickSlot(b.dataset.time, runId)));
   }
   wrap.classList.add('open');
   scrollEnd();
 }
 
-async function onPickSlot(time) {
+async function onPickSlot(time, runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
   selectedSlot = time;
+  bookingSubmitting = false;
+  bookingSubmitted = false;
   document.querySelectorAll('.slot-btn').forEach(b => {
     const s = b.dataset.time === time;
     b.classList.toggle('sel', s);
     b.setAttribute('aria-pressed', s);
   });
   scrollEnd();
-  await showConfirm();
+  await showConfirm(runId);
 }
 
 /* ═══ Confirm ══════════════════════════════════════════════ */
-async function showConfirm() {
+async function showConfirm(runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
   step = STEPS.CONFIRM;
   const client = getClient();
   const dateObj = new Date(selectedDate + 'T12:00:00');
@@ -1071,9 +1111,11 @@ async function showConfirm() {
     price: selectedService.price, duration: selectedService.duration,
     date: selectedDate, time: selectedSlot, dateStr,
   };
+  const oldConfirm = document.getElementById('confirmWidgetWrap');
+  if (oldConfirm) oldConfirm.remove();
   await say('Confirme seu agendamento:', 400);
   const w = appendWidget(`
-    <div class="confirm-card">
+    <div class="confirm-card" id="confirmWidgetWrap">
       <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(confirmData.serviceName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(dateStr)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
@@ -1084,30 +1126,61 @@ async function showConfirm() {
         Confirmar Agendamento
       </button>
     </div>`);
-  w.querySelector('#btnConfirm').addEventListener('click', submitBooking);
+  w.querySelector('#btnConfirm').addEventListener('click', () => submitBooking(runId));
 }
 
 /* ═══ Submit ═══════════════════════════════════════════════ */
-async function submitBooking() {
+async function submitBooking(runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
+  if (bookingSubmitting || bookingSubmitted) return;
+  bookingSubmitting = true;
   const btn = document.getElementById('btnConfirm');
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
   try {
     const iso = new Date(`${confirmData.date}T${confirmData.time}:00.000-03:00`).toISOString();
-    const token = localStorage.getItem('authToken');
     const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const payload = {
+      unitId: BOOKING_UNIT_ID || undefined,
+      clientName: confirmData.clientName,
+      clientPhone: confirmData.phone,
+      serviceId: confirmData.serviceId,
+      startsAt: iso,
+    };
+    if (confirmData.email) payload.clientEmail = confirmData.email;
     const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
-      body: JSON.stringify({ unitId: BOOKING_UNIT_ID || undefined, clientName:confirmData.clientName, clientPhone:confirmData.phone, clientEmail:confirmData.email, serviceId:confirmData.serviceId, startsAt:iso }),
+      body: JSON.stringify(payload),
     });
-    if (!r.ok) throw 0;
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      const err = new Error(data?.error || 'Não consegui confirmar agora. Tente novamente em instantes.');
+      err.status = r.status;
+      throw err;
+    }
+    bookingSubmitted = true;
     saveAppt({ id:Date.now(), service:confirmData.serviceName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
     step = STEPS.DONE;
     await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">Até ${escapeHtml(confirmData.time)} — ${escapeHtml(confirmData.dateStr)}.</span>`);
-    await say('Para agendar novamente, é só me chamar. 😊', 800);
-  } catch {
+    await say('Se quiser marcar outro horário, continue por aqui.', 800);
+    const restart = appendWidget(`
+      <div class="confirm-card">
+        <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer outro agendamento">
+          Novo agendamento
+        </button>
+      </div>`);
+    restart.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
+  } catch (error) {
+    bookingSubmitting = false;
+    const message = error?.status === 409
+      ? 'Esse horário acabou de ficar indisponível. Escolha outro horário na agenda acima.'
+      : (error?.message || 'Não consegui confirmar agora. Tente novamente em instantes.');
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar Novamente`; }
-    await say('Não consegui confirmar agora. Tente novamente em instantes.', 400);
+    await say(escapeHtml(message), 400);
+    if (error?.status === 409 && selectedService && weekStart) {
+      slots = {};
+      await fetchSlotsForWeek(weekStart);
+      renderCalendar();
+    }
   }
 }
 
@@ -1177,14 +1250,32 @@ function showVerifyCard(c) {
   });
 }
 
+/* ─ Business name (vindo das Configurações da empresa) ─ */
+let businessName = 'Agendamento';
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+async function loadBusinessName() {
+  try {
+    const r = await fetch(publicUrl('/public/business'));
+    if (!r.ok) return;
+    const data = await r.json();
+    const name = String(data?.name || '').trim();
+    if (!name) return;
+    businessName = name;
+    const brand = document.getElementById('brandName');
+    if (brand) brand.textContent = name;
+    document.title = `${name} — Agendar`;
+  } catch (_) { /* mantém fallback */ }
+}
+
 /* ─ Init ─ */
 async function init() {
+  await loadBusinessName();
   const c = getClient();
   if (c.name && c.phone) {
     await say(`Olá de novo, <strong>${escapeHtml(c.name)}</strong>! Que bom te ver. 👋`);
@@ -1196,7 +1287,7 @@ async function init() {
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
   } else {
-    await say('Olá! Bem-vindo à <strong>Liddo Barber</strong>.');
+    await say(`Olá! Bem-vindo à <strong>${escapeHtml(businessName)}</strong>.`);
     await say('Qual é o seu nome?', 400);
     step = STEPS.NAME;
     enableInput('Seu nome…');
