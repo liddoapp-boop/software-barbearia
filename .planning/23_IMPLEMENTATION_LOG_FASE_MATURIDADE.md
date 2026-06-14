@@ -1,4 +1,40 @@
 Data: 2026-06-14
+Escopo: Fase 1.0 - Auditoria e limpeza do ambiente real VPS.
+
+## Entregas executadas
+1. Criado `.planning/111_AUDITORIA_AMBIENTE_REAL_VPS.md` com objetivo, estado VPS/Git/PM2/Nginx/PostgreSQL, portas, certificado, variaveis sem segredos, riscos, planos de correcao, backup, deploy, rollback e decisao final.
+2. Executados os comandos de auditoria solicitados: `git status`, `git log`, `git remote`, `pm2 status/describe/logs`, `systemctl status nginx/postgresql`, `ss -tulpn`, health publico HTTPS, HTTP redirect, health direto na porta `3333`, certificado via `openssl`, `ufw status`, `certbot certificates`, cluster PostgreSQL e configuracao Nginx.
+3. Confirmado que `.env` nao aparece no Git status e nao teve conteudo exibido; `test-results/` aparece como untracked e nao deve ser commitado.
+4. Confirmado que `main` segue `ahead 10` de `origin/main`.
+5. Confirmado que PM2 esta online para `software-barbearia` usando `/root/software-barbearia/dist/src/server.js`.
+6. Confirmado que Nginx esta ativo, faz proxy HTTPS para `127.0.0.1:3333` e redireciona HTTP para HTTPS.
+7. Confirmado que PostgreSQL 16/main esta online, restrito a loopback na porta `5432`, com banco `barbearia` e usuario `barbearia` observados sem exibir senha.
+8. Confirmado que a app escuta em `0.0.0.0:3333` e responde diretamente por `http://76.13.161.250:3333/health`.
+9. Confirmado que o certificado atual de `barbearia.76-13-161-250.nip.io` e Let's Encrypt staging/test cert.
+10. Nenhuma feature, regra financeira, RBAC backend, endpoint, seed, migration destrutiva, deploy, restart PM2, firewall, certificado real, push ou exibicao de segredo foi executado.
+
+## Validacao
+- `curl -k -I https://barbearia.76-13-161-250.nip.io/health`: HTTP 200.
+- `curl -k https://barbearia.76-13-161-250.nip.io/health`: `{"ok":true,"authEnforced":true}`.
+- `curl -I http://barbearia.76-13-161-250.nip.io/health`: HTTP 301 para HTTPS.
+- `curl http://76.13.161.250:3333/health`: HTTP 200, confirmando exposicao direta.
+- `npm run build`: passou.
+- `npm run test`: passou (`6 passed | 1 skipped` arquivos; `88 passed | 11 skipped` testes).
+- `npm run test:db`: passou (`1 passed`; `11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou.
+
+## Resultado
+- Decisao da Fase 1.0: APROVADO PARA DEPLOY CONTROLADO com bloqueios/ressalvas.
+- Bloqueios para producao publica limpa: porta `3333` exposta publicamente, certificado Let's Encrypt staging e ausencia de backup PostgreSQL validado antes de deploy/restart/migration.
+- Recomendacao imediata: obter autorizacao explicita para corrigir bind/firewall, emitir certificado real, fazer backup e executar deploy controlado na ordem documentada.
+
+Documento: `.planning/111_AUDITORIA_AMBIENTE_REAL_VPS.md`.
+
+---
+
+Data: 2026-06-14
 Escopo: Fase 0.13 - Fechamento local, validacao fisica e preparacao de push.
 
 ## Entregas executadas

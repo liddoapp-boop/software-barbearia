@@ -1,5 +1,32 @@
 # Next Priorities
 
+## Atualizacao 2026-06-14 (Fase 1.0 - Auditoria ambiente real VPS)
+- Criado `.planning/111_AUDITORIA_AMBIENTE_REAL_VPS.md`.
+- Decisao final: APROVADO PARA DEPLOY CONTROLADO com bloqueios/ressalvas.
+- Ambiente real auditado: PM2 online, Nginx ativo, PostgreSQL online/local, health publico HTTPS respondendo e HTTP redirecionando para HTTPS.
+- Branch `main` segue `ahead 10` de `origin/main`; `.env` nao aparece no status; `test-results/` permanece untracked e nao deve ser commitado.
+- Risco P1/P2 confirmado: app escuta em `0.0.0.0:3333` e `http://76.13.161.250:3333/health` responde diretamente.
+- Risco P1 confirmado: certificado de `barbearia.76-13-161-250.nip.io` e Let's Encrypt staging/test cert.
+- `ufw` esta inativo; antes de ativar firewall, registrar portas e manter acesso SSH seguro.
+- Validacoes permitidas passaram: build, test, test:db, audit, audit omit dev e diff check.
+- Nenhum deploy, restart PM2, firewall, certificado real, migration, seed, push ou exibicao de segredo foi executado.
+
+Prioridade imediata:
+1. Autorizar ou ajustar plano para fechar a exposicao da porta `3333` via bind em `127.0.0.1`, firewall, ou ambos.
+2. Autorizar emissao de certificado Let's Encrypt real para `barbearia.76-13-161-250.nip.io` apos validar DNS/Nginx.
+3. Fazer backup PostgreSQL validado fora do repo antes de qualquer restart, migration ou deploy.
+4. Revisar commits locais ahead 10 e fazer push somente com status limpo e autorizacao.
+5. Executar deploy controlado na ordem documentada e depois smoke remoto completo.
+
+Nao priorizar agora:
+1. Feature nova.
+2. Regra financeira.
+3. RBAC backend.
+4. Endpoints.
+5. Seed, migration destrutiva, deploy, firewall, certificado real ou push sem autorizacao explicita.
+
+
+
 ## Atualizacao 2026-06-14 (Fase 0.13 - Fechamento local e push)
 - Usuario revalidou em celular fisico real.
 - Decisao mobile final: APROVADO.
