@@ -1,5 +1,28 @@
 # Next Priorities
 
+## Atualizacao 2026-06-14 (Fase 0.13 - Fechamento local e push)
+- Usuario revalidou em celular fisico real.
+- Decisao mobile final: APROVADO.
+- Painel interno mobile nao fica mais solto.
+- Agenda/calendario nao causa overflow horizontal geral.
+- Calendario rola dentro do proprio bloco.
+- PDV mobile segue usavel.
+- Booking publico nao foi afetado.
+
+Prioridade imediata:
+1. Criar commits seletivos sem `git add .`.
+2. Rodar bateria final local: build, test, test:db, audits, diff check e status/log.
+3. Recomendar push se o Git ficar sem arquivos indevidos staged e a branch seguir ahead do origin.
+4. Depois do push, validar ambiente alvo real/deploy controlado.
+
+Nao priorizar agora:
+1. Feature nova.
+2. Regra financeira.
+3. RBAC backend.
+4. Endpoints.
+5. Seed, migration destrutiva ou deploy antes do fechamento local.
+
+
 ## Atualizacao 2026-06-14 (Fase 0.12.1 - Correcao overflow mobile painel interno)
 - Criado/atualizado `.planning/108_CORRECAO_OVERFLOW_MOBILE_PAINEL_INTERNO.md`.
 - Decisao final: aprovado com ressalvas.
@@ -26,6 +49,117 @@ Nao priorizar agora:
 3. Alteracao de RBAC backend.
 4. Deploy antes de validacao fisica e commits seletivos.
 5. Seed/migration destrutiva.
+
+
+## Atualizacao 2026-06-14 (Fase 0.12 - Validacao fisica real)
+- Criado `.planning/107_VALIDACAO_DISPOSITIVO_FISICO_REAL.md`.
+- Decisao final: bloqueado para aprovacao fisica.
+- Branch atual `main` esta `0 behind / 6 ahead` de `origin/main`; `.env` nao aparece no status.
+- `test-results/.last-run.json` existe via diretorio untracked `test-results/` e nao deve ser commitado.
+- Fase 0.11.1 continua pendente no working tree, sem commit proprio.
+- Servidor dev isolado respondeu em `http://127.0.0.1:3335/health` e `http://76.13.161.250:3335/health`.
+- URLs candidatas para validacao no aparelho: `http://76.13.161.250:3335/` e `http://76.13.161.250:3335/booking.html`.
+- Validacoes automatizadas passaram: build, test, test:db, audit, audit omit dev, diff check e smoke dev isolado.
+- A validacao em celular fisico real nao foi executada neste ambiente; nao ha evidencia real de toque, teclado virtual, viewport fisico, console movel ou prints do aparelho.
+- Nenhuma feature, regra financeira, RBAC backend, seed, migration destrutiva, deploy, commit ou push foi feito.
+
+Prioridade imediata:
+1. Executar o checklist da Fase 0.12 em celular fisico real.
+2. Registrar modelo do aparelho, navegador, rede, prints/evidencias e resultado por perfil.
+3. Atualizar `.planning/107_VALIDACAO_DISPOSITIVO_FISICO_REAL.md` com aprovado, aprovado com ressalvas ou bloqueado.
+4. Depois da evidencia fisica, revisar o diff completo e fazer commits seletivos das fases pendentes; nao usar `git add .`.
+5. Nao incluir `test-results/.last-run.json` no commit.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Alteracao de regra financeira.
+3. Alteracao de RBAC backend.
+4. Deploy antes da evidencia fisica e dos commits seletivos.
+5. Seed/migration destrutiva.
+
+
+
+
+## Atualizacao 2026-06-13 (Fase 0.11.1 - Correcao P2 visual menu/PDV mobile)
+- Criado `.planning/106_CORRECAO_P2_VISUAL_MENU_PDV_MOBILE.md`.
+- Decisao final: aprovado com ressalvas.
+- Menu visual por perfil corrigido:
+  - owner mantem modulos administrativos;
+  - recepcao ve apenas `Agenda`, `PDV` e `Clientes`;
+  - profissional ve apenas `Agenda` e `Clientes`.
+- `loadAll()` agora evita chamadas de modulos ocultos para o perfil atual.
+- Menu de conta nao exibe Configuracoes/Usuario para perfis sem acesso a configuracoes.
+- PDV mobile nao exibe mais o botao flutuante `Ir para Venda`; checkout real continua no carrinho.
+- Validacoes passaram: syntax checks ES module, teste focado de menu, build, test, test:db, audit, audit omit dev, diff check, smoke dev isolado e Playwright DOM/mobile.
+- Nenhum backend RBAC, regra financeira, seed, migration destrutiva, deploy, commit ou push foi feito.
+
+Prioridade imediata:
+1. Revisar o diff da Fase 0.11.1.
+2. Fazer commit seletivo da Fase 0.11.1 sem `git add .`.
+3. Nao incluir `test-results/.last-run.json` no commit.
+4. Validar em dispositivo fisico real quando disponivel.
+5. Depois, organizar commits seletivos das fases anteriores ainda pendentes.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Alteracao de RBAC backend.
+3. Alteracao de regra financeira.
+4. Refatoracao ampla/code splitting do frontend.
+5. Deploy antes de commits organizados e smoke remoto.
+
+
+
+## Atualizacao 2026-06-13 (Fase 0.11 - Checklist visual humano desktop/mobile)
+- Criado `.planning/105_CHECKLIST_VISUAL_HUMANO_DESKTOP_MOBILE.md`.
+- Decisao final: aprovado com ressalvas.
+- Branch atual `main` esta `0 behind / 6 ahead` de `origin/main`; `.env` nao aparece no status.
+- Fase 0.10 segue pendente no working tree, sem commit proprio.
+- `npm audit` inicialmente falhou em dependencia dev (`tsx`/`esbuild`); corrigido com `npm audit fix` sem `--force`, alterando somente `package-lock.json`.
+- Evidencias visuais salvas em `.planning/evidence/fase-105/screenshots/`.
+- Owner passou nas telas criticas inspecionadas sem console/HTTP error via CDP.
+- Recepcao/profissional continuam com divergencia visual: menu mostra modulos sensiveis e o frontend dispara 403 de endpoints protegidos, embora o backend bloqueie corretamente.
+- PDV mobile tem sobreposicao do botao `Ir para Venda` sobre campos do carrinho.
+- Validacoes passaram: `git diff --check`, `npm run build`, `npm run test`, `npm run test:db`, `npm audit`, `npm audit --omit=dev` e smoke dev isolado.
+
+Prioridade imediata:
+1. Corrigir menu visual por perfil e carregamento condicional de modulos sensiveis no frontend.
+2. Corrigir sobreposicao do PDV mobile.
+3. Reexecutar checklist visual desktop/mobile da Fase 0.11.
+4. Fazer commits seletivos das fases pendentes; nao usar `git add .`.
+5. Rodar smoke remoto no ambiente alvo real antes de qualquer deploy.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Migration/seed destrutivos.
+3. Refatoracao ampla de frontend fora dos dois P2 encontrados.
+4. Alteracao de regra financeira ou RBAC backend.
+5. Push/deploy antes dos commits seletivos e do novo checklist.
+
+
+
+## Atualizacao 2026-06-08 (Fase 0.10 - Validacao/correcao Grupo E)
+- Criado `.planning/104_VALIDACAO_CORRECAO_GRUPO_E.md`.
+- Decisao final: aprovado com ressalvas.
+- Branch atual `main` esta `0 behind / 6 ahead` de `origin/main`; `.env` nao aparece no status.
+- Grupo E revalidado: Agenda, PDV, Financeiro, Configuracoes, Booking publico, sidebar/mobile, WhatsApp UI, CSS e services de resumo financeiro.
+- `renderTechnicalTrace()` foi mantido como no-op nesta fase; auditoria persistida backend continua sendo a fonte tecnica.
+- `tests/api.spec.ts` recebeu asserts para `paidCommissionsTotal`, `refundsTotal` e `operationalExpenses`.
+- Validacoes passaram: `npm run build`, `npm run test`, `npm run test:db`, `npm audit`, `npm audit --omit=dev`, `git diff --check`, syntax checks ES module e smoke dev isolado.
+
+Prioridade imediata:
+1. Fazer commit proprio do Grupo E com staging seletivo; nao usar `git add .`.
+2. Validar visualmente desktop/mobile: Agenda, PDV, Financeiro, Configuracoes, Booking publico, sidebar mobile, modais e WhatsApp UI.
+3. Decidir em fase futura se `renderTechnicalTrace()` sera restaurado apenas para owner/admin.
+4. Corrigir menu visual por perfil em fase separada, sem mexer no RBAC backend ja validado.
+5. Rodar smoke remoto no ambiente alvo real antes de deploy.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Deploy sem validacao visual e smoke remoto.
+3. Seed/migration destrutiva.
+4. Refatoracao ampla de frontend.
+5. Misturar Grupo E com novos hardenings.
+
 
 
 ## Atualizacao 2026-06-08 (Fase 0.9.9 - Auditoria Grupo E)

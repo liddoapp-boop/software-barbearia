@@ -2,7 +2,25 @@
 
 Data: 2026-06-14
 Responsabilidade: CTO, QA Engineer, Product Engineer e Release Manager
-Status: BLOQUEADO PARA APROVACAO FISICA
+Status: APROVADO
+
+## Atualizacao final - validacao fisica refeita pelo usuario
+
+Data: 2026-06-14
+
+O usuario revalidou o painel em celular fisico real apos as correcoes das Fases 0.12.1 e 0.12.2.
+
+Resultado confirmado:
+- O painel interno mobile nao fica mais solto.
+- A Agenda no mobile esta correta.
+- O calendario nao causa overflow horizontal geral da pagina.
+- O calendario rola dentro do proprio bloco quando a grade semanal e mais larga que a tela.
+- O PDV mobile segue usavel, com o checkout real preservado no carrinho.
+- O booking publico nao foi afetado pelas correcoes do painel interno.
+
+Decisao final: APROVADO.
+
+Proxima etapa: organizar commits seletivos, executar a bateria final local e, apos push, validar o ambiente alvo real/deploy controlado.
 
 ## Atualizacao posterior - Fase 0.12.1
 
@@ -239,17 +257,10 @@ Entretanto, a validacao fisica real nao foi executada. Logo, nao existe evidenci
 
 ## Decisao de release
 
-Decisao: BLOQUEADO PARA APROVACAO FISICA.
+Decisao: APROVADO.
 
-Motivo: o ambiente atual conseguiu preparar o servidor, confirmar health check e executar validacoes automatizadas, mas nao consegue operar um dispositivo fisico real. Aprovar esta fase sem evidencia do aparelho seria uma falsa validacao.
+Motivo: a validacao automatizada local ja havia passado e o usuario refez a validacao em celular fisico real, confirmando que o painel interno mobile nao arrasta mais lateralmente, a Agenda esta correta e o calendario rola apenas dentro do seu bloco. O PDV mobile segue usavel e o booking publico nao foi afetado.
 
 ## Proxima acao obrigatoria
 
-Em um celular fisico real, abrir:
-
-```text
-http://76.13.161.250:3335/
-http://76.13.161.250:3335/booking.html
-```
-
-Executar o checklist acima, registrar modelo do aparelho, navegador, rede, prints/evidencias e resultado por perfil. Depois disso, atualizar este documento para `APROVADO`, `APROVADO COM RESSALVAS` ou `BLOQUEADO` com base nas evidencias reais.
+Fechar commits seletivos, executar a bateria final local e preparar push. A etapa seguinte ao push deve ser validacao em ambiente alvo real/deploy controlado, sem seed, sem migration destrutiva e sem alterar regras financeiras ou RBAC backend.

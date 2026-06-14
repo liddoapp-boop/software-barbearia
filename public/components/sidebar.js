@@ -32,15 +32,43 @@ function escapeHtml(value) {
 }
 
 function getUserDisplayName(user) {
-  const rawName = user?.name || user?.displayName || user?.fullName || user?.email || "Usuario";
+  const rawName = user?.name || user?.displayName || user?.fullName || user?.email || "Usuário";
   const emailName = String(rawName).includes("@") ? String(rawName).split("@")[0] : rawName;
-  return String(emailName || "Usuario").trim();
+  return String(emailName || "Usuário").trim();
 }
 
-export function renderSidebar({ groups, activeModule, badges = {}, user = null, accountMenuOpen = false }) {
+export function renderSidebar({
+  groups,
+  activeModule,
+  badges = {},
+  user = null,
+  accountMenuOpen = false,
+  canOpenSettings = true,
+}) {
   const modules = groups.flatMap((group) => group.modules);
   const userName = getUserDisplayName(user);
   const userInitial = userName.charAt(0).toUpperCase() || "U";
+  const accountMenuMarkup = canOpenSettings
+    ? `
+            <button type="button" data-account-action="settings">
+              <span class="sb-menu-icon" aria-hidden="true">${ICON_SETTINGS}</span>
+              Configurações
+            </button>
+            <button type="button" data-account-action="user">
+              <span class="sb-menu-icon" aria-hidden="true">${ICON_USER}</span>
+              Usuário
+            </button>
+            <button type="button" data-account-action="logout">
+              <span class="sb-menu-icon" aria-hidden="true">${ICON_LOGOUT}</span>
+              Sair
+            </button>
+    `
+    : `
+            <button type="button" data-account-action="logout">
+              <span class="sb-menu-icon" aria-hidden="true">${ICON_LOGOUT}</span>
+              Sair
+            </button>
+    `;
 
   const itemsMarkup = modules
     .map((module) => {
@@ -76,18 +104,7 @@ export function renderSidebar({ groups, activeModule, badges = {}, user = null, 
       <div class="sb-footer">
         <div class="sb-account ${accountMenuOpen ? "is-open" : ""} ${activeModule === "configuracoes" ? "is-active" : ""}">
           <div class="sb-account-menu" aria-label="Menu do usuario">
-            <button type="button" data-account-action="settings">
-              <span class="sb-menu-icon" aria-hidden="true">${ICON_SETTINGS}</span>
-              Configuracoes
-            </button>
-            <button type="button" data-account-action="user">
-              <span class="sb-menu-icon" aria-hidden="true">${ICON_USER}</span>
-              Usuario
-            </button>
-            <button type="button" data-account-action="logout">
-              <span class="sb-menu-icon" aria-hidden="true">${ICON_LOGOUT}</span>
-              Sair
-            </button>
+            ${accountMenuMarkup}
           </div>
           <button type="button" class="sb-user-card" title="${escapeHtml(userName)}" data-account-action="toggle" aria-expanded="${accountMenuOpen ? "true" : "false"}">
             <span class="sb-user-avatar" aria-hidden="true">
@@ -95,7 +112,7 @@ export function renderSidebar({ groups, activeModule, badges = {}, user = null, 
             </span>
             <span class="sb-user-info">
               <span class="sb-user-name">${escapeHtml(userName)}</span>
-              <span class="sb-user-subtitle">Conta e operacao</span>
+              <span class="sb-user-subtitle">Conta e operação</span>
             </span>
           </button>
         </div>

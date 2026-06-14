@@ -697,7 +697,9 @@ function renderOperationalChrome() {
 
 const appShell = document.getElementById("appShell");
 const appSidebar = document.getElementById("appSidebar");
+const appContent = document.getElementById("appContent");
 const appMobileTabs = document.getElementById("appMobileTabs");
+const mobileSidebarBackdrop = document.getElementById("mobileSidebarBackdrop");
 
 renderOperationalChrome();
 
@@ -1311,12 +1313,32 @@ const agendaElements = {
   queue: queueList,
 };
 
+function normalizeSessionRole(role) {
+  const value = String(role || "").trim().toLowerCase();
+  if (value === "owner" || value === "recepcao" || value === "profissional") return value;
+  return "owner";
+}
+
+function getSessionRole(session) {
+  return normalizeSessionRole(session?.user?.role || session?.role);
+}
+
+function getStoredSessionRole() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_AUTH_SESSION) || "null");
+    return getSessionRole(parsed);
+  } catch (_error) {
+    return "owner";
+  }
+}
+
 const state = {
-  role: "owner",
+  role: getStoredSessionRole(),
   activeModule: restoreActiveModule(),
   viewport: getViewport(),
   mobileTab: "inicio",
   mobileMoreOpen: false,
+  mobileSidebarOpen: false,
   agendaFiltersOpen: false,
   navBadges: {},
 };
@@ -1408,6 +1430,11 @@ if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
 
 let authSession = restoreAuthSession();
 unitId = getSessionUnitId(authSession);
+state.role = getSessionRole(authSession);
+if (!isAllowedModule(state.activeModule)) {
+  state.activeModule = firstAllowedModule();
+  state.mobileTab = mapModuleToMobileTab(state.activeModule);
+}
 if (inventorySearch) inventoryFilters.search = String(inventorySearch.value || "").trim();
 if (inventoryCategoryFilter) inventoryFilters.category = inventoryCategoryFilter.value || "";
 if (inventoryStatusFilter) inventoryFilters.status = inventoryStatusFilter.value || "ALL";
@@ -1428,6 +1455,11 @@ function restoreAuthSession() {
 function persistAuthSession(session) {
   authSession = session;
   unitId = getSessionUnitId(session);
+  state.role = getSessionRole(session);
+  if (!isAllowedModule(state.activeModule)) {
+    state.activeModule = firstAllowedModule();
+    state.mobileTab = mapModuleToMobileTab(state.activeModule);
+  }
   localStorage.setItem(STORAGE_AUTH_SESSION, JSON.stringify(session));
   localStorage.setItem("authToken", session.accessToken);
 }
@@ -1522,11 +1554,11 @@ function persistNavigationState() {
 }
 
 function getRoleMenuGroups() {
-  return filterMenuGroupsByRole(MENU_GROUPS, "owner");
+  return filterMenuGroupsByRole(MENU_GROUPS, state.role);
 }
 
 function getAllowedModules() {
-  return getAllowedModulesForRole("owner");
+  return getAllowedModulesForRole(state.role);
 }
 
 function isAllowedModule(moduleId) {
@@ -1536,7 +1568,7 @@ function isAllowedModule(moduleId) {
 }
 
 function firstAllowedModule() {
-  const preferred = getDefaultModuleForRole("owner");
+  const preferred = getDefaultModuleForRole(state.role);
   if (isAllowedModule(preferred)) return preferred;
   const allowed = getAllowedModules();
   if (allowed.length) return allowed[0];
@@ -1561,6 +1593,8 @@ function renderShell() {
   const isSettingsMode = state.activeModule === "configuracoes";
 
   appShell?.classList.toggle("settings-mode", isSettingsMode);
+  appShell?.classList.toggle("mobile-sidebar-open", state.mobileSidebarOpen);
+  syncMobileHeaderButtons();
 
   appSidebar.innerHTML = isSettingsMode
     ? renderSettingsSidebar({
@@ -1574,6 +1608,7 @@ function renderShell() {
         badges: state.navBadges,
         user: authSession?.user,
         accountMenuOpen,
+        canOpenSettings: isAllowedModule("configuracoes"),
       });
 
   appMobileTabs.innerHTML = renderMobileTabs({
@@ -1588,11 +1623,45 @@ function renderShell() {
   syncAgendaFilterPanel();
 }
 
+function setMobileSidebarOpen(open) {
+  state.mobileSidebarOpen = Boolean(open) && state.viewport !== "desktop";
+  appShell?.classList.toggle("mobile-sidebar-open", state.mobileSidebarOpen);
+  syncMobileHeaderButtons();
+}
+
+function renderMobileHeaderButton() {
+  return `
+    <button class="mobile-sidebar-toggle" type="button" data-mobile-sidebar-toggle aria-label="Abrir menu" aria-controls="appSidebar" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function syncMobileHeaderButtons() {
+  document.querySelectorAll(".op-page-header, .settings-page-head").forEach((header) => {
+    if (!header.querySelector("[data-mobile-sidebar-toggle]")) {
+      header.insertAdjacentHTML("afterbegin", renderMobileHeaderButton());
+    }
+  });
+  document.querySelectorAll("[data-mobile-sidebar-toggle]").forEach((button) => {
+    button.setAttribute("aria-expanded", state.mobileSidebarOpen ? "true" : "false");
+    button.setAttribute("aria-label", state.mobileSidebarOpen ? "Fechar menu" : "Abrir menu");
+  });
+}
+
+const mobileHeaderObserver = new MutationObserver(() => syncMobileHeaderButtons());
+if (appContent) {
+  mobileHeaderObserver.observe(appContent, { childList: true, subtree: true });
+}
+
 function bindShellEvents() {
   appSidebar.querySelectorAll("[data-settings-shell-action]").forEach((button) => {
     button.addEventListener("click", () => {
       const action = button.getAttribute("data-settings-shell-action");
       if (action === "back") {
+        setMobileSidebarOpen(false);
         const fallback = isAllowedModule(settingsReturnModule) ? settingsReturnModule : firstAllowedModule();
         navigate(fallback);
       }
@@ -1602,6 +1671,7 @@ function bindShellEvents() {
   appSidebar.querySelectorAll('[data-settings-action="select-settings-section"]').forEach((button) => {
     button.addEventListener("click", () => {
       settingsActiveSection = button.getAttribute("data-settings-section") || "business";
+      setMobileSidebarOpen(false);
       renderShell();
       renderSettingsData(settingsElements, currentSettingsPayload || {}, {
         professionals: Object.values(professionalsById),
@@ -1619,6 +1689,7 @@ function bindShellEvents() {
   appSidebar.querySelectorAll("[data-sidebar-module]").forEach((button) => {
     button.addEventListener("click", () => {
       accountMenuOpen = false;
+      setMobileSidebarOpen(false);
       appSidebar.querySelectorAll("[data-sidebar-module]").forEach((item) => item.classList.remove("is-active"));
       button.classList.add("is-active");
       navigate(button.dataset.sidebarModule);
@@ -1644,6 +1715,8 @@ function bindShellEvents() {
       }
       accountMenuOpen = false;
       if (action === "settings") {
+        if (!isAllowedModule("configuracoes")) return;
+        setMobileSidebarOpen(false);
         settingsActiveSection = settingsActiveSection || "business";
         if (state.activeModule !== "configuracoes") settingsReturnModule = state.activeModule;
         navigate("configuracoes");
@@ -1657,6 +1730,8 @@ function bindShellEvents() {
         return;
       }
       if (action === "user") {
+        if (!isAllowedModule("configuracoes")) return;
+        setMobileSidebarOpen(false);
         settingsActiveSection = "usuario";
         if (state.activeModule !== "configuracoes") settingsReturnModule = state.activeModule;
         navigate("configuracoes");
@@ -1707,9 +1782,17 @@ function bindShellEvents() {
       navigate(button.dataset.mobileModule);
     });
   });
+
+  if (mobileSidebarBackdrop) mobileSidebarBackdrop.onclick = () => {
+    setMobileSidebarOpen(false);
+  };
 }
 
 document.addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest("[data-mobile-sidebar-toggle]")) {
+    setMobileSidebarOpen(!state.mobileSidebarOpen);
+    return;
+  }
   if (!accountMenuOpen) return;
   if (event.target instanceof Element && event.target.closest("#appSidebar .sb-account")) return;
   accountMenuOpen = false;
@@ -1729,8 +1812,7 @@ function syncAgendaFilterPanel() {
 
 function syncMobileOperationActions() {
   if (!mobileOperationActions) return;
-  const shouldShow = state.viewport === "mobile" && state.activeModule === "operacao";
-  mobileOperationActions.classList.toggle("hidden", !shouldShow);
+  mobileOperationActions.classList.add("hidden");
 }
 
 function navigate(moduleId, options = {}) {
@@ -5465,6 +5547,17 @@ async function loadMetasModule() {
   };
 }
 
+const SKIPPED_MODULE_LOAD = "__skipped_module_load__";
+
+function loadModuleIfAllowed(moduleId, loader) {
+  if (isAllowedModule(moduleId)) return loader();
+  return Promise.resolve({ type: SKIPPED_MODULE_LOAD, moduleId });
+}
+
+function isSkippedModuleLoad(result) {
+  return result?.status === "fulfilled" && result.value?.type === SKIPPED_MODULE_LOAD;
+}
+
 async function loadAll() {
   renderDashboardLoading(dashboardElements);
   renderAgendaLoading(agendaElements);
@@ -5503,20 +5596,29 @@ async function loadAll() {
     loadAgendaByPeriod(),
     loadAppointmentsByFilters(),
     loadDashboard(),
-    loadFinancialEntries(),
+    loadModuleIfAllowed("financeiro", loadFinancialEntries),
     loadStockOverview(),
     loadClientsOverview(),
     loadProfessionalsPerformance(),
     loadServicesModule(),
-    loadCommissionsStatement(),
-    loadFidelizacaoData(),
-    loadAutomacoesData(),
-    loadSettingsModule(),
-    loadMetasModule(),
-    loadAuditEvents(),
-    loadProductSalesHistory(),
-    loadReportsBundle(),
+    loadModuleIfAllowed("comissoes", loadCommissionsStatement),
+    loadModuleIfAllowed("fidelizacao", loadFidelizacaoData),
+    loadModuleIfAllowed("automacoes", loadAutomacoesData),
+    loadModuleIfAllowed("configuracoes", loadSettingsModule),
+    loadModuleIfAllowed("metas", loadMetasModule),
+    loadModuleIfAllowed("auditoria", loadAuditEvents),
+    loadModuleIfAllowed("operacao", loadProductSalesHistory),
+    loadModuleIfAllowed("relatorios", loadReportsBundle),
   ]);
+  const financialSkipped = isSkippedModuleLoad(financialResult);
+  const commissionsSkipped = isSkippedModuleLoad(commissionsResult);
+  const fidelizacaoSkipped = isSkippedModuleLoad(fidelizacaoResult);
+  const automacoesSkipped = isSkippedModuleLoad(automacoesResult);
+  const settingsSkipped = isSkippedModuleLoad(settingsResult);
+  const metasSkipped = isSkippedModuleLoad(metasResult);
+  const auditSkipped = isSkippedModuleLoad(auditResult);
+  const productSalesHistorySkipped = isSkippedModuleLoad(productSalesHistoryResult);
+  const reportsSkipped = isSkippedModuleLoad(reportsResult);
 
   if (agendaResult.status === "fulfilled") {
     currentAgenda = agendaResult.value;
@@ -5550,7 +5652,7 @@ async function loadAll() {
   }
 
   const dashboardAutomationSignalsPayload =
-    automacoesResult.status === "fulfilled"
+    automacoesResult.status === "fulfilled" && !automacoesSkipped
       ? buildDashboardAutomationSignals(automacoesResult.value)
       : {
           queued: 0,
@@ -5560,7 +5662,7 @@ async function loadAll() {
           topPlaybooks: [],
         };
   const clientsAutomationSignalsPayload =
-    automacoesResult.status === "fulfilled" && clientsResult.status === "fulfilled"
+    automacoesResult.status === "fulfilled" && !automacoesSkipped && clientsResult.status === "fulfilled"
       ? buildClientsAutomationSignals(clientsResult.value, automacoesResult.value)
       : {
           clientsWithRecentAutomation: 0,
@@ -5575,9 +5677,9 @@ async function loadAll() {
         dashboardPayload: dashboardResult.value,
         dashboardAutomationSignals: dashboardAutomationSignalsPayload,
         clientsPayload: clientsResult.status === "fulfilled" ? clientsResult.value : null,
-        financialPayload: financialResult.status === "fulfilled" ? financialResult.value : null,
+        financialPayload: financialResult.status === "fulfilled" && !financialSkipped ? financialResult.value : null,
         stockPayload: stockResult.status === "fulfilled" ? stockResult.value : null,
-        automacoesPayload: automacoesResult.status === "fulfilled" ? automacoesResult.value : null,
+        automacoesPayload: automacoesResult.status === "fulfilled" && !automacoesSkipped ? automacoesResult.value : null,
       }),
     );
   } else {
@@ -5586,7 +5688,9 @@ async function loadAll() {
     });
   }
 
-  if (financialResult.status === "fulfilled") {
+  if (financialSkipped) {
+    currentFinancialTransactions = [];
+  } else if (financialResult.status === "fulfilled") {
     currentFinancialTransactions = Array.isArray(financialResult.value?.transactions?.transactions)
       ? financialResult.value.transactions.transactions
       : [];
@@ -5630,7 +5734,9 @@ async function loadAll() {
     renderStockError(stockElements, "Nao foi possivel carregar estoque operacional.");
   }
 
-  if (productSalesHistoryResult.status !== "fulfilled") {
+  if (productSalesHistorySkipped) {
+    productSalesHistory = [];
+  } else if (productSalesHistoryResult.status !== "fulfilled") {
     productSalesHistory = [];
     if (saleRecentList) {
       saleRecentList.innerHTML = `<p class="panel-msg panel-msg-error">Nao foi possivel carregar historico de vendas.</p>`;
@@ -5658,7 +5764,7 @@ async function loadAll() {
     renderProfessionalsData(professionalsElements, professionalsResult.value, {
       services: servicesResult.status === "fulfilled" ? servicesResult.value.services : allServices,
       appointments: currentAppointments.length ? currentAppointments : currentAgenda,
-      commissions: commissionsResult.status === "fulfilled" ? commissionsResult.value.entries : [],
+      commissions: commissionsResult.status === "fulfilled" && !commissionsSkipped ? commissionsResult.value.entries : [],
     });
   } else {
     currentProfessionalsPayload = null;
@@ -5683,7 +5789,9 @@ async function loadAll() {
     renderServicesError(servicesElements, "Nao foi possivel carregar o modulo de servicos.");
   }
 
-  if (commissionsResult.status === "fulfilled") {
+  if (commissionsSkipped) {
+    currentCommissionsPayload = null;
+  } else if (commissionsResult.status === "fulfilled") {
     currentCommissionsPayload = commissionsResult.value;
     renderCommissionsData(commissionsElements, commissionsResult.value, {
       canPayCommissions: true,
@@ -5693,7 +5801,9 @@ async function loadAll() {
     renderCommissionsError(commissionsElements, "Nao foi possivel carregar extrato de comissoes.");
   }
 
-  if (auditResult.status === "fulfilled") {
+  if (auditSkipped) {
+    currentAuditPayload = null;
+  } else if (auditResult.status === "fulfilled") {
     currentAuditPayload = auditResult.value;
     renderAuditData(auditElements, auditResult.value);
     populateAuditActorFilter(Array.isArray(auditResult.value?.events) ? auditResult.value.events : []);
@@ -5705,7 +5815,9 @@ async function loadAll() {
     );
   }
 
-  if (reportsResult.status === "fulfilled") {
+  if (reportsSkipped) {
+    currentReportsPayload = null;
+  } else if (reportsResult.status === "fulfilled") {
     currentReportsPayload = reportsResult.value;
     renderReportsData(reportsElements, reportsResult.value, {
       activeReportId,
@@ -5718,7 +5830,9 @@ async function loadAll() {
     );
   }
 
-  if (fidelizacaoResult.status === "fulfilled") {
+  if (fidelizacaoSkipped) {
+    // Modulo oculto para o perfil atual.
+  } else if (fidelizacaoResult.status === "fulfilled") {
     renderFidelizacaoData(fidelizacaoElements, fidelizacaoResult.value);
   } else {
     renderFidelizacaoError(
@@ -5727,7 +5841,9 @@ async function loadAll() {
     );
   }
 
-  if (automacoesResult.status === "fulfilled") {
+  if (automacoesSkipped) {
+    currentAutomationRules = [];
+  } else if (automacoesResult.status === "fulfilled") {
     currentAutomationRules = Array.isArray(automacoesResult.value?.rules?.rules)
       ? automacoesResult.value.rules.rules
       : [];
@@ -5740,7 +5856,9 @@ async function loadAll() {
     );
   }
 
-  if (settingsResult.status === "fulfilled") {
+  if (settingsSkipped) {
+    currentSettingsPayload = null;
+  } else if (settingsResult.status === "fulfilled") {
     currentSettingsPayload = settingsResult.value || {};
     renderSettingsData(settingsElements, currentSettingsPayload, {
       professionals: Object.values(professionalsById),
@@ -5757,7 +5875,9 @@ async function loadAll() {
     );
   }
 
-  if (metasResult.status === "fulfilled") {
+  if (metasSkipped) {
+    currentMetasPayload = null;
+  } else if (metasResult.status === "fulfilled") {
     currentMetasPayload = metasResult.value || null;
     renderMetasData(metasElements, currentMetasPayload || {});
   } else {
@@ -8258,6 +8378,7 @@ window.addEventListener("resize", () => {
   if (previousViewport !== state.viewport && state.viewport !== "mobile") {
     state.mobileMoreOpen = false;
     state.agendaFiltersOpen = false;
+    state.mobileSidebarOpen = false;
   }
 
   renderShell();
@@ -8309,6 +8430,9 @@ function closeScheduleDrawer() {
 document.getElementById("scheduleDrawerClose")?.addEventListener("click", closeScheduleDrawer);
 document.getElementById("scheduleDrawerScrim")?.addEventListener("click", closeScheduleDrawer);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeScheduleDrawer(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setMobileSidebarOpen(false);
+});
 
 // ============================================================
 // WEEK CALENDAR
@@ -8417,8 +8541,11 @@ function renderWeekCalendar(options = {}) {
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const { startHour: HOUR_START, endHour: HOUR_END } = getWeekCalendarBounds();
-  const HOUR_H = 36;
   const HOURS = HOUR_END - HOUR_START;
+  const availableHeight = Math.max(420, Math.floor(window.innerHeight - container.getBoundingClientRect().top - 24));
+  const minHourHeight = state.viewport === "mobile" ? 48 : 44;
+  const maxHourHeight = state.viewport === "mobile" ? 58 : 62;
+  const HOUR_H = Math.max(minHourHeight, Math.min(maxHourHeight, Math.floor(availableHeight / HOURS)));
   const TOTAL_H = HOURS * HOUR_H;
   const DAY_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
 

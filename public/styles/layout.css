@@ -2404,6 +2404,10 @@ body {
   display: none;
 }
 
+#mobileOperationActions {
+  display: none !important;
+}
+
 #appointmentsDetailPanel {
   position: sticky;
   top: 90px;
@@ -2536,17 +2540,6 @@ body {
 
   .agenda-filters-panel.is-open {
     display: flex;
-  }
-
-  .mobile-operation-actions {
-    position: fixed;
-    left: 10px;
-    right: 10px;
-    bottom: calc(84px + env(safe-area-inset-bottom));
-    z-index: 49;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
   }
 
   .mobile-operation-btn {
@@ -17374,6 +17367,865 @@ body.theme-light .wz-tpl-btn-primary {
 }
 body.theme-light .wz-tpl-textarea {
   background: var(--color-bg-secondary);
+}
+
+/* Financeiro "Ver mais" */
+.fn-load-more-btn {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  margin-top: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 0 0 12px 12px;
+  background: var(--color-bg-secondary, #f2f1ed);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.14s ease;
+  font-family: inherit;
+}
+.fn-load-more-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* Financeiro picker wrap */
+.fn-picker-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.fn-picker-wrap .shf-popover {
+  left: 0;
+  right: auto;
+}
+
+/* Responsive shell pass: standardized settings sidebar + agenda sizing */
+.settings-sidebar-wrap .settings-back-item {
+  margin-bottom: 8px !important;
+}
+
+#appShell.settings-mode #appSidebar .sidebar-wrap {
+  background: linear-gradient(180deg, rgba(11, 17, 30, 0.99), rgba(26, 25, 21, 0.99)) !important;
+}
+
+#agendaSection {
+  min-width: 0 !important;
+}
+
+#agendaSection .wc-nav {
+  align-items: center !important;
+}
+
+#agendaSection .wc-nav-left {
+  min-width: 0 !important;
+  flex-wrap: wrap !important;
+}
+
+#agendaSection .wc-week-label {
+  min-width: 124px !important;
+  white-space: nowrap !important;
+}
+
+#agendaSection .wc-outer {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border-radius: 10px !important;
+}
+
+#agendaSection .wc-header-row,
+#agendaSection .wc-body-inner {
+  min-width: 820px !important;
+}
+
+#agendaSection .wc-body-scroll {
+  max-height: clamp(480px, calc(100vh - 248px), 760px) !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+#agendaSection .wc-appt {
+  min-height: 34px !important;
+}
+
+@media (max-width: 1279px) {
+  #agendaSection .agenda-next-strip {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #agendaSection .op-page-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+}
+
+@media (max-width: 900px) {
+  #appShell.settings-mode,
+  body.theme-light #appShell.settings-mode,
+  body.theme-light #appShell.settings-mode.sidebar-collapsed {
+    grid-template-columns: 1fr !important;
+  }
+
+  #appShell.settings-mode #appSidebar {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  #appShell.settings-mode #appContent {
+    padding: 12px 10px 86px !important;
+  }
+
+  #appShell.settings-mode #appMobileTabs {
+    display: block !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--color-border) !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-brand,
+  #appShell.settings-mode .settings-sidebar-wrap .sb-footer {
+    display: none !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-scroll {
+    padding: 10px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-nav {
+    display: flex !important;
+    gap: 8px !important;
+    width: max-content !important;
+    min-width: 100% !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-item {
+    flex: 0 0 auto !important;
+    min-height: 40px !important;
+    padding: 0 12px !important;
+    border-radius: 9px !important;
+    font-size: 13px !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-item::before {
+    display: none !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .settings-back-item {
+    margin-bottom: 0 !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #agendaSection .op-page-header {
+    padding: 12px !important;
+  }
+
+  #agendaSection .agenda-next-strip .ux-kpi:not(:first-child) {
+    display: none !important;
+  }
+
+  #agendaSection .wc-nav {
+    gap: 8px !important;
+  }
+
+  #agendaSection .wc-nav-left,
+  #agendaSection .wc-add-btn {
+    width: 100% !important;
+  }
+
+  #agendaSection .wc-nav-left {
+    display: grid !important;
+    grid-template-columns: 38px minmax(0, 1fr) 38px auto !important;
+    gap: 6px !important;
+  }
+
+  #agendaSection .wc-nav-btn {
+    width: 38px !important;
+    padding: 0 !important;
+  }
+
+  #agendaSection .wc-week-label {
+    min-width: 0 !important;
+    text-align: center !important;
+    font-size: 13px !important;
+    padding-left: 0 !important;
+  }
+
+  #agendaSection .wc-view-btn {
+    min-height: 28px !important;
+    padding: 0 10px !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    justify-content: center !important;
+  }
+
+  #agendaSection .wc-header-row,
+  #agendaSection .wc-body-inner {
+    min-width: 980px !important;
+  }
+
+  #agendaSection .wc-body-scroll {
+    max-height: clamp(440px, calc(100vh - 306px), 680px) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #agendaSection .wc-header-row,
+  #agendaSection .wc-body-inner {
+    min-width: 1040px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  #agendaSection .wc-nav-left {
+    grid-template-columns: 36px minmax(0, 1fr) 36px !important;
+  }
+
+  #agendaSection .wc-nav-right {
+    grid-column: 1 / -1 !important;
+    justify-self: stretch !important;
+  }
+
+  #agendaSection .wc-view-btn {
+    flex: 1 1 0 !important;
+  }
+}
+
+/* Mobile navigation: hamburger-triggered sidebar drawer */
+.mobile-sidebar-toggle,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 1279px) {
+  #appMobileTabs,
+  #appShell.settings-mode #appMobileTabs,
+  .mobile-tabs-shell {
+    display: none !important;
+  }
+
+  .mobile-sidebar-toggle {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top));
+    left: 12px;
+    z-index: 120;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent);
+    color: var(--color-text-primary);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(14px);
+    cursor: pointer;
+    transition:
+      transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      background 0.18s ease,
+      border-color 0.18s ease;
+  }
+
+  .mobile-sidebar-toggle span {
+    width: 17px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    transform-origin: center;
+    transition:
+      transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.16s ease;
+  }
+
+  .mobile-sidebar-toggle:hover {
+    border-color: var(--color-border-strong);
+    background: var(--color-bg-elevated);
+  }
+
+  #appShell.mobile-sidebar-open .mobile-sidebar-toggle {
+    transform: translateX(248px);
+  }
+
+  #appShell.mobile-sidebar-open .mobile-sidebar-toggle span:nth-child(1) {
+    transform: translateY(6px) rotate(45deg);
+  }
+
+  #appShell.mobile-sidebar-open .mobile-sidebar-toggle span:nth-child(2) {
+    opacity: 0;
+    transform: scaleX(0.4);
+  }
+
+  #appShell.mobile-sidebar-open .mobile-sidebar-toggle span:nth-child(3) {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: block;
+    background: rgba(0, 0, 0, 0.46);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+  }
+
+  #appShell.mobile-sidebar-open .mobile-sidebar-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  #appSidebar,
+  #appShell.settings-mode #appSidebar {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 110 !important;
+    display: block !important;
+    width: min(240px, 86vw) !important;
+    height: 100vh !important;
+    min-height: 100vh !important;
+    overflow: hidden !important;
+    transform: translateX(calc(-100% - 18px)) !important;
+    opacity: 0.98 !important;
+    will-change: transform;
+    transition:
+      transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.2s ease !important;
+  }
+
+  #appShell.mobile-sidebar-open #appSidebar {
+    transform: translateX(0) !important;
+    opacity: 1 !important;
+  }
+
+  #appSidebar .sidebar-wrap,
+  #appShell.settings-mode #appSidebar .sidebar-wrap,
+  #appShell.settings-mode .settings-sidebar-wrap {
+    width: 100% !important;
+    height: 100vh !important;
+    min-height: 100vh !important;
+    max-height: 100vh !important;
+    border-right: 1px solid var(--color-border) !important;
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: 24px 0 70px rgba(0, 0, 0, 0.34) !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-brand {
+    display: flex !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-footer {
+    display: grid !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-scroll {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-nav {
+    display: grid !important;
+    gap: 6px !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-item {
+    min-height: 50px !important;
+    padding: 11px 14px !important;
+    border-radius: 14px !important;
+    font-size: 15px !important;
+  }
+
+  #appShell.settings-mode .settings-sidebar-wrap .sb-item::before {
+    display: block !important;
+  }
+
+  #appMain,
+  #appShell.settings-mode #appMain {
+    padding: 0 !important;
+  }
+
+  #appContent,
+  #appShell.settings-mode #appContent {
+    padding: calc(60px + env(safe-area-inset-top)) 10px 18px !important;
+  }
+
+  body:has(#appShell.mobile-sidebar-open) {
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 420px) {
+  #appShell.mobile-sidebar-open .mobile-sidebar-toggle {
+    transform: translateX(calc(min(240px, 86vw) - 4px));
+  }
+}
+
+/* Mobile header composition: hamburger sits beside the page header */
+@media (max-width: 1279px) {
+  .mobile-sidebar-toggle {
+    top: calc(10px + env(safe-area-inset-top)) !important;
+    left: 10px !important;
+  }
+
+  #appContent,
+  #appShell.settings-mode #appContent {
+    padding: calc(10px + env(safe-area-inset-top)) 10px 18px !important;
+  }
+
+  #appContent .op-page-header {
+    width: calc(100% - 54px) !important;
+    min-height: 42px !important;
+    margin-left: 54px !important;
+  }
+
+  #appContent .settings-page-head {
+    width: calc(100% - 54px) !important;
+    margin-left: 54px !important;
+    padding-top: 10px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #appContent .op-page-header {
+    padding: 12px !important;
+  }
+
+  #appContent .op-page-title {
+    font-size: 22px !important;
+  }
+
+  #appContent .op-page-subtitle {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+  }
+}
+
+/* Mobile header final layout: the menu button is inside the header grid */
+@media (max-width: 1279px) {
+  #appContent .op-page-header,
+  #appContent .settings-page-head {
+    display: grid !important;
+    grid-template-columns: 42px minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin-left: 0 !important;
+    padding: 10px !important;
+  }
+
+  #appContent .op-page-header-main,
+  #appContent .settings-page-head > div {
+    grid-column: 2 !important;
+    min-width: 0 !important;
+  }
+
+  #appContent .op-page-action,
+  #appContent .settings-page-head > .op-status-chip {
+    grid-column: 1 / -1 !important;
+    justify-self: stretch !important;
+    margin-top: 2px !important;
+  }
+
+  #appContent .op-page-header .mobile-sidebar-toggle,
+  #appContent .settings-page-head .mobile-sidebar-toggle {
+    position: static !important;
+    z-index: 1 !important;
+    display: inline-flex !important;
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 42px !important;
+    height: 42px !important;
+    transform: none !important;
+    box-shadow: none !important;
+    justify-self: start !important;
+    align-self: center !important;
+  }
+
+  #appShell.mobile-sidebar-open #appContent .mobile-sidebar-toggle {
+    transform: none !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #appContent,
+  #appShell.settings-mode #appContent {
+    padding: 8px 8px 18px !important;
+  }
+
+  #appContent .op-page-header,
+  #appContent .settings-page-head {
+    border-radius: 8px !important;
+  }
+}
+
+/* Agenda mobile: compact controls, desktop-like action row */
+.wc-add-label-short {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  #agendaSection #agendaHeaderMount,
+  #agendaSection #agendaCardsMode,
+  #agendaSection .agenda-next-strip,
+  #agendaSection .wc-nav.ds-mb {
+    margin-bottom: 8px !important;
+  }
+
+  #agendaSection .agenda-next-strip .ux-kpi {
+    padding: 10px 12px !important;
+  }
+
+  #agendaSection .wc-nav {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  #agendaSection .wc-nav-left {
+    display: grid !important;
+    grid-template-columns: 30px minmax(96px, 1fr) 30px auto !important;
+    align-items: center !important;
+    column-gap: 3px !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+
+  #agendaSection .wc-nav-btn {
+    width: 30px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 !important;
+    border-radius: 7px !important;
+    font-size: 12px !important;
+  }
+
+  #agendaSection .wc-week-label {
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 2px !important;
+    text-align: center !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+  }
+
+  #agendaSection .wc-nav-right {
+    gap: 1px !important;
+    padding: 2px !important;
+    border-radius: 7px !important;
+  }
+
+  #agendaSection .wc-view-btn {
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 0 6px !important;
+    border-radius: 5px !important;
+    font-size: 10.5px !important;
+    line-height: 1 !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    width: auto !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 13px !important;
+    border-radius: 8px !important;
+    gap: 6px !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+  }
+
+  #agendaSection .wc-add-btn svg {
+    width: 13px !important;
+    height: 13px !important;
+  }
+
+  #agendaSection .wc-add-label-full {
+    display: none !important;
+  }
+
+  #agendaSection .wc-add-label-short {
+    display: inline !important;
+  }
+
+  #agendaSection .wc-outer {
+    margin-top: 0 !important;
+  }
+}
+
+@media (max-width: 390px) {
+  #agendaSection .wc-nav-left {
+    grid-template-columns: 28px minmax(82px, 1fr) 28px auto !important;
+    column-gap: 2px !important;
+  }
+
+  #agendaSection .wc-view-btn {
+    padding: 0 6px !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    padding: 0 11px !important;
+  }
+}
+
+/* Agenda mobile final: keep period controls grouped tightly */
+@media (max-width: 767px) {
+  #agendaSection .wc-nav {
+    grid-template-columns: auto minmax(84px, auto) !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+  }
+
+  #agendaSection .wc-nav-left {
+    grid-template-columns: 30px auto 30px auto !important;
+    justify-content: start !important;
+    justify-self: start !important;
+    column-gap: 4px !important;
+    width: max-content !important;
+    max-width: 100% !important;
+  }
+
+  #agendaSection .wc-week-label {
+    width: auto !important;
+    min-width: 88px !important;
+    max-width: 124px !important;
+    padding: 0 3px !important;
+    text-align: center !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    min-width: 88px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    padding: 0 15px !important;
+    font-size: 13px !important;
+    justify-self: end !important;
+  }
+}
+
+@media (max-width: 390px) {
+  #agendaSection .wc-nav-left {
+    grid-template-columns: 28px auto 28px auto !important;
+    column-gap: 3px !important;
+  }
+
+  #agendaSection .wc-week-label {
+    min-width: 78px !important;
+    max-width: 104px !important;
+    font-size: 10.5px !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    min-width: 78px !important;
+    padding: 0 12px !important;
+  }
+}
+
+/* REUI c-button-group-1 adaptation for the vanilla agenda toolbar */
+.c-button-group-1 {
+  isolation: isolate;
+}
+
+#agendaSection .c-button-group-1 {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0 !important;
+  padding: 3px !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 9px !important;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 84%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+#agendaSection .c-button-group-1 .c-button-group-item {
+  position: relative !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--color-text-muted) !important;
+  padding: 0 10px !important;
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  box-shadow: none !important;
+}
+
+#agendaSection .c-button-group-1 .c-button-group-item + .c-button-group-item {
+  margin-left: 1px !important;
+}
+
+#agendaSection .c-button-group-1 .c-button-group-item.is-active {
+  background: var(--color-bg-elevated) !important;
+  color: var(--color-text-primary) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+#agendaSection .c-button-group-1 .c-button-group-item:hover {
+  color: var(--color-text-primary) !important;
+}
+
+@media (max-width: 767px) {
+  #agendaSection .c-button-group-1 {
+    padding: 3px !important;
+    border-radius: 10px !important;
+  }
+
+  #agendaSection .c-button-group-1 .c-button-group-item {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 10px !important;
+    font-size: 11.5px !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    min-width: 104px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 18px !important;
+    border-radius: 9px !important;
+    font-size: 13px !important;
+  }
+}
+
+@media (max-width: 390px) {
+  #agendaSection .c-button-group-1 .c-button-group-item {
+    padding: 0 8px !important;
+  }
+
+  #agendaSection .wc-add-btn {
+    min-width: 94px !important;
+    padding: 0 14px !important;
+  }
+}
+
+/* Agenda mobile hard override: period controls tight, action button readable */
+@media (max-width: 767px) {
+  #agendaSection .wc-nav.ds-mb {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-nav-left {
+    display: inline-grid !important;
+    grid-template-columns: 30px max-content 30px max-content !important;
+    align-items: center !important;
+    justify-content: start !important;
+    column-gap: 4px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: calc(100% - 122px) !important;
+    flex: 0 1 auto !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-nav-btn {
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 !important;
+    flex: 0 0 30px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-week-label {
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: 102px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    text-align: left !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .c-button-group-1 {
+    width: max-content !important;
+    min-width: max-content !important;
+    flex: 0 0 auto !important;
+    padding: 3px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .c-button-group-1 .c-button-group-item {
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 0 10px !important;
+    font-size: 11.5px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb #agendaNewAppointmentBtn {
+    width: auto !important;
+    min-width: 108px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 18px !important;
+    flex: 0 0 auto !important;
+    justify-self: end !important;
+  }
+}
+
+@media (max-width: 390px) {
+  #agendaSection .wc-nav.ds-mb {
+    gap: 6px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-nav-left {
+    grid-template-columns: 28px max-content 28px max-content !important;
+    column-gap: 3px !important;
+    max-width: calc(100% - 106px) !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-nav-btn {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 30px !important;
+    flex-basis: 28px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .wc-week-label {
+    max-width: 86px !important;
+    font-size: 10.5px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb .c-button-group-1 .c-button-group-item {
+    padding: 0 8px !important;
+  }
+
+  #agendaSection .wc-nav.ds-mb #agendaNewAppointmentBtn {
+    min-width: 96px !important;
+    padding: 0 14px !important;
+  }
 }
 
 /* Fase 0.12.1 - Mobile overflow containment for the authenticated app shell.

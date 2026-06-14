@@ -45,26 +45,8 @@ export const ROLE_ACCESS = {
     "automacoes",
     "relatorios",
   ],
-  recepcao: [
-    ...MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id),
-    "configuracoes",
-    "estoque",
-    "comissoes",
-    "metas",
-    "fidelizacao",
-    "automacoes",
-    "relatorios",
-  ],
-  profissional: [
-    ...MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id),
-    "configuracoes",
-    "estoque",
-    "comissoes",
-    "metas",
-    "fidelizacao",
-    "automacoes",
-    "relatorios",
-  ],
+  recepcao: ["agenda", "operacao", "clientes"],
+  profissional: ["agenda", "clientes"],
 };
 
 export const ROLE_DEFAULT_MODULE = {
@@ -73,16 +55,21 @@ export const ROLE_DEFAULT_MODULE = {
   profissional: "agenda",
 };
 
-export function getDefaultModuleForRole(_role) {
-  return "agenda";
+function normalizeRole(role) {
+  const value = String(role || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ROLE_ACCESS, value) ? value : "owner";
 }
 
-export function getAllowedModulesForRole(_role) {
-  return ROLE_ACCESS.owner;
+export function getDefaultModuleForRole(role) {
+  return ROLE_DEFAULT_MODULE[normalizeRole(role)] || "agenda";
 }
 
-export function filterMenuGroupsByRole(groups, _role) {
-  const allowed = new Set(getAllowedModulesForRole("owner"));
+export function getAllowedModulesForRole(role) {
+  return ROLE_ACCESS[normalizeRole(role)];
+}
+
+export function filterMenuGroupsByRole(groups, role) {
+  const allowed = new Set(getAllowedModulesForRole(role));
   return groups
     .map((group) => ({
       ...group,

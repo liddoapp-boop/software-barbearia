@@ -1,4 +1,23 @@
 Data: 2026-06-14
+Escopo: Fase 0.13 - Fechamento local, validacao fisica e preparacao de push.
+
+## Entregas executadas
+1. Registrada a revalidacao mobile fisica refeita pelo usuario.
+2. Atualizados os documentos das Fases 0.12, 0.12.1 e 0.12.2 para decisao final `APROVADO`.
+3. Confirmado pelo usuario que o painel interno mobile nao fica mais solto.
+4. Confirmado que a Agenda no mobile esta correta e que o calendario rola dentro do proprio bloco.
+5. Confirmado que a Agenda/calendario nao causa overflow horizontal geral.
+6. Confirmado que o PDV mobile segue usavel.
+7. Registrado que o booking publico nao foi afetado.
+
+## Resultado
+- Decisao mobile final: APROVADO.
+- Proxima etapa: organizar commits seletivos, executar bateria final local e preparar push.
+- A etapa posterior ao push deve ser ambiente alvo real/deploy controlado.
+
+---
+
+Data: 2026-06-14
 Escopo: Fase 0.12.1 - Correcao de overflow horizontal no painel interno mobile.
 
 ## Entregas executadas
@@ -33,6 +52,134 @@ Documento: `.planning/108_CORRECAO_OVERFLOW_MOBILE_PAINEL_INTERNO.md`.
 
 ---
 
+Data: 2026-06-14
+Escopo: Fase 0.12 - Validacao visual em dispositivo fisico real.
+
+## Entregas executadas
+1. Criado `.planning/107_VALIDACAO_DISPOSITIVO_FISICO_REAL.md` com baseline Git, URLs candidatas para celular, checklist fisico por modulo/perfil, validacoes automatizadas e decisao de release.
+2. Confirmado branch `main`, status `main...origin/main [ahead 6]`, sem indicador de behind.
+3. Confirmado que `.env` nao aparece no status.
+4. Confirmado que `test-results/.last-run.json` esta presente via diretorio untracked `test-results/` e nao deve ser commitado.
+5. Confirmado que a Fase 0.11.1 segue pendente no working tree, ainda sem commit proprio.
+6. Servidor dev isolado preparado em `PORT=3335 NODE_ENV=development DATA_BACKEND=memory`.
+7. Health check local e por IP responderam HTTP 200 em `/health`.
+8. Nenhuma feature, regra financeira, RBAC backend, seed, migration destrutiva, deploy, commit, push ou `git add .` foi executado.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`86 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3335 npm run smoke:api`: passou.
+- `http://127.0.0.1:3335/health`: HTTP 200.
+- `http://76.13.161.250:3335/health`: HTTP 200.
+
+## Resultado
+- Decisao da Fase 0.12: bloqueado para aprovacao fisica.
+- Motivo: a validacao em celular fisico real nao pode ser executada a partir deste ambiente; aprovar sem evidencias reais seria uma falsa validacao.
+- Recomendacao: abrir `http://76.13.161.250:3335/` e `http://76.13.161.250:3335/booking.html` em celular fisico real, executar o checklist da fase e registrar evidencias antes de qualquer release/deploy.
+
+Documento: `.planning/107_VALIDACAO_DISPOSITIVO_FISICO_REAL.md`.
+
+---
+
+Data: 2026-06-13
+Escopo: Fase 0.11.1 - Correcao dos P2 visuais do checklist desktop/mobile.
+
+## Entregas executadas
+1. Criado `.planning/106_CORRECAO_P2_VISUAL_MENU_PDV_MOBILE.md` com baseline, causa provavel, arquivos alterados, validacoes, pendencias e decisao final.
+2. Corrigido `public/components/menu-config.js` para usar matriz visual por perfil em vez de retornar permissao de owner para todos.
+3. Corrigido `public/app.js` para ler o perfil real da sessao, recalcular modulo ativo permitido e evitar carregamento de modulos ocultos por perfil em `loadAll()`.
+4. Ajustado `public/components/sidebar.js` para nao exibir Configuracoes/Usuario no menu de conta quando o perfil nao pode acessar configuracoes.
+5. Ocultado o atalho mobile flutuante `Ir para Venda`, removendo a sobreposicao no carrinho do PDV sem alterar o checkout real.
+6. Adicionado `tests/frontend-menu-config.spec.ts` para travar a matriz visual do menu por perfil.
+7. Criada evidencia Playwright em `.planning/evidence/fase-106/p2-visual-check.spec.ts`.
+8. Nenhuma regra RBAC backend, regra financeira, seed, migration destrutiva, deploy, commit ou push foi executado.
+
+## Validacao
+- `node --input-type=module --check < public/app.js`: passou.
+- `node --input-type=module --check < public/components/menu-config.js`: passou.
+- `node --input-type=module --check < public/components/sidebar.js`: passou.
+- `npm test -- --run tests/frontend-menu-config.spec.ts`: passou (`3 passed`).
+- `npm run build`: passou.
+- `npm run test`: passou (`86 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3335 npm run smoke:api`: passou.
+- Playwright DOM/mobile da fase 106: passou (`2 passed`).
+
+## Resultado
+- Decisao da Fase 0.11.1: aprovado com ressalvas.
+- Ressalvas: falta validacao em dispositivo fisico real e commit seletivo ainda pendente.
+- Recomendacao: revisar diff e fazer commit seletivo da fase sem `git add .`; nao incluir `test-results/.last-run.json`.
+
+Documento: `.planning/106_CORRECAO_P2_VISUAL_MENU_PDV_MOBILE.md`.
+
+---
+
+Data: 2026-06-13
+Escopo: Fase 0.11 - Checklist visual humano desktop/mobile.
+
+## Entregas executadas
+1. Criado `.planning/105_CHECKLIST_VISUAL_HUMANO_DESKTOP_MOBILE.md` com baseline Git, ambiente, evidencias, resultado por modulo/perfil, bugs e decisao final.
+2. Capturadas evidencias desktop/mobile em `.planning/evidence/fase-105/screenshots/` usando Chromium headless temporario.
+3. Criado `.planning/evidence/fase-105/cdp-console-check.mjs` e `.planning/evidence/fase-105/console-check.json` para registrar erros de console/HTTP por perfil.
+4. Corrigido bloqueio de `npm audit` em dependencia dev via `npm audit fix` sem `--force`; `package-lock.json` atualizou `tsx` para `4.22.4` e `esbuild` para `0.28.1`.
+5. Confirmado que owner abre Financeiro, Agenda, PDV, Configuracoes e Link de Agendamento sem erros de console/HTTP no CDP.
+6. Confirmado que backend RBAC bloqueia rotas sensiveis para recepcao/profissional, mas o menu visual ainda mostra modulos proibidos e dispara 403.
+7. Nenhum seed, migration destrutiva, deploy, commit, push ou alteracao de regra financeira/RBAC backend foi executado.
+
+## Validacao
+- `git diff --check`: passou.
+- `npm run build`: passou.
+- `npm run test`: passou (`83 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou apos fix sem `--force`.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3335 npm run smoke:api`: passou.
+- `/favicon.ico`: retornou `204 No Content`, nao 401.
+
+## Resultado
+- Decisao da Fase 0.11: aprovado com ressalvas.
+- Ressalvas P2: menu/carregamento visual por perfil diverge do RBAC backend; PDV mobile tem sobreposicao do botao `Ir para Venda`.
+- Recomendacao: fase curta de correcao visual/RBAC frontend antes de release limpo.
+
+Documento: `.planning/105_CHECKLIST_VISUAL_HUMANO_DESKTOP_MOBILE.md`.
+
+---
+Data: 2026-06-08
+Escopo: Fase 0.10 - Validacao, correcao e decisao do Grupo E.
+
+## Entregas executadas
+1. Criado `.planning/104_VALIDACAO_CORRECAO_GRUPO_E.md` com baseline Git, analise por arquivo, decisao de `renderTechnicalTrace()`, validacao memory/Prisma, comandos, checklist manual e decisao final.
+2. Reauditados os 12 arquivos do Grupo E ainda pendentes.
+3. Mantido `renderTechnicalTrace()` como no-op nesta fase, com ressalva documentada de perda de rastreabilidade visual tecnica; auditoria persistida backend permanece.
+4. Confirmada paridade conceitual dos campos `paidCommissionsTotal`, `refundsTotal` e `operationalExpenses` entre backend memory e Prisma.
+5. Adicionados asserts focados em `tests/api.spec.ts` para resumo financeiro com refund e comissao paga.
+6. Nenhum seed, migration destrutiva, push, commit, `git add .`, `git add -A`, revert ou mudanca de RBAC backend foi executado.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`83 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3334 npm run smoke:api`: passou.
+- Syntax checks ES module dos principais JS alterados: passaram.
+
+## Resultado
+- Decisao da Fase 0.10: aprovado com ressalvas.
+- Ressalvas: validacao visual humana desktop/mobile, `renderTechnicalTrace()` no-op e menu visual por perfil pendente fora do escopo direto do Grupo E.
+- Recomendacao: commit proprio do Grupo E com staging seletivo, incluindo `tests/api.spec.ts` e documentos da fase.
+
+Documento: `.planning/104_VALIDACAO_CORRECAO_GRUPO_E.md`.
+
+---
 Data: 2026-06-08
 Escopo: Fase 0.9.9 - Auditoria das alteracoes preexistentes do Grupo E.
 

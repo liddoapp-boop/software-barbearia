@@ -128,6 +128,18 @@ async function waitForComplete(cdp: Cdp, sessionId: string) {
   }
 }
 
+async function waitForExpression(cdp: Cdp, sessionId: string, expression: string) {
+  for (let i = 0; i < 80; i += 1) {
+    const result = await cdp.send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+    }, sessionId);
+    if (result.result?.value) return;
+    await delay(250);
+  }
+  throw new Error(`Expression did not become true: ${expression}`);
+}
+
 async function measureModule(cdp: Cdp, authSession: any, activeModule: string, openMenu = false) {
   const target = await cdp.send("Target.createTarget", { url: "about:blank" });
   const attached = await cdp.send("Target.attachToTarget", {
@@ -173,6 +185,103 @@ async function measureModule(cdp: Cdp, authSession: any, activeModule: string, o
 
   await cdp.send("Target.closeTarget", { targetId: target.targetId });
   return result.result.value;
+}
+
+async function measureAgendaViewToggle(cdp: Cdp, authSession: any) {
+  const target = await cdp.send("Target.createTarget", { url: "about:blank" });
+  const attached = await cdp.send("Target.attachToTarget", {
+    targetId: target.targetId,
+    flatten: true,
+  });
+  const sessionId = attached.sessionId;
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  }, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: initScript(authSession, "agenda"),
+  }, sessionId);
+  await cdp.send("Page.navigate", { url: `${baseUrl}/` }, sessionId);
+  await waitForComplete(cdp, sessionId);
+  await waitForExpression(cdp, sessionId, "Boolean(document.querySelector('#agendaSection:not(.hidden) .wc-header-row'))");
+
+  const calendar = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `
+      (() => {
+        const outer = document.querySelector("#agendaSection .wc-outer");
+        const calendarMode = document.querySelector("#agendaCalendarMode");
+        const listMode = document.querySelector("#agendaListMode");
+        return {
+          viewport: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          calendarVisible: !!calendarMode && !calendarMode.classList.contains("hidden"),
+          listVisible: !!listMode && !listMode.classList.contains("hidden"),
+          calendarClientWidth: outer?.clientWidth || 0,
+          calendarScrollWidth: outer?.scrollWidth || 0,
+          calendarOverflowX: outer ? getComputedStyle(outer).overflowX : "",
+        };
+      })()
+    `,
+  }, sessionId);
+
+  await cdp.send("Runtime.evaluate", {
+    expression: "document.querySelector('#viewListBtn')?.click()",
+  }, sessionId);
+  await waitForExpression(cdp, sessionId, "Boolean(document.querySelector('#agendaListMode:not(.hidden)'))");
+
+  const list = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `
+      (() => {
+        const calendarMode = document.querySelector("#agendaCalendarMode");
+        const listMode = document.querySelector("#agendaListMode");
+        return {
+          viewport: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          calendarVisible: !!calendarMode && !calendarMode.classList.contains("hidden"),
+          listVisible: !!listMode && !listMode.classList.contains("hidden"),
+          listHasCards: document.querySelectorAll("#agendaListMode .al-card, #agendaListMode .al-empty").length > 0,
+        };
+      })()
+    `,
+  }, sessionId);
+
+  await cdp.send("Runtime.evaluate", {
+    expression: "document.querySelector('#viewGridBtn')?.click()",
+  }, sessionId);
+  await waitForExpression(cdp, sessionId, "Boolean(document.querySelector('#agendaCalendarMode:not(.hidden) .wc-header-row'))");
+
+  const calendarAgain = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `
+      (() => {
+        const calendarMode = document.querySelector("#agendaCalendarMode");
+        const listMode = document.querySelector("#agendaListMode");
+        return {
+          viewport: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          calendarVisible: !!calendarMode && !calendarMode.classList.contains("hidden"),
+          listVisible: !!listMode && !listMode.classList.contains("hidden"),
+        };
+      })()
+    `,
+  }, sessionId);
+
+  await cdp.send("Target.closeTarget", { targetId: target.targetId });
+  return {
+    calendar: calendar.result.value,
+    list: list.result.value,
+    calendarAgain: calendarAgain.result.value,
+  };
 }
 
 describe("frontend mobile overflow", () => {
@@ -230,5 +339,34 @@ describe("frontend mobile overflow", () => {
       expect(check.bodyScrollWidth, `${check.activeModule} bodyScrollWidth`).toBeLessThanOrEqual(check.viewport + 2);
     }
     expect(checks.at(-1)?.menuOpen).toBe(true);
+  }, 45_000);
+
+  testIfChrome("agenda mobile mantem calendario com scroll interno e lista existente funcional", async () => {
+    const version = await waitForJson<{ webSocketDebuggerUrl: string }>(`http://127.0.0.1:${cdpPort}/json/version`);
+    const cdp = new Cdp(version.webSocketDebuggerUrl);
+    await cdp.open();
+    const session = await loginOwner();
+
+    const result = await measureAgendaViewToggle(cdp, session);
+
+    cdp.close();
+
+    expect(result.calendar.scrollWidth, "agenda calendario document scrollWidth").toBeLessThanOrEqual(result.calendar.viewport + 2);
+    expect(result.calendar.bodyScrollWidth, "agenda calendario body scrollWidth").toBeLessThanOrEqual(result.calendar.viewport + 2);
+    expect(result.calendar.calendarVisible).toBe(true);
+    expect(result.calendar.listVisible).toBe(false);
+    expect(result.calendar.calendarScrollWidth).toBeGreaterThan(result.calendar.calendarClientWidth);
+    expect(result.calendar.calendarOverflowX).toMatch(/auto|scroll/);
+
+    expect(result.list.scrollWidth, "agenda lista document scrollWidth").toBeLessThanOrEqual(result.list.viewport + 2);
+    expect(result.list.bodyScrollWidth, "agenda lista body scrollWidth").toBeLessThanOrEqual(result.list.viewport + 2);
+    expect(result.list.calendarVisible).toBe(false);
+    expect(result.list.listVisible).toBe(true);
+    expect(result.list.listHasCards).toBe(true);
+
+    expect(result.calendarAgain.scrollWidth, "agenda calendario apos voltar document scrollWidth").toBeLessThanOrEqual(result.calendarAgain.viewport + 2);
+    expect(result.calendarAgain.bodyScrollWidth, "agenda calendario apos voltar body scrollWidth").toBeLessThanOrEqual(result.calendarAgain.viewport + 2);
+    expect(result.calendarAgain.calendarVisible).toBe(true);
+    expect(result.calendarAgain.listVisible).toBe(false);
   }, 45_000);
 });

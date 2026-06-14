@@ -1,7 +1,7 @@
 # Fase 0.12.1 - Correcao de overflow mobile no painel interno
 
 Data: 2026-06-14
-Status: APROVADO COM RESSALVAS
+Status: APROVADO
 
 ## Objetivo
 
@@ -355,12 +355,12 @@ Booking publico:
 
 ## Pendencias reais
 
-- Revalidar no mesmo celular fisico onde o problema foi observado.
-- Idealmente testar em pelo menos mais um aparelho/navegador mobile antes de remover a ressalva.
-- Fazer commit seletivo da fase, sem `git add .` e sem incluir `test-results/.last-run.json`.
+- Validacao fisica refeita pelo usuario em celular real: aprovada.
+- Fazer commit/push seletivo de fechamento, sem `git add .` e sem incluir `test-results/.last-run.json`.
+- Validar o ambiente alvo real/deploy controlado apos o push.
 
 ## Decisao final
 
-Decisao: APROVADO COM RESSALVAS.
+Decisao: APROVADO.
 
-Motivo: o overflow horizontal geral do painel interno foi corrigido nas medicoes automatizadas de dashboard, Agenda, PDV, Financeiro e menu mobile aberto. As validacoes obrigatorias passaram. A ressalva fica porque a sessao atual nao consegue tocar no aparelho fisico real onde o bug foi observado.
+Motivo: o overflow horizontal geral do painel interno foi corrigido nas medicoes automatizadas de Dashboard, Agenda, PDV, Financeiro e menu mobile aberto. As validacoes obrigatorias passaram e o usuario confirmou em celular fisico real que a tela nao fica mais solta.
