@@ -1,3 +1,38 @@
+Data: 2026-06-14
+Escopo: Fase 0.12.1 - Correcao de overflow horizontal no painel interno mobile.
+
+## Entregas executadas
+1. Atualizado `.planning/108_CORRECAO_OVERFLOW_MOBILE_PAINEL_INTERNO.md` com baseline Git, causa encontrada, arquivos alterados, validacoes, pendencias e decisao final.
+2. Corrigido `public/styles/layout.css` com uma camada final de contenção mobile do shell autenticado.
+3. Contido `#appShell`, `#appMain`, `#appContent`, cards, headers, filtros e secoes internas para nao excederem a viewport mobile.
+4. Corrigido o drawer de agendamento fechado, adicionando clipping/limite de largura para impedir faixa lateral vazia.
+5. Mantida a agenda semanal larga com scroll horizontal apenas dentro de `.wc-outer`, nao na pagina inteira.
+6. Reforcada contenção de PDV e Financeiro em mobile, preservando checkout real no carrinho e sem reativar o botao flutuante.
+7. Criado `tests/frontend-mobile-overflow.spec.ts` para validar `scrollWidth <= innerWidth + 2` em viewport `390x844`.
+8. Criada evidencia auxiliar em `.planning/evidence/fase-108/overflow-mobile-check.mjs` e `.planning/evidence/fase-108/overflow-mobile-check.json`.
+9. Booking publico nao foi alterado.
+10. Nenhuma regra financeira, RBAC backend, endpoint, seed, migration destrutiva, deploy, commit, push ou `git add .` foi executado.
+
+## Validacao
+- `npm test -- --run tests/frontend-mobile-overflow.spec.ts`: passou (`1 passed`).
+- Evidencia CDP mobile: Dashboard, Agenda, PDV, Financeiro e Dashboard/menu com `viewport=390`, `scrollWidth=390`, `overflow=0`.
+- `npm run build`: passou.
+- `npm run test`: passou (`87 passed | 11 skipped`; `6 passed | 1 skipped` arquivos).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: passou com 0 vulnerabilidades.
+- `npm audit --omit=dev`: passou com 0 vulnerabilidades.
+- `git diff --check`: passou.
+- `NODE_ENV=development DATA_BACKEND=memory SMOKE_BASE_URL=http://127.0.0.1:3336 npm run smoke:api`: passou.
+
+## Resultado
+- Decisao da Fase 0.12.1: aprovado com ressalvas.
+- Ressalva: falta repetir no celular fisico real onde o bug foi observado.
+- Recomendacao: validar no aparelho real e depois fazer commit seletivo da fase sem `git add .`; nao incluir `test-results/.last-run.json`.
+
+Documento: `.planning/108_CORRECAO_OVERFLOW_MOBILE_PAINEL_INTERNO.md`.
+
+---
+
 Data: 2026-06-08
 Escopo: Fase 0.9.9 - Auditoria das alteracoes preexistentes do Grupo E.
 

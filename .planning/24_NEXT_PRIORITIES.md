@@ -1,5 +1,33 @@
 # Next Priorities
 
+## Atualizacao 2026-06-14 (Fase 0.12.1 - Correcao overflow mobile painel interno)
+- Criado/atualizado `.planning/108_CORRECAO_OVERFLOW_MOBILE_PAINEL_INTERNO.md`.
+- Decisao final: aprovado com ressalvas.
+- Corrigido overflow horizontal geral do painel interno mobile com contencao final do shell autenticado em `public/styles/layout.css`.
+- Drawer de agendamento fechado agora fica contido pela viewport, sem criar faixa lateral vazia.
+- Agenda semanal mantem largura interna propria, mas rola dentro de `.wc-outer`, nao na pagina inteira.
+- PDV e Financeiro receberam reforco de `max-width: 100%`/`min-width: 0` para filtros, carrinho, listas e grids.
+- Adicionado `tests/frontend-mobile-overflow.spec.ts` cobrindo Dashboard, Agenda, PDV, Financeiro e menu mobile aberto em viewport `390x844`.
+- Evidencia CDP em `.planning/evidence/fase-108/`: todos os modulos testados ficaram com `scrollWidth=390` para `viewport=390`.
+- Booking publico nao foi alterado.
+- Validacoes passaram: teste focado, build, test, test:db, audit, audit omit dev, diff check e smoke dev isolado.
+- Nenhuma regra financeira, RBAC backend, endpoint, seed, migration destrutiva, deploy, commit ou push foi feito.
+
+Prioridade imediata:
+1. Reabrir o painel interno no celular fisico real onde o bug foi observado e confirmar que nao arrasta mais para area vazia.
+2. Validar manualmente Dashboard, Agenda, PDV, Financeiro e menu mobile no aparelho.
+3. Confirmar rapidamente que `/booking.html` segue sem regressao visual.
+4. Fazer commit seletivo da Fase 0.12.1 sem `git add .`.
+5. Nao incluir `test-results/.last-run.json` no commit.
+
+Nao priorizar agora:
+1. IA/WhatsApp real.
+2. Alteracao de regra financeira.
+3. Alteracao de RBAC backend.
+4. Deploy antes de validacao fisica e commits seletivos.
+5. Seed/migration destrutiva.
+
+
 ## Atualizacao 2026-06-08 (Fase 0.9.9 - Auditoria Grupo E)
 - Criado `.planning/103_AUDITORIA_GRUPO_E_ALTERACOES_PREEXISTENTES.md`.
 - Decisao final: aprovado com ressalvas.

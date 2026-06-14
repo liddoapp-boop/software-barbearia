@@ -1,0 +1,52 @@
+[
+  {
+    "moduleId": "dashboard",
+    "openMenu": false,
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "bodyScrollWidth": 390,
+    "documentClientWidth": 390,
+    "overflow": 0,
+    "offenders": []
+  },
+  {
+    "moduleId": "agenda",
+    "openMenu": false,
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "bodyScrollWidth": 390,
+    "documentClientWidth": 390,
+    "overflow": 0,
+    "offenders": []
+  },
+  {
+    "moduleId": "operacao",
+    "openMenu": false,
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "bodyScrollWidth": 390,
+    "documentClientWidth": 390,
+    "overflow": 0,
+    "offenders": []
+  },
+  {
+    "moduleId": "financeiro",
+    "openMenu": false,
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "bodyScrollWidth": 390,
+    "documentClientWidth": 390,
+    "overflow": 0,
+    "offenders": []
+  },
+  {
+    "moduleId": "dashboard",
+    "openMenu": true,
+    "viewport": 390,
+    "documentScrollWidth": 390,
+    "bodyScrollWidth": 390,
+    "documentClientWidth": 390,
+    "overflow": 0,
+    "offenders": []
+  }
+]
