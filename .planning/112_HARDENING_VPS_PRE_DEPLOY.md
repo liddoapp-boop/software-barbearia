@@ -137,3 +137,12 @@ Motivos:
 4. Decidir abordagem de porta `3333`: bind local via alteracao pequena futura ou firewall com portas essenciais confirmadas.
 5. Emitir certificado Let's Encrypt real apos validacao de Nginx/DNS.
 6. So entao executar deploy/restart controlado e smoke remoto completo.
+
+## Atualizacao 2026-06-15 - Fase 1.1.2
+Autenticacao SSH e remote foram corrigidos para `git@github.com:liddoapp-boop/software-barbearia.git`, mas `git fetch origin` revelou divergencia por forced update remoto:
+- `main...origin/main [ahead 23, behind 1]`
+- commit remoto ausente localmente: `9269836 feat: scaffold dashboard and agenda modules with mobile-first layout and navigation shell`
+
+A reconciliacao foi bloqueada antes de merge/rebase porque a simulacao de merge indicou conflitos em arquivos centrais de frontend e planejamento, incluindo `public/app.js`, `public/index.html`, `public/modules/agenda.js`, `public/modules/dashboard.js` e `public/styles/layout.css`.
+
+Documento detalhado: `.planning/113_RECONCILIACAO_GIT_ORIGIN_MAIN.md`.

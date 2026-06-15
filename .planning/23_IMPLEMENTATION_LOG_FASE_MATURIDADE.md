@@ -2208,3 +2208,28 @@ Escopo: Fase 1.14 - Contrato backend de relatorios gerenciais e exportacao profi
 - Ressalvas: smoke precisa ser reexecutado com API atual na porta livre; teste DB novo compila, mas nao foi reexecutado por limite da aprovacao automatica; ocupacao profissional ainda depende de base historica fechada.
 
 Documento: `.planning/114_CONTRATO_BACKEND_RELATORIOS_GERENCIAIS_EXPORTACAO.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.1.2 - Reconciliacao segura do Git com origin/main.
+
+## Entregas executadas
+1. Confirmado remote correto: `git@github.com:liddoapp-boop/software-barbearia.git`.
+2. Confirmada autenticacao SSH via deploy key do repositorio correto.
+3. Registrado estado inicial: `main...origin/main [ahead 23, behind 1]`.
+4. Criada branch local de seguranca `backup/pre-reconcile-origin-main-20260615-121401`.
+5. Inspecionado o commit remoto `9269836`.
+6. Executada simulacao de merge sem alterar o worktree.
+
+## Resultado
+BLOQUEADO.
+
+Motivos:
+- o remote teve forced update;
+- o commit remoto altera arquivos centrais de frontend e planejamento;
+- a simulacao de merge indicou conflitos em `public/app.js`, `public/index.html`, `public/modules/agenda.js`, `public/modules/dashboard.js`, `public/styles/layout.css`, `sidebar`, `topbar` e prioridades;
+- push normal nao e seguro enquanto a divergencia nao for reconciliada;
+- force push nao foi usado.
+
+Documento: `.planning/113_RECONCILIACAO_GIT_ORIGIN_MAIN.md`.

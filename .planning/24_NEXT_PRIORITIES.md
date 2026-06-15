@@ -1091,3 +1091,15 @@ Prioridade imediata:
 2. Executar passada visual assistida em host interno real para Desktop e Mobile em Dashboard, Agenda, PDV, Clientes, Financeiro e Relatorios.
 3. Consolidar pequenos ajustes finais de densidade e legibilidade apenas se surgirem na validacao visual.
 4. Planejar fase de modularizacao incremental de `public/index.html` e `public/app.js` sem reescrever arquitetura nem alterar fluxos.
+
+## Atualizacao 2026-06-15 (Fase 1.1.2 - Reconciliacao Git bloqueada)
+- Remote SSH correto confirmado: `git@github.com:liddoapp-boop/software-barbearia.git`.
+- Branch local segue divergente: `main...origin/main [ahead 23, behind 1]`.
+- Commit remoto analisado: `9269836 feat: scaffold dashboard and agenda modules with mobile-first layout and navigation shell`.
+- Branch de seguranca criada: `backup/pre-reconcile-origin-main-20260615-121401`.
+- Merge/rebase nao executado por risco alto de regressao e conflitos em frontend/layout.
+
+Prioridade imediata:
+1. Decidir estrategia humana para o commit remoto `9269836`: merge controlado em branch de integracao, cherry-pick parcial ou descartar como scaffold obsoleto mediante decisao explicita.
+2. Nao usar force push.
+3. Nao retomar hardening/deploy ate a reconciliacao Git estar segura e o push normal ser possivel.
