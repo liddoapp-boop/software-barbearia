@@ -1,4 +1,30 @@
 Data: 2026-06-14
+Escopo: Fase 1.1 - Hardening seguro da VPS antes do deploy controlado.
+
+## Entregas executadas
+1. Criado `.planning/112_HARDENING_VPS_PRE_DEPLOY.md` com estado inicial, acoes executadas, resultado do push, backup, certificado, firewall/porta 3333, deploy/restart, smoke remoto, riscos restantes e decisao final.
+2. Fechada a documentacao da Fase 1.0 com staging seletivo de `.planning/111_AUDITORIA_AMBIENTE_REAL_VPS.md`, `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md` e `.planning/24_NEXT_PRIORITIES.md`.
+3. Confirmado antes do commit que `test-results/` nao estava staged e `.env` nao aparecia no status.
+4. Criado commit local `bcf4b99 docs: auditar ambiente real da vps`.
+5. Tentado `git push`, que falhou por falta de credencial GitHub via HTTPS no ambiente.
+6. Interrompidas as acoes de infraestrutura apos a falha do push, conforme instrucao da fase.
+
+## Validacao
+- `git diff --cached --stat`: continha apenas os tres documentos da Fase 1.0 antes do commit.
+- `git diff --cached --name-only`: continha apenas os tres documentos da Fase 1.0 antes do commit.
+- `git status -sb` apos falha de push: `main...origin/main [ahead 11]`, com `test-results/` untracked.
+- Baseline operacional coletado: PM2 online, Nginx ativo, PostgreSQL ativo, porta `3333` ainda em `0.0.0.0`, certificado ainda staging.
+
+## Resultado
+- Decisao da Fase 1.1: BLOQUEADO.
+- Motivo principal: `git push` falhou com `fatal: could not read Username for 'https://github.com': No such device or address`.
+- Nao houve backup real, certificado real, firewall, deploy, restart PM2, migration, seed ou smoke remoto completo.
+
+Documento: `.planning/112_HARDENING_VPS_PRE_DEPLOY.md`.
+
+---
+
+Data: 2026-06-14
 Escopo: Fase 1.0 - Auditoria e limpeza do ambiente real VPS.
 
 ## Entregas executadas

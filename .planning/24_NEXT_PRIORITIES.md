@@ -1,5 +1,33 @@
 # Next Priorities
 
+## Atualizacao 2026-06-14 (Fase 1.1 - Hardening VPS pre-deploy)
+- Criado `.planning/112_HARDENING_VPS_PRE_DEPLOY.md`.
+- Decisao final: BLOQUEADO.
+- Commit local criado: `bcf4b99 docs: auditar ambiente real da vps`.
+- `git push` falhou por falta de credencial GitHub via HTTPS: `could not read Username`.
+- Branch local ficou `main...origin/main [ahead 11]`.
+- `test-results/` segue untracked e nao foi staged; `.env` nao apareceu no status.
+- Nenhum backup real PostgreSQL foi criado porque a fase parou apos falha no push.
+- Certificado real nao foi emitido; certificado segue staging/test.
+- Firewall/porta `3333` nao foram alterados; porta direta segue como risco pendente.
+- Nao houve deploy, restart PM2, migration, seed ou smoke remoto completo.
+
+Prioridade imediata:
+1. Configurar credencial GitHub segura para `git push` ou trocar `origin` para SSH com chave valida.
+2. Reexecutar `git push` e confirmar `git status -sb`.
+3. Depois do push, criar backup real PostgreSQL fora do repo.
+4. Decidir e aplicar mitigacao da porta `3333` com confirmacao de portas essenciais da VPS.
+5. Emitir certificado Let's Encrypt real e so entao seguir para deploy/restart controlado e smoke remoto.
+
+Nao priorizar agora:
+1. Deploy/restart antes de push e backup.
+2. Firewall restritivo sem confirmar outros servicos da VPS.
+3. Certbot real sem continuidade operacional apos resolver push.
+4. Seed ou migration destrutiva.
+5. Feature nova, regra financeira, RBAC backend ou endpoints.
+
+
+
 ## Atualizacao 2026-06-14 (Fase 1.0 - Auditoria ambiente real VPS)
 - Criado `.planning/111_AUDITORIA_AMBIENTE_REAL_VPS.md`.
 - Decisao final: APROVADO PARA DEPLOY CONTROLADO com bloqueios/ressalvas.

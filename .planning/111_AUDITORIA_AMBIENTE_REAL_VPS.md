@@ -246,3 +246,16 @@ APROVADO PARA DEPLOY CONTROLADO, com bloqueios/ressalvas obrigatorios antes de p
 - manter `.env`, backups e `test-results/` fora de commit.
 
 Nenhuma mudanca destrutiva, deploy, restart PM2, firewall, certificado real, migration, seed ou push foi executado nesta fase.
+
+## Atualizacao Fase 1.1
+Data: 2026-06-14
+
+A documentacao desta Fase 1.0 foi commitada localmente em `bcf4b99 docs: auditar ambiente real da vps`.
+
+O `git push` posterior falhou por falta de credencial GitHub no ambiente:
+
+```text
+fatal: could not read Username for 'https://github.com': No such device or address
+```
+
+Por regra da Fase 1.1, as acoes de infraestrutura foram interrompidas apos a falha de push. Backup real, certificado real, firewall/bloqueio da porta `3333`, deploy/restart e smoke remoto completo continuam pendentes.
