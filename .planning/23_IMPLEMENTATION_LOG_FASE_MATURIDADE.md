@@ -2233,3 +2233,32 @@ Motivos:
 - force push nao foi usado.
 
 Documento: `.planning/113_RECONCILIACAO_GIT_ORIGIN_MAIN.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.1.4 - Backup PostgreSQL pre-hardening.
+
+## Entregas executadas
+1. Confirmado Git alinhado com `origin/main`, com apenas `test-results/` untracked.
+2. Confirmado PM2 online, incluindo `software-barbearia`.
+3. Confirmado PostgreSQL ativo.
+4. Confirmado Nginx ativo.
+5. Identificado banco `barbearia` em `127.0.0.1:5432` com usuario `barbearia`, sem expor senha nem `DATABASE_URL`.
+6. Criado diretorio seguro `/root/software-barbearia-backups` com permissao `700`.
+7. Criado backup real fora do repo: `/root/software-barbearia-backups/barbearia_20260615_122852.sql`.
+8. Validado tamanho, linhas, checksum e permissoes do arquivo.
+9. Documentado comando de restore sem executa-lo.
+
+## Validacao
+- Tamanho: `1445896` bytes.
+- Linhas: `7142`.
+- SHA-256: `b3d000747e8e5ac4982be9c0cbb190c612b862b24442a0df7b0fd707c78b2082`.
+- Permissao: `-rw------- root:root`.
+
+## Resultado
+APROVADO.
+
+Nao houve deploy, restart PM2, firewall, certificado, Nginx, migration, seed, alteracao de codigo, commit ou push.
+
+Documento: `.planning/114_BACKUP_POSTGRESQL_PRE_HARDENING.md`.

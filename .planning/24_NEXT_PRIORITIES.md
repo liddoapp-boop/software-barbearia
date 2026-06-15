@@ -1103,3 +1103,16 @@ Prioridade imediata:
 1. Decidir estrategia humana para o commit remoto `9269836`: merge controlado em branch de integracao, cherry-pick parcial ou descartar como scaffold obsoleto mediante decisao explicita.
 2. Nao usar force push.
 3. Nao retomar hardening/deploy ate a reconciliacao Git estar segura e o push normal ser possivel.
+
+## Atualizacao 2026-06-15 (Fase 1.1.4 - Backup PostgreSQL pre-hardening)
+- Backup real criado fora do repositorio: `/root/software-barbearia-backups/barbearia_20260615_122852.sql`.
+- Banco salvo: `barbearia` em `127.0.0.1:5432`.
+- Tamanho: `1445896` bytes.
+- SHA-256: `b3d000747e8e5ac4982be9c0cbb190c612b862b24442a0df7b0fd707c78b2082`.
+- Restore documentado, nao executado.
+- Nenhum deploy, restart, firewall, certificado, migration, seed, commit ou push foi executado.
+
+Prioridade imediata:
+1. Planejar mitigacao controlada da porta `3333` sem interromper SSH ou outros servicos da VPS.
+2. Validar certificado real somente apos conferencia de Nginx/DNS e plano de rollback.
+3. Manter backup fora do repo como ponto de rollback antes de qualquer hardening/deploy.

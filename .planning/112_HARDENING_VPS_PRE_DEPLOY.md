@@ -146,3 +146,15 @@ Autenticacao SSH e remote foram corrigidos para `git@github.com:liddoapp-boop/so
 A reconciliacao foi bloqueada antes de merge/rebase porque a simulacao de merge indicou conflitos em arquivos centrais de frontend e planejamento, incluindo `public/app.js`, `public/index.html`, `public/modules/agenda.js`, `public/modules/dashboard.js` e `public/styles/layout.css`.
 
 Documento detalhado: `.planning/113_RECONCILIACAO_GIT_ORIGIN_MAIN.md`.
+
+## Atualizacao 2026-06-15 - Fase 1.1.4
+Backup real do PostgreSQL criado antes de qualquer hardening/deploy:
+- Banco: `barbearia`
+- Caminho: `/root/software-barbearia-backups/barbearia_20260615_122852.sql`
+- Tamanho: `1445896` bytes
+- SHA-256: `b3d000747e8e5ac4982be9c0cbb190c612b862b24442a0df7b0fd707c78b2082`
+- Arquivo fora do repositorio, com permissao `-rw------- root:root`
+
+Nao houve deploy, restart PM2, alteracao de firewall, emissao de certificado, alteracao de Nginx, migration ou seed.
+
+Documento detalhado: `.planning/114_BACKUP_POSTGRESQL_PRE_HARDENING.md`.
