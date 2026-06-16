@@ -1,5 +1,218 @@
 # Next Priorities
 
+## Atualizacao 2026-06-16 (Validacao owner-only aprovada)
+- Operador humano executou o provisionamento owner no terminal real da VPS.
+- `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD` estao presentes sem valores expostos.
+- Login owner remoto retornou `200`; token nao foi impresso completo.
+- `/auth/me` retornou `200`, role `owner`, activeUnitId `unit-01`.
+- Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes retornaram `200` como owner.
+- Health publico e booking publico retornaram `200`.
+- Banco continua owner-only: `users_active=1`, `active_unit_accesses=1`, role `owner`, `unit-01`; demais usuarios/acessos inativos.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis.
+- App segue em `127.0.0.1:3333`, sem `0.0.0.0:3333`; `3333/tcp` segue negado.
+- Logs PM2 sem crash, loop de restart ou erro `500` critico.
+- `.env`, backup SQL, script seguro e backup local do `.env` fora do repositorio nao aparecem no Git.
+- Nao houve seed, migration, alteracao de RBAC, regra financeira, firewall, certificado, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Revisar diff documental desta validacao.
+2. Quando autorizado, preparar commit seletivo somente dos documentos de planejamento.
+3. Manter fora do stage: `.env`, backups SQL, `/root/software-barbearia-secure/*`, backup local do `.env` e `test-results/`.
+4. Executar uma validacao manual humana no navegador/celular com o owner real antes de liberar uso operacional do piloto.
+5. Se o piloto exigir novos perfis no futuro, abrir fase propria para reativacao/validacao de recepcao e profissional sem remover RBAC.
+
+Nao priorizar agora:
+1. Reativar recepcao/profissional sem demanda do piloto.
+2. Remover RBAC ou roles.
+3. Seed ou migration.
+4. Alterar regra financeira, endpoints, firewall, certificado ou PM2.
+5. Commit/push sem revisao seletiva.
+
+## Atualizacao 2026-06-15 (Fase 1.2.5 - Consolidacao owner-only)
+- Criado `.planning/122_CONSOLIDACAO_PILOTO_OWNER_ONLY.md`.
+- Backup pre-alteracao criado fora do repositorio: `/root/software-barbearia-backups/barbearia_pre_owner_only_20260615_221305.sql`.
+- Backup validado: `1526775` bytes, permissao `-rw------- root:root`, SHA-256 `ddb3a3c52497cff1d84b837236e7747177e239dabc0c1a372b6ec0e46ceec845`.
+- Consolidacao owner-only aplicada no banco.
+- Usuario ativo final: `pe***1@gm***l.com`, role `owner`, `unit-01`.
+- `users_active=1` e `active_unit_accesses=1`.
+- `ow***r@ba***a.local`, `re***o@ba***a.local`, `pr***l@ba***a.local` e demais usuarios persistentes ficaram inativos.
+- Nenhum usuario foi deletado fisicamente.
+- Health publico e booking publico continuam OK.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis; app continua em `127.0.0.1:3333`.
+- Script owner-only foi iniciado, mas nao houve entrada humana no TTY.
+- `SMOKE_OWNER_*` continuam ausentes.
+- Login owner, `/auth/me` e modulos owner seguem pendentes.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Operador executar `/root/software-barbearia-secure/provision-owner-smoke.cjs` diretamente no terminal real da VPS.
+2. Digitar senha forte do owner, com entrada oculta.
+3. Confirmar apenas presenca de `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD`.
+4. Validar login owner, `/auth/me`, role `owner` e `unit-01`.
+5. Validar Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes como owner.
+6. Revalidar health, booking, logs PM2 e status de PM2/Nginx/PostgreSQL/UFW.
+
+Nao priorizar agora:
+1. Reativar recepcao/profissional no piloto.
+2. Remover RBAC ou roles.
+3. Seed ou migration.
+4. Alterar regra financeira, endpoints, firewall, certificado ou PM2.
+5. Commit/push antes de fechar senha owner e validacao autenticada.
+
+## Atualizacao 2026-06-15 (Fase 1.2.4 - Piloto monousuario owner)
+- Criado `.planning/121_DECISAO_PILOTO_MONOUSUARIO_OWNER.md`.
+- Decisao de produto: piloto apenas para Geovane/proprietario com perfil `owner`.
+- `recepcao` e `profissional` ficam fora do escopo do piloto atual.
+- RBAC, roles e permissoes devem permanecer no codigo para expansao futura.
+- Owner principal escolhido: `pe***1@gm***l.com`, role `owner`, `unit-01`, ativo.
+- Backup PostgreSQL owner-only criado fora do repositorio.
+- Script temporario owner-only criado fora do Git: `/root/software-barbearia-secure/provision-owner-smoke.cjs`.
+- Prompt oculto foi iniciado, mas nao houve entrada humana no TTY.
+- Senha owner nao foi resetada/configurada.
+- `SMOKE_OWNER_*` continuam ausentes.
+- Health publico e booking publico continuam OK.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Operador executar `/root/software-barbearia-secure/provision-owner-smoke.cjs` diretamente no terminal real da VPS.
+2. Digitar senha forte do owner, sem colocar no chat e sem imprimir valores.
+3. Confirmar apenas presenca de `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD`.
+4. Validar login owner remoto, `/auth/me` e modulos owner: Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes.
+5. Revalidar health, booking, logs PM2 e status de PM2/Nginx/PostgreSQL/UFW.
+
+Nao priorizar agora:
+1. Validacao de recepcao/profissional no piloto.
+2. Remocao de RBAC ou roles.
+3. Seed ou migration.
+4. Alteracao de regra financeira, endpoints, firewall, certificado ou PM2.
+5. Commit/push antes de fechar a validacao owner-only.
+
+## Atualizacao 2026-06-15 (Fase 1.2.3 - Senhas fortes via terminal)
+- Criado `.planning/121_CONFIGURACAO_SMOKE_SENHAS_TERMINAL.md`.
+- Decisao final: BLOQUEADO.
+- Script temporario seguro criado fora do repositorio: `/root/software-barbearia-secure/provision-smoke-users.cjs`.
+- O script pede senha oculta, valida minimo 14 caracteres, maiuscula, minuscula, numero, simbolo e senhas distintas.
+- Prompt foi iniciado, mas nao houve entrada no TTY acessivel por esta sessao.
+- `SMOKE_*` continuam ausentes.
+- Usuarios alvo seguem ativos em `unit-01`.
+- Nao houve impressao de senha/hash/token/.env/DATABASE_URL.
+- Nao houve seed, migration, deploy, reset parcial confirmado, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Operador executar `/root/software-barbearia-secure/provision-smoke-users.cjs` diretamente no terminal real da VPS.
+2. Digitar senhas fortes e distintas, sem colocar no chat.
+3. Confirmar presenca de `SMOKE_*` sem valores.
+4. Reexecutar login, `/auth/me`, RBAC e smoke remoto.
+5. Depois remover ou arquivar o script temporario conforme politica operacional.
+
+Nao priorizar agora:
+1. Enviar senha pelo chat.
+2. Usar senhas padrao/fracas.
+3. Seed ou migration.
+4. Alterar RBAC backend.
+5. Commit/push antes da validacao autenticada.
+
+## Atualizacao 2026-06-15 (Fase 1.2.2 - Provisionamento usuarios smoke)
+- Criado `.planning/120_PROVISIONAMENTO_USUARIOS_SMOKE_PRODUCAO.md`.
+- Decisao final: BLOQUEADO.
+- Usuarios ativos existem para `owner`, `recepcao` e `profissional`.
+- Os tres perfis possuem acesso ativo a `unit-01`.
+- Emails foram registrados apenas mascarados.
+- `SMOKE_*` continuam ausentes.
+- Nao ha script dedicado pronto para provisionamento/rotacao segura de usuario autenticavel.
+- Nao houve reset de senha, criacao de usuario, seed, migration, SQL manual, edicao de `.env`, deploy, restart PM2, firewall, certificado, `git add`, commit ou push.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis.
+
+Prioridade imediata:
+1. Operador humano abrir terminal seguro na VPS e definir senhas fortes para os usuarios smoke reais.
+2. Se for necessario resetar senha, executar fase assistida com confirmacao explicita no terminal.
+3. Usar script temporario fora do repositorio que importe `hashPassword` oficial, sem imprimir senha/hash.
+4. Configurar `SMOKE_*` no `.env` ignorado apos backup timestampado local.
+5. Reexecutar validacao autenticada remota e RBAC.
+
+Nao priorizar agora:
+1. Seed ou migration para criar credenciais.
+2. Senhas padrao versionadas.
+3. Reset automatico de usuario real sem confirmacao.
+4. Alteracao de RBAC backend ou regra financeira.
+5. Commit/push antes de fechar a validacao autenticada.
+
+## Atualizacao 2026-06-15 (Fase 1.2.1 - SMOKE autenticado remoto)
+- Criado `.planning/119_VALIDACAO_AUTENTICADA_SMOKE_REMOTO.md`.
+- Decisao final: BLOQUEADO.
+- `SMOKE_BASE_URL` e credenciais `SMOKE_OWNER_*`, `SMOKE_RECEPTION_*`, `SMOKE_PROFESSIONAL_*` estao ausentes.
+- Dominio publico segue saudavel: `/health` retornou `200 OK` e `{"ok":true,"authEnforced":true}`.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis.
+- Logs PM2 sem crash, sem loop de restart e sem erro `500` critico.
+- Nao houve edicao de `.env`, deploy, restart PM2, seed, migration, alteracao de codigo, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Operador humano configurar `SMOKE_*` reais e seguros fora do Git.
+2. Nao usar contas padrao fracas em producao.
+3. Reexecutar Fase 1.2.1 apos configurar credenciais: login owner, `/auth/me`, modulos principais e RBAC remoto.
+4. Se nao houver usuarios reais para recepcao/profissional, abrir fase especifica para criar/rotacionar usuarios piloto de producao com seguranca.
+5. Manter `.env` e `test-results/` fora de commits.
+
+Nao priorizar agora:
+1. Seed ou migration para resolver credenciais.
+2. Criacao direta de usuario no banco sem autorizacao.
+3. Alteracao de RBAC backend.
+4. Alteracao de regra financeira.
+5. Deploy/restart PM2 sem novo escopo.
+
+## Atualizacao 2026-06-15 (Fase 1.2 - Validacao funcional dominio publico)
+- Criado `.planning/118_VALIDACAO_FUNCIONAL_DOMINIO_PUBLICO.md`.
+- Decisao final: APROVADO COM RESSALVAS.
+- Dominio publico HTTPS validado sem `-k`.
+- `/health` retornou `200 OK` e `{"ok":true,"authEnforced":true}`.
+- Booking publico acessivel via `/agendamento` apos redirect de `/booking.html`.
+- Shell inicial, login e assets principais carregaram com `200`.
+- Rotas protegidas sem token retornaram `401`, sem `500`.
+- Login owner e RBAC por perfil nao foram validados porque `SMOKE_*` nao esta configurado e as senhas padrao versionadas retornaram `401` no ambiente real.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis; app segue em `127.0.0.1:3333`.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Configurar credenciais de smoke seguras para owner, recepcao e profissional, sem commitar segredos.
+2. Reexecutar validacao autenticada: login owner, `/auth/me`, Agenda, PDV, Clientes, Financeiro, Auditoria e Configuracoes.
+3. Reexecutar RBAC basico: recepcao/profissional devem receber `403` em Auditoria, Configuracoes e relatorios financeiros sensiveis.
+4. Depois de validar auth/RBAC, preparar commit seletivo das fases de hardening/documentacao.
+5. Manter `test-results/` e `.env` fora de commits.
+
+Nao priorizar agora:
+1. Migration ou seed.
+2. Venda real/checkout real para validar smoke curto.
+3. Alteracao de regra financeira.
+4. Alteracao de RBAC backend.
+5. Mudanca adicional de firewall, certificado, Nginx ou PM2 sem novo escopo.
+
+## Atualizacao 2026-06-15 (Fase 1.1.9 - Bind localhost app Node)
+- Criado `.planning/117_BIND_LOCALHOST_APP_NODE.md`.
+- Decisao final: APROVADO.
+- Estado inicial confirmado: app Node escutava em `0.0.0.0:3333`.
+- `src/server.ts` agora aceita `HOST` por env, usa `127.0.0.1` como default em producao e preserva `0.0.0.0` fora de producao.
+- `.env` ignorado pelo Git foi configurado com `HOST=127.0.0.1`, sem exibir segredos.
+- PM2 foi reiniciado com `pm2 restart software-barbearia --update-env`.
+- Estado final confirmado: app escuta em `127.0.0.1:3333`; HTTPS publico `/health` continua `200 OK`.
+- PM2, Nginx, PostgreSQL e UFW seguem saudaveis; UFW segue permitindo `22/80/443` e negando `3333`.
+- Validacoes passaram: build, test, test:db, audit, audit omit dev, diff check e `nginx -t`.
+- Nao houve migration, seed, alteracao de certificado, alteracao de firewall, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Validar fluxo funcional curto no dominio publico autenticado: login, agenda e PDV.
+2. Revisar diff desta fase e preparar commit seletivo sem `git add .`.
+3. Manter `test-results/` fora do commit.
+4. Nao incluir `.env` nem segredos em nenhum commit.
+5. Depois do commit seletivo, avaliar smoke remoto autenticado completo.
+
+Nao priorizar agora:
+1. Migration ou seed.
+2. Alteracao de regra financeira.
+3. Alteracao de RBAC backend.
+4. Alteracao de endpoints.
+5. Mudanca adicional em certificado, firewall ou Nginx sem novo escopo.
+
 ## Atualizacao 2026-06-14 (Fase 1.1 - Hardening VPS pre-deploy)
 - Criado `.planning/112_HARDENING_VPS_PRE_DEPLOY.md`.
 - Decisao final: BLOQUEADO.
@@ -943,7 +1156,7 @@ Prioridade imediata:
 ## Atualizacao 2026-05-03 (Fase 0.4 implementada)
 - Frontend operacional criado para auditoria, estorno de atendimento, devolucao de produto, financeiro rastreavel e comissoes.
 - Auditoria entrou no menu como owner-only e consome `GET /audit/events`.
-- Agenda/Central de agendamentos agora expõe estorno para appointment `COMPLETED` com `idempotencyKey`.
+- Agenda/Central de agendamentos agora expoe estorno para appointment `COMPLETED` com `idempotencyKey`.
 - PDV permite devolucao dos produtos vendidos na sessao com `idempotencyKey`.
 - Financeiro exibe origem tecnica dos lancamentos e destaca comissao/refund.
 - Comissoes exibem status e pagamento owner-only.
@@ -1116,3 +1329,33 @@ Prioridade imediata:
 1. Planejar mitigacao controlada da porta `3333` sem interromper SSH ou outros servicos da VPS.
 2. Validar certificado real somente apos conferencia de Nginx/DNS e plano de rollback.
 3. Manter backup fora do repo como ponto de rollback antes de qualquer hardening/deploy.
+
+## Atualizacao 2026-06-15 (Fase 1.1.5 - Firewall porta 3333)
+- Documentacao do backup PostgreSQL commitada e enviada em `6433952`.
+- UFW ativado com SSH `22/tcp`, HTTP `80/tcp`, HTTPS `443/tcp` permitidos e `3333/tcp` negado.
+- `127.0.0.1:3333/health` segue respondendo localmente.
+- `https://barbearia.76-13-161-250.nip.io/health` segue respondendo via Nginx.
+- Validacao externa indicou timeout em `76.13.161.250:3333` e conexao bem-sucedida em `:443`.
+- PM2, Nginx e PostgreSQL seguiram ativos.
+
+Prioridade imediata:
+1. Validar nova sessao SSH externa por operador humano antes de qualquer hardening adicional.
+2. Planejar bind futuro do app em `127.0.0.1` para reduzir dependencia exclusiva do firewall.
+3. Revisar o servico em `*:8080` e decidir exposicao ou bloqueio permanente.
+4. Emitir certificado real somente apos checklist de Nginx/DNS e rollback.
+
+## Atualizacao 2026-06-15 (Fase 1.1.7 - Certificado Let's Encrypt real)
+- Certificado staging/teste da barbearia substituido por certificado Let's Encrypt real.
+- Issuer final: `Let's Encrypt, CN = YE1`.
+- Validade final: ate `2026-09-13 11:54:14 GMT`.
+- HTTPS `/health` passou sem `-k`.
+- `nginx -t` passou e Nginx foi recarregado sem erro.
+- `certbot renew --dry-run --no-random-sleep-on-renew` passou.
+- PM2, Nginx, PostgreSQL e UFW seguiram saudaveis.
+- Porta `3333/tcp` seguiu bloqueada externamente em validacao ampliada.
+
+Prioridade imediata:
+1. Validar manualmente o dominio em navegador desktop e celular.
+2. Planejar bind do app em `127.0.0.1`.
+3. Revisar listener em `*:8080`.
+4. Preparar proxima fase de hardening/release sem deploy automatico.

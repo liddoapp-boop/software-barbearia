@@ -1,3 +1,76 @@
+Data: 2026-06-15
+Escopo: Fase 1.2.5 - Consolidacao piloto owner-only.
+
+## Entregas executadas
+1. Criado `.planning/122_CONSOLIDACAO_PILOTO_OWNER_ONLY.md`.
+2. Criado backup PostgreSQL pre-alteracao em `/root/software-barbearia-backups/barbearia_pre_owner_only_20260615_221305.sql`.
+3. Validado backup com tamanho, permissao `-rw------- root:root` e SHA-256.
+4. Verificado modelo `User`/`UserUnitAccess` e uso de `isActive` pela autenticacao.
+5. Consultados usuarios sem selecionar senha/hash/token.
+6. Aplicada consolidacao owner-only via Prisma: todos os usuarios exceto o owner escolhido ficaram inativos.
+7. Mantido ativo apenas `pe***1@gm***l.com`, role `owner`, `unit-01`.
+8. Desativados `ow***r@ba***a.local`, `re***o@ba***a.local`, `pr***l@ba***a.local` e demais usuarios persistentes.
+9. Nenhum usuario foi deletado fisicamente.
+10. Script owner-only de senha foi iniciado, mas nao houve entrada humana no TTY; processo encerrado sem reset.
+11. Revalidados health, booking, PM2, Nginx, PostgreSQL, UFW, portas e logs.
+
+## Validacao
+- Antes: `users_active=67`, `active_unit_accesses=89`.
+- Depois: `users_active=1`, `active_unit_accesses=1`.
+- Health publico: `200 OK`, `{"ok":true,"authEnforced":true}`.
+- Booking publico: `/booking.html` -> `/agendamento`, `200`.
+- PM2: `software-barbearia` online.
+- Nginx: ativo.
+- PostgreSQL: ativo.
+- UFW: ativo, `3333/tcp` negado.
+- `ss -tulpn`: app em `127.0.0.1:3333`.
+- Logs PM2: sem crash, sem loop de restart, sem erro `500` critico.
+- `.env`, backup SQL e script seguro nao aparecem no Git status.
+
+## Resultado
+- Decisao da Fase 1.2.5: BLOQUEADO.
+- Motivo: owner-only foi consolidado, mas a senha forte do owner nao foi digitada no TTY; `SMOKE_OWNER_*`, login owner, `/auth/me` e modulos autenticados seguem pendentes.
+
+Documento: `.planning/122_CONSOLIDACAO_PILOTO_OWNER_ONLY.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.2.4 - Decisao piloto monousuario owner.
+
+## Entregas executadas
+1. Criado `.planning/121_DECISAO_PILOTO_MONOUSUARIO_OWNER.md`.
+2. Registrada a decisao de produto: piloto apenas para Geovane/proprietario com perfil `owner`.
+3. Registrado que `recepcao` e `profissional` ficam fora do escopo do piloto, sem remover RBAC, roles ou permissoes.
+4. Escolhido owner principal para o piloto, registrado apenas com email mascarado `pe***1@gm***l.com`, role `owner`, `unit-01`, ativo.
+5. Criado backup PostgreSQL fora do repositorio antes da tentativa owner-only.
+6. Criado script temporario seguro fora do Git para reset/configuracao owner-only com senha oculta.
+7. Prompt oculto iniciado, mas sem entrada humana no TTY; processo encerrado sem aplicar reset.
+8. Confirmado que `SMOKE_OWNER_*` seguem ausentes.
+9. Revalidado health publico e booking publico.
+10. Verificados PM2, Nginx, PostgreSQL, UFW, portas e logs PM2.
+
+## Validacao
+- `git status --short`: `.env` nao apareceu; `test-results/` apareceu apenas como untracked.
+- `git status -sb`: `main...origin/main`.
+- `pm2 status`: `software-barbearia` online.
+- `systemctl status nginx --no-pager`: ativo.
+- `systemctl status postgresql --no-pager`: ativo.
+- `ufw status verbose`: ativo, `22/80/443` permitidos, `3333/tcp` negado.
+- `ss -tulpn`: app em `127.0.0.1:3333`, sem `0.0.0.0:3333`.
+- Health publico: `200 OK`, `{"ok":true,"authEnforced":true}`.
+- Booking publico: `/booking.html` redireciona para `/agendamento`, destino `200`.
+- Logs PM2: sem crash, sem loop de restart, sem erro `500` critico.
+
+## Resultado
+- Decisao da Fase 1.2.4: BLOQUEADO.
+- Motivo: senha forte do owner nao foi digitada pelo operador no TTY, entao nao houve reset confirmado nem configuracao de `SMOKE_OWNER_*`.
+- Login owner, `/auth/me` e modulos owner nao foram validados.
+
+Documento: `.planning/121_DECISAO_PILOTO_MONOUSUARIO_OWNER.md`.
+
+---
+
 Data: 2026-06-14
 Escopo: Fase 1.1 - Hardening seguro da VPS antes do deploy controlado.
 
@@ -2262,3 +2335,217 @@ APROVADO.
 Nao houve deploy, restart PM2, firewall, certificado, Nginx, migration, seed, alteracao de codigo, commit ou push.
 
 Documento: `.planning/114_BACKUP_POSTGRESQL_PRE_HARDENING.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.1.5 - Commit da documentacao do backup e mitigacao controlada da porta 3333.
+
+## Entregas executadas
+1. Commitada e enviada somente a documentacao do backup PostgreSQL:
+   - `6433952 docs: registrar backup postgresql pre hardening`
+2. Confirmado que `.env`, `test-results/`, backup SQL, arquivos `.sql`, chaves SSH e temporarios nao entraram no commit.
+3. Confirmado estado inicial: PM2 online, Nginx ativo, PostgreSQL ativo, UFW inativo e `software-barbearia` ouvindo em `0.0.0.0:3333`.
+4. Testado estado inicial: localhost `3333`, HTTPS publico e IP publico direto `:3333` respondiam.
+5. Confirmado SSH em `22/tcp` por `sshd -T`, `ss` e perfil UFW `OpenSSH`.
+6. Aplicadas regras UFW para permitir SSH/80/443 e negar `3333/tcp`.
+7. Ativado UFW sem deploy, restart PM2, certificado, migration, seed ou alteracao de codigo.
+8. Validado que localhost `3333` e HTTPS publico continuam respondendo.
+9. Validado externamente que `76.13.161.250:3333` da timeout e `:443` conecta.
+
+## Resultado
+APROVADO.
+
+Ressalvas operacionais:
+- O app ainda faz bind em `0.0.0.0:3333`; a exposicao externa esta mitigada por firewall.
+- Existe listener em `*:8080`, bloqueado pela politica padrao de entrada do UFW salvo regras explicitas futuras.
+- Nova sessao SSH externa deve ser validada por operador humano antes de hardening adicional.
+
+Documento: `.planning/115_MITIGACAO_PORTA_3333_FIREWALL.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.1.7 - Corrigir certificado Let's Encrypt staging para certificado real.
+
+## Entregas executadas
+1. Confirmado baseline: `.env` ausente do status, `test-results/` apenas untracked, PM2 online, Nginx ativo, PostgreSQL ativo e UFW permitindo `22/80/443` e negando `3333`.
+2. Confirmado certificado anterior como staging/test:
+   - Issuer: `Let's Encrypt, CN = (STAGING) Baloney Bulgur YE2`
+   - Validade: `May 24 02:51:30 2026 GMT` ate `Aug 22 02:51:29 2026 GMT`
+3. Confirmado DNS do dominio para `76.13.161.250`.
+4. Confirmado HTTP `301` para HTTPS e HTTPS `200 OK` com `-k` antes da troca.
+5. Emitido certificado real com Certbot/Nginx usando endpoint `https://acme-v02.api.letsencrypt.org/directory`, sem `--staging`.
+6. Validado certificado final:
+   - Issuer: `Let's Encrypt, CN = YE1`
+   - Validade: `Jun 15 11:54:15 2026 GMT` ate `Sep 13 11:54:14 2026 GMT`
+7. Executado `nginx -t` com sucesso e `systemctl reload nginx` sem erro.
+8. Validado `curl https://barbearia.76-13-161-250.nip.io/health` sem `-k`.
+9. Executado `certbot renew --dry-run --no-random-sleep-on-renew` com sucesso.
+10. Revalidado PM2 online, Nginx ativo, PostgreSQL ativo e UFW correto.
+11. Revalidado externamente `3333/tcp` bloqueado por 8 nos externos e `443/tcp` acessivel.
+
+## Resultado
+APROVADO COM RESSALVAS.
+
+Ressalva:
+- Falta validacao manual em navegador/celular, embora curl e OpenSSL ja confirmem certificado real confiavel.
+
+Documento: `.planning/116_CERTIFICADO_LETSENCRYPT_REAL.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.1.9 - Bind do app Node em 127.0.0.1.
+
+## Entregas executadas
+1. Confirmado baseline: PM2 online, Nginx ativo, PostgreSQL ativo, UFW ativo, `.env` fora do status e `test-results/` apenas untracked.
+2. Confirmado estado inicial do app: `0.0.0.0:3333`.
+3. Identificado que `src/server.ts` fixava `host: "0.0.0.0"` e nao aceitava `HOST` por env.
+4. Alterado `src/server.ts` para aceitar `process.env.HOST`, usar `127.0.0.1` como default em producao e preservar `0.0.0.0` fora de producao.
+5. Configurado `HOST=127.0.0.1` no `.env` ignorado pelo Git, sem imprimir segredos.
+6. Confirmado Nginx com `proxy_pass http://127.0.0.1:3333` e `nginx -t` com sucesso.
+7. Executado `pm2 restart software-barbearia --update-env`.
+8. Validado `curl http://127.0.0.1:3333/health` e `curl https://barbearia.76-13-161-250.nip.io/health` com `200 OK`.
+9. Confirmado em `ss -tulpn` que o Node passou a escutar em `127.0.0.1:3333`, sem `0.0.0.0:3333`.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`88 passed | 11 skipped`).
+- `npm run test:db`: passou (`11 passed`).
+- `npm audit`: `found 0 vulnerabilities`.
+- `npm audit --omit=dev`: `found 0 vulnerabilities`.
+- `git diff --check`: passou.
+- `nginx -t`: passou.
+
+## Resultado
+APROVADO.
+
+Documento: `.planning/117_BIND_LOCALHOST_APP_NODE.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.2 - Validacao funcional curta no dominio publico.
+
+## Entregas executadas
+1. Confirmado baseline: `.env` fora do status, `test-results/` apenas untracked, PM2 online, Nginx ativo, PostgreSQL ativo e UFW ativo.
+2. Confirmado `software-barbearia` em `127.0.0.1:3333`, sem `0.0.0.0:3333`.
+3. Validado health publico HTTPS sem `-k`: `200 OK`, `{"ok":true,"authEnforced":true}`.
+4. Validado booking publico: `/booking.html` redireciona para `/agendamento`, e `/agendamento` retorna `200 OK`.
+5. Validado painel publico: `/`, `/login`, `/app.js` e `/styles/layout.css` retornaram `200`.
+6. Verificado que rotas internas protegidas sem token retornam `401`, sem `500`.
+7. Verificado que `SMOKE_*` nao esta configurado e que as contas padrao versionadas retornam `401` no ambiente real.
+8. Verificados logs PM2: sem erro critico, sem crash e sem loop de restart.
+
+## Resultado
+APROVADO COM RESSALVAS.
+
+Ressalvas:
+- Login owner autenticado nao foi validado por ausencia de credencial de smoke valida.
+- RBAC basico por recepcao/profissional nao foi validado por falta de token.
+- Modulos internos como owner precisam de validacao autenticada manual ou com `SMOKE_*`.
+
+Documento: `.planning/118_VALIDACAO_FUNCIONAL_DOMINIO_PUBLICO.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.2.1 - Configurar SMOKE seguro e validar login/RBAC remoto.
+
+## Entregas executadas
+1. Confirmado baseline: `.env` fora do status, `test-results/` apenas untracked, PM2 online, Nginx ativo, PostgreSQL ativo e UFW ativo.
+2. Revalidado dominio publico: `/health` retornou `200 OK` e `{"ok":true,"authEnforced":true}`.
+3. Verificada presenca das variaveis `SMOKE_*` sem imprimir valores.
+4. Confirmado que `SMOKE_BASE_URL`, credenciais owner, recepcao e profissional estao ausentes.
+5. Interrompida validacao autenticada conforme regra da fase.
+6. Verificados logs PM2: sem crash, sem loop de restart e sem erro `500` critico.
+
+## Resultado
+BLOQUEADO.
+
+Motivo:
+- Credenciais reais `SMOKE_*` nao estao configuradas.
+- Nao e permitido inventar senha, usar senha padrao fraca, criar usuario inseguro, rodar seed ou alterar banco sem autorizacao.
+
+Documento: `.planning/119_VALIDACAO_AUTENTICADA_SMOKE_REMOTO.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.2.2 - Provisionar usuarios piloto seguros e configurar SMOKE_*.
+
+## Entregas executadas
+1. Confirmado baseline operacional: `.env` fora do status, `test-results/` apenas untracked, PM2 online, Nginx ativo, PostgreSQL ativo, UFW ativo e health publico `200`.
+2. Inspecionado modelo `User`/`UserUnitAccess` e rotas de auth/RBAC.
+3. Confirmadas roles validas: `owner`, `recepcao`, `profissional`.
+4. Confirmado hash oficial: PBKDF2 SHA-256 com 210000 iteracoes.
+5. Confirmado que nao existe script dedicado de provisionamento/rotacao segura de usuario de producao.
+6. Consultado banco sem `passwordHash`: 88 usuarios, 90 acessos de unidade, 276 unidades.
+7. Identificados usuarios ativos para os tres perfis, com acesso `unit-01`, registrando apenas emails mascarados.
+8. Bloqueada criacao/reset/configuracao de `SMOKE_*` por ausencia de senhas reais e canal seguro de entrada oculta do operador.
+9. Verificados logs PM2: sem crash, sem loop de restart e sem erro `500` critico.
+
+## Resultado
+BLOQUEADO.
+
+Motivo:
+- Usuarios existem, mas credenciais reais nao estao disponiveis.
+- A fase proibe usar senha padrao, inventar senha, rodar seed/migration, inserir hash manual ou resetar usuario real sem confirmacao humana.
+
+Documento: `.planning/120_PROVISIONAMENTO_USUARIOS_SMOKE_PRODUCAO.md`.
+
+---
+
+Data: 2026-06-15
+Escopo: Fase 1.2.3 - Configurar SMOKE_* com senhas fortes digitadas no terminal.
+
+## Entregas executadas
+1. Confirmado baseline: `.env` fora do status, PM2 online, Nginx ativo, PostgreSQL ativo, UFW ativo e health publico OK.
+2. Criado script temporario fora do repositorio em `/root/software-barbearia-secure/provision-smoke-users.cjs`.
+3. Script configurado para coletar senhas sem eco, validar forca/diferenca, usar `hashPassword` oficial e configurar `SMOKE_*`.
+4. Prompt oculto iniciado para o owner.
+5. Sem entrada no TTY durante a janela de espera; prompt encerrado.
+6. Confirmado que `SMOKE_*` continuam ausentes.
+7. Confirmado que os tres usuarios alvo continuam ativos em `unit-01`.
+
+## Resultado
+BLOQUEADO.
+
+Motivo:
+- A sessao nao forneceu canal interativo acessivel para o operador digitar senhas fortes ocultas.
+- Por seguranca, nao foram usadas senhas padrao/fracas nem senha via chat.
+
+Documento: `.planning/121_CONFIGURACAO_SMOKE_SENHAS_TERMINAL.md`.
+
+---
+
+Data: 2026-06-16
+Escopo: Validacao owner-only apos provisionamento humano.
+
+## Entregas executadas
+1. Confirmada presenca de `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD` sem imprimir valores.
+2. Validado login owner remoto no dominio publico: `200`, token redigido.
+3. Validado `/auth/me`: `200`, role `owner`, activeUnitId `unit-01`.
+4. Validados modulos principais como owner: Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes, todos com `200`.
+5. Revalidado health publico `/health`: `200`, `ok=true`.
+6. Revalidado booking publico `/agendamento`: `200`.
+7. Consultado banco via Prisma sem selecionar hash/senha: `users_active=1`, `active_unit_accesses=1`, usuario/acesso ativo unico role `owner` em `unit-01`.
+8. Verificados logs PM2: sem crash, sem loop de restart e sem erro `500` critico.
+9. Verificados PM2, Nginx, PostgreSQL, UFW e sockets: app em `127.0.0.1:3333`, sem `0.0.0.0:3333`, porta `3333/tcp` negada.
+10. Verificado Git: `.env`, backup SQL, script seguro e backup local do `.env` fora do repositorio nao aparecem no status; `test-results/` segue aceitavel como untracked.
+
+## Resultado
+APROVADO.
+
+Nao houve impressao de senha, hash, token completo, `.env` ou `DATABASE_URL`. Nao houve seed, migration, alteracao de RBAC, regra financeira, firewall, certificado, `git add`, commit ou push.
+
+Documentos atualizados:
+- `.planning/122_CONSOLIDACAO_PILOTO_OWNER_ONLY.md`
+- `.planning/121_DECISAO_PILOTO_MONOUSUARIO_OWNER.md`
+- `.planning/120_PROVISIONAMENTO_USUARIOS_SMOKE_PRODUCAO.md`
+- `.planning/119_VALIDACAO_AUTENTICADA_SMOKE_REMOTO.md`
+- `.planning/118_VALIDACAO_FUNCIONAL_DOMINIO_PUBLICO.md`
+- `.planning/112_HARDENING_VPS_PRE_DEPLOY.md`
+- `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
+- `.planning/24_NEXT_PRIORITIES.md`
