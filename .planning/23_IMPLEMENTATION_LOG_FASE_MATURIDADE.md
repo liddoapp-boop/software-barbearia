@@ -1,3 +1,34 @@
+Data: 2026-06-16
+Escopo: Fase 2.0 - Auditoria completa do produto e escopo restante do TG.
+
+## Entregas executadas
+1. Criado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
+2. Executadas validacoes base: Git, build, testes, teste DB, audits npm, health publico, PM2, Nginx, PostgreSQL, UFW e sockets.
+3. Confirmado ambiente publico saudavel: HTTPS real, Nginx proxy, PM2 online, PostgreSQL ativo, UFW ativo, app em `127.0.0.1:3333` e sem `0.0.0.0:3333`.
+4. Executados GETs autenticados owner sem imprimir credenciais ou token; modulos principais retornaram `200`.
+5. Validado booking publico por GETs seguros e teste automatizado mobile/overflow.
+6. Mapeados backend, Prisma, frontend modular e documentacao recente das fases 112 a 122.
+7. Classificados modulos, lacunas, riscos P0/P1/P2/P3 e proximas fases recomendadas.
+
+## Validacao
+- `npm run build`: passou.
+- `npm run test`: passou (`6 passed | 1 skipped`; `88 passed | 11 skipped`).
+- `npm run test:db`: passou (`1 passed`; `11 passed`).
+- `npm audit`: 0 vulnerabilidades.
+- `npm audit --omit=dev`: 0 vulnerabilidades.
+- Health publico: `{"ok":true,"authEnforced":true}`.
+- GETs owner: `/auth/me`, Dashboard, Agenda, Clientes, PDV, Estoque, Financeiro, Servicos, Equipe, Comissoes, Auditoria, Configuracoes, Relatorios e WhatsApp status retornaram `200`.
+- WhatsApp status autenticado: `state=close`, sem QR code.
+- Mobile overflow automatizado: passou.
+
+## Resultado
+- Decisao da Fase 2.0: APROVADO COM RESSALVAS.
+- Ressalvas principais: WhatsApp real nao comprovado conectado, IA generativa ausente, Google Calendar ausente, validacao humana mobile ainda pendente e documentacao academica final ainda precisa consolidacao.
+
+Documento: `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
+
+---
+
 Data: 2026-06-15
 Escopo: Fase 1.2.5 - Consolidacao piloto owner-only.
 
@@ -2549,3 +2580,32 @@ Documentos atualizados:
 - `.planning/112_HARDENING_VPS_PRE_DEPLOY.md`
 - `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`
 - `.planning/24_NEXT_PRIORITIES.md`
+
+---
+
+Data: 2026-06-16
+Escopo: Fase 2.1 - Validacao manual owner-only com evidencias reais para o TG.
+
+## Entregas executadas
+1. Confirmado baseline solicitado: Git tinha apenas docs pendentes da Fase 2.0; health publico retornou `200`; PM2 online; Nginx ativo; PostgreSQL ativo; UFW ativo; app em `127.0.0.1:3333`; sem `0.0.0.0:3333`.
+2. Criada pasta `.planning/evidence/fase-201-validacao-owner-only/`.
+3. Validado submit real da tela de login owner no dominio publico, com sessao `owner` e e-mail mascarado em `ui-login-result.json`.
+4. Coletados prints desktop owner para login, painel inicial/Inicio, Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes.
+5. Validado booking publico ponta a ponta com dados ficticios, criando agendamento de teste `34f531e1-c50b-4f7b-a47a-4686ed7d06fd`.
+6. Confirmado que o agendamento de teste entrou na agenda interna como `SCHEDULED`.
+7. Coletados prints mobile por viewport realista 390x844 para login, Agenda, Clientes, PDV, Financeiro e booking publico.
+8. Validada LGPD basica das evidencias: prints/logs sem senha, hash, token completo, `.env`, `DATABASE_URL`, telefone completo ou e-mail completo.
+9. Executado `pm2 logs software-barbearia --lines 150 --nostream`; salvo `pm2-logs-sanitized.txt`; sem crash, loop de restart ou `500` critico.
+10. Criado `.planning/201_VALIDACAO_MANUAL_OWNER_ONLY_EVIDENCIAS.md`.
+11. Atualizados `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`, `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md` e `.planning/24_NEXT_PRIORITIES.md`.
+
+## Resultado
+APROVADO COM RESSALVAS.
+
+Ressalvas:
+- P1: fluxo financeiro/estoque/comissoes completo ainda precisa fase propria com base conhecida e reversao documentada.
+- P1: LGPD basica precisa ser consolidada no texto academico/manual.
+- P2: booking publico nao possui escolha explicita de profissional.
+- P3: print do menu mobile aberto e validacao em aparelho fisico podem complementar a evidencia.
+
+Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, alteracao de regra financeira, `git add`, commit ou push.

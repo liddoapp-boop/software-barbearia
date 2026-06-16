@@ -1,5 +1,59 @@
 # Next Priorities
 
+## Atualizacao 2026-06-16 (Fase 2.1 - Validacao manual owner-only com evidencias)
+- Criado `.planning/201_VALIDACAO_MANUAL_OWNER_ONLY_EVIDENCIAS.md`.
+- Criada pasta `.planning/evidence/fase-201-validacao-owner-only/`.
+- Login owner pela tela passou no dominio publico, com usuario mascarado e sem exposicao de senha/token.
+- Desktop owner validado com prints: login, painel inicial/Inicio, Agenda, Clientes, PDV, Financeiro, Servicos, Equipe, Auditoria e Configuracoes.
+- Booking publico validado ponta a ponta com dado ficticio; agendamento de teste criado: `34f531e1-c50b-4f7b-a47a-4686ed7d06fd`.
+- Mobile validado por viewport realista 390x844: login, Agenda, Clientes, PDV, Financeiro e booking publico; sem overflow horizontal no booking mobile (`scrollWidth=390`).
+- Logs PM2 pos-validacao sem crash, loop de restart ou `500` critico; copia sanitizada salva em evidencias.
+- LGPD basica das evidencias passou: sem senha/hash/token completo, `.env`, `DATABASE_URL`, telefone completo ou e-mail completo em prints/logs.
+- Decisao da fase: APROVADO COM RESSALVAS.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, regra financeira, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Executar fase P1 de reconciliacao financeira/estoque/comissoes com base conhecida, IDs registrados e reversao documentada.
+2. Consolidar LGPD basica no TG/manual: finalidade, minimizacao, responsabilidade e exclusao/anonimizacao como escopo ou trabalho futuro.
+3. Preparar pacote academico do TG usando os prints da Fase 2.1, health/infra, logs sanitizados e roteiro de demonstracao.
+4. Se a banca exigir, complementar com print do menu mobile aberto e validacao em aparelho fisico.
+5. Decidir se o booking publico precisa expor escolha de profissional ou se a selecao automatica sera documentada como decisao de escopo.
+
+Nao priorizar agora:
+1. Alterar regra financeira sem fase propria.
+2. Apagar/cancelar o agendamento de teste sem documentar.
+3. WhatsApp real, IA generativa ou Google Calendar OAuth completo sem escopo separado.
+4. Reativar recepcao/profissional no piloto owner-only.
+5. Commit/push antes de revisao seletiva dos documentos e evidencias.
+
+## Atualizacao 2026-06-16 (Fase 2.0 - Auditoria completa produto/TG)
+- Criado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
+- Validacoes base passaram: build, test, test:db, audit, audit omit dev, health publico, PM2, Nginx, PostgreSQL, UFW e sockets.
+- Git estava alinhado com `origin/main` antes da auditoria documental.
+- App segue em `127.0.0.1:3333`, sem `0.0.0.0:3333`; `3333/tcp` segue negado no UFW.
+- GETs autenticados owner retornaram `200` para modulos principais.
+- Booking publico e endpoints publicos basicos retornaram `200`.
+- Teste automatizado mobile/overflow passou.
+- WhatsApp status retornou `state=close`; WhatsApp real nao esta comprovado conectado.
+- IA generativa real nao foi encontrada; existem sugestoes inteligentes por regra.
+- Google Calendar nao foi encontrado.
+- Nao houve feature nova, migration, seed, deploy, restart PM2, firewall, certificado, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Fazer validacao manual owner-only no navegador real com roteiro curto e prints.
+2. Validar em celular real: login, menu, agenda, PDV/carrinho, clientes, financeiro, servicos, equipe, configuracoes e booking publico.
+3. Ajustar ou documentar o texto do booking quando WhatsApp estiver desconectado.
+4. Criar manual de uso owner-only para o Geovane.
+5. Consolidar documentacao academica do TG: problema, objetivos, requisitos, arquitetura, banco, seguranca, testes, resultados, limitacoes e trabalhos futuros.
+6. Preparar pacote de evidencias: prints, logs resumidos, health/HTTPS, testes e roteiro de apresentacao.
+
+Nao priorizar agora:
+1. IA generativa alterando dados.
+2. WhatsApp real com webhook/API oficial sem fase propria.
+3. Google Calendar OAuth completo sem fase propria.
+4. Reativar recepcao/profissional no piloto atual.
+5. Migration, seed, deploy, firewall, certificado ou PM2 fora de fase especifica.
+
 ## Atualizacao 2026-06-16 (Validacao owner-only aprovada)
 - Operador humano executou o provisionamento owner no terminal real da VPS.
 - `SMOKE_BASE_URL`, `SMOKE_OWNER_EMAIL` e `SMOKE_OWNER_PASSWORD` estao presentes sem valores expostos.

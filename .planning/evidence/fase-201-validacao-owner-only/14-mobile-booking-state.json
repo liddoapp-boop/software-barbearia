@@ -1,0 +1,10 @@
+{
+  "title": "Barbearia — Agendar",
+  "url": "https://barbearia.76-13-161-250.nip.io/agendamento",
+  "hasChat": true,
+  "hasInput": true,
+  "viewport": 390,
+  "scrollWidth": 390,
+  "overflow": false,
+  "body": "Qual é o seu nome?\nBarbearia\nCHAT\nMeus Agendamentos\nOlá! Bem-vindo à Barbearia.\nQual é o seu nome?\nMeus Agendamentos"
+}
