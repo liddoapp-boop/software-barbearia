@@ -1,5 +1,33 @@
 # Next Priorities
 
+## Atualizacao 2026-06-16 (Reexecucao Fase 2.0 - Auditoria completa produto/TG)
+- Atualizado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
+- Atualizado `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`.
+- Validacoes base passaram: build, test, test:db, audit, audit omit dev, health publico, PM2, Nginx, PostgreSQL, UFW e sockets.
+- Git iniciou com arvore limpa, mas a branch local nao esta alinhada: `main...origin/main [ahead 1]`.
+- App segue em `127.0.0.1:3333`, sem `0.0.0.0:3333`; `3333/tcp` segue negado no UFW.
+- Health publico segue OK: `{"ok":true,"authEnforced":true}`.
+- WhatsApp assistido e base Evolution API existem, mas WhatsApp real conectado nao foi comprovado.
+- IA generativa real nao foi encontrada; existem sugestoes inteligentes por regra e telemetria.
+- Google Calendar nao foi encontrado; referencias a Google no codigo sao de Firebase/auth, nao Calendar.
+- Nao houve feature nova, migration, seed, deploy, restart PM2, firewall, certificado, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Executar fase P1 de reconciliacao financeira/estoque/comissoes com base conhecida, IDs registrados e reversao documentada.
+2. Revisar o commit local `ahead 1` e decidir, em fase propria, se sera enviado ao remoto ou mantido como artefato local.
+3. Consolidar LGPD basica no TG/manual: finalidade, minimizacao, responsabilidade e exclusao/anonimizacao como escopo ou trabalho futuro.
+4. Preparar pacote academico do TG usando prints da Fase 2.1, health/infra, logs sanitizados, resultados de testes e roteiro de demonstracao.
+5. Ajustar ou documentar o texto do booking quando WhatsApp estiver desconectado.
+6. Criar manual de uso owner-only para o Geovane.
+7. Se a banca exigir, complementar com print do menu mobile aberto e validacao em aparelho fisico.
+
+Nao priorizar agora:
+1. Alterar regra financeira sem fase propria.
+2. WhatsApp real, IA generativa ou Google Calendar OAuth completo sem escopo separado.
+3. Reativar recepcao/profissional no piloto owner-only.
+4. Migration, seed, deploy, firewall, certificado ou PM2 fora de fase especifica.
+5. Commit/push antes de revisao seletiva dos documentos e evidencias.
+
 ## Atualizacao 2026-06-16 (Fase 2.1 - Validacao manual owner-only com evidencias)
 - Criado `.planning/201_VALIDACAO_MANUAL_OWNER_ONLY_EVIDENCIAS.md`.
 - Criada pasta `.planning/evidence/fase-201-validacao-owner-only/`.
@@ -29,7 +57,7 @@ Nao priorizar agora:
 ## Atualizacao 2026-06-16 (Fase 2.0 - Auditoria completa produto/TG)
 - Criado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
 - Validacoes base passaram: build, test, test:db, audit, audit omit dev, health publico, PM2, Nginx, PostgreSQL, UFW e sockets.
-- Git estava alinhado com `origin/main` antes da auditoria documental.
+- Registro anterior indicava Git alinhado, mas a reexecucao atual corrigiu o estado: `main...origin/main [ahead 1]`.
 - App segue em `127.0.0.1:3333`, sem `0.0.0.0:3333`; `3333/tcp` segue negado no UFW.
 - GETs autenticados owner retornaram `200` para modulos principais.
 - Booking publico e endpoints publicos basicos retornaram `200`.

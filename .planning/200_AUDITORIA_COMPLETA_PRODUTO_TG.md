@@ -8,6 +8,8 @@ A Fase 2.0 auditou o estado atual do Software Barbearia sem criar feature, sem a
 
 O sistema esta acima de um MVP tecnico simples e ja sustenta demonstracao real do fluxo principal do TG. A entrega ainda nao deve ser vendida como produto completo de mercado porque WhatsApp real, IA generativa, Google Calendar, validacao manual/mobile final e documentacao academica ainda estao parciais ou ausentes.
 
+Atualizacao da reexecucao em 2026-06-16: a arvore Git iniciou limpa, mas a branch local **nao esta alinhada** com `origin/main`; `git status -sb` retornou `main...origin/main [ahead 1]`. Nenhum push, commit ou staging foi feito nesta auditoria.
+
 Decisao da fase: **APROVADO COM RESSALVAS PARA PROXIMA FASE DE FECHAMENTO DO TG**.
 
 ## 2. Validacoes base executadas
@@ -15,8 +17,8 @@ Decisao da fase: **APROVADO COM RESSALVAS PARA PROXIMA FASE DE FECHAMENTO DO TG*
 | Validacao | Resultado |
 | --- | --- |
 | `git status --short` | limpo antes da auditoria documental |
-| `git status -sb` | `main...origin/main` |
-| `git log --oneline -10` | historico recente alinhado com hardening, owner-only e seguranca |
+| `git status -sb` | `main...origin/main [ahead 1]`; branch local nao alinhada com `origin/main` |
+| `git log --oneline -10` | historico recente inclui validacao owner-only, `.gitignore` de `test-results/`, hardening de producao, seguranca e owner-only |
 | `npm run build` | passou |
 | `npm run test` | passou: 6 arquivos, 1 skipped; 88 testes, 11 skipped |
 | `npm run test:db` | passou: 1 arquivo; 11 testes |
@@ -28,11 +30,19 @@ Decisao da fase: **APROVADO COM RESSALVAS PARA PROXIMA FASE DE FECHAMENTO DO TG*
 | `systemctl status postgresql --no-pager` | ativo |
 | `ufw status verbose` | ativo; 80/443/22 permitidos; 3333 negado |
 | `ss -tulpn` | app em `127.0.0.1:3333`; sem `0.0.0.0:3333` |
-| GETs autenticados owner | `/auth/me`, Dashboard, Agenda, Clientes, PDV, Estoque, Financeiro, Servicos, Equipe, Comissoes, Auditoria, Configuracoes, Relatorios e WhatsApp status retornaram 200 |
+| GETs autenticados owner | validacao registrada na Fase 2.1: `/auth/me`, Dashboard, Agenda, Clientes, PDV, Estoque, Financeiro, Servicos, Equipe, Comissoes, Auditoria, Configuracoes, Relatorios e WhatsApp status retornaram 200 |
 | Booking publico | `/agendamento`, `/public/services` e `/public/business` retornaram 200 |
 | Mobile/overflow automatizado | `tests/frontend-mobile-overflow.spec.ts` passou: 2 testes |
 
 Observacao operacional: `npm run test:db` executa fluxo Prisma e cria dados de teste com prefixos de teste no banco configurado. Passou, mas deve ser tratado como comando de ambiente controlado; para rotina de producao, preferir banco isolado de teste ou janela explicitamente autorizada.
+
+Confirmacoes objetivas desta reexecucao:
+- arvore Git limpa antes da edicao documental;
+- branch local nao alinhada, `ahead 1`;
+- app escutando em `127.0.0.1:3333`;
+- sem listener `0.0.0.0:3333`;
+- health publico HTTPS OK com `{"ok":true,"authEnforced":true}`;
+- Nginx ativo, PostgreSQL ativo, PM2 online e UFW ativo com `3333/tcp` negado.
 
 ## 3. Estado geral do projeto
 
@@ -59,8 +69,8 @@ O ambiente publico esta saudavel: HTTPS real, Nginx proxy, PM2 online, PostgreSQ
 | Auditoria | Pronto | `AuditLog` persistente, append-only e rotas sensiveis owner-only | Boa evidencia para TG |
 | Configuracoes | Pronto | empresa, horarios, pagamentos, equipe e regras de comissao | Algumas configuracoes dependem de validacao operacional do dono |
 | Autenticacao/owner-only | Pronto | login owner, `/auth/me`, JWT, role owner, active unit e RBAC validados | Tokens antigos continuam stateless ate expirarem |
-| Seguranca/infra | Pronto | HTTPS, UFW, Nginx, PM2, PostgreSQL, audits 0 vulnerabilidades | `script-src 'unsafe-inline'` e `style-src 'unsafe-inline'` sao aceitaveis para monolito estatico, mas nao ideais |
-| Mobile/responsividade | Precisa validacao real | teste automatizado de overflow passou | Falta checklist humano em aparelho real para TG |
+| Seguranca/infra | Pronto com ressalva Git | HTTPS, UFW, Nginx, PM2, PostgreSQL, audits 0 vulnerabilidades | Branch local esta `ahead 1`; `script-src 'unsafe-inline'` e `style-src 'unsafe-inline'` sao aceitaveis para monolito estatico, mas nao ideais |
+| Mobile/responsividade | Precisa validacao real | teste automatizado de overflow passou; Fase 2.1 coletou evidencias em viewport 390x844 | Falta, se exigido pela banca, validacao complementar em aparelho fisico real |
 | WhatsApp | Parcial | endpoints owner-only e Evolution API implementados; estado atual `close` | WhatsApp real ainda nao comprovado conectado |
 | IA | Ausente como IA generativa | nao ha dependencia OpenAI/LLM; ha sugestoes por regra | Tratar como inteligencia operacional por regra ou implementar fase controlada |
 | Google Calendar | Ausente | nao ha OAuth, tokens, criacao de evento ou link dedicado | Recomendar link "Adicionar ao Google Calendar" se entrar no TG |
@@ -292,11 +302,11 @@ Nenhum P0 confirmado nesta auditoria. O sistema publico permaneceu saudavel e os
 
 ### P1
 
-1. Validar manualmente fluxo completo owner-only no navegador real antes da entrega ao Geovane.
-2. Conferir manualmente financeiro/estoque/comissoes com base pequena conhecida.
+1. Conferir manualmente financeiro/estoque/comissoes com base pequena conhecida.
+2. Alinhar decisao Git antes do handoff: revisar o commit local `ahead 1` e decidir se sera enviado ou mantido apenas como artefato local.
 3. Corrigir ou ajustar texto do booking quando WhatsApp estiver desconectado.
 4. Definir LGPD basica no escopo do TG.
-5. Coletar evidencias mobile reais.
+5. Coletar evidencias mobile em aparelho fisico se a banca exigir alem da viewport 390x844 da Fase 2.1.
 6. Evitar `test:db` contra banco operacional sem isolamento explicito.
 
 ### P2
@@ -334,7 +344,7 @@ Nenhum P0 confirmado nesta auditoria. O sistema publico permaneceu saudavel e os
 - Booking publico apresentavel.
 - Clientes com LGPD/reativacao formal.
 - WhatsApp assistido/real.
-- Mobile validado em aparelho real.
+- Mobile validado em viewport realista, com aparelho fisico como evidencia complementar se exigido.
 - Manual de uso.
 - Documentacao academica final.
 - Evidencias de apresentacao.
@@ -368,12 +378,13 @@ Criterios atendidos:
 - nenhum segredo exposto;
 - sistema publico seguiu saudavel;
 - testes base passaram;
-- Git estava limpo antes da criacao documental;
+- Git estava com arvore limpa antes da criacao documental, porem branch local ja estava `ahead 1`;
 - foi criada lista clara de proximos passos.
 
 Ressalvas:
 - esta fase gerou apenas documentos pendentes no working tree;
-- nao houve validacao humana em celular real durante esta auditoria;
+- branch local nao esta alinhada com `origin/main` e precisa decisao antes do handoff;
+- nao houve validacao humana em aparelho fisico real durante esta auditoria;
 - WhatsApp, IA e Google Calendar nao devem ser apresentados como prontos.
 
 ## 24. Atualizacao Fase 2.1 - Validacao manual owner-only

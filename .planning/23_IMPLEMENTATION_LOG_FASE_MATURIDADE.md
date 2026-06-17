@@ -1,4 +1,40 @@
 Data: 2026-06-16
+Escopo: Reexecucao da Fase 2.0 - Auditoria completa do produto e escopo restante do TG.
+
+## Entregas executadas
+1. Atualizado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md` com a revalidacao base atual.
+2. Atualizado `.planning/24_NEXT_PRIORITIES.md` com a correcao de branch local `ahead 1` e proximos passos.
+3. Reexecutadas validacoes base solicitadas: Git, build, testes, teste DB, audits npm, health publico, PM2, Nginx, PostgreSQL, UFW e sockets.
+4. Confirmado ambiente publico saudavel: HTTPS real, Nginx proxy, PM2 online, PostgreSQL ativo, UFW ativo, app em `127.0.0.1:3333` e sem `0.0.0.0:3333`.
+5. Reconfirmado por codigo/testes/documentacao que WhatsApp assistido e Evolution API existem, mas WhatsApp real conectado nao foi comprovado.
+6. Reconfirmado que IA generativa real nao existe; o produto possui sugestoes por regra e telemetria de sugestoes.
+7. Reconfirmado que Google Calendar real esta ausente; ocorrencias de Google no codigo estao ligadas a Firebase auth/public certs, nao a Calendar.
+
+## Validacao
+- `git status --short`: limpo antes das edicoes documentais.
+- `git status -sb`: `main...origin/main [ahead 1]`; branch local nao alinhada com `origin/main`.
+- `npm run build`: passou.
+- `npm run test`: passou (`6 passed | 1 skipped`; `88 passed | 11 skipped`).
+- `npm run test:db`: passou (`1 passed`; `11 passed`).
+- `npm audit`: 0 vulnerabilidades.
+- `npm audit --omit=dev`: 0 vulnerabilidades.
+- Health publico: `{"ok":true,"authEnforced":true}`.
+- PM2: `software-barbearia` online.
+- Nginx: ativo.
+- PostgreSQL: ativo.
+- UFW: ativo; `3333/tcp` negado.
+- `ss -tulpn`: app em `127.0.0.1:3333`, sem `0.0.0.0:3333`.
+
+## Resultado
+- Decisao da reexecucao da Fase 2.0: APROVADO COM RESSALVAS.
+- Ressalvas principais: branch local `ahead 1`, WhatsApp real nao comprovado conectado, IA generativa ausente, Google Calendar ausente, reconciliacao financeiro/estoque/comissoes ainda precisa massa conhecida e documentacao academica final ainda precisa consolidacao.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, regra financeira, `git add`, commit ou push.
+
+Documento: `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
+
+---
+
+Data: 2026-06-16
 Escopo: Fase 2.0 - Auditoria completa do produto e escopo restante do TG.
 
 ## Entregas executadas
