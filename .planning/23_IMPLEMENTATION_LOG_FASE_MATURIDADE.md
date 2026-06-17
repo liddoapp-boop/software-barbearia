@@ -1,3 +1,40 @@
+Data: 2026-06-17
+Escopo: Fase 2.2 - Reconciliacao financeiro/estoque/comissoes com massa conhecida.
+
+## Entregas executadas
+1. Criado `.planning/202_RECONCILIACAO_FINANCEIRO_ESTOQUE_COMISSOES.md`.
+2. Criada evidencia local `.planning/evidence/fase-202-reconciliacao/reconciliation-result.json`.
+3. Criado backup PostgreSQL previo fora do repositorio: `/root/software-barbearia-backups/barbearia_pre_finance_stock_commission_20260617_222020.sql`.
+4. Validado backup com tamanho `1904947` bytes, permissao `-rw------- root:root` e SHA-256 `cc2f7f746f5272c45179834a83b221b4822bd5bd5120dceaa2f0eb5226643aed`.
+5. Executada venda de produto com massa `TESTE TG`: estoque `10 -> 8`, receita `40` e idempotencia confirmada.
+6. Executada devolucao oficial da venda: estoque `8 -> 10`, despesa `40` e idempotencia confirmada.
+7. Executado checkout de servico: agendamento concluido, receita `100`, comissao de servico `40` e idempotencia confirmada.
+8. Executado pagamento de comissao: status `PAID`, despesa `40`, sem duplicidade em replay.
+9. Conferido financeiro liquido da massa conhecida: `40 - 40 + 100 - 40 = 60`.
+10. Conferidos logs e servicos sem crash, loop de restart ou erro `500` critico.
+
+## Validacao
+- `git status --short`: limpo antes da fase.
+- `git status -sb`: `main...origin/main`.
+- Health publico: `{"ok":true,"authEnforced":true}`.
+- PM2: `software-barbearia` online.
+- Nginx: ativo.
+- PostgreSQL: ativo.
+- UFW: ativo; `3333/tcp` negado.
+- `ss -tulpn`: app em `127.0.0.1:3333`, sem `0.0.0.0:3333`.
+- Idempotencia validada para venda, devolucao, checkout e pagamento de comissao.
+- Auditoria encontrada para os fluxos principais.
+
+## Resultado
+- Decisao da Fase 2.2: APROVADO COM RESSALVAS.
+- Ressalvas P1: `defaultCommissionRate=30` causa `numeric field overflow`; devolucao total de produto nao cancelou/reverteu comissao de produto pendente.
+- Ressalvas P2: valor/status diretos da devolucao apareceram ambiguos na evidencia; demonstracao financeira precisa separar soma bruta e resultado liquido.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, regra de negocio, `git add`, commit ou push.
+
+Documento: `.planning/202_RECONCILIACAO_FINANCEIRO_ESTOQUE_COMISSOES.md`.
+
+---
+
 Data: 2026-06-16
 Escopo: Reexecucao da Fase 2.0 - Auditoria completa do produto e escopo restante do TG.
 

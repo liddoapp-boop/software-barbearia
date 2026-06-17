@@ -1,5 +1,30 @@
 # Next Priorities
 
+## Atualizacao 2026-06-17 (Fase 2.2 - Reconciliacao financeiro/estoque/comissoes)
+- Criado `.planning/202_RECONCILIACAO_FINANCEIRO_ESTOQUE_COMISSOES.md`.
+- Criada evidencia local `.planning/evidence/fase-202-reconciliacao/reconciliation-result.json`.
+- Backup PostgreSQL previo criado fora do repositorio e validado.
+- Venda de produto, devolucao, checkout de servico e pagamento de comissao foram executados com massa conhecida e chaves de idempotencia.
+- Estoque reconciliou: `10 -> 8 -> 10`.
+- Financeiro liquido reconciliou: `40 - 40 + 100 - 40 = 60`.
+- Comissao de servico reconciliou: taxa `0.4`, base `100`, valor `40`, pagamento unico.
+- Health publico, PM2, Nginx, PostgreSQL, UFW e sockets seguiram saudaveis.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao de codigo, regra de negocio, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Corrigir ou documentar como limitacao P1 o bug de escala entre `defaultCommissionRate` aceito pela API e `Decimal(5,4)` no banco.
+2. Corrigir ou documentar como limitacao P1 que devolucao total de produto nao cancela/reverte automaticamente a comissao de produto pendente.
+3. Revisar UX/API de devolucao para evitar valor/status ambiguos em evidencia e demonstracao.
+4. Consolidar no TG a diferenca entre soma bruta de lancamentos e resultado financeiro liquido.
+5. Depois dos P1, criar manual owner-only e pacote academico final.
+
+Nao priorizar agora:
+1. Mudar regra financeira sem fase propria.
+2. Apagar dados `TESTE TG` sem plano de reversao oficial.
+3. Criar IA generativa, WhatsApp real ou Google Calendar OAuth antes do fechamento documental.
+4. Migration, seed, deploy, firewall, certificado ou PM2 fora de fase especifica.
+5. Commit/push antes de revisao seletiva dos documentos e evidencias.
+
 ## Atualizacao 2026-06-16 (Reexecucao Fase 2.0 - Auditoria completa produto/TG)
 - Atualizado `.planning/200_AUDITORIA_COMPLETA_PRODUTO_TG.md`.
 - Atualizado `.planning/23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md`.

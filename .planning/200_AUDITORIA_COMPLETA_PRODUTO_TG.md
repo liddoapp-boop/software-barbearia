@@ -408,3 +408,28 @@ Ressalvas restantes:
 - P1: consolidar LGPD basica no texto academico/manual;
 - P2: booking publico nao permite escolha explicita de profissional;
 - P3: print do menu mobile aberto e validacao em aparelho fisico podem complementar o pacote do TG.
+
+## 25. Atualizacao Fase 2.2 - Reconciliacao financeiro/estoque/comissoes
+
+Data: 2026-06-17
+
+Documento novo: `.planning/202_RECONCILIACAO_FINANCEIRO_ESTOQUE_COMISSOES.md`.
+
+Resultado: **APROVADO COM RESSALVAS**.
+
+Evidencia local: `.planning/evidence/fase-202-reconciliacao/reconciliation-result.json`.
+
+Resumo:
+- backup PostgreSQL previo criado fora do repositorio em `/root/software-barbearia-backups/barbearia_pre_finance_stock_commission_20260617_222020.sql`;
+- venda de produto baixou estoque de `10` para `8`, gerou receita de `40` e respeitou idempotencia;
+- devolucao oficial restaurou estoque para `10`, gerou despesa de `40` e respeitou idempotencia;
+- checkout de servico concluiu agendamento, gerou receita de `100`, comissao de servico de `40` e respeitou idempotencia;
+- pagamento de comissao marcou comissao como `PAID`, gerou despesa de `40` e respeitou idempotencia;
+- financeiro liquido da massa conhecida reconciliou em `+60`;
+- PM2, Nginx, PostgreSQL, UFW, health publico e bind em `127.0.0.1:3333` seguiram saudaveis.
+
+Novos achados:
+- P1: `defaultCommissionRate=30` em servico causa `numeric field overflow`, pois a validacao aceita escala 0..100 e o campo persiste como `Decimal(5,4)`;
+- P1: devolucao total de produto nao cancelou/reverteu a comissao de produto pendente;
+- P2: evidencia de devolucao mostrou valor/status diretos ambiguos, apesar de estoque e financeiro estarem corretos;
+- P2: demonstracao financeira precisa explicar diferenca entre soma bruta de lancamentos e resultado liquido.
