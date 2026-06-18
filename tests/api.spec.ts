@@ -1314,6 +1314,157 @@ describe("API MVP", () => {
     ).toHaveLength(1);
   });
 
+  it("cancela comissao de produto pendente em devolucao total sem duplicar no replay", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const sale = await app.inject({
+      method: "POST",
+      url: "/sales/products",
+      headers: { "idempotency-key": "sale-product-refund-commission-full" },
+      payload: {
+        unitId: "unit-01",
+        professionalId: "pro-01",
+        clientId: "cli-01",
+        soldAt: "2026-04-29T14:00:00.000Z",
+        items: [{ productId: "prd-pomada", quantity: 1 }],
+      },
+    });
+    expect(sale.statusCode).toBe(200);
+    const saleId = sale.json().sale.id as string;
+
+    const beforeRefund = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-29T00:00:00.000Z&end=2026-04-29T23:59:59.999Z",
+    });
+    expect(beforeRefund.statusCode).toBe(200);
+    const productCommission = beforeRefund
+      .json()
+      .entries.find(
+        (item: { source: string; status: string }) =>
+          item.source === "PRODUCT" && item.status === "PENDING",
+      );
+    expect(productCommission).toBeTruthy();
+
+    const payload = {
+      unitId: "unit-01",
+      changedBy: "owner",
+      reason: "Devolucao total cancela comissao pendente",
+      refundedAt: "2026-04-29T15:00:00.000Z",
+      items: [{ productId: "prd-pomada", quantity: 1 }],
+    };
+    const refund = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: { "idempotency-key": "refund-product-commission-full" },
+      payload,
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(1);
+    expect(refund.json().canceledCommissions[0]).toMatchObject({
+      id: productCommission.id,
+      status: "CANCELED",
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: { "idempotency-key": "refund-product-commission-full" },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refund.id).toBe(refund.json().refund.id);
+    expect(replay.json().canceledCommissions).toHaveLength(1);
+
+    const afterRefund = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-29T00:00:00.000Z&end=2026-04-29T23:59:59.999Z",
+    });
+    expect(afterRefund.statusCode).toBe(200);
+    const canceled = afterRefund
+      .json()
+      .entries.find((item: { id: string }) => item.id === productCommission.id);
+    expect(canceled.status).toBe("CANCELED");
+
+    const audit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01&entity=commission&action=PRODUCT_COMMISSION_CANCELED_BY_REFUND&limit=20",
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(
+      audit.json().events.filter((item: { entityId: string }) => item.entityId === productCommission.id),
+    ).toHaveLength(1);
+  });
+
+  it("nao cancela silenciosamente comissao de produto ja paga em devolucao total", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const sale = await app.inject({
+      method: "POST",
+      url: "/sales/products",
+      headers: { "idempotency-key": "sale-product-refund-paid-commission" },
+      payload: {
+        unitId: "unit-01",
+        professionalId: "pro-01",
+        clientId: "cli-01",
+        soldAt: "2026-04-29T16:00:00.000Z",
+        items: [{ productId: "prd-pomada", quantity: 1 }],
+      },
+    });
+    expect(sale.statusCode).toBe(200);
+    const saleId = sale.json().sale.id as string;
+
+    const commissions = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-29T00:00:00.000Z&end=2026-04-29T23:59:59.999Z",
+    });
+    const productCommission = commissions
+      .json()
+      .entries.find(
+        (item: { source: string; status: string }) =>
+          item.source === "PRODUCT" && item.status === "PENDING",
+      );
+    expect(productCommission).toBeTruthy();
+
+    const pay = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${productCommission.id}/pay`,
+      headers: { "idempotency-key": "pay-product-commission-before-refund" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "owner",
+        paidAt: "2026-04-29T16:30:00.000Z",
+      },
+    });
+    expect(pay.statusCode).toBe(200);
+    expect(pay.json().status).toBe("PAID");
+
+    const refund = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: { "idempotency-key": "refund-product-paid-commission" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "owner",
+        reason: "Devolucao total preserva comissao paga",
+        refundedAt: "2026-04-29T17:00:00.000Z",
+        items: [{ productId: "prd-pomada", quantity: 1 }],
+      },
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(0);
+
+    const afterRefund = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-29T00:00:00.000Z&end=2026-04-29T23:59:59.999Z",
+    });
+    const stillPaid = afterRefund
+      .json()
+      .entries.find((item: { id: string }) => item.id === productCommission.id);
+    expect(stillPaid.status).toBe("PAID");
+  });
+
   it("lista historico de vendas de produto por unidade com filtros e status de devolucao", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -2585,6 +2736,80 @@ describe("API MVP", () => {
     });
     expect(removed.statusCode).toBe(200);
     expect(removed.json().mode).toBe("deleted");
+  });
+
+  it("normaliza comissao padrao de servico em percentual humano sem overflow", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const decimal = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Comissao Decimal",
+        price: 30,
+        durationMinutes: 20,
+        defaultCommissionRate: 0.3,
+      },
+    });
+    expect(decimal.statusCode).toBe(200);
+    expect(decimal.json().service.defaultCommissionRate).toBe(30);
+
+    const percent = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Comissao Percentual",
+        price: 40,
+        durationMinutes: 25,
+        defaultCommissionRate: 30,
+      },
+    });
+    expect(percent.statusCode).toBe(200);
+    expect(percent.json().service.defaultCommissionRate).toBe(30);
+
+    const full = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Comissao Integral",
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: 100,
+      },
+    });
+    expect(full.statusCode).toBe(200);
+    expect(full.json().service.defaultCommissionRate).toBe(100);
+
+    const invalidHigh = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Comissao Invalida Alta",
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: 150,
+      },
+    });
+    expect(invalidHigh.statusCode).toBe(400);
+    expect(invalidHigh.json().error).toContain("100");
+
+    const invalidNegative = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Comissao Invalida Negativa",
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: -10,
+      },
+    });
+    expect(invalidNegative.statusCode).toBe(400);
   });
 
   it("registra lancamento manual e retorna resumo financeiro correto", async () => {

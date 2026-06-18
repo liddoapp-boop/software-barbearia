@@ -236,6 +236,89 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     await prisma.$disconnect();
   });
 
+  it("normaliza defaultCommissionRate no Prisma antes de persistir", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+
+    const decimal = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: scenario.unitId,
+        name: uniqueId("Servico decimal"),
+        price: 30,
+        durationMinutes: 20,
+        defaultCommissionRate: 0.3,
+      },
+    });
+    expect(decimal.statusCode).toBe(200);
+    expect(decimal.json().service.defaultCommissionRate).toBe(30);
+    const decimalRow = await prisma.service.findUniqueOrThrow({
+      where: { id: decimal.json().service.id },
+    });
+    expect(Number(decimalRow.defaultCommissionRate)).toBe(0.3);
+
+    const percent = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: scenario.unitId,
+        name: uniqueId("Servico percentual"),
+        price: 40,
+        durationMinutes: 25,
+        defaultCommissionRate: 30,
+      },
+    });
+    expect(percent.statusCode).toBe(200);
+    const percentRow = await prisma.service.findUniqueOrThrow({
+      where: { id: percent.json().service.id },
+    });
+    expect(Number(percentRow.defaultCommissionRate)).toBe(0.3);
+
+    const full = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: scenario.unitId,
+        name: uniqueId("Servico integral"),
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: 100,
+      },
+    });
+    expect(full.statusCode).toBe(200);
+    const fullRow = await prisma.service.findUniqueOrThrow({
+      where: { id: full.json().service.id },
+    });
+    expect(Number(fullRow.defaultCommissionRate)).toBe(1);
+
+    const invalidHigh = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: scenario.unitId,
+        name: uniqueId("Servico invalido alto"),
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: 150,
+      },
+    });
+    expect(invalidHigh.statusCode).toBe(400);
+
+    const invalidNegative = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: scenario.unitId,
+        name: uniqueId("Servico invalido negativo"),
+        price: 50,
+        durationMinutes: 30,
+        defaultCommissionRate: -10,
+      },
+    });
+    expect(invalidNegative.statusCode).toBe(400);
+  });
+
   it("autentica usuario persistente do Prisma e emite token com identidade e unidades", async () => {
     process.env.AUTH_ENFORCED = "true";
     const app = createApp();
@@ -508,6 +591,124 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(
       auditEvents.json().events.filter((event: { entityId: string }) => event.entityId === refundId),
     ).toHaveLength(1);
+  });
+
+  it("cancela comissao de produto pendente na devolucao total pelo Prisma", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const saleId = await createProductSale(app, scenario, uniqueId("sale-refund-commission"));
+    const commission = await prisma.commissionEntry.findFirstOrThrow({
+      where: {
+        unitId: scenario.unitId,
+        productSaleId: saleId,
+        source: "PRODUCT",
+        status: "PENDING",
+      },
+    });
+
+    const payload = {
+      unitId: scenario.unitId,
+      changedBy: "db-test",
+      reason: "Devolucao total cancela comissao DB",
+      refundedAt: "2026-05-12T16:30:00.000Z",
+      items: [{ productId: scenario.productId, quantity: 1 }],
+    };
+    const idempotencyKey = uniqueId("refund-commission-cancel");
+    const refund = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: {
+        "idempotency-key": idempotencyKey,
+        "x-correlation-id": uniqueId("corr-refund-commission"),
+      },
+      payload,
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(1);
+    expect(refund.json().canceledCommissions[0]).toMatchObject({
+      id: commission.id,
+      status: "CANCELED",
+    });
+
+    const updated = await prisma.commissionEntry.findUniqueOrThrow({
+      where: { id: commission.id },
+    });
+    expect(updated.status).toBe("CANCELED");
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: {
+        unitId: scenario.unitId,
+        action: "PRODUCT_COMMISSION_CANCELED_BY_REFUND",
+        entity: "commission",
+        entityId: commission.id,
+      },
+    });
+    expect(auditLogs).toHaveLength(1);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refund.id).toBe(refund.json().refund.id);
+
+    const replayAuditLogs = await prisma.auditLog.findMany({
+      where: {
+        unitId: scenario.unitId,
+        action: "PRODUCT_COMMISSION_CANCELED_BY_REFUND",
+        entity: "commission",
+        entityId: commission.id,
+      },
+    });
+    expect(replayAuditLogs).toHaveLength(1);
+  });
+
+  it("preserva comissao de produto ja paga durante devolucao total pelo Prisma", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const saleId = await createProductSale(app, scenario, uniqueId("sale-refund-paid-commission"));
+    const commission = await prisma.commissionEntry.findFirstOrThrow({
+      where: {
+        unitId: scenario.unitId,
+        productSaleId: saleId,
+        source: "PRODUCT",
+        status: "PENDING",
+      },
+    });
+
+    const pay = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${commission.id}/pay`,
+      headers: { "idempotency-key": uniqueId("pay-product-before-refund") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        paidAt: "2026-05-12T17:00:00.000Z",
+      },
+    });
+    expect(pay.statusCode).toBe(200);
+
+    const refund = await app.inject({
+      method: "POST",
+      url: `/sales/products/${saleId}/refund`,
+      headers: { "idempotency-key": uniqueId("refund-paid-product-commission") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        reason: "Devolucao preserva comissao paga DB",
+        refundedAt: "2026-05-12T17:30:00.000Z",
+        items: [{ productId: scenario.productId, quantity: 1 }],
+      },
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(0);
+
+    const updated = await prisma.commissionEntry.findUniqueOrThrow({
+      where: { id: commission.id },
+    });
+    expect(updated.status).toBe("PAID");
   });
 
   it("rejeita payload divergente com mesma idempotencyKey sem efeito colateral extra", async () => {

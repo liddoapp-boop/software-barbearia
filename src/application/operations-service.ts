@@ -26,6 +26,7 @@ import {
   AppointmentsReportPayload,
   AuditReportPayload,
   BillingReconciliationDiscrepancy,
+  CommissionEntry,
   DashboardSuggestionTelemetryEvent,
   DashboardSuggestionTelemetryOutcome,
   ClientsOverviewPayload,
@@ -65,6 +66,10 @@ import {
   computeEffectiveConsumptionQty,
   normalizeConsumptionItems,
 } from "./stock-consumption";
+import {
+  formatCommissionRatePercent,
+  normalizeDefaultCommissionRate,
+} from "../domain/commission-rate";
 import {
   buildDashboardPlaybookHistory,
   calibrateDashboardThresholds,
@@ -1118,7 +1123,7 @@ export class OperationsService {
       category: service.category ?? "",
       price: Number(service.price || 0),
       durationMinutes: Number(service.durationMin || 0),
-      defaultCommissionRate: commissionRate,
+      defaultCommissionRate: formatCommissionRatePercent(commissionRate),
       estimatedCost: Number(service.costEstimate || 0),
       estimatedMargin,
       estimatedMarginPct: marginPct,
@@ -1265,15 +1270,12 @@ export class OperationsService {
     const price = Number(input.price ?? 0);
     const durationMinutes = Math.trunc(Number(input.durationMinutes ?? 0));
     const estimatedCost = Number(input.estimatedCost ?? 0);
-    const commissionRate = Number(input.defaultCommissionRate ?? 0);
+    const commissionRate = normalizeDefaultCommissionRate(input.defaultCommissionRate);
     if (!Number.isFinite(price) || price < 0) throw new Error("Preco invalido");
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
       throw new Error("Duracao invalida");
     }
     if (!Number.isFinite(estimatedCost) || estimatedCost < 0) throw new Error("Custo estimado invalido");
-    if (!Number.isFinite(commissionRate) || commissionRate < 0 || commissionRate > 100) {
-      throw new Error("Comissao deve estar entre 0% e 100%");
-    }
     if (
       this.store.services.some(
         (item) =>
@@ -1293,7 +1295,7 @@ export class OperationsService {
       category: String(input.category ?? "").trim() || undefined,
       price: Number(price.toFixed(2)),
       durationMin: durationMinutes,
-      defaultCommissionRate: Number(commissionRate.toFixed(2)),
+      defaultCommissionRate: commissionRate,
       costEstimate: Number(estimatedCost.toFixed(2)),
       notes: String(input.notes ?? "").trim() || undefined,
       imageUrl: String(input.imageUrl ?? "").trim() || undefined,
@@ -1366,11 +1368,7 @@ export class OperationsService {
       service.durationMin = durationMinutes;
     }
     if (input.defaultCommissionRate != null) {
-      const commissionRate = Number(input.defaultCommissionRate);
-      if (!Number.isFinite(commissionRate) || commissionRate < 0 || commissionRate > 100) {
-        throw new Error("Comissao deve estar entre 0% e 100%");
-      }
-      service.defaultCommissionRate = Number(commissionRate.toFixed(2));
+      service.defaultCommissionRate = normalizeDefaultCommissionRate(input.defaultCommissionRate);
     }
     if (input.estimatedCost != null) {
       const estimatedCost = Number(input.estimatedCost);
@@ -2432,6 +2430,7 @@ export class OperationsService {
       refund: Refund;
       financialEntry: FinancialEntry;
       stockMovements: unknown[];
+      canceledCommissions?: CommissionEntry[];
     }>(scope);
     if (replay) return replay;
 
@@ -2634,10 +2633,31 @@ export class OperationsService {
       if (product) product.stockQty += movement.quantity;
     }
 
+    const isFullyRefunded = Array.from(soldByProduct.entries()).every(([productId, sold]) => {
+      const alreadyRefunded = refundedByProduct.get(productId) ?? 0;
+      const requestedQuantity = requested.get(productId) ?? 0;
+      return alreadyRefunded + requestedQuantity >= sold.quantity;
+    });
+    const canceledCommissions: CommissionEntry[] = [];
+    if (isFullyRefunded) {
+      for (const commission of this.store.commissionEntries) {
+        if (
+          commission.unitId === input.unitId &&
+          commission.productSaleId === sale.id &&
+          commission.source === "PRODUCT" &&
+          (commission.status ?? "PENDING") === "PENDING"
+        ) {
+          commission.status = "CANCELED";
+          canceledCommissions.push({ ...commission });
+        }
+      }
+    }
+
     const response = {
       refund,
       financialEntry,
       stockMovements,
+      canceledCommissions,
     };
     this.finishMemoryIdempotency(scope, response);
     return response;

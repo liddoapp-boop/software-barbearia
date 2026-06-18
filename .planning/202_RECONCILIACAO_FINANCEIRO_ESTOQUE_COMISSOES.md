@@ -181,8 +181,10 @@ Nenhum P0 confirmado. O sistema publico permaneceu saudavel, o health continuou 
 
 ### P1
 
-1. `defaultCommissionRate=30` em servico causa `numeric field overflow`: o backend aceita escala 0..100, mas o campo `Service.defaultCommissionRate` persiste como `Decimal(5,4)`. Corrigir validacao, conversao para fracao ou modelagem antes de usar percentual nessa tela como funcionalidade final.
-2. Devolucao total de produto nao cancelou/reverteu a comissao de produto pendente (`3cac61e8-5141-4536-bea8-ae1ae8fd9602`). Para entrega, precisa corrigir ou documentar que comissao de produto devolvido deve ser revisada manualmente.
+1. Resolvido na Fase 2.3: `defaultCommissionRate=30` agora e normalizado no backend para `0.3` antes de persistir.
+2. Resolvido para novas operacoes na Fase 2.3: devolucao total de produto cancela comissao de produto pendente vinculada a venda usando status `CANCELED`.
+
+Observacao: a comissao pendente historica da massa desta Fase 2.2 nao foi alterada manualmente no banco, conforme restricao operacional da Fase 2.3.
 
 ### P2
 
@@ -227,4 +229,4 @@ Ressalvas para fechar antes do TG:
 
 ## 15. Proxima etapa recomendada
 
-Fase 2.3: corrigir ou documentar os achados P1 da reconciliacao antes de consolidar o manual e o texto academico. Se nao houver tempo para correcao, o escopo do TG deve declarar revisao manual de comissao de produto devolvido como limitacao operacional e trabalho futuro.
+Fase 2.3.1: validar `test:db` em banco isolado confirmado e commitar seletivamente a correcao dos P1. Depois, consolidar manual owner-only e texto academico.

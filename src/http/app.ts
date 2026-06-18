@@ -2844,6 +2844,30 @@ export function createApp() {
         items: body.items.length,
       },
     });
+    const canceledCommissions = (result as {
+      canceledCommissions?: Array<{
+        id: string;
+        status: string;
+        commissionAmount: number;
+      }>;
+    }).canceledCommissions;
+    if (backend !== "prisma" && Array.isArray(canceledCommissions)) {
+      for (const commission of canceledCommissions) {
+        await recordAudit(request, {
+          unitId: body.unitId,
+          action: "PRODUCT_COMMISSION_CANCELED_BY_REFUND",
+          entity: "commission",
+          entityId: commission.id,
+          before: { status: "PENDING" },
+          after: {
+            status: commission.status,
+            productSaleId: params.id,
+            refundId: result.refund.id,
+            amount: commission.commissionAmount,
+          },
+        });
+      }
+    }
     return result;
   });
 

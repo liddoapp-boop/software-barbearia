@@ -1,5 +1,29 @@
 # Next Priorities
 
+## Atualizacao 2026-06-18 (Fase 2.3 - Correcao P1 financeiro/comissoes)
+- Criado `.planning/203_CORRECAO_P1_FINANCEIRO_COMISSOES.md`.
+- Corrigida normalizacao de `defaultCommissionRate`: backend persiste `0..1`, UI/API aceitam percentual humano.
+- Corrigido fluxo de devolucao total de produto para cancelar comissao de produto pendente com status `CANCELED`.
+- Comissao de produto ja paga permanece `PAID`; nao ha estorno silencioso.
+- Replay de refund nao duplica cancelamento nem auditoria.
+- Adicionada auditoria `PRODUCT_COMMISSION_CANCELED_BY_REFUND`.
+- Build, testes API/memoria, teste completo, audits, `git diff --check` e health publico passaram.
+- `npm run test:db` nao foi executado porque nao houve confirmacao de banco isolado de teste.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao manual de dados, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Preparar banco isolado de teste e executar `npm run test:db`.
+2. Se `test:db` passar, fazer revisao seletiva do diff e abrir Fase 2.3.1 para commit/push.
+3. Validar visualmente a tela de Servicos para confirmar exibicao de percentual humano apos a mudanca.
+4. Depois do commit, seguir para manual owner-only e pacote academico final.
+
+Nao priorizar agora:
+1. Alterar dados historicos da massa `TESTE TG` manualmente.
+2. Criar migration para status de comissao enquanto o dominio textual atual atende.
+3. Recalculo proporcional de comissao em devolucao parcial sem fase propria.
+4. Estorno automatico de comissao ja paga sem regra financeira aprovada.
+5. Deploy ou restart PM2 antes de fase propria.
+
 ## Atualizacao 2026-06-17 (Fase 2.2 - Reconciliacao financeiro/estoque/comissoes)
 - Criado `.planning/202_RECONCILIACAO_FINANCEIRO_ESTOQUE_COMISSOES.md`.
 - Criada evidencia local `.planning/evidence/fase-202-reconciliacao/reconciliation-result.json`.

@@ -1,3 +1,40 @@
+Data: 2026-06-18
+Escopo: Fase 2.3 - Correcao dos P1 financeiros encontrados na reconciliacao.
+
+## Entregas executadas
+1. Criado `.planning/203_CORRECAO_P1_FINANCEIRO_COMISSOES.md`.
+2. Criado `src/domain/commission-rate.ts` para normalizar `defaultCommissionRate`.
+3. Atualizado backend em memoria e backend Prisma para persistir `defaultCommissionRate` em escala decimal `0..1`.
+4. Mantida entrada humana percentual: `30` vira `0.3`, `100` vira `1`.
+5. Atualizada resposta de gerenciamento de servicos para exibir percentual humano na UI.
+6. Atualizado fluxo de devolucao total de produto para cancelar comissao de produto pendente com status `CANCELED`.
+7. Preservado comportamento de comissao ja paga: refund nao altera `PAID` silenciosamente.
+8. Adicionada auditoria `PRODUCT_COMMISSION_CANCELED_BY_REFUND`.
+9. Adicionados testes API/memoria e testes Prisma para os dois P1.
+
+## Validacao
+- `npm run build`: passou.
+- Testes especificos P1 em `tests/api.spec.ts`: passaram.
+- `npm test -- --run tests/api.spec.ts`: passou (`70 passed`).
+- `npm test -- --run tests/engine.spec.ts`: passou (`4 passed`).
+- `npm run test`: passou (`6 passed | 1 skipped`; `91 passed | 14 skipped`).
+- `RUN_DB_TESTS=0 DATA_BACKEND=prisma npx vitest run tests/db.integration.spec.ts`: passou em modo skip, sem tocar no banco.
+- `npm audit`: 0 vulnerabilidades.
+- `npm audit --omit=dev`: 0 vulnerabilidades.
+- `git diff --check`: passou.
+- Health publico: `{"ok":true,"authEnforced":true}`.
+
+## Resultado
+- Decisao da Fase 2.3: APROVADO COM RESSALVAS.
+- P1-1 corrigido no codigo.
+- P1-2 corrigido no codigo para novas operacoes.
+- Ressalva: `npm run test:db` nao foi executado porque nao houve confirmacao de banco isolado de teste; nenhum valor de `DATABASE_URL` foi exposto.
+- Nao houve deploy, restart PM2, firewall, certificado, migration, seed, alteracao manual de dados, `git add`, commit ou push.
+
+Documento: `.planning/203_CORRECAO_P1_FINANCEIRO_COMISSOES.md`.
+
+---
+
 Data: 2026-06-17
 Escopo: Fase 2.2 - Reconciliacao financeiro/estoque/comissoes com massa conhecida.
 

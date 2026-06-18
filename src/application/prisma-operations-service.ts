@@ -66,6 +66,10 @@ import {
   normalizeConsumptionItems,
 } from "./stock-consumption";
 import {
+  formatCommissionRatePercent,
+  normalizeDefaultCommissionRate,
+} from "../domain/commission-rate";
+import {
   buildDashboardPlaybookHistory,
   calibrateDashboardThresholds,
   DashboardThresholdConfig,
@@ -1273,7 +1277,7 @@ export class PrismaOperationsService {
       category: service.category ?? "",
       price: Number(service.price || 0),
       durationMinutes: Number(service.durationMin || 0),
-      defaultCommissionRate: Number(service.defaultCommissionRate ?? 0),
+      defaultCommissionRate: formatCommissionRatePercent(asNumber(service.defaultCommissionRate)),
       estimatedCost: Number(service.costEstimate || 0),
       estimatedMargin,
       estimatedMarginPct,
@@ -1435,18 +1439,10 @@ export class PrismaOperationsService {
     const price = Number(input.price ?? 0);
     const durationMinutes = Math.trunc(Number(input.durationMinutes ?? 0));
     const estimatedCost = Number(input.estimatedCost ?? 0);
-    const defaultCommissionRate = Number(input.defaultCommissionRate ?? 0);
+    const defaultCommissionRate = normalizeDefaultCommissionRate(input.defaultCommissionRate);
     if (!Number.isFinite(price) || price < 0) throw new Error("Preco invalido");
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) throw new Error("Duracao invalida");
     if (!Number.isFinite(estimatedCost) || estimatedCost < 0) throw new Error("Custo estimado invalido");
-    if (
-      !Number.isFinite(defaultCommissionRate) ||
-      defaultCommissionRate < 0 ||
-      defaultCommissionRate > 100
-    ) {
-      throw new Error("Comissao deve estar entre 0% e 100%");
-    }
-
     const service = await this.prisma.service.create({
       data: {
         id: crypto.randomUUID(),
@@ -1456,7 +1452,7 @@ export class PrismaOperationsService {
         category: String(input.category ?? "").trim() || null,
         price: Number(price.toFixed(2)),
         durationMin: durationMinutes,
-        defaultCommissionRate: Number(defaultCommissionRate.toFixed(2)),
+        defaultCommissionRate,
         costEstimate: Number(estimatedCost.toFixed(2)),
         notes: String(input.notes ?? "").trim() || null,
         active: input.isActive !== false,
@@ -1516,14 +1512,10 @@ export class PrismaOperationsService {
     ) {
       throw new Error("Duracao invalida");
     }
-    if (
-      input.defaultCommissionRate != null &&
-      (!Number.isFinite(Number(input.defaultCommissionRate)) ||
-        Number(input.defaultCommissionRate) < 0 ||
-        Number(input.defaultCommissionRate) > 100)
-    ) {
-      throw new Error("Comissao deve estar entre 0% e 100%");
-    }
+    const defaultCommissionRate =
+      input.defaultCommissionRate !== undefined
+        ? normalizeDefaultCommissionRate(input.defaultCommissionRate)
+        : undefined;
     if (
       input.estimatedCost != null &&
       (!Number.isFinite(Number(input.estimatedCost)) || Number(input.estimatedCost) < 0)
@@ -1539,9 +1531,7 @@ export class PrismaOperationsService {
         ...(input.category !== undefined ? { category: String(input.category || "").trim() || null } : {}),
         ...(input.price !== undefined ? { price: Number(Number(input.price).toFixed(2)) } : {}),
         ...(input.durationMinutes !== undefined ? { durationMin: Math.trunc(Number(input.durationMinutes)) } : {}),
-        ...(input.defaultCommissionRate !== undefined
-          ? { defaultCommissionRate: Number(Number(input.defaultCommissionRate).toFixed(2)) }
-          : {}),
+        ...(defaultCommissionRate !== undefined ? { defaultCommissionRate } : {}),
         ...(input.estimatedCost !== undefined
           ? { costEstimate: Number(Number(input.estimatedCost).toFixed(2)) }
           : {}),
@@ -3655,6 +3645,12 @@ export class PrismaOperationsService {
           refund: Refund;
           financialEntry: FinancialEntry;
           stockMovements: ReturnType<typeof buildStockMovementsFromProductRefund>;
+          canceledCommissions: Array<{
+            id: string;
+            status: string;
+            productSaleId: string | null;
+            commissionAmount: number;
+          }>;
         }
       | undefined;
 
@@ -3824,7 +3820,66 @@ export class PrismaOperationsService {
           }
         }
 
-        response = { refund, financialEntry, stockMovements };
+        const isFullyRefunded = Array.from(soldByProduct.entries()).every(([productId, sold]) => {
+          const alreadyRefunded = refundedByProduct.get(productId) ?? 0;
+          const requestedQuantity = requested.get(productId) ?? 0;
+          return alreadyRefunded + requestedQuantity >= sold.quantity;
+        });
+        const pendingProductCommissions = isFullyRefunded
+          ? await tx.commissionEntry.findMany({
+              where: {
+                unitId: input.unitId,
+                productSaleId: input.productSaleId,
+                source: "PRODUCT",
+                status: "PENDING",
+              },
+              select: {
+                id: true,
+                status: true,
+                productSaleId: true,
+                commissionAmount: true,
+              },
+            })
+          : [];
+        if (pendingProductCommissions.length > 0) {
+          await tx.commissionEntry.updateMany({
+            where: { id: { in: pendingProductCommissions.map((item) => item.id) } },
+            data: { status: "CANCELED" },
+          });
+          for (const commission of pendingProductCommissions) {
+            await this.recordCriticalAudit(
+              tx,
+              input.audit
+                ? {
+                    ...input.audit,
+                    unitId: input.unitId,
+                    action: "PRODUCT_COMMISSION_CANCELED_BY_REFUND",
+                    entity: "commission",
+                    entityId: commission.id,
+                    before: { status: commission.status },
+                    after: {
+                      status: "CANCELED",
+                      productSaleId: input.productSaleId,
+                      refundId: refund.id,
+                      amount: asNumber(commission.commissionAmount),
+                    },
+                  }
+                : undefined,
+            );
+          }
+        }
+
+        response = {
+          refund,
+          financialEntry,
+          stockMovements,
+          canceledCommissions: pendingProductCommissions.map((item) => ({
+            id: item.id,
+            status: "CANCELED",
+            productSaleId: item.productSaleId,
+            commissionAmount: Number(asNumber(item.commissionAmount).toFixed(2)),
+          })),
+        };
         await this.recordCriticalAudit(
           tx,
           input.audit

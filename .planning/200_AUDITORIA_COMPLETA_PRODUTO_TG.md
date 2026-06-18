@@ -433,3 +433,32 @@ Novos achados:
 - P1: devolucao total de produto nao cancelou/reverteu a comissao de produto pendente;
 - P2: evidencia de devolucao mostrou valor/status diretos ambiguos, apesar de estoque e financeiro estarem corretos;
 - P2: demonstracao financeira precisa explicar diferenca entre soma bruta de lancamentos e resultado liquido.
+
+## 26. Atualizacao Fase 2.3 - Correcao P1 financeiro/comissoes
+
+Data: 2026-06-18
+
+Documento novo: `.planning/203_CORRECAO_P1_FINANCEIRO_COMISSOES.md`.
+
+Resultado: **APROVADO COM RESSALVAS**.
+
+Resumo:
+- criada normalizacao backend de `defaultCommissionRate` para persistir taxa decimal `0..1`;
+- entrada humana `30` passa a persistir `0.3`;
+- entrada `100` passa a persistir `1`;
+- entradas invalidas como `150` e `-10` retornam erro controlado;
+- devolucao total de produto passa a cancelar comissao de produto pendente com status `CANCELED`;
+- comissao de produto ja paga nao e alterada silenciosamente;
+- replay de refund nao duplica cancelamento nem auditoria;
+- adicionada auditoria `PRODUCT_COMMISSION_CANCELED_BY_REFUND`.
+
+Validacoes:
+- `npm run build`: passou;
+- `npm run test`: passou (`6 passed | 1 skipped`; `91 passed | 14 skipped`);
+- `npm audit`: 0 vulnerabilidades;
+- `npm audit --omit=dev`: 0 vulnerabilidades;
+- `git diff --check`: passou;
+- health publico: `{"ok":true,"authEnforced":true}`.
+
+Ressalva:
+- `npm run test:db` nao foi executado porque o banco carregado do `.env` nao foi confirmado como isolado de teste. O arquivo DB foi validado em modo skip sem executar queries.
