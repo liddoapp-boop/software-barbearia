@@ -224,3 +224,19 @@ Ressalva:
 ## 14. Proxima etapa recomendada
 
 Fase 2.3.1: validar `test:db` em banco isolado confirmado e, se aprovado, fazer commit seletivo desta correcao. Depois disso, seguir para manual owner-only e consolidacao academica do TG.
+
+## 15. Atualizacao posterior - Fase 2.3.1
+
+Em 2026-06-18, a Fase 2.3.1 criou o banco isolado `barbearia_test_fase_231` e executou `npm run test:db` contra ele.
+
+Resultado:
+
+- `npm run test:db`: passou, 1 arquivo, 14 testes.
+- `npm run build`: passou.
+- `npm run test`: passou, 6 arquivos, 1 skipped; 91 testes, 14 skipped.
+- `npm audit`: 0 vulnerabilidades.
+- `npm audit --omit=dev`: 0 vulnerabilidades.
+- `git diff --check`: passou.
+- Health publico: `{"ok":true,"authEnforced":true}`.
+
+A ressalva de falta de `test:db` em banco isolado foi encerrada para a Fase 2.3. O registro completo esta em `.planning/204_VALIDACAO_TEST_DB_ISOLADO.md`.

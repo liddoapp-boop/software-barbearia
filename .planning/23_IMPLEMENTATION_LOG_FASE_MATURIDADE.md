@@ -1,4 +1,40 @@
 Data: 2026-06-18
+Escopo: Fase 2.3.1 - Validacao de `test:db` em banco PostgreSQL isolado.
+
+## Entregas executadas
+1. Criado banco isolado `barbearia_test_fase_231` com owner `barbearia`.
+2. Confirmado que a `.env` padrao aponta para `barbearia`, sem marcador de teste; `test:db` nao foi executado contra esse banco.
+3. Tentado `npx prisma migrate deploy` somente contra o banco de teste; falhou por BOM em migration historica `20260428_goals_performance_module`.
+4. Recriado apenas o banco de teste e preparado schema com `npx prisma db push --skip-generate`.
+5. Executado `npm run test:db` com `DATABASE_URL` temporaria apontando para `barbearia_test_fase_231`.
+6. Mantido o banco de teste para validacoes recorrentes locais.
+7. Criado `.planning/204_VALIDACAO_TEST_DB_ISOLADO.md`.
+
+## Validacao
+- `git status --short`: limpo antes da fase.
+- `git status -sb`: `main...origin/main`.
+- `git log --oneline -10`: HEAD em `72510ad`.
+- Health publico inicial e final: `{"ok":true,"authEnforced":true}`.
+- PM2: `software-barbearia` online.
+- PostgreSQL: ativo.
+- `npm run test:db`: passou (`1 passed`; `14 passed`).
+- `npm run build`: passou.
+- `npm run test`: passou (`6 passed | 1 skipped`; `91 passed | 14 skipped`).
+- `npm audit`: 0 vulnerabilidades.
+- `npm audit --omit=dev`: 0 vulnerabilidades.
+- `git diff --check`: passou.
+
+## Resultado
+- Decisao da Fase 2.3.1: APROVADO.
+- A ressalva da Fase 2.3 sobre `test:db` pendente foi encerrada.
+- Risco residual P2: `prisma migrate deploy` em banco vazio falha por BOM em migration historica; nao foi corrigido nesta fase para evitar alterar migration ja existente sem avaliacao de checksum/ambientes.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de `.env`, alteracao manual do banco operacional, `git add`, commit ou push.
+
+Documento: `.planning/204_VALIDACAO_TEST_DB_ISOLADO.md`.
+
+---
+
+Data: 2026-06-18
 Escopo: Fase 2.3 - Correcao dos P1 financeiros encontrados na reconciliacao.
 
 ## Entregas executadas

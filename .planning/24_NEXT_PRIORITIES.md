@@ -1,5 +1,28 @@
 # Next Priorities
 
+## Atualizacao 2026-06-18 (Fase 2.3.1 - Validacao test DB isolado)
+- Criado `.planning/204_VALIDACAO_TEST_DB_ISOLADO.md`.
+- Criado banco isolado `barbearia_test_fase_231`, diferente de `barbearia` e com marcador explicito `test`.
+- Confirmado que a `.env` padrao aponta para `barbearia`; por seguranca, `test:db` nao foi executado com essa URL.
+- `prisma migrate deploy` foi tentado somente no banco de teste e falhou por BOM em migration historica `20260428_goals_performance_module`.
+- Schema do banco isolado foi preparado com `npx prisma db push --skip-generate`.
+- `npm run test:db` passou contra `barbearia_test_fase_231`: 1 arquivo, 14 testes.
+- Build, suite geral, audits, `git diff --check` e health publico passaram.
+- Banco de teste foi mantido para validacoes recorrentes locais.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de `.env`, alteracao manual do banco operacional, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Revisar seletivamente a documentacao da Fase 2.3.1 e commitar apenas os arquivos de planejamento, se aprovado.
+2. Planejar uma fase pequena para decidir como tratar o BOM da migration historica antes de depender de `prisma migrate deploy` em banco vazio.
+3. Validar visualmente a tela de Servicos para confirmar exibicao de percentual humano apos a mudanca.
+4. Depois do commit documental, seguir para manual owner-only e pacote academico final.
+
+Nao priorizar agora:
+1. Alterar migration historica sem avaliacao de impacto em checksums/ambientes ja migrados.
+2. Remover o banco `barbearia_test_fase_231` enquanto ele for util como alvo recorrente de teste.
+3. Alterar dados historicos da massa `TESTE TG` manualmente.
+4. Deploy ou restart PM2 antes de fase propria.
+
 ## Atualizacao 2026-06-18 (Fase 2.3 - Correcao P1 financeiro/comissoes)
 - Criado `.planning/203_CORRECAO_P1_FINANCEIRO_COMISSOES.md`.
 - Corrigida normalizacao de `defaultCommissionRate`: backend persiste `0..1`, UI/API aceitam percentual humano.
