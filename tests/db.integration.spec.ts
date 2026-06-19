@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
 import { prisma } from "../src/infrastructure/database/prisma";
@@ -85,6 +85,17 @@ async function createScenario(): Promise<DbScenario> {
 
   await prisma.unit.create({
     data: { id: unitId, name: `Unidade DB ${suffix}` },
+  });
+
+  await prisma.businessHour.createMany({
+    data: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      id: `bh-db-${suffix}-${dayOfWeek}`,
+      unitId,
+      dayOfWeek,
+      opensAt: "00:00",
+      closesAt: "23:59",
+      isClosed: false,
+    })),
   });
 
   await prisma.service.create({
@@ -226,10 +237,13 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
   beforeEach(() => {
     process.env.AUTH_ENFORCED = "false";
     process.env.DATA_BACKEND = "prisma";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
   });
 
   afterEach(() => {
     process.env.AUTH_ENFORCED = "false";
+    vi.useRealTimers();
   });
 
   afterAll(async () => {
@@ -851,6 +865,37 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
           event.entityId === refund.json().refund.id,
       ),
     ).toBe(true);
+  });
+
+  it("impede duplicidade de agendamento concorrente para mesmo profissional e horario", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const payload = {
+      unitId: scenario.unitId,
+      clientId: scenario.clientId,
+      professionalId: scenario.professionalId,
+      serviceId: scenario.serviceId,
+      startsAt: "2026-05-20T13:00:00.000Z",
+      changedBy: "db-concurrency-test",
+    };
+
+    const responses = await Promise.all([
+      app.inject({ method: "POST", url: "/appointments", payload }),
+      app.inject({ method: "POST", url: "/appointments", payload }),
+    ]);
+    const statusCodes = responses.map((response) => response.statusCode).sort();
+
+    expect(statusCodes).toEqual([200, 409]);
+    const activeCount = await prisma.appointment.count({
+      where: {
+        unitId: scenario.unitId,
+        professionalId: scenario.professionalId,
+        status: { in: ["SCHEDULED", "CONFIRMED", "IN_SERVICE"] },
+        startsAt: { lt: new Date("2026-05-20T13:55:00.000Z") },
+        endsAt: { gt: new Date("2026-05-20T13:00:00.000Z") },
+      },
+    });
+    expect(activeCount).toBe(1);
   });
 
   it("gera relatorios gerenciais e CSV com dados reais do Prisma", async () => {

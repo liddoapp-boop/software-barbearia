@@ -127,13 +127,13 @@ export class InMemoryStore {
     },
   ];
   businessHours: BusinessHour[] = [
-    { id: "bh-unit-01-1", unitId: "unit-01", dayOfWeek: 1, opensAt: "14:00", closesAt: "20:00", isClosed: false },
-    { id: "bh-unit-01-2", unitId: "unit-01", dayOfWeek: 2, opensAt: "14:00", closesAt: "18:00", isClosed: false },
-    { id: "bh-unit-01-3", unitId: "unit-01", dayOfWeek: 3, opensAt: "11:30", closesAt: "20:00", isClosed: false },
-    { id: "bh-unit-01-4", unitId: "unit-01", dayOfWeek: 4, opensAt: "11:30", closesAt: "19:30", isClosed: false },
-    { id: "bh-unit-01-5", unitId: "unit-01", dayOfWeek: 5, opensAt: "13:30", closesAt: "21:00", isClosed: false },
-    { id: "bh-unit-01-6", unitId: "unit-01", dayOfWeek: 6, opensAt: "07:00", closesAt: "20:00", isClosed: false },
-    { id: "bh-unit-01-0", unitId: "unit-01", dayOfWeek: 0, opensAt: "09:00", closesAt: "12:00", isClosed: false },
+    { id: "bh-unit-01-0", unitId: "unit-01", dayOfWeek: 0, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-1", unitId: "unit-01", dayOfWeek: 1, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-2", unitId: "unit-01", dayOfWeek: 2, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-3", unitId: "unit-01", dayOfWeek: 3, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-4", unitId: "unit-01", dayOfWeek: 4, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-5", unitId: "unit-01", dayOfWeek: 5, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-6", unitId: "unit-01", dayOfWeek: 6, opensAt: "00:00", closesAt: "23:59", isClosed: false },
   ];
   businessPaymentMethods: BusinessPaymentMethod[] = [
     { id: "pay-unit-01-cash", unitId: "unit-01", name: "Dinheiro", isActive: true, isDefault: false },

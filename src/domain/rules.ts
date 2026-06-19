@@ -1,6 +1,8 @@
 import {
   Appointment,
   AppointmentStatus,
+  BusinessHour,
+  BusinessSettings,
   CommissionEntry,
   CommissionRule,
   FinancialEntry,
@@ -14,6 +16,7 @@ import {
 
 export interface AppointmentConflictInput {
   businessId?: UUID;
+  clientId?: UUID;
   professionalId: UUID;
   startsAt: Date;
   endsAt: Date;
@@ -30,7 +33,9 @@ export const ACTIVE_APPOINTMENT_CONFLICT_STATUSES: AppointmentStatus[] = [
 export function hasAppointmentConflict(input: AppointmentConflictInput): boolean {
   return input.existingAppointments.some((appointment) => {
     if (input.businessId && appointment.unitId !== input.businessId) return false;
-    if (appointment.professionalId !== input.professionalId) return false;
+    const sameProfessional = appointment.professionalId === input.professionalId;
+    const sameClient = input.clientId ? appointment.clientId === input.clientId : false;
+    if (!sameProfessional && !sameClient) return false;
     if (appointment.id === input.ignoreAppointmentId) return false;
     if (!ACTIVE_APPOINTMENT_CONFLICT_STATUSES.includes(appointment.status)) return false;
 
@@ -41,6 +46,125 @@ export function hasAppointmentConflict(input: AppointmentConflictInput): boolean
 }
 
 export const hasScheduleConflict = hasAppointmentConflict;
+
+export interface AppointmentSchedulingWindowInput {
+  unitId: UUID;
+  startsAt: Date;
+  endsAt: Date;
+  serviceDurationMin: number;
+  bufferAfterMin: number;
+  settings: Pick<
+    BusinessSettings,
+    "minimumAdvanceMinutes" | "allowOutOfHoursAppointments" | "allowOverbooking"
+  >;
+  businessHours: BusinessHour[];
+  timezone?: string;
+  now?: Date;
+}
+
+type LocalDateTimeParts = {
+  dayOfWeek: number;
+  minutes: number;
+  dateKey: string;
+};
+
+const WEEKDAY_TO_NUMBER: Record<string, number> = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+};
+
+function parseTimeToMinutes(value?: string): number | null {
+  if (!value) return null;
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function getLocalDateTimeParts(date: Date, timezone = "America/Sao_Paulo"): LocalDateTimeParts {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+  const weekday = String(byType.get("weekday") || "").toLowerCase();
+  const dayOfWeek = WEEKDAY_TO_NUMBER[weekday];
+  if (dayOfWeek == null) throw new Error(`Timezone invalida para agenda: ${timezone}`);
+  const hour = Number(byType.get("hour"));
+  const minute = Number(byType.get("minute"));
+  return {
+    dayOfWeek,
+    minutes: hour * 60 + minute,
+    dateKey: `${byType.get("year")}-${byType.get("month")}-${byType.get("day")}`,
+  };
+}
+
+export function validateAppointmentSchedulingWindow(input: AppointmentSchedulingWindowInput): void {
+  if (!(input.startsAt instanceof Date) || Number.isNaN(input.startsAt.getTime())) {
+    throw new Error("Data inicial do agendamento invalida");
+  }
+  if (!(input.endsAt instanceof Date) || Number.isNaN(input.endsAt.getTime())) {
+    throw new Error("Data final do agendamento invalida");
+  }
+  if (input.endsAt <= input.startsAt) {
+    throw new Error("Horario final do agendamento deve ser posterior ao inicio");
+  }
+
+  const expectedDurationMs = (input.serviceDurationMin + input.bufferAfterMin) * 60_000;
+  const actualDurationMs = input.endsAt.getTime() - input.startsAt.getTime();
+  if (actualDurationMs < expectedDurationMs) {
+    throw new Error("Duracao do agendamento nao respeita servico e buffer configurado");
+  }
+
+  const now = input.now ?? new Date();
+  if (input.startsAt.getTime() < now.getTime()) {
+    throw new Error("Nao e permitido criar agendamento no passado");
+  }
+
+  const minimumAdvanceMinutes = Math.max(0, Math.trunc(input.settings.minimumAdvanceMinutes ?? 0));
+  if (input.startsAt.getTime() < now.getTime() + minimumAdvanceMinutes * 60_000) {
+    throw new Error(`Agendamento exige antecedencia minima de ${minimumAdvanceMinutes} minutos`);
+  }
+
+  if (input.settings.allowOutOfHoursAppointments) return;
+
+  const timezone = input.timezone || "America/Sao_Paulo";
+  const startLocal = getLocalDateTimeParts(input.startsAt, timezone);
+  const endLocal = getLocalDateTimeParts(input.endsAt, timezone);
+  if (startLocal.dateKey !== endLocal.dateKey) {
+    throw new Error("Agendamento nao pode atravessar dias de funcionamento");
+  }
+
+  const businessHour = input.businessHours.find((item) => item.dayOfWeek === startLocal.dayOfWeek);
+  if (!businessHour || businessHour.isClosed) {
+    throw new Error("Unidade fechada no dia selecionado");
+  }
+
+  const opensAt = parseTimeToMinutes(businessHour.opensAt);
+  const closesAt = parseTimeToMinutes(businessHour.closesAt);
+  if (opensAt == null || closesAt == null || startLocal.minutes < opensAt || endLocal.minutes > closesAt) {
+    throw new Error("Horario fora do expediente da unidade");
+  }
+
+  const breakStart = parseTimeToMinutes(businessHour.breakStart);
+  const breakEnd = parseTimeToMinutes(businessHour.breakEnd);
+  if (breakStart != null && breakEnd != null && startLocal.minutes < breakEnd && endLocal.minutes > breakStart) {
+    throw new Error("Horario indisponivel durante intervalo da unidade");
+  }
+}
 
 export function canTransitionAppointmentStatus(
   from: AppointmentStatus,

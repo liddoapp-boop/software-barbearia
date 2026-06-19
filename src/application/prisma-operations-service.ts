@@ -58,6 +58,7 @@ import {
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
   hasAppointmentConflict,
+  validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import { buildClientsOverviewPredictive } from "./client-predictive";
 import {
@@ -450,8 +451,10 @@ export class PrismaOperationsService {
       where: { id: unitId },
       select: { name: true },
     });
-    return await this.prisma.businessSettings.create({
-      data: {
+    return await this.prisma.businessSettings.upsert({
+      where: { unitId },
+      update: {},
+      create: {
         id: crypto.randomUUID(),
         unitId,
         businessName: unit?.name ?? "Minha empresa",
@@ -2238,9 +2241,14 @@ export class PrismaOperationsService {
     notes?: string;
     changedBy: string;
   }) {
-    const serviceRow = await this.prisma.service.findFirst({
-      where: { id: input.serviceId, businessId: input.unitId },
-    });
+    const [serviceRow, settings, businessHours, unitRow] = await Promise.all([
+      this.prisma.service.findFirst({
+        where: { id: input.serviceId, businessId: input.unitId },
+      }),
+      this.ensureBusinessSettings(input.unitId),
+      this.ensureBusinessHours(input.unitId),
+      this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
+    ]);
     if (!serviceRow || !serviceRow.active) {
       throw new Error("Servico nao encontrado ou inativo");
     }
@@ -2260,60 +2268,121 @@ export class PrismaOperationsService {
     if (!clientRow) throw new Error("Cliente nao encontrado");
 
     const service = this.mapService(serviceRow);
+    const bufferAfterMin = input.bufferAfterMin ?? settings.bufferBetweenAppointmentsMinutes;
     const expectedEnd = new Date(
       input.startsAt.getTime() +
-        (service.durationMin + (input.bufferAfterMin ?? 0)) * 60_000,
+        (service.durationMin + bufferAfterMin) * 60_000,
     );
 
-    const existingRows = await this.findOverlappingActiveAppointments({
-      businessId: input.unitId,
-      professionalId: input.professionalId,
-      startAt: input.startsAt,
-      endAt: expectedEnd,
+    validateAppointmentSchedulingWindow({
+      unitId: input.unitId,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
+      serviceDurationMin: service.durationMin,
+      bufferAfterMin,
+      settings,
+      businessHours: businessHours.map((item) => ({
+        id: item.id,
+        unitId: item.unitId,
+        dayOfWeek: item.dayOfWeek,
+        opensAt: item.opensAt ?? undefined,
+        closesAt: item.closesAt ?? undefined,
+        breakStart: item.breakStart ?? undefined,
+        breakEnd: item.breakEnd ?? undefined,
+        isClosed: item.isClosed,
+      })),
+      timezone: unitRow?.timezone ?? undefined,
     });
-    const existing = existingRows.map((item) => this.mapAppointment(item));
 
-    const appointment = this.engine.scheduleAppointment(
-      {
-        unitId: input.unitId,
-        clientId: input.clientId,
-        professionalId: input.professionalId,
-        service,
-        startsAt: input.startsAt,
-        bufferAfterMin: input.bufferAfterMin,
-        isFitting: input.isFitting,
-        notes: input.notes,
-        changedBy: input.changedBy,
+    let appointment: Appointment | undefined;
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockAppointmentScheduling(tx, input.unitId, input.professionalId, input.clientId);
+
+        const existingRows = await tx.appointment.findMany({
+          where: {
+            unitId: input.unitId,
+            OR: [{ professionalId: input.professionalId }, { clientId: input.clientId }],
+            status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
+            startsAt: { lt: expectedEnd },
+            endsAt: { gt: input.startsAt },
+          },
+          include: { history: { orderBy: { changedAt: "asc" } } },
+        });
+
+        appointment = this.engine.scheduleAppointment(
+          {
+            unitId: input.unitId,
+            clientId: input.clientId,
+            professionalId: input.professionalId,
+            service,
+            startsAt: input.startsAt,
+            bufferAfterMin,
+            schedulingSettings: settings,
+            businessHours: businessHours.map((item) => ({
+              id: item.id,
+              unitId: item.unitId,
+              dayOfWeek: item.dayOfWeek,
+              opensAt: item.opensAt ?? undefined,
+              closesAt: item.closesAt ?? undefined,
+              breakStart: item.breakStart ?? undefined,
+              breakEnd: item.breakEnd ?? undefined,
+              isClosed: item.isClosed,
+            })),
+            timezone: unitRow?.timezone ?? undefined,
+            isFitting: input.isFitting,
+            notes: input.notes,
+            changedBy: input.changedBy,
+          },
+          existingRows.map((item) => this.mapAppointment(item)),
+        );
+
+        await tx.appointment.create({
+          data: {
+            id: appointment.id,
+            unitId: appointment.unitId,
+            clientId: appointment.clientId,
+            professionalId: appointment.professionalId,
+            serviceId: appointment.serviceId,
+            startsAt: appointment.startsAt,
+            endsAt: appointment.endsAt,
+            status: appointment.status,
+            isFitting: appointment.isFitting,
+            notes: appointment.notes,
+            history: {
+              create: appointment.history.map((entry) => ({
+                id: crypto.randomUUID(),
+                changedAt: entry.changedAt,
+                changedBy: entry.changedBy,
+                action: entry.action,
+                reason: entry.reason,
+              })),
+            },
+          },
+          include: { history: { orderBy: { changedAt: "asc" } } },
+        });
       },
-      existing,
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
-    await this.prisma.appointment.create({
-      data: {
-        id: appointment.id,
-        unitId: appointment.unitId,
-        clientId: appointment.clientId,
-        professionalId: appointment.professionalId,
-        serviceId: appointment.serviceId,
-        startsAt: appointment.startsAt,
-        endsAt: appointment.endsAt,
-        status: appointment.status,
-        isFitting: appointment.isFitting,
-        notes: appointment.notes,
-        history: {
-          create: appointment.history.map((entry) => ({
-            id: crypto.randomUUID(),
-            changedAt: entry.changedAt,
-            changedBy: entry.changedBy,
-            action: entry.action,
-            reason: entry.reason,
-          })),
-        },
-      },
-      include: { history: { orderBy: { changedAt: "asc" } } },
-    });
+    if (!appointment) {
+      throw new Error("Nao foi possivel criar agendamento");
+    }
 
     return appointment;
+  }
+
+  private async lockAppointmentScheduling(
+    tx: Prisma.TransactionClient,
+    unitId: string,
+    professionalId: string,
+    clientId: string,
+  ) {
+    const keys = [`appointment:${unitId}:professional:${professionalId}`, `appointment:${unitId}:client:${clientId}`].sort();
+    for (const key of keys) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    }
   }
 
   async reschedule(input: {
@@ -2333,11 +2402,18 @@ export class PrismaOperationsService {
 
     const appointment = this.mapAppointment(row);
     const service = this.mapService(row.service);
+    const [settings, businessHours, unitRow] = await Promise.all([
+      this.ensureBusinessSettings(appointment.unitId),
+      this.ensureBusinessHours(appointment.unitId),
+      this.prisma.unit.findUnique({ where: { id: appointment.unitId }, select: { timezone: true } }),
+    ]);
 
-    const newEnd = new Date(input.startsAt.getTime() + service.durationMin * 60_000);
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+    const newEnd = new Date(input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000);
     const overlappingRows = await this.findOverlappingActiveAppointments({
       businessId: appointment.unitId,
       professionalId: appointment.professionalId,
+      clientId: appointment.clientId,
       startAt: input.startsAt,
       endAt: newEnd,
       excludeAppointmentId: appointment.id,
@@ -2349,6 +2425,21 @@ export class PrismaOperationsService {
       service.durationMin,
       overlappingRows.map((item) => this.mapAppointment(item)),
       input.changedBy,
+      {
+        bufferAfterMin,
+        schedulingSettings: settings,
+        businessHours: businessHours.map((item) => ({
+          id: item.id,
+          unitId: item.unitId,
+          dayOfWeek: item.dayOfWeek,
+          opensAt: item.opensAt ?? undefined,
+          closesAt: item.closesAt ?? undefined,
+          breakStart: item.breakStart ?? undefined,
+          breakEnd: item.breakEnd ?? undefined,
+          isClosed: item.isClosed,
+        })),
+        timezone: unitRow?.timezone ?? undefined,
+      },
     );
 
     await this.prisma.appointment.update({
@@ -2373,6 +2464,7 @@ export class PrismaOperationsService {
   private async findOverlappingActiveAppointments(input: {
     businessId: string;
     professionalId: string;
+    clientId?: string;
     startAt: Date;
     endAt: Date;
     excludeAppointmentId?: string;
@@ -2380,7 +2472,9 @@ export class PrismaOperationsService {
     return await this.prisma.appointment.findMany({
       where: {
         unitId: input.businessId,
-        professionalId: input.professionalId,
+        OR: input.clientId
+          ? [{ professionalId: input.professionalId }, { clientId: input.clientId }]
+          : [{ professionalId: input.professionalId }],
         ...(input.excludeAppointmentId ? { id: { not: input.excludeAppointmentId } } : {}),
         status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
         startsAt: { lt: input.endAt },
@@ -8334,7 +8428,7 @@ export class PrismaOperationsService {
     const nextServiceId = input.serviceId ?? current.serviceId;
     const nextStartsAt = input.startsAt ?? current.startsAt;
 
-    const [serviceRow, professionalRow, clientRow] = await Promise.all([
+    const [serviceRow, professionalRow, clientRow, settings, businessHours, unitRow] = await Promise.all([
       this.prisma.service.findFirst({
         where: { id: nextServiceId, businessId: current.unitId },
       }),
@@ -8342,6 +8436,9 @@ export class PrismaOperationsService {
       this.prisma.client.findFirst({
         where: { id: nextClientId, businessId: current.unitId },
       }),
+      this.ensureBusinessSettings(current.unitId),
+      this.ensureBusinessHours(current.unitId),
+      this.prisma.unit.findUnique({ where: { id: current.unitId }, select: { timezone: true } }),
     ]);
 
     if (!serviceRow || !serviceRow.active) throw new Error("Servico nao encontrado ou inativo");
@@ -8351,12 +8448,32 @@ export class PrismaOperationsService {
     await this.assertProfessionalCanExecuteService(serviceRow.id, professionalRow.id);
     if (!clientRow) throw new Error("Cliente nao encontrado");
 
-    const nextEndsAt = new Date(nextStartsAt.getTime() + serviceRow.durationMin * 60_000);
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+    const nextEndsAt = new Date(nextStartsAt.getTime() + (serviceRow.durationMin + bufferAfterMin) * 60_000);
+    validateAppointmentSchedulingWindow({
+      unitId: current.unitId,
+      startsAt: nextStartsAt,
+      endsAt: nextEndsAt,
+      serviceDurationMin: serviceRow.durationMin,
+      bufferAfterMin,
+      settings,
+      businessHours: businessHours.map((item) => ({
+        id: item.id,
+        unitId: item.unitId,
+        dayOfWeek: item.dayOfWeek,
+        opensAt: item.opensAt ?? undefined,
+        closesAt: item.closesAt ?? undefined,
+        breakStart: item.breakStart ?? undefined,
+        breakEnd: item.breakEnd ?? undefined,
+        isClosed: item.isClosed,
+      })),
+      timezone: unitRow?.timezone ?? undefined,
+    });
     const overlappingRows = await this.prisma.appointment.findMany({
       where: {
         unitId: current.unitId,
         id: { not: current.id },
-        professionalId: nextProfessionalId,
+        OR: [{ professionalId: nextProfessionalId }, { clientId: nextClientId }],
         status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
         startsAt: { lt: nextEndsAt },
         endsAt: { gt: nextStartsAt },
@@ -8377,13 +8494,14 @@ export class PrismaOperationsService {
 
     const hasConflict = hasAppointmentConflict({
       businessId: current.unitId,
+      clientId: nextClientId,
       professionalId: nextProfessionalId,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
       ignoreAppointmentId: current.id,
       existingAppointments: overlappingRows.map((item) => this.mapAppointment(item)),
     });
-    if (hasConflict) {
+    if (hasConflict && !settings.allowOverbooking) {
       throw new Error("Conflito de horario detectado para o profissional");
     }
 
@@ -8459,7 +8577,7 @@ export class PrismaOperationsService {
     startsAt: Date;
     windowHours?: number;
   }) {
-    const [serviceRow, professionalRow] = await Promise.all([
+    const [serviceRow, professionalRow, settings, businessHours, unitRow] = await Promise.all([
       this.prisma.service.findFirst({
         where: { id: input.serviceId, businessId: input.unitId },
         select: { id: true, active: true, durationMin: true },
@@ -8468,6 +8586,9 @@ export class PrismaOperationsService {
         where: { id: input.professionalId, businessId: input.unitId },
         select: { id: true, active: true },
       }),
+      this.ensureBusinessSettings(input.unitId),
+      this.ensureBusinessHours(input.unitId),
+      this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
     ]);
 
     if (!serviceRow || !serviceRow.active) {
@@ -8479,9 +8600,10 @@ export class PrismaOperationsService {
     await this.assertProfessionalCanExecuteService(serviceRow.id, professionalRow.id);
 
     const windowHours = Math.min(Math.max(input.windowHours ?? 6, 1), 24);
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = serviceRow.durationMin * 60_000;
+    const durationMs = (serviceRow.durationMin + bufferAfterMin) * 60_000;
     const stepMs = 15 * 60_000;
 
     const overlappingRows = await this.prisma.appointment.findMany({
@@ -8512,6 +8634,29 @@ export class PrismaOperationsService {
     for (let cursor = windowStart.getTime(); cursor <= windowEnd.getTime(); cursor += stepMs) {
       const startsAt = new Date(cursor);
       const endsAt = new Date(startsAt.getTime() + durationMs);
+      try {
+        validateAppointmentSchedulingWindow({
+          unitId: input.unitId,
+          startsAt,
+          endsAt,
+          serviceDurationMin: serviceRow.durationMin,
+          bufferAfterMin,
+          settings,
+          businessHours: businessHours.map((item) => ({
+            id: item.id,
+            unitId: item.unitId,
+            dayOfWeek: item.dayOfWeek,
+            opensAt: item.opensAt ?? undefined,
+            closesAt: item.closesAt ?? undefined,
+            breakStart: item.breakStart ?? undefined,
+            breakEnd: item.breakEnd ?? undefined,
+            isClosed: item.isClosed,
+          })),
+          timezone: unitRow?.timezone ?? undefined,
+        });
+      } catch {
+        continue;
+      }
       const conflict = hasAppointmentConflict({
         businessId: input.unitId,
         professionalId: input.professionalId,

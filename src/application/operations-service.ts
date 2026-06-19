@@ -59,6 +59,7 @@ import {
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
   hasAppointmentConflict,
+  validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import { buildClientsOverviewPredictive } from "./client-predictive";
 import {
@@ -1922,11 +1923,13 @@ export class OperationsService {
     notes?: string;
     changedBy: string;
   }) {
-    const service = this.store.services.find((item) => item.id === input.serviceId);
+    const service = this.store.services.find(
+      (item) => item.id === input.serviceId && item.businessId === input.unitId,
+    );
     if (!service || !service.active) throw new Error("Servico nao encontrado ou inativo");
 
     const professional = this.store.professionals.find(
-      (item) => item.id === input.professionalId,
+      (item) => item.id === input.professionalId && item.businessId === input.unitId,
     );
     if (!professional || !professional.active) {
       throw new Error("Profissional nao encontrado ou inativo");
@@ -1936,8 +1939,12 @@ export class OperationsService {
     const client = this.store.clients.find((item) => item.id === input.clientId);
     if (!client) throw new Error("Cliente nao encontrado");
 
+    const settings = this.ensureBusinessSettings(input.unitId);
+    const businessHours = this.ensureBusinessHours(input.unitId);
+    const timezone = this.store.units.find((item) => item.id === input.unitId)?.timezone;
+    const bufferAfterMin = input.bufferAfterMin ?? settings.bufferBetweenAppointmentsMinutes;
     const expectedEnd = new Date(
-      input.startsAt.getTime() + (service.durationMin + (input.bufferAfterMin ?? 0)) * 60_000,
+      input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000,
     );
     const appointment = this.engine.scheduleAppointment(
       {
@@ -1946,7 +1953,10 @@ export class OperationsService {
         professionalId: professional.id,
         service,
         startsAt: input.startsAt,
-        bufferAfterMin: input.bufferAfterMin,
+        bufferAfterMin,
+        schedulingSettings: settings,
+        businessHours,
+        timezone,
         isFitting: input.isFitting,
         notes: input.notes,
         changedBy: input.changedBy,
@@ -1954,7 +1964,7 @@ export class OperationsService {
       this.store.appointments.filter(
         (item) =>
           item.unitId === input.unitId &&
-          item.professionalId === professional.id &&
+          (item.professionalId === professional.id || item.clientId === client.id) &&
           item.startsAt < expectedEnd &&
           item.endsAt > input.startsAt,
       ),
@@ -1980,6 +1990,11 @@ export class OperationsService {
 
     const service = this.store.services.find((item) => item.id === appointment.serviceId);
     if (!service) throw new Error("Servico do agendamento nao encontrado");
+    const settings = this.ensureBusinessSettings(appointment.unitId);
+    const businessHours = this.ensureBusinessHours(appointment.unitId);
+    const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+    const newEnd = new Date(input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000);
 
     const updated = this.engine.rescheduleAppointment(
       appointment,
@@ -1988,12 +2003,18 @@ export class OperationsService {
       this.store.appointments.filter(
         (item) =>
           item.unitId === appointment.unitId &&
-          item.professionalId === appointment.professionalId &&
+          (item.professionalId === appointment.professionalId || item.clientId === appointment.clientId) &&
           item.id !== appointment.id &&
-          item.startsAt < new Date(input.startsAt.getTime() + service.durationMin * 60_000) &&
+          item.startsAt < newEnd &&
           item.endsAt > input.startsAt,
       ),
       input.changedBy,
+      {
+        bufferAfterMin,
+        schedulingSettings: settings,
+        businessHours,
+        timezone,
+      },
     );
 
     this.replaceAppointment(updated);
@@ -6444,11 +6465,13 @@ export class OperationsService {
     const nextProfessionalId = input.professionalId ?? appointment.professionalId;
     const nextServiceId = input.serviceId ?? appointment.serviceId;
     const nextStartsAt = input.startsAt ?? appointment.startsAt;
-    const nextService = this.store.services.find((item) => item.id === nextServiceId && item.active);
+    const nextService = this.store.services.find(
+      (item) => item.id === nextServiceId && item.businessId === appointment.unitId && item.active,
+    );
     if (!nextService) throw new Error("Servico nao encontrado ou inativo");
 
     const nextProfessional = this.store.professionals.find(
-      (item) => item.id === nextProfessionalId && item.active,
+      (item) => item.id === nextProfessionalId && item.businessId === appointment.unitId && item.active,
     );
     if (!nextProfessional) throw new Error("Profissional nao encontrado ou inativo");
     this.assertProfessionalCanExecuteService(nextService.id, nextProfessional.id);
@@ -6456,16 +6479,31 @@ export class OperationsService {
     const nextClient = this.store.clients.find((item) => item.id === nextClientId);
     if (!nextClient) throw new Error("Cliente nao encontrado");
 
-    const nextEndsAt = new Date(nextStartsAt.getTime() + nextService.durationMin * 60_000);
+    const settings = this.ensureBusinessSettings(appointment.unitId);
+    const businessHours = this.ensureBusinessHours(appointment.unitId);
+    const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+    const nextEndsAt = new Date(nextStartsAt.getTime() + (nextService.durationMin + bufferAfterMin) * 60_000);
+    validateAppointmentSchedulingWindow({
+      unitId: appointment.unitId,
+      startsAt: nextStartsAt,
+      endsAt: nextEndsAt,
+      serviceDurationMin: nextService.durationMin,
+      bufferAfterMin,
+      settings,
+      businessHours,
+      timezone,
+    });
     const hasConflict = hasAppointmentConflict({
       businessId: appointment.unitId,
+      clientId: nextClient.id,
       professionalId: nextProfessional.id,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
       ignoreAppointmentId: appointment.id,
       existingAppointments: this.store.appointments,
     });
-    if (hasConflict) {
+    if (hasConflict && !settings.allowOverbooking) {
       throw new Error("Conflito de horario detectado para o profissional");
     }
 
@@ -6526,19 +6564,25 @@ export class OperationsService {
     startsAt: Date;
     windowHours?: number;
   }) {
-    const service = this.store.services.find((item) => item.id === input.serviceId && item.active);
+    const service = this.store.services.find(
+      (item) => item.id === input.serviceId && item.businessId === input.unitId && item.active,
+    );
     if (!service) throw new Error("Servico nao encontrado ou inativo");
 
     const professional = this.store.professionals.find(
-      (item) => item.id === input.professionalId && item.active,
+      (item) => item.id === input.professionalId && item.businessId === input.unitId && item.active,
     );
     if (!professional) throw new Error("Profissional nao encontrado ou inativo");
     this.assertProfessionalCanExecuteService(service.id, professional.id);
 
     const windowHours = Math.min(Math.max(input.windowHours ?? 6, 1), 24);
+    const settings = this.ensureBusinessSettings(input.unitId);
+    const businessHours = this.ensureBusinessHours(input.unitId);
+    const timezone = this.store.units.find((item) => item.id === input.unitId)?.timezone;
+    const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = service.durationMin * 60_000;
+    const durationMs = (service.durationMin + bufferAfterMin) * 60_000;
     const stepMs = 15 * 60_000;
 
     const existingAppointments = this.store.appointments.filter(
@@ -6554,6 +6598,20 @@ export class OperationsService {
     for (let cursor = windowStart.getTime(); cursor <= windowEnd.getTime(); cursor += stepMs) {
       const startsAt = new Date(cursor);
       const endsAt = new Date(startsAt.getTime() + durationMs);
+      try {
+        validateAppointmentSchedulingWindow({
+          unitId: input.unitId,
+          startsAt,
+          endsAt,
+          serviceDurationMin: service.durationMin,
+          bufferAfterMin,
+          settings,
+          businessHours,
+          timezone,
+        });
+      } catch {
+        continue;
+      }
 
       const conflict = hasAppointmentConflict({
         businessId: input.unitId,

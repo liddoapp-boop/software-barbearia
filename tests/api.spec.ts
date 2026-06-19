@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
 import {
@@ -26,6 +26,12 @@ async function loginAs(
 describe("API MVP", () => {
   beforeEach(() => {
     process.env.AUTH_ENFORCED = "false";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("envia headers minimos de seguranca para reduzir impacto de XSS", async () => {
@@ -176,7 +182,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-barba",
-        startsAt: "2026-04-22T10:45:00.000Z",
+        startsAt: "2026-04-22T10:55:00.000Z",
         changedBy: "owner",
       },
     });
@@ -3136,6 +3142,7 @@ describe("API MVP", () => {
 
   it("retorna visao de clientes 360 com metricas preditivas e fila de reativacao", async () => {
     process.env.DATA_BACKEND = "memory";
+    vi.setSystemTime(new Date("2026-02-01T00:00:00.000Z"));
     const app = createApp();
 
     const createAndComplete = async (clientIdValue: string, startsAt: string, completedAt: string) => {
@@ -3618,6 +3625,7 @@ describe("API MVP", () => {
     expect(cancel.statusCode).toBe(200);
     expect(cancel.json().subscription.status).toBe("CANCELLED");
 
+    vi.setSystemTime(new Date("2025-12-31T00:00:00.000Z"));
     const created = await app.inject({
       method: "POST",
       url: "/appointments",
@@ -3647,6 +3655,7 @@ describe("API MVP", () => {
       payload: { changedBy: "owner", completedAt: "2026-01-01T11:00:00.000Z" },
     });
 
+    vi.setSystemTime(new Date("2026-04-23T00:00:00.000Z"));
     const retention = await app.inject({
       method: "GET",
       url: "/retention/cases?unitId=unit-01&limit=20",

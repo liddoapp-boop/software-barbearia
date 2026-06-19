@@ -2547,17 +2547,22 @@ export function createApp() {
       }
     }
 
-    const statusValues = (query.status ?? []).filter((status) =>
-      [
-        "SCHEDULED",
-        "CONFIRMED",
-        "IN_SERVICE",
-        "COMPLETED",
-        "CANCELLED",
-        "NO_SHOW",
-        "BLOCKED",
-      ].includes(status),
-    ) as AppointmentStatus[];
+    const allowedAppointmentStatuses = [
+      "SCHEDULED",
+      "CONFIRMED",
+      "IN_SERVICE",
+      "COMPLETED",
+      "CANCELLED",
+      "NO_SHOW",
+      "BLOCKED",
+    ] as const;
+    const invalidStatus = (query.status ?? []).find(
+      (status) => !allowedAppointmentStatuses.includes(status as AppointmentStatus),
+    );
+    if (invalidStatus) {
+      throw new Error(`Status invalido para agendamentos: ${invalidStatus}`);
+    }
+    const statusValues = (query.status ?? []) as AppointmentStatus[];
 
     if (!("getAppointments" in operations) || typeof operations.getAppointments !== "function") {
       throw new Error("Listagem de agendamentos indisponivel");
@@ -4610,6 +4615,12 @@ export function createApp() {
             : normalized.includes("nao encontrado")
         ? 404
         : normalized.includes("conflito")
+          || normalized.includes("expediente")
+          || normalized.includes("fechada")
+          || normalized.includes("fechado")
+          || normalized.includes("intervalo")
+          || normalized.includes("antecedencia")
+          || normalized.includes("passado")
           ? 409
           : normalized.includes("invalida")
             ? 422
