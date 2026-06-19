@@ -160,6 +160,23 @@ Nenhum P1 funcional confirmado apos `test:db`, build, suite geral, audits, diff 
 2. Devolucao parcial segue sem recalculo proporcional de comissao; a regra atual cancela apenas quando a venda fica totalmente devolvida.
 3. Comissao de produto ja paga em venda devolvida continua preservada como `PAID`; tratamento financeiro de estorno deve ser definido em fase propria se necessario.
 
+Atualizacao 2026-06-18:
+
+- A Fase 2.3.3 confirmou tecnicamente o BOM UTF-8 no arquivo `prisma/migrations/20260428_goals_performance_module/migration.sql`.
+- `prisma migrate deploy` foi reproduzido em banco isolado temporario e falhou novamente nessa migration.
+- O banco operacional possui uma tentativa historica com checksum do arquivo com BOM marcada como rolled back e uma aplicacao finalizada com checksum do conteudo sem BOM.
+- A decisao formal foi nao alterar a migration nesta fase e recomendar saneamento controlado em fase propria.
+- Registro completo: `.planning/205_DIAGNOSTICO_BOM_MIGRATION_HISTORICA.md`.
+
+Atualizacao 2026-06-18 - Fase 2.3.4:
+
+- O BOM inicial foi removido da migration historica `20260428_goals_performance_module`.
+- O checksum final do arquivo passou a ser `cfbacf969dc090577a6168c47290c6e9012c43ff794164fac15a0fb46b410e63`.
+- `npx prisma migrate deploy` passou em banco isolado vazio `barbearia_test_migrate_bom_fixed`.
+- `npm run test:db` tambem passou contra esse banco isolado com `NODE_ENV=test`.
+- O banco temporario `barbearia_test_migrate_bom_fixed` foi removido.
+- Registro completo: `.planning/206_SANEAMENTO_BOM_MIGRATION_HISTORICA.md`.
+
 ### P3
 
 1. Expor na UI a informacao de comissao cancelada por devolucao.

@@ -1,4 +1,78 @@
 Data: 2026-06-18
+Escopo: Fase 2.3.4 - Saneamento controlado do BOM na migration historica.
+
+## Entregas executadas
+1. Removido somente o BOM UTF-8 inicial de `prisma/migrations/20260428_goals_performance_module/migration.sql`.
+2. Confirmado que o arquivo passou de `935` para `932` bytes.
+3. Confirmado checksum final `cfbacf969dc090577a6168c47290c6e9012c43ff794164fac15a0fb46b410e63`.
+4. Criado banco isolado vazio `barbearia_test_migrate_bom_fixed`.
+5. Executado `npx prisma migrate deploy` com `DATABASE_URL` temporaria apontando para o banco isolado, sem imprimir URL completa.
+6. Confirmado que todas as 16 migrations foram aplicadas com sucesso.
+7. Executado `npm run test:db` contra banco isolado com `NODE_ENV=test`.
+8. Removido o banco temporario `barbearia_test_migrate_bom_fixed`.
+9. Criado `.planning/206_SANEAMENTO_BOM_MIGRATION_HISTORICA.md`.
+
+## Validacao
+- `git status --short`: apenas documentos pendentes da Fase 2.3.3 antes da fase.
+- `git status -sb`: `main...origin/main`.
+- `git log --oneline -10`: HEAD em `c2cf297`.
+- Health publico inicial e final: `{"ok":true,"authEnforced":true}`.
+- `file` antes: `UTF-8 (with BOM)`.
+- `xxd` antes: primeiros bytes `ef bb bf`.
+- `file` depois: `ASCII text`.
+- `xxd` depois: primeiros bytes `2d 2d 20`.
+- `npx prisma migrate deploy`: passou em banco vazio isolado.
+- `npm run build`: passou.
+- `npm run test`: falhou por 3 timeouts nao relacionados ao BOM.
+- `npm run test:db`: passou (`1 passed`; `14 passed`) com `NODE_ENV=test`.
+- `npm audit`: falhou por vulnerabilidade alta em `nodemailer <=9.0.0`.
+- `npm audit --omit=dev`: falhou por vulnerabilidade alta em `nodemailer <=9.0.0`.
+- `git diff --check`: passou.
+
+## Resultado
+- Decisao da Fase 2.3.4: APROVADO COM RESSALVAS.
+- Saneamento do BOM concluido e validado por checksum e `migrate deploy`.
+- Banco operacional nao foi alterado.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de `.env`, `git add`, commit ou push.
+- Ressalvas: suite geral com timeouts e advisory atual de `nodemailer`.
+
+Documento: `.planning/206_SANEAMENTO_BOM_MIGRATION_HISTORICA.md`.
+
+---
+
+Data: 2026-06-18
+Escopo: Fase 2.3.3 - Diagnostico e decisao formal sobre BOM em migration historica.
+
+## Entregas executadas
+1. Criado `.planning/205_DIAGNOSTICO_BOM_MIGRATION_HISTORICA.md`.
+2. Confirmado BOM UTF-8 no inicio de `prisma/migrations/20260428_goals_performance_module/migration.sql`.
+3. Calculado checksum atual com BOM e checksum equivalente sem BOM, sem alterar o arquivo.
+4. Reproduzida falha de `npx prisma migrate deploy` em banco isolado temporario `barbearia_test_migrate_bom`.
+5. Consultada `_prisma_migrations` do banco operacional apenas em leitura.
+6. Confirmado que o banco operacional tem uma tentativa rolled back com checksum do arquivo com BOM e uma aplicacao finalizada com checksum do conteudo sem BOM.
+7. Removido o banco temporario de reproducao.
+
+## Validacao
+- `git status --short`: limpo antes da fase.
+- `git status -sb`: `main...origin/main`.
+- `git log --oneline -10`: HEAD em `c2cf297`.
+- Health publico inicial: `{"ok":true,"authEnforced":true}`.
+- `file` confirmou `UTF-8 (with BOM)`.
+- `xxd` confirmou primeiros bytes `ef bb bf`.
+- `prisma migrate deploy` falhou no banco isolado com `P3018`, PostgreSQL `42601`, na migration `20260428_goals_performance_module`.
+
+## Resultado
+- Decisao da Fase 2.3.3: APROVADO.
+- Migration historica nao foi alterada.
+- Banco operacional nao foi alterado.
+- Decisao formal: manter P2 documentado nesta fase e recomendar saneamento controlado do BOM em fase propria.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de banco operacional, alteracao de migration, `git add`, commit ou push.
+
+Documento: `.planning/205_DIAGNOSTICO_BOM_MIGRATION_HISTORICA.md`.
+
+---
+
+Data: 2026-06-18
 Escopo: Fase 2.3.1 - Validacao de `test:db` em banco PostgreSQL isolado.
 
 ## Entregas executadas

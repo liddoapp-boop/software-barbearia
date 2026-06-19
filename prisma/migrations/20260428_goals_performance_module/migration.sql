@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "public"."MonthlyGoal" (
     "id" TEXT NOT NULL,
     "businessId" TEXT NOT NULL,

@@ -1,5 +1,50 @@
 # Next Priorities
 
+## Atualizacao 2026-06-18 (Fase 2.3.4 - Saneamento BOM migration historica)
+- Criado `.planning/206_SANEAMENTO_BOM_MIGRATION_HISTORICA.md`.
+- Removido somente o BOM inicial de `prisma/migrations/20260428_goals_performance_module/migration.sql`.
+- Arquivo passou de `935` para `932` bytes.
+- Checksum final confirmado: `cfbacf969dc090577a6168c47290c6e9012c43ff794164fac15a0fb46b410e63`.
+- `npx prisma migrate deploy` passou em banco vazio isolado `barbearia_test_migrate_bom_fixed`.
+- `npm run test:db` passou contra o banco isolado com `NODE_ENV=test`: 1 arquivo, 14 testes.
+- Banco temporario `barbearia_test_migrate_bom_fixed` foi removido.
+- Health publico permaneceu OK.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de `.env`, alteracao do banco operacional, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Revisar seletivamente o diff da migration saneada e dos documentos das Fases 2.3.3/2.3.4.
+2. Investigar/corrigir a vulnerabilidade alta de `nodemailer <=9.0.0` em fase propria.
+3. Reexecutar ou investigar os 3 timeouts da suite geral (`tests/api.spec.ts` e `tests/frontend-mobile-overflow.spec.ts`).
+4. Quando autorizado, commitar seletivamente a migration saneada e a documentacao, sem `git add .`.
+5. Depois disso, seguir para manual owner-only e pacote academico final.
+
+Nao priorizar agora:
+1. Deploy, restart PM2 ou alteracao de ambiente produtivo.
+2. Seed ou alteracao manual de dados.
+3. Baseline/reorganizacao ampla de migrations sem fase propria.
+
+## Atualizacao 2026-06-18 (Fase 2.3.3 - Diagnostico BOM migration historica)
+- Criado `.planning/205_DIAGNOSTICO_BOM_MIGRATION_HISTORICA.md`.
+- Confirmado BOM UTF-8 em `prisma/migrations/20260428_goals_performance_module/migration.sql`.
+- `prisma migrate deploy` foi reproduzido em banco isolado temporario e falhou em `20260428_goals_performance_module` com `P3018`/PostgreSQL `42601`.
+- Banco operacional foi consultado apenas em leitura: existe tentativa historica rolled back com checksum do arquivo com BOM e aplicacao finalizada com checksum do conteudo sem BOM.
+- Migration historica nao foi alterada nesta fase.
+- Banco temporario de reproducao foi removido.
+- Decisao formal: manter P2 documentado agora e executar saneamento controlado do BOM em fase propria.
+- Nao houve deploy, restart PM2, firewall, certificado, seed, alteracao de banco operacional, alteracao de migration, `git add`, commit ou push.
+
+Prioridade imediata:
+1. Abrir Fase 2.3.4 para remover somente o BOM inicial da migration historica.
+2. Confirmar que o checksum do arquivo apos saneamento bate com o checksum finalizado no banco operacional.
+3. Revalidar `prisma migrate deploy` em banco isolado vazio.
+4. Se aprovado, commitar apenas a migration saneada e a documentacao da fase.
+5. Depois disso, seguir para manual owner-only e pacote academico final.
+
+Nao priorizar agora:
+1. Baseline/reorganizacao ampla de migrations.
+2. Deploy, restart PM2 ou alteracao de ambiente produtivo.
+3. Seed ou alteracao manual de dados.
+
 ## Atualizacao 2026-06-18 (Fase 2.3.1 - Validacao test DB isolado)
 - Criado `.planning/204_VALIDACAO_TEST_DB_ISOLADO.md`.
 - Criado banco isolado `barbearia_test_fase_231`, diferente de `barbearia` e com marcador explicito `test`.
