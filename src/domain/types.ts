@@ -175,6 +175,7 @@ export interface CommissionRule {
 
 export interface Client {
   id: UUID;
+  businessId?: UUID;
   fullName: string;
   phone?: string;
   preferredProfessionalId?: UUID;

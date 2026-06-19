@@ -216,6 +216,30 @@ describe("blindagem de agendamentos", () => {
     expect(response.json().error).toMatch(/servico|unidade/i);
   });
 
+  it("bloqueia cliente de outra unidade", async () => {
+    const app = createApp();
+    await setUnit01WideWednesdayHours(app);
+    const createdClient = await app.inject({
+      method: "POST",
+      url: "/clients",
+      payload: {
+        unitId: "unit-02",
+        name: "Cliente Zona Sul",
+        phone: "11977776666",
+      },
+    });
+    expect(createdClient.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: appointmentPayload({ clientId: createdClient.json().client.id }),
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error).toMatch(/cliente/i);
+  });
+
   it("retorna erro claro para status invalido em listagem", async () => {
     const app = createApp();
 

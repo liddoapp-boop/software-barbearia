@@ -1936,7 +1936,9 @@ export class OperationsService {
     }
     this.assertProfessionalCanExecuteService(service.id, professional.id);
 
-    const client = this.store.clients.find((item) => item.id === input.clientId);
+    const client = this.store.clients.find(
+      (item) => item.id === input.clientId && (item.businessId ?? "unit-01") === input.unitId,
+    );
     if (!client) throw new Error("Cliente nao encontrado");
 
     const settings = this.ensureBusinessSettings(input.unitId);
@@ -6476,7 +6478,9 @@ export class OperationsService {
     if (!nextProfessional) throw new Error("Profissional nao encontrado ou inativo");
     this.assertProfessionalCanExecuteService(nextService.id, nextProfessional.id);
 
-    const nextClient = this.store.clients.find((item) => item.id === nextClientId);
+    const nextClient = this.store.clients.find(
+      (item) => item.id === nextClientId && (item.businessId ?? "unit-01") === appointment.unitId,
+    );
     if (!nextClient) throw new Error("Cliente nao encontrado");
 
     const settings = this.ensureBusinessSettings(appointment.unitId);

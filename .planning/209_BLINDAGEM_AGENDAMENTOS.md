@@ -1,7 +1,7 @@
 # Sprint 209 - Blindagem da Agenda
 
 Data: 2026-06-19
-Status: aprovado
+Status: em revisao
 
 ## Escopo executado
 
@@ -15,7 +15,7 @@ Auditoria e correcoes P1 no fluxo de agendamentos:
 - consistencia de unidade para servico/profissional;
 - filtro de status invalido;
 - concorrencia no backend Prisma;
-- smoke readonly de API.
+- checagem sintatica do smoke readonly de API.
 
 Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, WhatsApp ou IA.
 
@@ -33,7 +33,7 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 
 - Nao foi confirmada quebra estrutural visivel no HTML da tela de agenda dentro do escopo desta sprint.
 - Nao foi necessaria migracao de banco.
-- O smoke readonly de API ja estava saudavel antes e continuou saudavel apos as correcoes.
+- Nao houve alteracao no script do smoke readonly de API.
 
 ## Correcoes aplicadas
 
@@ -51,7 +51,7 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 
 - `src/application/operations-service.ts`
   - criacao, atualizacao, reagendamento e sugestoes usam a regra central;
-  - servico e profissional precisam pertencer a unidade;
+  - servico, profissional e cliente precisam pertencer a unidade;
   - buffer padrao vem de `businessSettings`;
   - conflito considera profissional e cliente.
 
@@ -79,6 +79,7 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
   - passado e antecedencia minima;
   - buffer na criacao e no reagendamento;
   - servico de outra unidade;
+  - cliente de outra unidade;
   - status invalido.
 
 - `tests/db.integration.spec.ts`
@@ -93,12 +94,19 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 ## Validacao final
 
 - `npm run build`: passou.
-- `npm test`: passou, 7 arquivos, 99 testes, 15 ignorados.
+- `npm test`: passou, 7 arquivos, 100 testes, 15 ignorados.
 - `npm run test:db`: passou, 1 arquivo, 15 testes.
 - `node --check scripts/smoke-api-readonly.mjs`: passou.
-- `npm run smoke:api:readonly`: passou.
+- `npm run smoke:api:readonly`: nao executado nesta retomada; apenas checagem sintatica do script foi executada.
 - `git diff --check`: passou.
 - Busca por padroes comuns de secrets no diff: sem achados.
+
+## Revisao retomada apos interrupcao
+
+- Estado observado em 2026-06-19: o trabalho parcial ja estava consolidado no commit local `4ab24d0 fix: blindar regras de agendamento`, deixando `main` um commit a frente de `origin/main`.
+- Durante a revisao foi confirmado um ajuste pendente: o backend em memoria validava cliente apenas por `id`, enquanto o Prisma validava por `id` e unidade. A regra foi alinhada no servico em memoria e recebeu teste dedicado.
+- Risco conhecido mantido para proxima melhoria: o advisory lock cobre concorrencia de criacao Prisma; remarcacao/update ainda nao possuem advisory lock transacional especifico.
+- A etapa segue sem commit adicional ate aprovacao explicita.
 
 ## Estado operacional
 
@@ -106,4 +114,4 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 - Migracoes: nenhuma criada ou executada.
 - Seeds de producao: nenhuma executada.
 - `.env` e secrets: nao alterados.
-- Git add: somente arquivos explicitos.
+- Git add/commit/push: nao executados nesta retomada.

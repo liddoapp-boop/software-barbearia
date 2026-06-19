@@ -168,6 +168,7 @@ export class InMemoryStore {
   clients: Client[] = [
     {
       id: "cli-01",
+      businessId: "unit-01",
       fullName: "Joao Santos",
       phone: "11999999999",
       preferredProfessionalId: "pro-01",
@@ -175,6 +176,7 @@ export class InMemoryStore {
     },
     {
       id: "cli-02",
+      businessId: "unit-01",
       fullName: "Carlos Silva",
       phone: "11888888888",
       tags: ["NEW"],
