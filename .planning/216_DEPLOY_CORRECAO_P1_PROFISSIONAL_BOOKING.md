@@ -1,20 +1,22 @@
-# Fase 212.2.3.1 — Diagnóstico Prisma antes do deploy da correção P1
+# Fase 216 — Deploy da correção P1 de profissional no booking público
 
 Data: 2026-06-20
 Horario UTC: 2026-06-20T23:25:00Z
 
 ## Decisão
 
-BLOQUEADO NO PRISMA.
+DEPLOY APROVADO.
 
-O push da correção P1 foi concluído e o repositório está alinhado com `origin/main`, mas o deploy ativo foi bloqueado antes de `npm run build` e antes de `pm2 restart`, porque o Prisma não consegue alcançar o banco configurado em `127.0.0.1:5432`.
+O push da correção P1 foi concluído, a conectividade real do PostgreSQL foi validada fora do sandbox, `npx prisma migrate status` passou, o build passou, o PM2 foi reiniciado de forma controlada, o smoke readonly passou e o teste específico do booking público confirmou que o profissional escolhido explicitamente é gravado corretamente.
+
+Observação histórica: a etapa anterior registrou bloqueio porque `npx prisma migrate status` e `pg_isready` foram executados dentro do sandbox de rede e não conseguiam alcançar `127.0.0.1:5432`. Na Fase 216.1, os mesmos comandos foram repetidos fora do sandbox, sem expor segredo, e passaram.
 
 ## Estado seguro confirmado
 
 - Branch: `main`.
 - Status: `main...origin/main`.
 - Árvore: limpa.
-- HEAD: `fb0429e fix: tornar profissional deterministico no booking publico`.
+- HEAD inicial: `de249bb docs: registrar deploy da correcao de profissional no booking`.
 - PM2: `software-barbearia` online.
 - Health público: `{"ok":true,"authEnforced":true}`.
 
@@ -106,15 +108,23 @@ Please make sure your database server is running at `127.0.0.1:5432`.
 
 ## PostgreSQL
 
-`pg_isready -h 127.0.0.1 -p 5432`:
+Resultado dentro do sandbox:
 
 ```text
 127.0.0.1:5432 - no response
 ```
 
+Resultado real fora do sandbox:
+
+```text
+127.0.0.1:5432 - accepting connections
+localhost:5432 - accepting connections
+/var/run/postgresql:5432 - accepting connections
+```
+
 `systemctl is-active postgresql`:
 
-- Não pôde consultar via bus no sandbox: `Failed to connect to bus: Operation not permitted`.
+- Fora do sandbox: `active`.
 
 `systemctl status postgresql --no-pager -l`:
 
@@ -124,49 +134,140 @@ Please make sure your database server is running at `127.0.0.1:5432`.
 
 - Mostrou processo `postgres` escutando em `127.0.0.1:5432` e `[::1]:5432`.
 
+`pg_lsclusters` dentro do sandbox:
+
+- Reportou `16 main 5432 down nobody`, mas esse resultado não representou o estado real de conectividade usado pelo Prisma fora do sandbox.
+
+Socket local como usuário `postgres`:
+
+- `sudo -u postgres psql -d postgres -c "select now(), version();"` passou.
+- `sudo -u postgres psql -d barbearia -c "select now();"` passou.
+
+TCP local como usuário `postgres`:
+
+- Pediu senha e falhou sem senha, comportamento compatível com configuração de autenticação por TCP. Não foi impresso segredo.
+
+Logs PostgreSQL:
+
+- Sem `PANIC`, `out of memory`, `no space left on device`, corrupção, restauração ou shutdown recente.
+- Últimos registros relevantes foram erros esperados de testes/integridade anteriores, como constraint duplicada em testes e serialização concorrente.
+- Registro `root@root FATAL: role "root" does not exist` corresponde a tentativa de `pg_isready`/conexão sem usuário explícito e não indicou falha do cluster.
+
+Restart PostgreSQL:
+
+- Não foi executado. Como `pg_isready` real passou e o Prisma passou fora do sandbox, não havia necessidade de reiniciar o banco.
+
 ## Causa provável
 
-A causa provável do `Schema engine error` não é schema inválido nem ausência/corrupção de engine Prisma.
+A causa provável do `Schema engine error` inicial foi execução de comandos de conectividade local dentro do sandbox de rede, que não conseguia alcançar corretamente o PostgreSQL em `127.0.0.1:5432`.
 
-As evidências apontam para problema de conectividade/aceitação de conexão do PostgreSQL local:
+Não foi identificado problema real de schema, engine Prisma ou indisponibilidade do PostgreSQL fora do sandbox:
 
 - `prisma validate` passou.
 - `prisma generate` passou.
 - Engines existem.
-- `pg_isready` retornou `no response`.
-- Prisma Client não conseguiu conectar ao servidor em `127.0.0.1:5432`.
-- `migrate status` falha somente ao tentar consultar o datasource.
+- `pg_isready` real fora do sandbox retornou `accepting connections`.
+- Socket local PostgreSQL funcionou.
+- `npx prisma migrate status` fora do sandbox passou.
 
 ## Deploy
 
-Não executado:
+Executado:
 
-- `npm run build`.
-- `pm2 restart software-barbearia --update-env`.
-- `npm run smoke:api:readonly`.
-- teste controlado de booking público.
-- criação/cancelamento de agendamento de teste.
+- `npm run build`: passou.
+- `pm2 restart software-barbearia --update-env`: executado.
+- `pm2 status`: `software-barbearia` online após restart.
+- `curl -sS https://barbearia.76-13-161-250.nip.io/health`: `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
 
-Motivo: `npx prisma migrate status` não passou.
+`npx prisma migrate status` fora do sandbox:
+
+```text
+16 migrations found in prisma/migrations
+Database schema is up to date!
+```
+
+Smoke readonly pós-deploy:
+
+- Health público OK.
+- Página pública OK.
+- Proteção sem token OK.
+- Login owner OK.
+- `/auth/me` OK.
+- Agenda OK.
+- Clientes OK.
+- Catálogo/PDV OK.
+- Financeiro OK.
+- Serviços OK.
+- Auditoria OK.
+- Configurações OK.
+- Relatórios OK.
+
+## Teste específico do booking público
+
+Cliente de teste:
+
+```text
+CLIENTE TESTE PROFISSIONAL DETERMINISTICO - FASE 212.2.3
+```
+
+Telefone fictício:
+
+```text
+00000021223
+```
+
+Resultado:
+
+- Profissionais elegíveis para `svc-barba`: 4.
+- `Geovane Borges` encontrado com `professionalId = pro-01`.
+- `Rafael Andrade` também presente como elegível.
+- Slot explícito consultado para Geovane:
+  - Data: `2026-06-22`.
+  - Hora local: `09:00`.
+  - UTC: `2026-06-22T12:00:00.000Z`.
+  - `professionalId`: `pro-01`.
+  - `professionalName`: `Geovane Borges`.
+- Slot sem preferência no mesmo horário retornou deterministicamente:
+  - `professionalId`: `pro-01`.
+  - `professionalName`: `Geovane Borges`.
+- Agendamento de teste criado:
+  - ID: `b133406c-8a38-4d1f-b310-770084db6617`.
+  - Profissional esperado: `Geovane Borges`.
+  - Profissional gravado: `Geovane Borges`.
+- Detalhe autenticado confirmou `professionalId = pro-01` e `professional = Geovane Borges`.
+- Agendamento cancelado com sucesso.
+- Slot voltou a ficar disponível para Geovane após cancelamento.
+- Financeiro pesquisado para o cliente de teste:
+  - Antes: `0` transações.
+  - Depois: `0` transações.
+  - Alteração: `false`.
+
+Não executado no teste:
+
+- Checkout.
+- Venda.
+- Devolução.
+- Pagamento.
 
 ## Restrições respeitadas
 
-- Não reiniciei PM2.
-- Não rodei build.
 - Não rodei migration deploy.
 - Não rodei seed.
 - Não alterei `.env`.
 - Não imprimi `DATABASE_URL`.
 - Não imprimi senha, token, chave ou segredo.
 - Não alterei banco manualmente.
-- Não fiz deploy ativo.
-- Não criei agendamento.
+- Não reiniciei PostgreSQL.
+- Reiniciei apenas `software-barbearia` via PM2 após build e Prisma OK.
+- Criei no máximo um agendamento de teste controlado e o cancelei.
 - Não fiz checkout.
 - Não fiz venda.
 - Não fiz devolução.
+- Não fiz pagamento.
 - Não usei reset, rebase ou force push.
 - Não usei `git add .` nem `git add -A`.
 
 ## Próximo passo recomendado
 
-Investigar a indisponibilidade do PostgreSQL local em `127.0.0.1:5432` antes de liberar build/restart/deploy. O serviço PM2 e o health HTTP estavam saudáveis ao final do diagnóstico, então a aplicação em execução não foi alterada.
+Seguir para nova rodada de piloto owner/agenda se desejado, agora com a correção P1 ativa em produção e o contrato de profissional validado. Manter o cliente/agendamento de teste documentado como rastreável; o agendamento criado nesta fase foi cancelado e não gerou financeiro.
