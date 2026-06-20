@@ -898,6 +898,65 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(activeCount).toBe(1);
   });
 
+  it("impede remarcacao concorrente para mesmo profissional e horario", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const first = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-21T13:00:00.000Z",
+        changedBy: "db-reschedule-concurrency-test",
+      },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-21T15:00:00.000Z",
+        changedBy: "db-reschedule-concurrency-test",
+      },
+    });
+    expect(second.statusCode).toBe(200);
+
+    const startsAt = "2026-05-21T17:00:00.000Z";
+    const responses = await Promise.all([
+      app.inject({
+        method: "PATCH",
+        url: `/appointments/${first.json().appointment.id}/reschedule`,
+        payload: { startsAt, changedBy: "db-reschedule-concurrency-test" },
+      }),
+      app.inject({
+        method: "PATCH",
+        url: `/appointments/${second.json().appointment.id}/reschedule`,
+        payload: { startsAt, changedBy: "db-reschedule-concurrency-test" },
+      }),
+    ]);
+    const statusCodes = responses.map((response) => response.statusCode).sort();
+
+    expect(statusCodes).toEqual([200, 409]);
+    const activeCount = await prisma.appointment.count({
+      where: {
+        unitId: scenario.unitId,
+        professionalId: scenario.professionalId,
+        status: { in: ["SCHEDULED", "CONFIRMED", "IN_SERVICE"] },
+        startsAt: { lt: new Date("2026-05-21T17:55:00.000Z") },
+        endsAt: { gt: new Date("2026-05-21T17:00:00.000Z") },
+      },
+    });
+    expect(activeCount).toBe(1);
+  });
+
   it("gera relatorios gerenciais e CSV com dados reais do Prisma", async () => {
     const app = createApp();
     const scenario = await createScenario();

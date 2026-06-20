@@ -60,6 +60,9 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
   - criacao roda em transacao serializable;
   - locks transacionais por unidade/profissional/cliente via `pg_advisory_xact_lock`;
   - conflito e rechecagem transacional consideram profissional e cliente;
+  - remarcacao e update de agendamento agora rodam em transacao serializable;
+  - remarcacao/update aplicam lock transacional por unidade/profissional/cliente, incluindo valores antigo e novo quando o update troca profissional ou cliente;
+  - remarcacao/update fazem validacao de unidade, cliente, profissional, servico, expediente, buffer e conflito dentro da transacao;
   - settings padrao usam `upsert` para evitar corrida de criacao.
 
 - `src/http/app.ts`
@@ -86,6 +89,9 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
   - adiciona teste concorrente com duas criacoes simultaneas no mesmo horario;
   - valida resultado esperado `200` e `409`;
   - valida que somente um agendamento ativo sobreposto fica persistido.
+  - adiciona teste concorrente com duas remarcacoes simultaneas para o mesmo profissional e horario;
+  - valida resultado esperado `200` e `409`;
+  - valida que a corrida de remarcacao nao deixa dois agendamentos ativos sobrepostos persistidos.
 
 - `tests/api.spec.ts`
   - datas estabilizadas com fake timers;
@@ -105,8 +111,11 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 
 - Estado observado em 2026-06-19: o trabalho parcial ja estava consolidado no commit local `4ab24d0 fix: blindar regras de agendamento`, deixando `main` um commit a frente de `origin/main`.
 - Durante a revisao foi confirmado um ajuste pendente: o backend em memoria validava cliente apenas por `id`, enquanto o Prisma validava por `id` e unidade. A regra foi alinhada no servico em memoria e recebeu teste dedicado.
-- Risco conhecido mantido para proxima melhoria: o advisory lock cobre concorrencia de criacao Prisma; remarcacao/update ainda nao possuem advisory lock transacional especifico.
-- A etapa segue sem commit adicional ate aprovacao explicita.
+- Risco conhecido de remarcacao/update concorrente foi tratado na Sprint 209.1: ambos passam a usar transacao serializable, advisory lock por chaves estaveis e busca de conflito dentro da transacao.
+- A criacao concorrente Prisma segue coberta por teste dedicado em `tests/db.integration.spec.ts`.
+- A remarcacao concorrente Prisma passa a ser coberta por teste dedicado em `tests/db.integration.spec.ts`.
+- Ressalva residual: nao houve alteracao de schema, indice ou constraint no banco; a protecao permanece em nivel de aplicacao/transacao.
+- A etapa segue sem push ate aprovacao explicita.
 
 ## Estado operacional
 
@@ -114,4 +123,4 @@ Nao houve alteracao em producao, migracao, seed de producao, `.env`, secrets, Wh
 - Migracoes: nenhuma criada ou executada.
 - Seeds de producao: nenhuma executada.
 - `.env` e secrets: nao alterados.
-- Git add/commit/push: nao executados nesta retomada.
+- Git push: nao executado nesta retomada.
