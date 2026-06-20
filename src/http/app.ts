@@ -4259,6 +4259,186 @@ export function createApp() {
     return fromRequest || process.env.PUBLIC_BOOKING_UNIT_ID || "unit-01";
   };
 
+  type PublicBookingService = {
+    id: string;
+    name: string;
+    price: number | bigint | { toNumber(): number };
+    durationMin: number;
+    active: boolean;
+  };
+
+  type PublicBookingProfessional = {
+    id: string;
+    name: string;
+  };
+
+  type PublicBusySlot = {
+    professionalId: string;
+    startsAt: Date;
+    endsAt: Date;
+  };
+
+  const activeAppointmentStatuses: AppointmentStatus[] = [
+    "SCHEDULED",
+    "CONFIRMED",
+    "IN_SERVICE",
+    "BLOCKED",
+  ];
+
+  const sortPublicProfessionals = (items: PublicBookingProfessional[]) =>
+    [...items].sort((a, b) => {
+      const byName = a.name.localeCompare(b.name, "pt-BR");
+      return byName || a.id.localeCompare(b.id, "pt-BR");
+    });
+
+  const normalizePublicProfessionalId = (value?: unknown) => {
+    const normalized = String(value ?? "").trim();
+    return normalized || undefined;
+  };
+
+  const getPublicServiceForBooking = async (
+    unitId: string,
+    serviceId: string,
+  ): Promise<PublicBookingService | null> => {
+    if (backend === "prisma") {
+      return await prisma.service.findFirst({
+        where: { id: serviceId, businessId: unitId, active: true },
+        select: { id: true, name: true, price: true, durationMin: true, active: true },
+      });
+    }
+    const service = memoryStore.services.find(
+      (item) => item.id === serviceId && item.active && (item.businessId ?? unitId) === unitId,
+    );
+    if (!service) return null;
+    return {
+      id: service.id,
+      name: service.name,
+      price: service.price,
+      durationMin: service.durationMin,
+      active: service.active,
+    };
+  };
+
+  const getPublicEligibleProfessionals = async (
+    unitId: string,
+    serviceId: string,
+    professionalId?: string,
+  ): Promise<PublicBookingProfessional[]> => {
+    if (backend === "prisma") {
+      const rows = await prisma.serviceProfessional.findMany({
+        where: {
+          serviceId,
+          ...(professionalId ? { professionalId } : {}),
+          service: { businessId: unitId, active: true },
+          professional: { businessId: unitId, active: true },
+        },
+        include: {
+          professional: { select: { id: true, name: true } },
+        },
+      });
+      return sortPublicProfessionals(
+        rows.map((row) => ({
+          id: row.professional.id,
+          name: row.professional.name,
+        })),
+      );
+    }
+
+    const linkedIds = memoryStore.serviceProfessionalAssignments
+      .filter((item) => item.serviceId === serviceId)
+      .map((item) => item.professionalId);
+    const professionals = memoryStore.professionals
+      .filter((item) => item.active && (item.businessId ?? unitId) === unitId)
+      .filter((item) => linkedIds.includes(item.id))
+      .filter((item) => !professionalId || item.id === professionalId)
+      .map((item) => ({ id: item.id, name: item.name }));
+    return sortPublicProfessionals(professionals);
+  };
+
+  const getPublicBusySlots = async (
+    unitId: string,
+    professionalIds: string[],
+    start: Date,
+    end: Date,
+  ): Promise<PublicBusySlot[]> => {
+    if (!professionalIds.length) return [];
+    if (backend === "prisma") {
+      return await prisma.appointment.findMany({
+        where: {
+          unitId,
+          professionalId: { in: professionalIds },
+          startsAt: { lt: end },
+          endsAt: { gt: start },
+          status: { in: activeAppointmentStatuses },
+        },
+        select: { professionalId: true, startsAt: true, endsAt: true },
+      });
+    }
+    return memoryStore.appointments
+      .filter(
+        (item) =>
+          item.unitId === unitId &&
+          professionalIds.includes(item.professionalId) &&
+          activeAppointmentStatuses.includes(item.status) &&
+          item.startsAt < end &&
+          item.endsAt > start,
+      )
+      .map((item) => ({
+        professionalId: item.professionalId,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+      }));
+  };
+
+  const isProfessionalAvailableFromBusySlots = (
+    professionalId: string,
+    startsAt: Date,
+    endsAt: Date,
+    busySlots: PublicBusySlot[],
+  ) =>
+    !busySlots.some(
+      (item) =>
+        item.professionalId === professionalId &&
+        startsAt < item.endsAt &&
+        endsAt > item.startsAt,
+    );
+
+  const resolvePublicProfessionalForSlot = async (input: {
+    unitId: string;
+    serviceId: string;
+    startsAt: Date;
+    endsAt: Date;
+    professionalId?: string;
+  }) => {
+    const eligible = await getPublicEligibleProfessionals(
+      input.unitId,
+      input.serviceId,
+      input.professionalId,
+    );
+    if (!eligible.length) {
+      return {
+        professional: null,
+        reason: input.professionalId
+          ? "Profissional indisponivel para este servico"
+          : "Nenhum profissional disponivel para este servico",
+      };
+    }
+    const busySlots = await getPublicBusySlots(
+      input.unitId,
+      eligible.map((item) => item.id),
+      input.startsAt,
+      input.endsAt,
+    );
+    const professional =
+      eligible.find((item) =>
+        isProfessionalAvailableFromBusySlots(item.id, input.startsAt, input.endsAt, busySlots),
+      ) ?? null;
+    return {
+      professional,
+      reason: professional ? null : "Horario indisponivel. Por favor escolha outro horario.",
+    };
+  };
+
   app.get("/public/services", async (request) => {
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
     const unitId = publicUnitId(query.unitId);
@@ -4286,6 +4466,29 @@ export function createApp() {
       ...service,
       durationMinutes: service.durationMinutes ?? service.durationMin ?? service.duration,
     }));
+  });
+
+  app.get("/public/services/:serviceId/professionals", async (request, reply) => {
+    const params = z.object({ serviceId: z.string().min(1) }).parse(request.params);
+    const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
+    const unitId = publicUnitId(query.unitId);
+    const service = await getPublicServiceForBooking(unitId, params.serviceId);
+    if (!service) {
+      reply.status(404).send({ error: "Servico nao encontrado" });
+      return;
+    }
+    const professionals = await getPublicEligibleProfessionals(unitId, service.id);
+    return {
+      service: {
+        id: service.id,
+        name: service.name,
+      },
+      professionals: professionals.map((item) => ({
+        id: item.id,
+        name: item.name,
+        displayName: item.name,
+      })),
+    };
   });
 
   app.get("/public/business", async (request) => {
@@ -4326,27 +4529,35 @@ export function createApp() {
     return { workingHours };
   });
 
-  app.get("/public/slots", async (request) => {
+  app.get("/public/slots", async (request, reply) => {
     const query = z
       .object({
         serviceId: z.string().min(1),
         weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         unitId: z.string().min(1).optional(),
+        professionalId: z.string().min(1).optional(),
       })
       .parse(request.query);
 
     const unitId = publicUnitId(query.unitId);
     const weekStartDate = new Date(`${query.weekStart}T00:00:00.000-03:00`);
 
-    // Busca serviço para duração
-    let durationMin = 30;
-    if (backend === "prisma") {
-      const svc = await prisma.service.findFirst({
-        where: { id: query.serviceId, businessId: unitId },
-        select: { durationMin: true },
-      });
-      if (svc) durationMin = svc.durationMin;
+    const service = await getPublicServiceForBooking(unitId, query.serviceId);
+    if (!service) {
+      reply.status(404).send({ error: "Servico nao encontrado" });
+      return;
     }
+    const eligibleProfessionals = await getPublicEligibleProfessionals(
+      unitId,
+      query.serviceId,
+      query.professionalId,
+    );
+    if (query.professionalId && !eligibleProfessionals.length) {
+      reply.status(409).send({ error: "Profissional indisponivel para este servico" });
+      return;
+    }
+    const eligibleProfessionalIds = eligibleProfessionals.map((item) => item.id);
+    const durationMin = service.durationMin;
 
     // Horários de funcionamento por dia da semana
     let businessHours: Array<{
@@ -4361,21 +4572,24 @@ export function createApp() {
 
     // Agendamentos da semana
     const weekEnd = new Date(weekStartDate.getTime() + 7 * 24 * 3600_000);
-    let busySlots: Array<{ startsAt: Date; endsAt: Date }> = [];
-    if (backend === "prisma") {
-      busySlots = await prisma.appointment.findMany({
-        where: {
-          unitId,
-          startsAt: { gte: weekStartDate, lt: weekEnd },
-          status: { in: ["SCHEDULED", "CONFIRMED", "IN_SERVICE", "BLOCKED"] },
-        },
-        select: { startsAt: true, endsAt: true },
-      });
-    }
+    const busySlots = await getPublicBusySlots(
+      unitId,
+      eligibleProfessionalIds,
+      weekStartDate,
+      weekEnd,
+    );
 
     const now = new Date();
     const minAdvanceMs = 30 * 60_000;
-    const result: Record<string, { time: string; available: boolean }[]> = {};
+    const result: Record<
+      string,
+      {
+        time: string;
+        available: boolean;
+        professionalId?: string;
+        professionalName?: string;
+      }[]
+    > = {};
 
     for (let d = 0; d < 7; d++) {
       const day = new Date(weekStartDate.getTime() + d * 24 * 3600_000);
@@ -4393,7 +4607,12 @@ export function createApp() {
       const [openH, openM] = opensAt.split(":").map(Number) as [number, number];
       const [closeH, closeM] = closesAt.split(":").map(Number) as [number, number];
 
-      const slots: { time: string; available: boolean }[] = [];
+      const slots: {
+        time: string;
+        available: boolean;
+        professionalId?: string;
+        professionalName?: string;
+      }[] = [];
       let slotMin = openH * 60 + openM;
       const endMin = closeH * 60 + closeM - durationMin;
 
@@ -4405,11 +4624,21 @@ export function createApp() {
         );
 
         const isPast = slotDate.getTime() - now.getTime() < minAdvanceMs;
-        const hasConflict = busySlots.some(
-          (b) => slotDate < b.endsAt && new Date(slotDate.getTime() + durationMin * 60_000) > b.startsAt,
+        const slotEnd = new Date(slotDate.getTime() + durationMin * 60_000);
+        const professional = eligibleProfessionals.find((item) =>
+          isProfessionalAvailableFromBusySlots(item.id, slotDate, slotEnd, busySlots),
         );
 
-        slots.push({ time: `${h}:${m}`, available: !isPast && !hasConflict });
+        slots.push({
+          time: `${h}:${m}`,
+          available: !isPast && Boolean(professional),
+          ...(professional
+            ? {
+                professionalId: professional.id,
+                professionalName: professional.name,
+              }
+            : {}),
+        });
         slotMin += 30;
       }
 
@@ -4427,6 +4656,10 @@ export function createApp() {
       z.string().email().optional(),
     ),
     serviceId: z.string().min(1),
+    professionalId: z.preprocess(
+      (value) => normalizePublicProfessionalId(value),
+      z.string().min(1).optional(),
+    ),
     startsAt: z.string().datetime(),
     unitId: z.string().min(1).optional(),
   });
@@ -4438,16 +4671,47 @@ export function createApp() {
 
     const phone = body.clientPhone.replace(/\D/g, "");
 
-    let service: { id: string; name: string; price: number | bigint | { toNumber(): number }; durationMin: number; active: boolean };
+    let service: PublicBookingService;
     let clientId: string;
     let profId: string;
     let profName: string | undefined;
-    let startsAt: Date;
+    const startsAt = new Date(body.startsAt);
     let endsAt: Date;
     let appointmentId: string;
 
+    const svc = await getPublicServiceForBooking(unitId, body.serviceId);
+    if (!svc) {
+      reply.status(404).send({ error: "Servico nao encontrado" });
+      return;
+    }
+    service = svc;
+
+    endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
+    if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
+      reply.status(409).send({
+        error:
+          "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
+        workingHours,
+      });
+      return;
+    }
+
+    const resolvedProfessional = await resolvePublicProfessionalForSlot({
+      unitId,
+      serviceId: service.id,
+      startsAt,
+      endsAt,
+      professionalId: body.professionalId,
+    });
+    if (!resolvedProfessional.professional) {
+      reply.status(409).send({ error: resolvedProfessional.reason });
+      return;
+    }
+    profId = resolvedProfessional.professional.id;
+    profName = resolvedProfessional.professional.name;
+
     if (backend === "prisma") {
-      // Busca ou cria cliente pelo telefone
+      // Busca ou cria cliente pelo telefone depois de validar serviço, profissional e disponibilidade.
       let client = await prisma.client.findFirst({
         where: { businessId: unitId, phone: { contains: phone } },
       });
@@ -4462,37 +4726,7 @@ export function createApp() {
           },
         });
       }
-
-      const svc = await prisma.service.findFirst({ where: { id: body.serviceId, businessId: unitId } });
-      if (!svc || !svc.active) { reply.status(404).send({ error: "Servico nao encontrado" }); return; }
-      service = svc;
       clientId = client.id;
-
-      const sp = await prisma.serviceProfessional.findFirst({
-        where: { serviceId: body.serviceId, service: { businessId: unitId } },
-        include: { professional: { select: { id: true, name: true, active: true } } },
-      });
-      const prof = sp?.professional?.active ? sp.professional : null;
-      if (!prof) { reply.status(409).send({ error: "Nenhum profissional disponivel" }); return; }
-      profId = prof.id; profName = prof.name;
-
-      startsAt = new Date(body.startsAt);
-      endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
-      if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
-        reply.status(409).send({
-          error:
-            "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
-          workingHours,
-        });
-        return;
-      }
-
-      const conflict = await prisma.appointment.findFirst({
-        where: { unitId, professionalId: profId, status: { in: ["SCHEDULED","CONFIRMED","IN_SERVICE","BLOCKED"] },
-          AND: [{ startsAt: { lt: endsAt } }, { endsAt: { gt: startsAt } }] },
-      });
-      if (conflict) { reply.status(409).send({ error: "Horario indisponivel. Por favor escolha outro horario." }); return; }
-
       appointmentId = crypto.randomUUID();
       await prisma.appointment.create({
         data: { id: appointmentId, unitId, clientId, professionalId: profId, serviceId: service.id,
@@ -4500,41 +4734,12 @@ export function createApp() {
       });
     } else {
       // Memory backend
-      const svc = memoryStore.services.find(s => s.id === body.serviceId && s.active);
-      if (!svc) { reply.status(404).send({ error: "Servico nao encontrado" }); return; }
-      service = svc;
-
       let memClient = memoryStore.clients.find(c => c.phone?.replace(/\D/g,"") === phone);
       if (!memClient) {
         memClient = { id: crypto.randomUUID(), fullName: body.clientName, phone: body.clientPhone, tags: ["NEW"] };
         memoryStore.clients.push(memClient);
       }
       clientId = memClient.id;
-
-      const assign = memoryStore.serviceProfessionalAssignments.find(a => a.serviceId === body.serviceId);
-      const prof = assign
-        ? memoryStore.professionals.find(p => p.id === assign.professionalId && p.active)
-        : memoryStore.professionals.find(p => p.active);
-      if (!prof) { reply.status(409).send({ error: "Nenhum profissional disponivel" }); return; }
-      profId = prof.id; profName = prof.name;
-
-      startsAt = new Date(body.startsAt);
-      endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
-      if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
-        reply.status(409).send({
-          error:
-            "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
-          workingHours,
-        });
-        return;
-      }
-
-      const conflict = memoryStore.appointments.find(a =>
-        a.unitId === unitId && a.professionalId === profId &&
-        ["SCHEDULED","CONFIRMED","IN_SERVICE","BLOCKED"].includes(a.status) &&
-        a.startsAt < endsAt && a.endsAt > startsAt
-      );
-      if (conflict) { reply.status(409).send({ error: "Horario indisponivel. Por favor escolha outro horario." }); return; }
 
       appointmentId = crypto.randomUUID();
       memoryStore.appointments.push({
@@ -4577,6 +4782,8 @@ export function createApp() {
       message: "Agendamento confirmado! Voce receberá uma confirmação no WhatsApp.",
       startsAt: appointment.startsAt,
       endsAt: appointment.endsAt,
+      professionalId: profId,
+      professionalName: profName,
       workingHours,
     });
   });

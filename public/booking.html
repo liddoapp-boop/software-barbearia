@@ -670,11 +670,12 @@
 <script>
 const API   = '';
 const BOOKING_UNIT_ID = new URLSearchParams(window.location.search).get('unitId') || '';
-const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFIRM:6, DONE:7 };
+const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, PROFESSIONAL:5, CALENDAR:6, CONFIRM:7, DONE:8 };
 
 let step = STEPS.NAME;
 let services = [], slots = {};
-let selectedService = null, selectedDate = null, selectedSlot = null;
+let selectedService = null, selectedProfessional = null, selectedDate = null, selectedSlot = null, selectedSlotProfessional = null;
+let serviceProfessionals = [];
 let weekStart = null, phoneMask = null, confirmData = {};
 let publicWorkingHours = null;
 let bookingSubmitting = false;
@@ -820,8 +821,11 @@ function disableInput() {
 function resetBookingFlowState() {
   bookingRunId += 1;
   selectedService = null;
+  selectedProfessional = null;
   selectedDate = null;
   selectedSlot = null;
+  selectedSlotProfessional = null;
+  serviceProfessionals = [];
   weekStart = null;
   slots = {};
   confirmData = {};
@@ -945,13 +949,76 @@ async function onPickService(id, runId = bookingRunId) {
   const svc = services.find(s => String(s.id) === String(id));
   if (!svc) return;
   selectedService = svc;
+  selectedProfessional = null;
   selectedDate = null;
   selectedSlot = null;
+  selectedSlotProfessional = null;
   confirmData = {};
   bookingSubmitting = false;
   bookingSubmitted = false;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
-  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Selecione uma data:`, 400);
+  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Escolha um profissional:`, 400);
+  step = STEPS.PROFESSIONAL;
+  await loadProfessionals(runId);
+}
+
+/* ═══ Professionals ═══════════════════════════════════════ */
+async function loadProfessionals(runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
+  disableInput();
+  serviceProfessionals = [];
+  showTyping();
+  try {
+    const r = await fetch(publicUrl(`/public/services/${encodeURIComponent(selectedService.id)}/professionals`));
+    if (r.ok) {
+      const data = await r.json();
+      serviceProfessionals = Array.isArray(data.professionals) ? data.professionals : [];
+    }
+  } catch {}
+  hideTyping();
+  renderProfessionals(runId);
+}
+
+function renderProfessionals(runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
+  const options = [
+    { id: '', name: 'Sem preferência', hint: 'Atribuição automática' },
+    ...serviceProfessionals.map((item) => ({ id: item.id, name: item.displayName || item.name, hint: 'Profissional escolhido' })),
+  ];
+  const cards = options.map((item, i) => `
+    <button class="svc-card" type="button" data-professional-id="${escapeHtml(item.id)}" style="animation-delay:${i*.04}s">
+      <div class="svc-img">${IMG_PH}</div>
+      <div class="svc-body">
+        <div class="svc-name">${escapeHtml(item.name)}</div>
+        <div class="svc-dur">${escapeHtml(item.hint)}</div>
+      </div>
+    </button>`).join('');
+  const w = appendWidget(`
+    <div class="svc-scroll" role="group" aria-label="Profissionais disponíveis">
+      <div class="svc-row">${cards}</div>
+    </div>`);
+  w.querySelectorAll('[data-professional-id]').forEach((button) => {
+    button.addEventListener('click', () => onPickProfessional(button.dataset.professionalId || '', runId));
+  });
+}
+
+async function onPickProfessional(id, runId = bookingRunId) {
+  if (!isCurrentBookingRun(runId)) return;
+  const professional = id
+    ? serviceProfessionals.find((item) => String(item.id) === String(id))
+    : { id: '', name: 'Sem preferência', displayName: 'Sem preferência' };
+  if (!professional) return;
+  selectedProfessional = {
+    id: professional.id || '',
+    name: professional.displayName || professional.name || 'Sem preferência',
+  };
+  selectedDate = null;
+  selectedSlot = null;
+  selectedSlotProfessional = null;
+  bookingSubmitting = false;
+  bookingSubmitted = false;
+  appendBubble(selectedProfessional.name, true);
+  await say('Selecione uma data:', 300);
   step = STEPS.CALENDAR;
   await loadCalendar();
 }
@@ -960,7 +1027,8 @@ async function onPickService(id, runId = bookingRunId) {
 async function fetchSlotsForWeek(ws) {
   const key = toKey(ws);
   try {
-    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}`));
+    const professionalQuery = selectedProfessional?.id ? `&professionalId=${encodeURIComponent(selectedProfessional.id)}` : '';
+    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}${professionalQuery}`));
     if (r.ok) Object.assign(slots, await r.json());
   } catch {}
 }
@@ -1058,7 +1126,7 @@ function renderCalendar() {
 
 function onPickDay(key, runId = bookingRunId) {
   if (!isCurrentBookingRun(runId)) return;
-  selectedDate = key; selectedSlot = null;
+  selectedDate = key; selectedSlot = null; selectedSlotProfessional = null;
   bookingSubmitting = false;
   bookingSubmitted = false;
   document.querySelectorAll('.cal-day').forEach(b => {
@@ -1087,6 +1155,10 @@ function onPickDay(key, runId = bookingRunId) {
 async function onPickSlot(time, runId = bookingRunId) {
   if (!isCurrentBookingRun(runId)) return;
   selectedSlot = time;
+  const slot = (slots[selectedDate] || []).find((item) => item.time === time);
+  selectedSlotProfessional = slot?.professionalId
+    ? { id: slot.professionalId, name: slot.professionalName || 'Profissional' }
+    : null;
   bookingSubmitting = false;
   bookingSubmitted = false;
   document.querySelectorAll('.slot-btn').forEach(b => {
@@ -1108,6 +1180,11 @@ async function showConfirm(runId = bookingRunId) {
   confirmData = {
     clientName: client.name, phone: client.phone, email: client.email||'',
     serviceId: selectedService.id, serviceName: selectedService.name,
+    professionalId: selectedProfessional?.id || '',
+    professionalName: selectedProfessional?.id
+      ? selectedProfessional.name
+      : 'Sem preferência',
+    resolvedProfessionalName: selectedSlotProfessional?.name || '',
     price: selectedService.price, duration: selectedService.duration,
     date: selectedDate, time: selectedSlot, dateStr,
   };
@@ -1117,6 +1194,7 @@ async function showConfirm(runId = bookingRunId) {
   const w = appendWidget(`
     <div class="confirm-card" id="confirmWidgetWrap">
       <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(confirmData.serviceName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(confirmData.professionalName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(dateStr)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
@@ -1147,6 +1225,7 @@ async function submitBooking(runId = bookingRunId) {
       startsAt: iso,
     };
     if (confirmData.email) payload.clientEmail = confirmData.email;
+    if (confirmData.professionalId) payload.professionalId = confirmData.professionalId;
     const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
       body: JSON.stringify(payload),
@@ -1157,10 +1236,12 @@ async function submitBooking(runId = bookingRunId) {
       err.status = r.status;
       throw err;
     }
+    const created = await r.json().catch(() => ({}));
+    const assignedProfessionalName = created?.professionalName || confirmData.resolvedProfessionalName || confirmData.professionalName;
     bookingSubmitted = true;
-    saveAppt({ id:Date.now(), service:confirmData.serviceName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
+    saveAppt({ id:Date.now(), service:confirmData.serviceName, professional:assignedProfessionalName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
     step = STEPS.DONE;
-    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">Até ${escapeHtml(confirmData.time)} — ${escapeHtml(confirmData.dateStr)}.</span>`);
+    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(assignedProfessionalName)} · ${escapeHtml(confirmData.time)} — ${escapeHtml(confirmData.dateStr)}.</span>`);
     await say('Se quiser marcar outro horário, continue por aqui.', 800);
     const restart = appendWidget(`
       <div class="confirm-card">
@@ -1199,7 +1280,7 @@ function openSheet() {
     ? `<p style="color:var(--tx2);font-size:14px;text-align:center;padding:40px 0">Nenhum agendamento ainda.</p>`
     : appts.map(a => `<div class="appt-item">
         <div class="appt-svc">${escapeHtml(a.service)}</div>
-        <div class="appt-meta">${escapeHtml(a.date)} &bull; ${escapeHtml(a.time)}</div>
+        <div class="appt-meta">${escapeHtml(a.date)} &bull; ${escapeHtml(a.time)}${a.professional ? ` &bull; ${escapeHtml(a.professional)}` : ''}</div>
         <div class="appt-price">${escapeHtml(a.price)}</div>
         <span class="appt-badge ${a.status==='pending'?'pending':'done'}">${a.status==='pending'?'Pendente':'Concluído'}</span>
       </div>`).join('');

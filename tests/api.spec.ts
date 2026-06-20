@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
@@ -21,6 +22,32 @@ async function loginAs(
   });
   expect(login.statusCode).toBe(200);
   return login.json().accessToken as string;
+}
+
+async function createProfessional(app: FastifyInstance, name: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/professionals",
+    payload: {
+      unitId: "unit-01",
+      name,
+    },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json().professional as { id: string; name: string };
+}
+
+async function setBarbaProfessionals(app: FastifyInstance, professionalIds: string[]) {
+  const response = await app.inject({
+    method: "PATCH",
+    url: "/services/svc-barba",
+    payload: {
+      unitId: "unit-01",
+      professionalIds,
+    },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json();
 }
 
 describe("API MVP", () => {
@@ -4110,6 +4137,180 @@ describe("API MVP", () => {
     expect(secondBooking.json().id).toBeTruthy();
     expect(secondBooking.json().id).not.toBe(booking.json().id);
     process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("grava no booking publico o profissional escolhido explicitamente", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const rafael = await createProfessional(app, "Rafael Andrade");
+    await setBarbaProfessionals(app, ["pro-01", rafael.id]);
+
+    const geovaneBooking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Profissional Geovane",
+        clientPhone: "(11) 90000-2101",
+        serviceId: "svc-barba",
+        professionalId: "pro-01",
+        startsAt: "2026-06-05T19:00:00.000Z",
+      },
+    });
+    expect(geovaneBooking.statusCode).toBe(201);
+    expect(geovaneBooking.json().professionalId).toBe("pro-01");
+    expect(geovaneBooking.json().professionalName).toBe("Geovane Borges");
+
+    const geovaneDetail = await app.inject({
+      method: "GET",
+      url: `/appointments/${geovaneBooking.json().id}`,
+    });
+    expect(geovaneDetail.statusCode).toBe(200);
+    expect(geovaneDetail.json().appointment.professionalId).toBe("pro-01");
+    expect(geovaneDetail.json().appointment.professional).toBe("Geovane Borges");
+
+    const rafaelBooking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Profissional Rafael",
+        clientPhone: "(11) 90000-2102",
+        serviceId: "svc-barba",
+        professionalId: rafael.id,
+        startsAt: "2026-06-05T20:00:00.000Z",
+      },
+    });
+    expect(rafaelBooking.statusCode).toBe(201);
+    expect(rafaelBooking.json().professionalId).toBe(rafael.id);
+    expect(rafaelBooking.json().professionalName).toBe("Rafael Andrade");
+
+    const rafaelDetail = await app.inject({
+      method: "GET",
+      url: `/appointments/${rafaelBooking.json().id}`,
+    });
+    expect(rafaelDetail.statusCode).toBe(200);
+    expect(rafaelDetail.json().appointment.professionalId).toBe(rafael.id);
+    expect(rafaelDetail.json().appointment.professional).toBe("Rafael Andrade");
+  });
+
+  it("rejeita profissional publico nao vinculado ao servico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const unlinked = await createProfessional(app, "Profissional Sem Vinculo");
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Profissional Invalido",
+        clientPhone: "(11) 90000-2103",
+        serviceId: "svc-barba",
+        professionalId: unlinked.id,
+        startsAt: "2026-06-05T19:00:00.000Z",
+      },
+    });
+
+    expect(booking.statusCode).toBe(409);
+    expect(booking.json().error).toContain("Profissional indisponivel");
+  });
+
+  it("mantem atribuicao deterministica sem preferencia no booking publico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const rafael = await createProfessional(app, "Rafael Andrade");
+    await setBarbaProfessionals(app, ["pro-01", rafael.id]);
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Sem Preferencia",
+        clientPhone: "(11) 90000-2104",
+        serviceId: "svc-barba",
+        startsAt: "2026-06-05T19:00:00.000Z",
+      },
+    });
+
+    expect(booking.statusCode).toBe(201);
+    expect(booking.json().professionalId).toBe("pro-01");
+    expect(booking.json().professionalName).toBe("Geovane Borges");
+  });
+
+  it("alinha /public/slots com a mesma disponibilidade profissional do booking publico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const rafael = await createProfessional(app, "Rafael Andrade");
+    await setBarbaProfessionals(app, ["pro-01", rafael.id]);
+
+    const explicitSlots = await app.inject({
+      method: "GET",
+      url: "/public/slots?unitId=unit-01&serviceId=svc-barba&professionalId=pro-01&weekStart=2026-06-01",
+    });
+    expect(explicitSlots.statusCode).toBe(200);
+    const explicitFriday = explicitSlots.json()["2026-06-05"] as Array<{
+      time: string;
+      available: boolean;
+      professionalId?: string;
+      professionalName?: string;
+    }>;
+    const explicitSlot = explicitFriday.find((slot) => slot.time === "16:00");
+    expect(explicitSlot).toMatchObject({
+      time: "16:00",
+      available: true,
+      professionalId: "pro-01",
+      professionalName: "Geovane Borges",
+    });
+
+    const automaticSlots = await app.inject({
+      method: "GET",
+      url: "/public/slots?unitId=unit-01&serviceId=svc-barba&weekStart=2026-06-01",
+    });
+    expect(automaticSlots.statusCode).toBe(200);
+    const automaticFriday = automaticSlots.json()["2026-06-05"] as Array<{
+      time: string;
+      available: boolean;
+      professionalId?: string;
+      professionalName?: string;
+    }>;
+    const automaticSlot = automaticFriday.find((slot) => slot.time === "17:00");
+    expect(automaticSlot).toMatchObject({
+      time: "17:00",
+      available: true,
+      professionalId: "pro-01",
+      professionalName: "Geovane Borges",
+    });
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Slots Alinhados",
+        clientPhone: "(11) 90000-2105",
+        serviceId: "svc-barba",
+        startsAt: "2026-06-05T20:00:00.000Z",
+      },
+    });
+    expect(booking.statusCode).toBe(201);
+    expect(booking.json().professionalId).toBe(automaticSlot?.professionalId);
+    expect(booking.json().professionalName).toBe(automaticSlot?.professionalName);
+  });
+
+  it("mantem o contrato estatico do booking publico sem selecao implicita findFirst", async () => {
+    const apiSource = readFileSync("src/http/app.ts", "utf8");
+    const publicSectionStart = apiSource.indexOf('app.get("/public/services"');
+    const publicBookingSource = apiSource.slice(publicSectionStart);
+    const uiSource = readFileSync("public/booking.html", "utf8");
+
+    expect(publicSectionStart).toBeGreaterThanOrEqual(0);
+    expect(publicBookingSource).not.toContain("serviceProfessional.findFirst");
+    expect(publicBookingSource).toContain('app.get("/public/services/:serviceId/professionals"');
+    expect(publicBookingSource).toContain("professionalId");
+    expect(uiSource).toContain("STEPS.PROFESSIONAL");
+    expect(uiSource).toContain("payload.professionalId = confirmData.professionalId");
   });
 
   it("autentica e preserva perfis em /auth/me", async () => {
