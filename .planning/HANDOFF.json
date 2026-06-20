@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-20T02:37:09Z",
+  "phase": "212.1",
+  "phase_name": "Piloto sintetico controlado de agendamento como cliente",
+  "phase_dir": ".planning",
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "completed_tasks": [
+    {
+      "id": 209,
+      "name": "Blindagem da Agenda implantada e auditada",
+      "status": "done",
+      "commit": "385845a"
+    },
+    {
+      "id": 211,
+      "name": "Validacao acelerada do fluxo operacional principal",
+      "status": "done",
+      "commit": "a08fd36"
+    },
+    {
+      "id": 212.1,
+      "name": "Piloto sintetico controlado de agendamento como cliente",
+      "status": "done",
+      "commit": "1cc25a1"
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 212.2,
+      "name": "Piloto assistido owner-only com usuario real",
+      "status": "not_started"
+    },
+    {
+      "id": 212.3,
+      "name": "Avaliar auditoria explicita para criacao publica de agendamento",
+      "status": "not_started"
+    }
+  ],
+  "blockers": [],
+  "human_actions_pending": [
+    {
+      "action": "Executar piloto assistido com usuario real",
+      "context": "O fluxo sintetico passou, mas ainda falta observar ergonomia e atritos do fluxo real em balcao.",
+      "blocking": false
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Sistema classificado como pronto para piloto operacional apos Fase 211.",
+      "rationale": "Build, testes, test:db, smoke readonly e cobertura do fluxo Agenda -> Checkout -> Financeiro -> Auditoria passaram.",
+      "phase": "211"
+    },
+    {
+      "decision": "Piloto sintetico de agendamento aprovado com dado de teste rastreavel.",
+      "rationale": "Criou 1 agendamento publico, validou na Agenda owner, cancelou por endpoint seguro, liberou o slot e nao gerou financeiro.",
+      "phase": "212.1"
+    }
+  ],
+  "uncommitted_files": [],
+  "next_action": "Iniciar a proxima etapa com leitura de .planning/211_VALIDACAO_FLUXO_OPERACIONAL.md, .planning/212_PILOTO_SINTETICO_AGENDAMENTO.md e .planning/.continue-here.md; depois planejar piloto assistido owner-only.",
+  "context_notes": "Repositorio limpo e alinhado com origin/main antes da pausa. Ultimo commit funcional/documental antes do handoff: 1cc25a1 docs: registrar piloto sintetico de agendamento. Nao houve migration, seed, alteracao de .env, deploy, restart PM2 ou alteracao manual em banco."
+}
