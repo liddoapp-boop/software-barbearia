@@ -110,8 +110,73 @@ Telefone e e-mail do cliente nao sao gravados no payload de auditoria publica.
 ## Riscos restantes
 
 - A criacao publica e a auditoria sao operacoes sequenciais no handler publico. Se a gravacao de auditoria falhar depois da criacao do agendamento, a requisicao falhara apos o agendamento ja existir. Nao foi introduzida migration nem refatoracao transacional nesta sprint para manter o escopo controlado.
-- Falta registrar nesta mesma documentacao os resultados de deploy e piloto controlado em producao.
 
 ## Decisao pre-deploy
 
 APROVADO para commit, push, deploy controlado e smoke pos-deploy, pois build, testes, test:db, checks e smoke readonly passaram localmente.
+
+## Commit de codigo
+
+- Commit: `1957eb0 fix: consolidar booking publico com profissional e auditoria`.
+- Push: `origin/main` atualizado de `6d232ed` para `1957eb0`.
+
+## Deploy controlado
+
+- `git status -sb`: `main...origin/main`.
+- `git status --short`: limpo.
+- `git pull --ff-only origin main`: already up to date.
+- `npx prisma migrate status`: schema up to date, 16 migrations.
+- `npm run build`: passou.
+- `pm2 restart software-barbearia --update-env`: processo reiniciado e online.
+- `pm2 status`: `software-barbearia` online.
+- Primeiro `curl /health` logo apos restart retornou 502 transitorio enquanto o processo subia.
+- Repeticao de `curl /health`: 200 OK, `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
+
+## Teste controlado em producao
+
+- Cliente: `CLIENTE TESTE BOOKING CONSOLIDADO - SPRINT 213`.
+- Telefone: `00000021300`.
+- Servico: `Barba Terapia` (`svc-barba`).
+- Profissional escolhido: `Geovane Borges` (`pro-01`).
+- Slot usado: `2026-06-22 09:00` America/Sao_Paulo (`2026-06-22T12:00:00.000Z`).
+- Profissionais elegiveis carregaram e Geovane apareceu.
+- `/public/slots` com Geovane retornou `professionalId=pro-01` e `professionalName=Geovane Borges`.
+- Agendamento criado: `26385f22-f589-4eb7-a0ba-8a3364fad25f`.
+- Profissional gravado: `pro-01 / Geovane Borges`.
+- Agenda owner retornou exatamente 1 ocorrencia do agendamento.
+- Auditoria encontrada:
+  - id: `b9239cb1-4554-4f78-b9f0-01ba25bd5d17`
+  - action: `APPOINTMENT_CREATED`
+  - route: `/public/booking`
+  - professionalId: `pro-01`
+  - professionalName: `Geovane Borges`
+- Cancelamento executado via status `CANCELLED`.
+- Slot voltou a ficar disponivel apos cancelamento.
+- Financeiro antes/depois: 8 transacoes antes, 8 depois.
+- Transacoes financeiras relacionadas ao appointmentId: 0.
+- Acoes de auditoria do agendamento: `APPOINTMENT_CREATED` e `APPOINTMENT_STATUS_UPDATED`.
+- Nao houve checkout, pagamento, venda real ou devolucao real.
+
+## Smoke e logs finais
+
+- `curl /health`: 200 OK.
+- `npm run smoke:api:readonly`: passou.
+- `pm2 logs software-barbearia --lines 120 --nostream`: sem crash, sem loop, sem erro Prisma critico, sem 500 repetido, sem segredo exposto. Os logs mostram `POST /public/booking` 201, `PATCH /appointments/:id/status` 200 para cancelamento, `GET /public/slots` 200 apos cancelamento e smoke readonly 200.
+
+## Decisao final
+
+APROVADO.
+
+## Confirmacoes de seguranca operacional
+
+- Nao houve migration.
+- Nao houve seed.
+- Nao houve alteracao de `.env`.
+- Nao houve exposicao de segredo.
+- Nao houve alteracao manual no banco.
+- Nao houve cliente real.
+- Nao houve checkout real.
+- Nao houve pagamento real.
+- Nao houve venda real.
+- Nao houve devolucao real.
