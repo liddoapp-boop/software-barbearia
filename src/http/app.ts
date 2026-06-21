@@ -2776,6 +2776,31 @@ export function createApp() {
         reason: body.reason,
       },
     });
+    const canceledCommissions = (result as {
+      canceledCommissions?: Array<{
+        id: string;
+        appointmentId?: string;
+        commissionAmount?: number;
+        status?: string;
+      }>;
+    }).canceledCommissions;
+    if (backend !== "prisma" && Array.isArray(canceledCommissions)) {
+      for (const commission of canceledCommissions) {
+        await recordAudit(request, {
+          unitId: body.unitId,
+          action: "COMMISSION_CANCELED_DUE_TO_APPOINTMENT_REFUND",
+          entity: "commission",
+          entityId: commission.id,
+          before: { status: "PENDING" },
+          after: {
+            status: "CANCELED",
+            appointmentId: commission.appointmentId ?? params.id,
+            refundId: result.refund.id,
+            amount: commission.commissionAmount,
+          },
+        });
+      }
+    }
     return result;
   });
 
@@ -4805,13 +4830,17 @@ export function createApp() {
 
   app.setErrorHandler(
     (error: Error, _request: FastifyRequest, reply: FastifyReply) => {
-      const isUniqueConstraint = (error as Error & { code?: string }).code === "P2002";
+      const errorCode = (error as Error & { code?: string }).code;
+      const isUniqueConstraint = errorCode === "P2002";
+      const isWriteConflict = errorCode === "P2034";
       const message = isUniqueConstraint
         ? "Conflito: operacao critica ja processada para esta origem"
+        : isWriteConflict
+          ? "Conflito: operacao concorrente deve ser repetida"
         : error.message || "Erro inesperado";
       const normalized = message.toLowerCase();
       const statusCode =
-        isUniqueConstraint
+        isUniqueConstraint || isWriteConflict
           ? 409
           : normalized.includes("nao autenticado") ||
         normalized.includes("token invalido") ||

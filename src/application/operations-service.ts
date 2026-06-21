@@ -2481,6 +2481,16 @@ export class OperationsService {
     );
     if (alreadyRefunded) throw new Error("Atendimento ja estornado");
 
+    const appointmentCommissions = this.store.commissionEntries.filter(
+      (commission) =>
+        commission.unitId === input.unitId &&
+        commission.appointmentId === appointment.id &&
+        commission.source === "SERVICE",
+    );
+    if (appointmentCommissions.some((commission) => commission.status === "PAID")) {
+      throw new Error("Comissao ja paga exige ajuste manual antes do estorno");
+    }
+
     const refund: Refund = {
       id: crypto.randomUUID(),
       unitId: input.unitId,
@@ -2513,11 +2523,19 @@ export class OperationsService {
       action: "REFUNDED",
       reason,
     });
+    const canceledCommissions: CommissionEntry[] = [];
+    for (const commission of appointmentCommissions) {
+      if ((commission.status ?? "PENDING") === "PENDING") {
+        commission.status = "CANCELED";
+        canceledCommissions.push({ ...commission });
+      }
+    }
 
     const response = {
       refund,
       financialEntry,
       stockMovements: [],
+      canceledCommissions,
     };
     this.finishMemoryIdempotency(scope, response);
     return response;

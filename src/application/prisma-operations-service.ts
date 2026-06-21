@@ -3630,6 +3630,7 @@ export class PrismaOperationsService {
         refund: Refund;
         financialEntry: FinancialEntry;
         stockMovements: unknown[];
+        canceledCommissions?: unknown[];
       }>(scope);
       if (replay) return replay;
     }
@@ -3646,10 +3647,11 @@ export class PrismaOperationsService {
 
     let response:
       | {
-          refund: Refund;
-          financialEntry: FinancialEntry;
-          stockMovements: unknown[];
-        }
+        refund: Refund;
+        financialEntry: FinancialEntry;
+        stockMovements: unknown[];
+        canceledCommissions?: unknown[];
+      }
       | undefined;
 
     try {
@@ -3684,6 +3686,28 @@ export class PrismaOperationsService {
           select: { id: true },
         });
         if (existingRefund) throw new Error("Atendimento ja estornado");
+
+        const appointmentCommissions = await tx.commissionEntry.findMany({
+          where: {
+            unitId: input.unitId,
+            appointmentId: appointment.id,
+            source: "SERVICE",
+          },
+          select: {
+            id: true,
+            status: true,
+            professionalId: true,
+            appointmentId: true,
+            baseAmount: true,
+            commissionRate: true,
+            commissionAmount: true,
+            paidAt: true,
+            source: true,
+          },
+        });
+        if (appointmentCommissions.some((commission) => commission.status === "PAID")) {
+          throw new Error("Comissao ja paga exige ajuste manual antes do estorno");
+        }
 
         const refund: Refund = {
           id: crypto.randomUUID(),
@@ -3748,8 +3772,56 @@ export class PrismaOperationsService {
             reason,
           },
         });
+        const pendingAppointmentCommissions = appointmentCommissions.filter(
+          (commission) => commission.status === "PENDING",
+        );
+        if (pendingAppointmentCommissions.length > 0) {
+          await tx.commissionEntry.updateMany({
+            where: { id: { in: pendingAppointmentCommissions.map((item) => item.id) } },
+            data: { status: "CANCELED" },
+          });
+          for (const commission of pendingAppointmentCommissions) {
+            await this.recordCriticalAudit(
+              tx,
+              input.audit
+                ? {
+                    ...input.audit,
+                    unitId: input.unitId,
+                    action: "COMMISSION_CANCELED_DUE_TO_APPOINTMENT_REFUND",
+                    entity: "commission",
+                    entityId: commission.id,
+                    before: { status: commission.status, paidAt: commission.paidAt },
+                    after: {
+                      status: "CANCELED",
+                      appointmentId: appointment.id,
+                      refundId: refund.id,
+                      amount: asNumber(commission.commissionAmount),
+                    },
+                  }
+                : undefined,
+            );
+          }
+        }
 
-        response = { refund, financialEntry, stockMovements: [] };
+        response = {
+          refund,
+          financialEntry,
+          stockMovements: [],
+          canceledCommissions: pendingAppointmentCommissions.map((item) => ({
+            id: item.id,
+            status: "CANCELED",
+            professionalId: item.professionalId,
+            appointmentId: item.appointmentId,
+            source: item.source,
+            baseAmount: Number(asNumber(item.baseAmount).toFixed(2)),
+            commissionRate:
+              item.commissionRate == null
+                ? null
+                : Number((asNumber(item.commissionRate) * 100).toFixed(2)),
+            commissionAmount: Number(asNumber(item.commissionAmount).toFixed(2)),
+            paidAt: null,
+          })),
+        };
         await this.recordCriticalAudit(
           tx,
           input.audit

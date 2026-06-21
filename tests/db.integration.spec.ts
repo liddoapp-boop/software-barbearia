@@ -495,6 +495,202 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(persisted).not.toBeNull();
   });
 
+  it("cancela comissao pendente no estorno de atendimento e mantem idempotencia", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-12T13:00:00.000Z",
+    );
+    const checkout = await checkoutAppointment(app, appointmentId, uniqueId("checkout-refund-service"));
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().commissions).toHaveLength(1);
+    const commissionId = checkout.json().commissions[0].id as string;
+
+    const payload = {
+      unitId: scenario.unitId,
+      changedBy: "db-test",
+      reason: "Estorno de atendimento cancela comissao DB",
+      refundedAt: "2026-05-12T14:00:00.000Z",
+    };
+    const idempotencyKey = uniqueId("appointment-refund-commission");
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: {
+        "idempotency-key": idempotencyKey,
+        "x-correlation-id": uniqueId("corr-appointment-refund"),
+      },
+      payload,
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(1);
+    expect(refund.json().canceledCommissions[0]).toMatchObject({
+      id: commissionId,
+      status: "CANCELED",
+      appointmentId,
+      paidAt: null,
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refund.id).toBe(refund.json().refund.id);
+    expect(replay.json().canceledCommissions).toHaveLength(1);
+
+    const commission = await prisma.commissionEntry.findUniqueOrThrow({
+      where: { id: commissionId },
+    });
+    expect(commission.status).toBe("CANCELED");
+    expect(commission.paidAt).toBeNull();
+
+    const payCanceled = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${commissionId}/pay`,
+      headers: { "idempotency-key": uniqueId("pay-canceled-appointment-commission") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        paidAt: "2026-05-12T14:30:00.000Z",
+      },
+    });
+    expect(payCanceled.statusCode).toBe(400);
+    expect(payCanceled.json().error).toBe("Comissao cancelada nao pode ser paga");
+
+    const serviceRevenue = await prisma.financialEntry.findMany({
+      where: {
+        unitId: scenario.unitId,
+        source: "SERVICE",
+        referenceType: "APPOINTMENT",
+        referenceId: appointmentId,
+      },
+    });
+    expect(serviceRevenue).toHaveLength(1);
+
+    const refundExpenses = await prisma.financialEntry.findMany({
+      where: {
+        unitId: scenario.unitId,
+        source: "REFUND",
+        referenceType: "APPOINTMENT_REFUND",
+        notes: { contains: appointmentId },
+      },
+    });
+    expect(refundExpenses).toHaveLength(1);
+
+    const refunds = await prisma.refund.findMany({
+      where: { unitId: scenario.unitId, appointmentId },
+    });
+    expect(refunds).toHaveLength(1);
+
+    const pending = await app.inject({
+      method: "GET",
+      url: `/financial/commissions?unitId=${scenario.unitId}&start=2026-05-12T00:00:00.000Z&end=2026-05-12T23:59:59.999Z&status=PENDING`,
+    });
+    expect(pending.statusCode).toBe(200);
+    expect(
+      pending.json().entries.some((item: { id: string }) => item.id === commissionId),
+    ).toBe(false);
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: {
+        unitId: scenario.unitId,
+        action: "COMMISSION_CANCELED_DUE_TO_APPOINTMENT_REFUND",
+        entity: "commission",
+        entityId: commissionId,
+      },
+    });
+    expect(auditLogs).toHaveLength(1);
+  });
+
+  it("bloqueia estorno de atendimento quando a comissao ja foi paga", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-13T13:00:00.000Z",
+    );
+    const checkout = await checkoutAppointment(app, appointmentId, uniqueId("checkout-paid-before-refund"));
+    expect(checkout.statusCode).toBe(200);
+    const commissionId = checkout.json().commissions[0].id as string;
+
+    const pay = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${commissionId}/pay`,
+      headers: { "idempotency-key": uniqueId("pay-before-appointment-refund") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        paidAt: "2026-05-13T14:00:00.000Z",
+      },
+    });
+    expect(pay.statusCode).toBe(200);
+
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": uniqueId("blocked-paid-appointment-refund") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        reason: "Nao deve estornar comissao paga",
+        refundedAt: "2026-05-13T14:30:00.000Z",
+      },
+    });
+    expect(refund.statusCode).toBe(400);
+    expect(refund.json().error).toBe("Comissao ja paga exige ajuste manual antes do estorno");
+
+    const refunds = await prisma.refund.findMany({
+      where: { unitId: scenario.unitId, appointmentId },
+    });
+    expect(refunds).toHaveLength(0);
+  });
+
+  it("mantem estorno de atendimento funcionando quando nao ha comissao vinculada", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.commissionRule.deleteMany({
+      where: { professionalId: scenario.professionalId },
+    });
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-14T13:00:00.000Z",
+    );
+    const checkout = await checkoutAppointment(app, appointmentId, uniqueId("checkout-without-commission"));
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().commissions).toHaveLength(0);
+
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": uniqueId("refund-without-commission") },
+      payload: {
+        unitId: scenario.unitId,
+        changedBy: "db-test",
+        reason: "Estorno sem comissao vinculada",
+        refundedAt: "2026-05-14T14:00:00.000Z",
+      },
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(0);
+
+    const refundExpenses = await prisma.financialEntry.findMany({
+      where: {
+        unitId: scenario.unitId,
+        source: "REFUND",
+        referenceType: "APPOINTMENT_REFUND",
+        notes: { contains: appointmentId },
+      },
+    });
+    expect(refundExpenses).toHaveLength(1);
+  });
+
   it("paga comissao concorrente sem duplicar despesa financeira", async () => {
     const app = createApp();
     const scenario = await createScenario();

@@ -1429,6 +1429,210 @@ describe("API MVP", () => {
     ).toHaveLength(1);
   });
 
+  it("cancela comissao de atendimento pendente no estorno e bloqueia pagamento posterior", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-barba",
+        startsAt: "2026-04-30T14:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const updated = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${appointmentId}/status`,
+        payload: { status, changedBy: "owner" },
+      });
+      expect(updated.statusCode).toBe(200);
+    }
+
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "checkout-appointment-refund-commission" },
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-04-30T14:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 55,
+      },
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().commissions).toHaveLength(1);
+    const commissionId = checkout.json().commissions[0].id as string;
+
+    const payload = {
+      unitId: "unit-01",
+      changedBy: "owner",
+      reason: "Estorno cancela comissao de atendimento",
+      refundedAt: "2026-04-30T15:00:00.000Z",
+    };
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": "refund-appointment-commission" },
+      payload,
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(1);
+    expect(refund.json().canceledCommissions[0]).toMatchObject({
+      id: commissionId,
+      status: "CANCELED",
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": "refund-appointment-commission" },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refund.id).toBe(refund.json().refund.id);
+    expect(replay.json().canceledCommissions).toHaveLength(1);
+
+    const commissions = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-30T00:00:00.000Z&end=2026-04-30T23:59:59.999Z",
+    });
+    expect(commissions.statusCode).toBe(200);
+    const canceled = commissions
+      .json()
+      .entries.find((item: { id: string }) => item.id === commissionId);
+    expect(canceled.status).toBe("CANCELED");
+    expect(canceled.paidAt).toBeNull();
+    expect(commissions.json().summary.pendingCommission).toBe(0);
+
+    const payCanceled = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${commissionId}/pay`,
+      headers: { "idempotency-key": "pay-canceled-appointment-commission" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "owner",
+        paidAt: "2026-04-30T15:30:00.000Z",
+      },
+    });
+    expect(payCanceled.statusCode).toBe(400);
+    expect(payCanceled.json().error).toBe("Comissao cancelada nao pode ser paga");
+
+    const transactions = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-30T00:00:00.000Z&end=2026-04-30T23:59:59.999Z",
+    });
+    const related = transactions
+      .json()
+      .transactions.filter(
+        (item: { appointmentId: string | null; notes: string | null }) =>
+          item.appointmentId === appointmentId || item.notes?.includes(appointmentId),
+      );
+    expect(related.filter((item: { type: string; source: string }) => item.type === "INCOME" && item.source === "SERVICE")).toHaveLength(1);
+    expect(related.filter((item: { type: string; source: string }) => item.type === "EXPENSE" && item.source === "REFUND")).toHaveLength(1);
+
+    const audit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01&entity=commission&action=COMMISSION_CANCELED_DUE_TO_APPOINTMENT_REFUND&limit=20",
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(
+      audit.json().events.filter((item: { entityId: string }) => item.entityId === commissionId),
+    ).toHaveLength(1);
+  });
+
+  it("bloqueia estorno automatico de atendimento com comissao ja paga", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-barba",
+        startsAt: "2026-04-30T16:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const updated = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${appointmentId}/status`,
+        payload: { status, changedBy: "owner" },
+      });
+      expect(updated.statusCode).toBe(200);
+    }
+
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "checkout-paid-appointment-refund" },
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-04-30T16:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 55,
+      },
+    });
+    expect(checkout.statusCode).toBe(200);
+    const commissionId = checkout.json().commissions[0].id as string;
+
+    const pay = await app.inject({
+      method: "PATCH",
+      url: `/financial/commissions/${commissionId}/pay`,
+      headers: { "idempotency-key": "pay-before-appointment-refund" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "owner",
+        paidAt: "2026-04-30T17:00:00.000Z",
+      },
+    });
+    expect(pay.statusCode).toBe(200);
+
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": "refund-paid-appointment-commission" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "owner",
+        reason: "Nao estornar comissao paga",
+        refundedAt: "2026-04-30T17:30:00.000Z",
+      },
+    });
+    expect(refund.statusCode).toBe(400);
+    expect(refund.json().error).toBe("Comissao ja paga exige ajuste manual antes do estorno");
+
+    const transactions = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-30T00:00:00.000Z&end=2026-04-30T23:59:59.999Z",
+    });
+    expect(
+      transactions
+        .json()
+        .transactions.filter(
+          (item: { type: string; source: string; notes: string | null }) =>
+            item.type === "EXPENSE" &&
+            item.source === "REFUND" &&
+            item.notes?.includes(appointmentId),
+        ),
+    ).toHaveLength(0);
+  });
+
   it("nao cancela silenciosamente comissao de produto ja paga em devolucao total", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
