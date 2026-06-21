@@ -430,6 +430,12 @@
     .slot-btn:hover { border-color: var(--bd2); color: var(--tx); }
     .slot-btn.sel { border-color: var(--sel-bd); color: var(--tx); background: var(--sel-bg); }
     .slot-btn.taken { opacity: .30; pointer-events: none; text-decoration: line-through; }
+    .booking-locked .cal-day,
+    .booking-locked .cal-nav-btn,
+    .booking-locked .slot-btn {
+      pointer-events: none;
+      opacity: .42;
+    }
 
     /* ── Confirm Card ────────────────────────────────── */
     .confirm-card {
@@ -679,8 +685,9 @@ let serviceProfessionals = [];
 let weekStart = null, phoneMask = null, confirmData = {};
 let publicWorkingHours = null;
 let bookingSubmitting = false;
-let bookingSubmitted = false;
+let bookingCompleted = false;
 let bookingRunId = 0;
+let confirmRenderSeq = 0;
 
 const chat      = document.getElementById('chat');
 const chatInput = document.getElementById('chatInput');
@@ -891,6 +898,7 @@ function disableInput() {
 
 function resetBookingFlowState() {
   bookingRunId += 1;
+  confirmRenderSeq += 1;
   selectedService = null;
   selectedProfessional = null;
   selectedDate = null;
@@ -901,11 +909,42 @@ function resetBookingFlowState() {
   slots = {};
   confirmData = {};
   bookingSubmitting = false;
-  bookingSubmitted = false;
+  bookingCompleted = false;
+  document.body.classList.remove('booking-locked');
+  removeCurrentBookingWidgets();
 }
 
 function isCurrentBookingRun(runId) {
   return runId === bookingRunId;
+}
+
+function removeCurrentBookingWidgets() {
+  ['calWidgetWrap', 'confirmWidgetWrap', 'bookingSuccessWrap', 'bookingSuccessMessageWrap'].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) node.remove();
+  });
+}
+
+function disableConfirmButtons() {
+  document.querySelectorAll('#btnConfirm').forEach((button) => {
+    button.disabled = true;
+    button.setAttribute('aria-disabled', 'true');
+  });
+}
+
+function lockCompletedBookingUI() {
+  bookingCompleted = true;
+  bookingSubmitting = false;
+  confirmRenderSeq += 1;
+  document.body.classList.add('booking-locked');
+  disableConfirmButtons();
+  removeCurrentBookingWidgets();
+  selectedSlot = null;
+  selectedSlotProfessional = null;
+}
+
+function canMutateBookingFlow(runId = bookingRunId) {
+  return isCurrentBookingRun(runId) && !bookingCompleted;
 }
 
 async function beginNewBooking(fromUserAction = false) {
@@ -1022,7 +1061,7 @@ function renderServices() {
 }
 
 async function onPickService(id, runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   const svc = services.find(s => String(s.id) === String(id));
   if (!svc) return;
   selectedService = svc;
@@ -1032,7 +1071,6 @@ async function onPickService(id, runId = bookingRunId) {
   selectedSlotProfessional = null;
   confirmData = {};
   bookingSubmitting = false;
-  bookingSubmitted = false;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
   await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Escolha um profissional:`, 400);
   step = STEPS.PROFESSIONAL;
@@ -1041,7 +1079,7 @@ async function onPickService(id, runId = bookingRunId) {
 
 /* ═══ Professionals ═══════════════════════════════════════ */
 async function loadProfessionals(runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   disableInput();
   serviceProfessionals = [];
   showTyping();
@@ -1057,7 +1095,7 @@ async function loadProfessionals(runId = bookingRunId) {
 }
 
 function renderProfessionals(runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   const options = [
     { id: '', name: 'Sem preferência', hint: 'Atribuição automática' },
     ...serviceProfessionals.map((item) => ({ id: item.id, name: item.displayName || item.name, hint: 'Profissional escolhido' })),
@@ -1080,7 +1118,7 @@ function renderProfessionals(runId = bookingRunId) {
 }
 
 async function onPickProfessional(id, runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   const professional = id
     ? serviceProfessionals.find((item) => String(item.id) === String(id))
     : { id: '', name: 'Sem preferência', displayName: 'Sem preferência' };
@@ -1093,7 +1131,6 @@ async function onPickProfessional(id, runId = bookingRunId) {
   selectedSlot = null;
   selectedSlotProfessional = null;
   bookingSubmitting = false;
-  bookingSubmitted = false;
   appendBubble(selectedProfessional.name, true);
   await say('Selecione uma data:', 300);
   step = STEPS.CALENDAR;
@@ -1102,6 +1139,7 @@ async function onPickProfessional(id, runId = bookingRunId) {
 
 /* ═══ Calendar ════════════════════════════════════════════ */
 async function fetchSlotsForWeek(ws) {
+  if (bookingCompleted) return;
   const key = toKey(ws);
   try {
     const professionalQuery = selectedProfessional?.id ? `&professionalId=${encodeURIComponent(selectedProfessional.id)}` : '';
@@ -1111,6 +1149,7 @@ async function fetchSlotsForWeek(ws) {
 }
 
 async function loadCalendar() {
+  if (bookingCompleted) return;
   disableInput();
   const today = new Date(); today.setHours(0,0,0,0);
   weekStart = new Date(today);
@@ -1133,6 +1172,7 @@ function weekDates(s) {
 }
 
 function renderCalendar() {
+  if (bookingCompleted) return;
   const runId = bookingRunId;
   const prev = document.getElementById('calWidgetWrap');
   if (prev) prev.remove();
@@ -1183,7 +1223,7 @@ function renderCalendar() {
     </div>`);
 
   document.getElementById('calPrev').addEventListener('click', async () => {
-    if (!isCurrentBookingRun(runId)) return;
+    if (!canMutateBookingFlow(runId)) return;
     const t = new Date(); t.setHours(0,0,0,0);
     const p = new Date(weekStart); p.setDate(p.getDate()-7);
     if (p < t) return;
@@ -1192,7 +1232,7 @@ function renderCalendar() {
     renderCalendar();
   });
   document.getElementById('calNext').addEventListener('click', async () => {
-    if (!isCurrentBookingRun(runId)) return;
+    if (!canMutateBookingFlow(runId)) return;
     const n = new Date(weekStart); n.setDate(n.getDate()+7);
     weekStart = n; selectedDate = null; selectedSlot = null;
     if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
@@ -1202,10 +1242,9 @@ function renderCalendar() {
 }
 
 function onPickDay(key, runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   selectedDate = key; selectedSlot = null; selectedSlotProfessional = null;
   bookingSubmitting = false;
-  bookingSubmitted = false;
   document.querySelectorAll('.cal-day').forEach(b => {
     const s = b.dataset.key === key;
     b.classList.toggle('sel', s);
@@ -1230,14 +1269,13 @@ function onPickDay(key, runId = bookingRunId) {
 }
 
 async function onPickSlot(time, runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   selectedSlot = time;
   const slot = (slots[selectedDate] || []).find((item) => item.time === time);
   selectedSlotProfessional = slot?.professionalId
     ? { id: slot.professionalId, name: slot.professionalName || 'Profissional' }
     : null;
   bookingSubmitting = false;
-  bookingSubmitted = false;
   document.querySelectorAll('.slot-btn').forEach(b => {
     const s = b.dataset.time === time;
     b.classList.toggle('sel', s);
@@ -1249,8 +1287,11 @@ async function onPickSlot(time, runId = bookingRunId) {
 
 /* ═══ Confirm ══════════════════════════════════════════════ */
 async function showConfirm(runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
+  if (!canMutateBookingFlow(runId)) return;
   step = STEPS.CONFIRM;
+  const renderSeq = ++confirmRenderSeq;
+  const oldConfirm = document.getElementById('confirmWidgetWrap');
+  if (oldConfirm) oldConfirm.remove();
   const client = getClient();
   const email = sanitizeEmailValue(client.email);
   const dateObj = new Date(selectedDate + 'T12:00:00');
@@ -1266,9 +1307,8 @@ async function showConfirm(runId = bookingRunId) {
     price: selectedService.price, duration: selectedService.duration,
     date: selectedDate, time: selectedSlot, dateStr,
   };
-  const oldConfirm = document.getElementById('confirmWidgetWrap');
-  if (oldConfirm) oldConfirm.remove();
   await say('Confirme seu agendamento:', 400);
+  if (!canMutateBookingFlow(runId) || renderSeq !== confirmRenderSeq) return;
   const w = appendWidget(`
     <div class="confirm-card" id="confirmWidgetWrap">
       <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(confirmData.serviceName)}</span></div>
@@ -1287,22 +1327,24 @@ async function showConfirm(runId = bookingRunId) {
 
 /* ═══ Submit ═══════════════════════════════════════════════ */
 async function submitBooking(runId = bookingRunId) {
-  if (!isCurrentBookingRun(runId)) return;
-  if (bookingSubmitting || bookingSubmitted) return;
+  if (!canMutateBookingFlow(runId)) return;
+  if (bookingSubmitting || bookingCompleted) return;
+  if (!confirmData?.date || !confirmData?.time || !selectedSlot) return;
   bookingSubmitting = true;
-  const btn = document.getElementById('btnConfirm');
+  const btn = document.querySelector('#confirmWidgetWrap #btnConfirm');
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
   try {
+    const submittedData = { ...confirmData };
     const iso = new Date(`${confirmData.date}T${confirmData.time}:00.000-03:00`).toISOString();
     const headers = { 'Content-Type': 'application/json' };
     const payload = {
       unitId: BOOKING_UNIT_ID || undefined,
-      clientName: sanitizeTextValue(confirmData.clientName, 120),
-      clientPhone: normalizePhoneDigits(confirmData.phone),
-      serviceId: confirmData.serviceId,
+      clientName: sanitizeTextValue(submittedData.clientName, 120),
+      clientPhone: normalizePhoneDigits(submittedData.phone),
+      serviceId: submittedData.serviceId,
       startsAt: iso,
     };
-    const email = sanitizeEmailValue(confirmData.email);
+    const email = sanitizeEmailValue(submittedData.email);
     if (email && !isValidEmail(email)) {
       const err = new Error('Informe um e-mail válido ou deixe o campo em branco.');
       err.status = 400;
@@ -1322,19 +1364,19 @@ async function submitBooking(runId = bookingRunId) {
       throw err;
     }
     const created = await r.json().catch(() => ({}));
-    const assignedProfessionalName = created?.professionalName || confirmData.resolvedProfessionalName || confirmData.professionalName;
-    bookingSubmitted = true;
-    saveAppt({ id:Date.now(), service:confirmData.serviceName, professional:assignedProfessionalName, date:confirmData.dateStr, time:confirmData.time, price:fmtBRL(confirmData.price), status:'pending', createdAt:new Date().toISOString() });
+    const assignedProfessionalName = created?.professionalName || submittedData.resolvedProfessionalName || submittedData.professionalName;
+    saveAppt({ id:Date.now(), service:submittedData.serviceName, professional:assignedProfessionalName, date:submittedData.dateStr, time:submittedData.time, price:fmtBRL(submittedData.price), status:'pending', createdAt:new Date().toISOString() });
     step = STEPS.DONE;
-    await say(`<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(assignedProfessionalName)} · ${escapeHtml(confirmData.time)} — ${escapeHtml(confirmData.dateStr)}.</span>`);
-    await say('Se quiser marcar outro horário, continue por aqui.', 800);
-    const restart = appendWidget(`
-      <div class="confirm-card">
-        <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer outro agendamento">
-          Novo agendamento
-        </button>
-      </div>`);
-    restart.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
+    lockCompletedBookingUI();
+    renderBookingSuccess({
+      serviceName: submittedData.serviceName,
+      professionalName: assignedProfessionalName,
+      dateStr: submittedData.dateStr,
+      time: submittedData.time,
+      duration: submittedData.duration,
+      price: submittedData.price,
+      appointmentId: created?.id || '',
+    });
   } catch (error) {
     bookingSubmitting = false;
     const backendError = String(error?.backendError || error?.message || '').toLowerCase();
@@ -1351,6 +1393,30 @@ async function submitBooking(runId = bookingRunId) {
       renderCalendar();
     }
   }
+}
+
+function renderBookingSuccess(summary) {
+  const oldSuccess = document.getElementById('bookingSuccessWrap');
+  if (oldSuccess) oldSuccess.remove();
+  const oldSuccessMessage = document.getElementById('bookingSuccessMessageWrap');
+  if (oldSuccessMessage) oldSuccessMessage.remove();
+  const successMessage = appendBubble(
+    `<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} · ${escapeHtml(summary.time)} — ${escapeHtml(summary.dateStr)}.</span>`,
+  );
+  successMessage.id = 'bookingSuccessMessageWrap';
+  const success = appendWidget(`
+    <div class="confirm-card" id="bookingSuccessWrap" aria-live="polite">
+      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(summary.serviceName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(summary.professionalName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(summary.dateStr)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(summary.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(summary.duration)} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(summary.price)}</span></div>
+      <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer outro agendamento">
+        Novo agendamento
+      </button>
+    </div>`);
+  success.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
 }
 
 /* ─ Input events ─ */
