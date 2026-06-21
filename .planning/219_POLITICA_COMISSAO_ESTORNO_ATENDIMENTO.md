@@ -1,7 +1,7 @@
 # Fase 219 - Politica de comissao em estorno de atendimento
 
 Data de inicio: 2026-06-21 UTC
-Decisao final: em validacao pos-deploy
+Decisao final: APROVADO
 
 ## Problema
 
@@ -163,13 +163,94 @@ Observacao: durante a primeira execucao completa de `npm run test:db`, um caso c
 
 ## Deploy e teste em producao
 
-Pendente apos commit e push de codigo.
+Commit de codigo:
+
+- `6aeef90 fix: cancelar comissao pendente em estorno de atendimento`
+
+Deploy controlado executado em `2026-06-21 UTC`:
+
+- `git status -sb`: limpo e alinhado com `origin/main`.
+- `git status --short`: sem alteracoes.
+- `git pull --ff-only origin main`: already up to date.
+- `npx prisma migrate status`: schema em dia; nenhuma migration aplicada.
+- `npm run build`: passou.
+- `pm2 restart software-barbearia --update-env`: processo `software-barbearia` reiniciado e online.
+- `pm2 status`: `software-barbearia` online.
+- `curl -sS https://barbearia.76-13-161-250.nip.io/health`: `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
+
+Teste controlado em producao:
+
+- Ambiente: `https://barbearia.76-13-161-250.nip.io`
+- Cliente fake: `CLIENTE TESTE COMISSAO ESTORNO - FASE 219`
+- Telefone fake: `00000021900`
+- Unidade: `unit-01`
+- Servico: `svc-barba` / `Barba Terapia`
+- Profissional: `pro-01` / `Geovane Borges`
+- Agendamento: `bbc7aa3c-f275-480d-9d66-54846f9f1c26`
+- Horario: `2026-06-22T12:00:00.000Z`
+- Status percorrido: `SCHEDULED -> CONFIRMED -> IN_SERVICE -> COMPLETED`
+
+Resultado financeiro:
+
+- Receita `SERVICE`: `92895cdc-66d0-46dd-8f56-8aa28a3b4156`, valor `55`, appointment `bbc7aa3c-f275-480d-9d66-54846f9f1c26`.
+- Refund: `3be1a961-4b96-4ce9-8d86-d38a2ddcba6b`.
+- Despesa `REFUND`: `f9c63b28-172d-448b-b34b-7e30e56b3d33`, valor `55`, `referenceType=APPOINTMENT_REFUND`, notes com `appointmentId=bbc7aa3c-f275-480d-9d66-54846f9f1c26`.
+
+Resultado da comissao:
+
+- Comissao: `d674b9f1-23b9-4075-9d44-3713b0e1e112`.
+- Valor: `22`.
+- Status inicial: `PENDING`.
+- Status final apos refund: `CANCELED`.
+- `paidAt`: `null`.
+- Tentativa de pagamento apos cancelamento: HTTP `400`, mensagem `Comissao cancelada nao pode ser paga`.
+
+Auditoria em producao:
+
+- `APPOINTMENT_REFUNDED`: `967c08a8-c7cb-465e-9dee-7e871c1a5b1e`.
+- `COMMISSION_CANCELED_DUE_TO_APPOINTMENT_REFUND`: `e08ae373-8b76-407a-8123-548c3c554918`.
+
+Observacao de idempotencia em producao:
+
+- O refund foi executado uma vez com sucesso.
+- Um replay manual posterior reutilizou a mesma `idempotencyKey` com `refundedAt` diferente e retornou HTTP `409` por payload diferente, comportamento esperado do contrato de idempotencia.
+- O replay com payload identico foi validado nas suites automatizadas local e Prisma, sem duplicar despesa, comissao ou auditoria.
+
+Smoke e logs finais:
+
+- Health final: `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
+- `pm2 logs software-barbearia --lines 160 --nostream`: error log vazio; sem crash, loop, erro Prisma critico ou 500 repetido. Os status observados foram os esperados pelo teste (`409` de idempotency key com payload diferente e `400` ao tentar pagar comissao cancelada).
 
 ## Riscos restantes
 
 - Esta fase bloqueia estorno automatico com comissao `PAID`; ainda falta definir uma politica operacional para ajuste manual controlado de comissoes ja pagas.
 - O comportamento de cancelamento automatico foi aplicado somente a comissao de servico ligada ao appointment estornado.
 
+## Garantias de escopo
+
+Nao houve:
+
+- migration;
+- seed;
+- alteracao de `.env`;
+- impressao de segredo no relatorio final;
+- alteracao manual em banco;
+- uso de cliente real;
+- venda real de produto;
+- devolucao real de produto;
+- estorno de atendimento real;
+- force push;
+- rebase;
+- `git reset --hard`.
+
 ## Decisao final
 
-Pendente ate concluir validacao completa, deploy controlado e teste controlado em producao.
+`APROVADO`
+
+Motivo: a politica definida foi implementada, testada localmente em memoria e Prisma, publicada sem migration, e validada em producao controlada com cliente fake. O refund de atendimento com comissao pendente criou a despesa `REFUND`, cancelou a comissao para `CANCELED`, manteve `paidAt` nulo, bloqueou pagamento posterior e registrou auditoria propria.
+
+## Proxima etapa recomendada
+
+Definir uma fase operacional pequena para regularizacao manual de atendimentos estornados com comissao ja `PAID`, incluindo permissao, auditoria e lancamento financeiro de ajuste quando aplicavel.
