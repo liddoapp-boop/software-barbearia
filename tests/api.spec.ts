@@ -4398,6 +4398,35 @@ describe("API MVP", () => {
     expect(rafaelDetail.json().appointment.professional).toBe("Rafael Andrade");
   });
 
+  it("lista somente dados publicos seguros dos profissionais elegiveis por servico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const rafael = await createProfessional(app, "Rafael Andrade");
+    await setBarbaProfessionals(app, ["pro-01", rafael.id]);
+
+    const professionals = await app.inject({
+      method: "GET",
+      url: "/public/services/svc-barba/professionals?unitId=unit-01",
+    });
+
+    expect(professionals.statusCode).toBe(200);
+    expect(professionals.json().service).toEqual({
+      id: "svc-barba",
+      name: "Barba Terapia",
+    });
+    expect(professionals.json().professionals).toEqual([
+      { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
+      { id: rafael.id, name: "Rafael Andrade", displayName: "Rafael Andrade" },
+    ]);
+    for (const item of professionals.json().professionals as Array<Record<string, unknown>>) {
+      expect(Object.keys(item).sort()).toEqual(["displayName", "id", "name"]);
+      expect(item).not.toHaveProperty("email");
+      expect(item).not.toHaveProperty("document");
+      expect(item).not.toHaveProperty("phone");
+      expect(item).not.toHaveProperty("commission");
+    }
+  });
+
   it("rejeita profissional publico nao vinculado ao servico", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -4501,6 +4530,64 @@ describe("API MVP", () => {
     expect(booking.statusCode).toBe(201);
     expect(booking.json().professionalId).toBe(automaticSlot?.professionalId);
     expect(booking.json().professionalName).toBe(automaticSlot?.professionalName);
+  });
+
+  it("registra auditoria ao criar agendamento pelo booking publico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      headers: { "x-correlation-id": "corr-public-booking-audit" },
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Auditoria Publica",
+        clientPhone: "(11) 90000-2106",
+        serviceId: "svc-barba",
+        professionalId: "pro-01",
+        startsAt: "2026-06-05T21:00:00.000Z",
+      },
+    });
+    expect(booking.statusCode).toBe(201);
+
+    const audit = await app.inject({
+      method: "GET",
+      url: `/audit/events?unitId=unit-01&entity=appointment&action=APPOINTMENT_CREATED&limit=20`,
+    });
+    expect(audit.statusCode).toBe(200);
+    const events = audit.json().events as Array<{
+      action: string;
+      entity: string;
+      entityId: string;
+      route: string;
+      method: string;
+      requestId: string;
+      afterJson: Record<string, unknown>;
+      metadataJson: Record<string, unknown>;
+    }>;
+    const event = events.find((item) => item.entityId === booking.json().id);
+
+    expect(event).toMatchObject({
+      action: "APPOINTMENT_CREATED",
+      entity: "appointment",
+      entityId: booking.json().id,
+      route: "/public/booking",
+      method: "POST",
+      requestId: "corr-public-booking-audit",
+    });
+    expect(event?.afterJson).toMatchObject({
+      origin: "public_booking",
+      appointmentId: booking.json().id,
+      serviceId: "svc-barba",
+      serviceName: "Barba Terapia",
+      professionalId: "pro-01",
+      professionalName: "Geovane Borges",
+      startsAt: "2026-06-05T21:00:00.000Z",
+    });
+    expect(event?.afterJson).not.toHaveProperty("clientPhone");
+    expect(event?.afterJson).not.toHaveProperty("clientEmail");
+    expect(event?.metadataJson).toEqual({ source: "public" });
   });
 
   it("mantem o contrato estatico do booking publico sem selecao implicita findFirst", async () => {

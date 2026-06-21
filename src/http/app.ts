@@ -4775,6 +4775,26 @@ export function createApp() {
     }
 
     const appointment = { id: appointmentId, startsAt, endsAt };
+    await recordAudit(request, {
+      unitId,
+      action: "APPOINTMENT_CREATED",
+      entity: "appointment",
+      entityId: appointmentId,
+      after: {
+        origin: "public_booking",
+        appointmentId,
+        clientId,
+        serviceId: service.id,
+        serviceName: service.name,
+        professionalId: profId,
+        professionalName: profName,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+      },
+      metadata: {
+        source: "public",
+      },
+    });
 
     // Notificações assíncronas (não bloqueia a resposta)
     const bookingData = {
