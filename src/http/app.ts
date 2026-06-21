@@ -4316,8 +4316,18 @@ export function createApp() {
       return byName || a.id.localeCompare(b.id, "pt-BR");
     });
 
+  const isPublicOperationalProfessional = (item: PublicBookingProfessional) =>
+    !item.id.startsWith("demo-pro-");
+
   const normalizePublicProfessionalId = (value?: unknown) => {
     const normalized = String(value ?? "").trim();
+    return normalized || undefined;
+  };
+
+  const normalizeOptionalPublicEmail = (value: unknown) => {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value !== "string") return value;
+    const normalized = value.trim();
     return normalized || undefined;
   };
 
@@ -4362,10 +4372,12 @@ export function createApp() {
         },
       });
       return sortPublicProfessionals(
-        rows.map((row) => ({
-          id: row.professional.id,
-          name: row.professional.name,
-        })),
+        rows
+          .map((row) => ({
+            id: row.professional.id,
+            name: row.professional.name,
+          }))
+          .filter(isPublicOperationalProfessional),
       );
     }
 
@@ -4376,6 +4388,7 @@ export function createApp() {
       .filter((item) => item.active && (item.businessId ?? unitId) === unitId)
       .filter((item) => linkedIds.includes(item.id))
       .filter((item) => !professionalId || item.id === professionalId)
+      .filter(isPublicOperationalProfessional)
       .map((item) => ({ id: item.id, name: item.name }));
     return sortPublicProfessionals(professionals);
   };
@@ -4677,8 +4690,8 @@ export function createApp() {
     clientName: z.string().min(2).max(120),
     clientPhone: z.string().min(8).max(20),
     clientEmail: z.preprocess(
-      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-      z.string().email().optional(),
+      normalizeOptionalPublicEmail,
+      z.string().email("Informe um e-mail valido ou deixe o campo em branco.").optional(),
     ),
     serviceId: z.string().min(1),
     professionalId: z.preprocess(
@@ -4690,7 +4703,19 @@ export function createApp() {
   });
 
   app.post("/public/booking", async (request, reply) => {
-    const body = publicBookingSchema.parse(request.body);
+    const parsedBody = publicBookingSchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      const hasEmailIssue = parsedBody.error.issues.some((issue) =>
+        issue.path.includes("clientEmail"),
+      );
+      reply.status(400).send({
+        error: hasEmailIssue
+          ? "Informe um e-mail valido ou deixe o campo em branco."
+          : "Nao foi possivel concluir o agendamento. Verifique os dados e tente novamente.",
+      });
+      return;
+    }
+    const body = parsedBody.data;
     const unitId = publicUnitId(body.unitId);
     const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
 

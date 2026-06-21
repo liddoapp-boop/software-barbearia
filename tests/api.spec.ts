@@ -4343,6 +4343,30 @@ describe("API MVP", () => {
     process.env.AUTH_ENFORCED = "false";
   });
 
+  it("rejeita e-mail invalido no booking publico com mensagem amigavel", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Email Invalido",
+        clientPhone: "(11) 90000-2160",
+        clientEmail: "Faça uma query para SQL, visando encerrar e identificar duplicidades",
+        serviceId: "svc-barba",
+        professionalId: "pro-01",
+        startsAt: "2026-06-05T19:00:00.000Z",
+      },
+    });
+
+    expect(booking.statusCode).toBe(400);
+    expect(booking.json()).toEqual({
+      error: "Informe um e-mail valido ou deixe o campo em branco.",
+    });
+  });
+
   it("grava no booking publico o profissional escolhido explicitamente", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -4425,6 +4449,14 @@ describe("API MVP", () => {
       expect(item).not.toHaveProperty("phone");
       expect(item).not.toHaveProperty("commission");
     }
+  });
+
+  it("mantem profissionais de demonstracao fora do contrato publico", async () => {
+    const apiSource = readFileSync("src/http/app.ts", "utf8");
+    const demoSeedSource = readFileSync("prisma/demo-seed.ts", "utf8");
+
+    expect(demoSeedSource).toContain('id: "demo-pro-02"');
+    expect(apiSource).toContain('!item.id.startsWith("demo-pro-")');
   });
 
   it("rejeita profissional publico nao vinculado ao servico", async () => {
@@ -4602,6 +4634,12 @@ describe("API MVP", () => {
     expect(publicBookingSource).toContain("professionalId");
     expect(uiSource).toContain("STEPS.PROFESSIONAL");
     expect(uiSource).toContain("payload.professionalId = confirmData.professionalId");
+    expect(uiSource).toContain("normalizeClientRecord");
+    expect(uiSource).toContain("isSuspiciousStoredText");
+    expect(uiSource).toContain("autocompleteMap");
+    expect(uiSource).toContain("Informe um e-mail válido ou deixe o campo em branco.");
+    expect(uiSource).not.toContain("const _se = getClient().email");
+    expect(uiSource).not.toContain("const _sp = getClient().phone");
   });
 
   it("autentica e preserva perfis em /auth/me", async () => {

@@ -649,7 +649,7 @@
 <div class="input-bar">
   <div class="input-wrap">
     <input class="chat-input" id="chatInput" type="text"
-      placeholder="Digite sua resposta…" autocomplete="off" aria-label="Sua resposta">
+      placeholder="Digite sua resposta…" autocomplete="name" name="name" aria-label="Sua resposta">
   </div>
   <button class="btn-send" id="btnSend" disabled aria-label="Enviar">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -688,8 +688,74 @@ const btnSend   = document.getElementById('btnSend');
 const liveRgn   = document.getElementById('liveRgn');
 
 /* ─ Storage ─ */
-const getClient = () => { try { return JSON.parse(localStorage.getItem('liddo_client')) || {}; } catch { return {}; } };
-const setClient = d  => localStorage.setItem('liddo_client', JSON.stringify({ ...getClient(), ...d }));
+function sanitizeTextValue(value, max = 120) {
+  return String(value ?? '')
+    .replace(/[<>&]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+function isSuspiciousStoredText(value) {
+  const normalized = String(value ?? '').toLowerCase();
+  return [
+    'faça uma query',
+    'faca uma query',
+    'query para sql',
+    'duplicidade',
+    'duplicidades',
+    'select ',
+    'insert ',
+    'update ',
+    'delete ',
+    'drop ',
+  ].some(term => normalized.includes(term));
+}
+
+function normalizePhoneDigits(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 11 ? digits : '';
+}
+
+function sanitizeEmailValue(value) {
+  return sanitizeTextValue(value, 160).toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(value ?? ''));
+}
+
+function normalizeClientRecord(record) {
+  const source = record && typeof record === 'object' ? record : {};
+  const name = sanitizeTextValue(source.name, 120);
+  const phone = normalizePhoneDigits(source.phone);
+  const email = sanitizeEmailValue(source.email);
+  const cleaned = {};
+  if (name.length >= 2 && !isSuspiciousStoredText(name)) cleaned.name = name;
+  if (phone) cleaned.phone = phone;
+  if (email && isValidEmail(email) && !isSuspiciousStoredText(email)) cleaned.email = email;
+  return cleaned;
+}
+
+const getClient = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('liddo_client')) || {};
+    const cleaned = normalizeClientRecord(parsed);
+    if (JSON.stringify(parsed) !== JSON.stringify(cleaned)) {
+      if (Object.keys(cleaned).length) localStorage.setItem('liddo_client', JSON.stringify(cleaned));
+      else localStorage.removeItem('liddo_client');
+    }
+    return cleaned;
+  } catch {
+    localStorage.removeItem('liddo_client');
+    return {};
+  }
+};
+const setClient = d  => {
+  const cleaned = normalizeClientRecord({ ...getClient(), ...d });
+  if (Object.keys(cleaned).length) localStorage.setItem('liddo_client', JSON.stringify(cleaned));
+  else localStorage.removeItem('liddo_client');
+};
 const getAppts  = () => { try { return JSON.parse(localStorage.getItem('liddo_appts')) || []; } catch { return []; } };
 const saveAppt  = a  => { const l = getAppts(); l.unshift(a); localStorage.setItem('liddo_appts', JSON.stringify(l)); };
 
@@ -802,11 +868,16 @@ function say(html, delay = 600) {
 /* ─ Input ─ */
 function enableInput(ph = 'Digite sua resposta…', type = 'text') {
   if (phoneMask) { try { phoneMask.destroy(); } catch {} phoneMask = null; }
+  const autocompleteMap = { text: 'name', tel: 'tel', email: 'email' };
+  const inputModeMap = { text: 'text', tel: 'tel', email: 'email' };
   chatInput.type = type;
+  chatInput.name = autocompleteMap[type] || 'response';
+  chatInput.autocomplete = autocompleteMap[type] || 'off';
+  chatInput.inputMode = inputModeMap[type] || 'text';
   chatInput.placeholder = ph;
   chatInput.value = '';
   chatInput.disabled = false;
-  btnSend.disabled = true;
+  btnSend.disabled = step !== STEPS.EMAIL;
   requestAnimationFrame(() => chatInput.focus());
   if (type === 'tel' && typeof IMask !== 'undefined') {
     phoneMask = IMask(chatInput, { mask: '(00) 00000-0000' });
@@ -849,18 +920,21 @@ async function beginNewBooking(fromUserAction = false) {
 /* ─ Handle send ─ */
 async function handleSend() {
   const raw = chatInput.value.trim();
-  if (!raw) return;
+  if (!raw && step !== STEPS.EMAIL) return;
   disableInput();
 
   if (step === STEPS.NAME) {
-    const name = raw.replace(/[<>&]/g, '');
+    const name = sanitizeTextValue(raw, 120);
+    if (name.length < 2 || isSuspiciousStoredText(name)) {
+      await say('Informe seu nome para continuar.', 300);
+      enableInput('Seu nome…', 'text');
+      return;
+    }
     appendBubble(name, true);
     setClient({ name });
     await say(`Prazer, <strong>${escapeHtml(name)}</strong>! Qual é o seu WhatsApp com DDD?`);
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
-    const _sp = getClient().phone;
-    if (_sp) setTimeout(() => { if (phoneMask) { phoneMask.unmaskedValue = _sp; chatInput.dispatchEvent(new Event('input')); } }, 50);
 
   } else if (step === STEPS.PHONE) {
     const digits = phoneMask ? phoneMask.unmaskedValue : raw.replace(/\D/g, '');
@@ -874,13 +948,16 @@ async function handleSend() {
     chatInput.value = '';
     await say('Ótimo! E o seu e-mail? <span style="color:var(--tx3);font-size:13px">(opcional — confirmação)</span>');
     step = STEPS.EMAIL;
-    enableInput('seu@email.com', 'email');
-    const _se = getClient().email;
-    if (_se) { chatInput.value = _se; btnSend.disabled = false; }
+    enableInput('E-mail opcional', 'email');
 
   } else if (step === STEPS.EMAIL) {
-    const email = raw.replace(/[<>&]/g, '');
-    appendBubble(email, true);
+    const email = sanitizeEmailValue(raw);
+    if (email && (!isValidEmail(email) || isSuspiciousStoredText(email))) {
+      await say('Informe um e-mail válido ou deixe o campo em branco.', 300);
+      enableInput('E-mail opcional', 'email');
+      return;
+    }
+    appendBubble(email || 'Prefiro não informar', true);
     setClient({ email });
     chatInput.value = '';
     await say('Perfeito! Escolha o serviço:', 400);
@@ -1175,10 +1252,11 @@ async function showConfirm(runId = bookingRunId) {
   if (!isCurrentBookingRun(runId)) return;
   step = STEPS.CONFIRM;
   const client = getClient();
+  const email = sanitizeEmailValue(client.email);
   const dateObj = new Date(selectedDate + 'T12:00:00');
   const dateStr = dateObj.toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
   confirmData = {
-    clientName: client.name, phone: client.phone, email: client.email||'',
+    clientName: sanitizeTextValue(client.name, 120), phone: normalizePhoneDigits(client.phone), email: isValidEmail(email) ? email : '',
     serviceId: selectedService.id, serviceName: selectedService.name,
     professionalId: selectedProfessional?.id || '',
     professionalName: selectedProfessional?.id
@@ -1219,12 +1297,18 @@ async function submitBooking(runId = bookingRunId) {
     const headers = { 'Content-Type': 'application/json' };
     const payload = {
       unitId: BOOKING_UNIT_ID || undefined,
-      clientName: confirmData.clientName,
-      clientPhone: confirmData.phone,
+      clientName: sanitizeTextValue(confirmData.clientName, 120),
+      clientPhone: normalizePhoneDigits(confirmData.phone),
       serviceId: confirmData.serviceId,
       startsAt: iso,
     };
-    if (confirmData.email) payload.clientEmail = confirmData.email;
+    const email = sanitizeEmailValue(confirmData.email);
+    if (email && !isValidEmail(email)) {
+      const err = new Error('Informe um e-mail válido ou deixe o campo em branco.');
+      err.status = 400;
+      throw err;
+    }
+    if (email) payload.clientEmail = email;
     if (confirmData.professionalId) payload.professionalId = confirmData.professionalId;
     const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
@@ -1232,8 +1316,9 @@ async function submitBooking(runId = bookingRunId) {
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      const err = new Error(data?.error || 'Não consegui confirmar agora. Tente novamente em instantes.');
+      const err = new Error('Não foi possível concluir o agendamento. Verifique os dados e tente novamente.');
       err.status = r.status;
+      err.backendError = data?.error || '';
       throw err;
     }
     const created = await r.json().catch(() => ({}));
@@ -1252,9 +1337,12 @@ async function submitBooking(runId = bookingRunId) {
     restart.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
   } catch (error) {
     bookingSubmitting = false;
+    const backendError = String(error?.backendError || error?.message || '').toLowerCase();
     const message = error?.status === 409
       ? 'Esse horário acabou de ficar indisponível. Escolha outro horário na agenda acima.'
-      : (error?.message || 'Não consegui confirmar agora. Tente novamente em instantes.');
+      : error?.status === 400 && backendError.includes('e-mail')
+        ? 'Informe um e-mail válido ou deixe o campo em branco.'
+        : 'Não foi possível concluir o agendamento. Verifique os dados e tente novamente.';
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar Novamente`; }
     await say(escapeHtml(message), 400);
     if (error?.status === 409 && selectedService && weekStart) {
@@ -1266,7 +1354,7 @@ async function submitBooking(runId = bookingRunId) {
 }
 
 /* ─ Input events ─ */
-chatInput.addEventListener('input', () => { btnSend.disabled = chatInput.value.trim().length === 0; });
+chatInput.addEventListener('input', () => { btnSend.disabled = step !== STEPS.EMAIL && chatInput.value.trim().length === 0; });
 chatInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey && !btnSend.disabled) { e.preventDefault(); handleSend(); } });
 btnSend.addEventListener('click', handleSend);
 
