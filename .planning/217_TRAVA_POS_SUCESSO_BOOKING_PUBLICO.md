@@ -115,8 +115,73 @@ Apos a alteracao:
 
 ## Deploy e validacao em producao
 
-Pendente no momento deste registro inicial. Sera atualizado apos commit, push, deploy controlado e teste fake em producao.
+Executado em 2026-06-21 apos o commit `9487c87`.
+
+### Deploy
+
+- `git push origin main`: publicado em `main`.
+- `git pull --ff-only origin main`: up to date no servidor.
+- `npx prisma migrate status`: schema up to date, sem migration pendente.
+- `npm run build`: passou.
+- `pm2 restart software-barbearia --update-env`: processo reiniciado.
+- `pm2 status software-barbearia`: `online`, pid `331011`.
+- `curl https://barbearia.76-13-161-250.nip.io/health`: `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
+
+### Evidencia do HTML implantado
+
+- Rota publica correta: `/agendamento`.
+- `GET /agendamento`: 200.
+- HTML implantado contem `bookingCompleted`, `lockCompletedBookingUI`, `canMutateBookingFlow` e `bookingSuccessWrap`.
+- `/booking.html` redireciona para `/agendamento`; `/public/booking.html` nao e rota publica valida.
+
+### Piloto fake controlado
+
+Validacao executada por Chrome headless em viewport mobile `390x844`, simulando o fluxo publico real:
+
+- Cliente fake: `CLIENTE TESTE TRAVA BOOKING - SPRINT 217`.
+- Telefone fake: `00000021700`.
+- E-mail: em branco.
+- Servico: `Barba Terapia` (`svc-barba`).
+- Profissional: `Geovane Borges` (`pro-01`).
+- Horario escolhido: `2026-06-22 10:00` horario local.
+- `startsAt` gravado: `2026-06-22T13:00:00.000Z`.
+- Agendamento fake criado: `4837e726-4e06-460d-82d8-cac76336768e`.
+
+Resultado UI pos-sucesso:
+
+- Double tap no botao confirmar gerou exatamente `1` POST para `/public/booking`.
+- `#bookingSuccessWrap`: `1`.
+- `#bookingSuccessMessageWrap`: `1`.
+- `#confirmWidgetWrap`: `0`.
+- `#calWidgetWrap`: `0`.
+- `.slot-btn` apos sucesso: `0`.
+- `#btnConfirm` apos sucesso: `0`.
+- `booking-locked`: `true`.
+- `bookingCompleted`: `true`.
+- `bookingSubmitting`: `false`.
+- `selectedSlot`: `null`.
+- Tentativa de clicar em slot/confirmar depois do sucesso manteve `posts=1` e `successCards=1`.
+- Botao "Novo agendamento" removeu sucesso, removeu lock e deixou o fluxo apto a recomecar sem novo POST (`restartPosts=1`).
+
+Resultado API/operacional:
+
+- Agenda owner retornou exatamente `1` ocorrencia para o agendamento fake.
+- Auditoria `APPOINTMENT_CREATED` encontrada para o appointment fake.
+- Profissional gravado: `pro-01` / `Geovane Borges`.
+- Cancelamento aplicado via `/appointments/:id/status`: `CANCELLED`.
+- Slot `2026-06-22 10:00` voltou a ficar disponivel apos cancelamento.
+- Financeiro relacionado ao teste: `0`.
+- Contagem financeira global do mes permaneceu `8 -> 8`.
+
+### Logs finais
+
+- PM2 `error.log`: sem stack trace ou erro de aplicacao no trecho final.
+- PM2 `out.log`: registrou `/agendamento` 200, `/public/booking` 201, auditoria `APPOINTMENT_CREATED`, `/appointments/:id/status` 200, `/public/slots` 200 apos cancelamento e `/financial/transactions` 200.
+- Health final permaneceu `ok=true`.
 
 ## Decisao final
 
-Pendente ate a validacao em producao.
+APROVADO.
+
+Nao houve migration aplicada, seed, alteracao de `.env`, segredo exposto, alteracao manual em banco, cliente real, checkout, pagamento, venda real ou devolucao real.
