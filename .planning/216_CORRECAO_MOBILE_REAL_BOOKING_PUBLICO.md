@@ -50,12 +50,37 @@ Corrigir tres problemas observados no booking publico em uso real mobile:
 
 ## Deploy e validacao em producao
 
-Pendente neste ponto da sprint. Apos deploy, registrar:
+Executado em 2026-06-21 apos o commit `e35b99a`.
 
-- health/PM2/smoke readonly;
-- lista publica de profissionais do servico `svc-barba`;
-- agendamento fake controlado sem e-mail;
-- presenca unica na agenda;
-- auditoria `APPOINTMENT_CREATED`;
-- cancelamento do agendamento fake;
-- ausencia de impacto financeiro.
+### Deploy
+
+- `git push origin main`: publicado em `main`.
+- `git pull --ff-only origin main`: up to date no servidor.
+- `npx prisma migrate status`: schema up to date, sem migration pendente.
+- `npm run build`: passou.
+- `pm2 restart software-barbearia --update-env`: processo reiniciado.
+- `pm2 status software-barbearia`: `online`, pid `324498`.
+- `curl http://127.0.0.1:3333/health`: `{"ok":true,"authEnforced":true}`.
+- `npm run smoke:api:readonly`: passou.
+
+### Piloto fake controlado
+
+- Endpoint publico validado: `/public/services/svc-barba/professionals?unitId=unit-01`.
+- Resultado publico: somente `Geovane Borges` (`pro-01`).
+- Cliente fake: `CLIENTE TESTE MOBILE REAL - SPRINT 216 - f12d2329`.
+- Agendamento fake criado sem `clientEmail`: `609c2009-3927-4d6d-a222-f45ca105e50f`.
+- Horario criado: `2026-06-22T12:00:00.000Z`.
+- Profissional gravado: `pro-01` / `Geovane Borges`.
+- Agenda autenticada retornou exatamente 1 ocorrencia para o agendamento fake.
+- Auditoria `APPOINTMENT_CREATED` encontrada para `/public/booking`.
+- Cancelamento via status aplicado para o agendamento fake: `CANCELLED`.
+- Slot ficou disponivel novamente apos o cancelamento.
+- Financeiro sem efeito colateral: entradas relacionadas ao agendamento `0`; contagem global `101 -> 101`.
+
+### Logs finais
+
+- Logs do PM2 registraram `/public/booking` com status `201`.
+- Logs do PM2 registraram auditoria `APPOINTMENT_CREATED`.
+- Logs do PM2 registraram `/appointments/:id/status` com status `200` para cancelamento.
+- Logs do PM2 registraram `/public/slots` com status `200` apos cancelamento.
+- Health final permaneceu `ok=true`.
