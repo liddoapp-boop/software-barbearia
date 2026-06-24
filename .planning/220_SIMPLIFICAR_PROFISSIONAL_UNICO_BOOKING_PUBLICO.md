@@ -106,6 +106,39 @@ Todos os comandos obrigatorios seguros passaram.
 
 - A validacao automatizada e headless. Como o comportamento afeta UX mobile, a proxima verificacao manual real deve confirmar que a mensagem `Profissional: Geovane Borges` fica clara no celular e que a transicao para calendario parece natural.
 - Se no futuro a barbearia habilitar multiplos profissionais publicos, o fluxo de escolha permanece ativo e deve continuar sendo validado em piloto real.
+- Validar/configurar horarios reais de funcionamento, dias fechados, folgas e bloqueios manuais. Na validacao manual, surgiu duvida se todos os dias/horarios oferecidos representam a agenda real da barbearia.
+
+## Validacao manual no celular
+
+Resultado reportado pelo usuario:
+
+- Ao escolher `Barba Terapia`, apareceu direto `Profissional: Geovane Borges`.
+- Nao apareceu card `Sem preferencia`.
+- Nao apareceu grid de escolha de profissionais.
+- O fluxo seguiu para selecao de data/horario.
+- A melhoria visual foi aprovada.
+
+Durante a validacao manual, foi criado um agendamento controlado/teste:
+
+- Servico: `Barba Terapia`.
+- Profissional: `Geovane Borges`.
+- Data/hora local: quinta-feira, 25 de junho de 2026, 09:00.
+- E-mail: vazio.
+- Cliente: teste/controlado.
+- Agendamento: `965f2261...`.
+- Horario persistido: `2026-06-25T12:00:00.000Z` ate `2026-06-25T12:35:00.000Z`.
+
+Validacao readonly pos-agendamento:
+
+- Agenda: 1 ocorrencia exata para o agendamento `965f2261...`; 1 ocorrencia no slot 09:00 para `Barba Terapia` com `Geovane Borges`.
+- Status inicial: `SCHEDULED`.
+- Profissional persistido: `Geovane Borges` (`pro-01`).
+- Auditoria: 1 evento `APPOINTMENT_CREATED`, rota `/public/booking`, origem `public_booking`, metadata `source=public`.
+- Auditoria nao contem `clientPhone` nem `clientEmail`.
+- Financeiro: 0 transacoes referenciando o agendamento.
+- Logs recentes: `POST /public/booking` com `statusCode=201`; sem erro 500, crash, loop ou erro Prisma critico apos a validacao.
+- Nao houve checkout, pagamento, venda, comissao ou financeiro.
+- Nao houve cancelamento ate este registro; cancelamento requer confirmacao explicita.
 
 ## Decisao final
 
