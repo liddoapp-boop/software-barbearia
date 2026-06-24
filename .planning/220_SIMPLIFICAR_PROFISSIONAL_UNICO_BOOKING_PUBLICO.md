@@ -138,7 +138,26 @@ Validacao readonly pos-agendamento:
 - Financeiro: 0 transacoes referenciando o agendamento.
 - Logs recentes: `POST /public/booking` com `statusCode=201`; sem erro 500, crash, loop ou erro Prisma critico apos a validacao.
 - Nao houve checkout, pagamento, venda, comissao ou financeiro.
-- Nao houve cancelamento ate este registro; cancelamento requer confirmacao explicita.
+- Cancelamento autorizado posteriormente pelo usuario para o agendamento controlado/teste.
+
+## Cancelamento do agendamento controlado
+
+Cancelamento autorizado explicitamente pelo usuario:
+
+- Agendamento: `965f2261...`.
+- Data/hora local: quinta-feira, 25 de junho de 2026, 09:00.
+- Motivo: `teste controlado da validacao mobile do profissional unico`.
+- Acao executada: alteracao de status do agendamento para `CANCELLED`.
+- Nao houve checkout, pagamento, venda, comissao, refund financeiro ou qualquer alteracao fora do escopo.
+
+Validacao readonly pos-cancelamento:
+
+- Status do agendamento: `CANCELLED`.
+- Agenda: 1 ocorrencia exata do agendamento `965f2261...`, agora cancelada.
+- Slot publico `09:00` de `2026-06-25` para `svc-barba`/`pro-01`: encontrado e `available=true`.
+- Auditoria de cancelamento: 1 evento `APPOINTMENT_STATUS_UPDATED`, rota `/appointments/:id/status`, status `CANCELLED`, motivo registrado.
+- Financeiro: 0 transacoes referenciando o agendamento.
+- Logs recentes: `PATCH /appointments/:id/status` com `statusCode=200`; sem erro 500, crash, loop ou erro Prisma critico apos o cancelamento.
 
 ## Decisao final
 
