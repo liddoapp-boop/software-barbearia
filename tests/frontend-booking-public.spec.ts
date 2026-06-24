@@ -172,6 +172,16 @@ type FetchRequest = {
   body?: Record<string, unknown>;
 };
 
+type PublicProfessional = {
+  id: string;
+  name: string;
+  displayName?: string;
+};
+
+type BookingHarnessOptions = {
+  professionals?: PublicProfessional[];
+};
+
 function stripTags(value: string) {
   return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -231,7 +241,10 @@ function jsonResponse(body: unknown, status = 200) {
   };
 }
 
-function createFetchMock(requests: FetchRequest[]) {
+function createFetchMock(requests: FetchRequest[], options: BookingHarnessOptions = {}) {
+  const professionals = options.professionals ?? [
+    { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
+  ];
   return async (input: string, init?: { method?: string; body?: string }) => {
     const url = new URL(input, "http://booking.local");
     const method = init?.method ?? "GET";
@@ -247,7 +260,7 @@ function createFetchMock(requests: FetchRequest[]) {
     if (url.pathname === "/public/services/svc-barba/professionals") {
       return jsonResponse({
         service: { id: "svc-barba", name: "Barba Terapia" },
-        professionals: [{ id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" }],
+        professionals,
       });
     }
     if (url.pathname === "/public/working-hours") {
@@ -275,7 +288,7 @@ function getInlineBookingScript() {
   return match[1];
 }
 
-async function createBookingHarness(initialStorage: Record<string, string> = {}) {
+async function createBookingHarness(initialStorage: Record<string, string> = {}, options: BookingHarnessOptions = {}) {
   const document = new FakeDocument();
   const storage = new Map(Object.entries(initialStorage));
   const requests: FetchRequest[] = [];
@@ -287,7 +300,7 @@ async function createBookingHarness(initialStorage: Record<string, string> = {})
       setItem: (key: string, value: string) => storage.set(key, String(value)),
       removeItem: (key: string) => storage.delete(key),
     },
-    fetch: createFetchMock(requests),
+    fetch: createFetchMock(requests, options),
     URLSearchParams,
     URL,
     Date,
@@ -320,7 +333,7 @@ async function createBookingHarness(initialStorage: Record<string, string> = {})
       onPickDay,
       onPickSlot,
       submitBooking,
-      getState: () => ({ step, bookingSubmitting, bookingCompleted, selectedSlot, confirmData })
+      getState: () => ({ step, bookingSubmitting, bookingCompleted, selectedProfessional, selectedSlot, confirmData })
     };
     window.__bookingReady = init();`,
   );
@@ -357,7 +370,6 @@ async function completeBookingUntilConfirm() {
   });
   await harness.api.beginNewBooking();
   await harness.api.onPickService("svc-barba");
-  await harness.api.onPickProfessional("");
   harness.api.onPickDay("2026-06-01");
   await harness.api.onPickSlot("10:00");
   return harness;
@@ -446,6 +458,71 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(html).toContain("isValidEmail(email)");
     expect(api).toContain("professionalName");
     expect(api).toContain("APPOINTMENT_CREATED");
+  });
+
+  it("seleciona automaticamente o unico profissional publico e segue para horarios", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+    const harness = await createBookingHarness();
+
+    await harness.api.beginNewBooking();
+    await harness.api.onPickService("svc-barba");
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(harness.requests.some((request) => request.path === "/public/services/svc-barba/professionals")).toBe(true);
+    expect(harness.api.getState()).toMatchObject({
+      selectedProfessional: { id: "pro-01", name: "Geovane Borges" },
+    });
+    expect(text).toContain("Profissional: Geovane Borges");
+    expect(text).not.toContain("Sem preferência");
+    expect(harness.document.querySelector("[data-professional-id]")).toBeNull();
+    expect(harness.document.getElementById("calWidgetWrap")).not.toBeNull();
+    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(true);
+  });
+
+  it("mantem escolha explicita quando ha mais de um profissional publico", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+    const harness = await createBookingHarness({}, {
+      professionals: [
+        { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
+        { id: "pro-02", name: "Rafael Andrade", displayName: "Rafael Andrade" },
+      ],
+    });
+
+    await harness.api.beginNewBooking();
+    await harness.api.onPickService("svc-barba");
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(text).toContain("Escolha um profissional:");
+    expect(text).toContain("Sem preferência");
+    expect(text).toContain("Geovane Borges");
+    expect(text).toContain("Rafael Andrade");
+    expect(harness.api.getState()).toMatchObject({ selectedProfessional: null });
+    expect(harness.document.querySelectorAll("[data-professional-id]")).toHaveLength(3);
+    expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
+    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(false);
+
+    await harness.api.onPickProfessional("pro-02");
+    expect(harness.api.getState()).toMatchObject({
+      selectedProfessional: { id: "pro-02", name: "Rafael Andrade" },
+    });
+    expect(harness.document.getElementById("calWidgetWrap")).not.toBeNull();
+  });
+
+  it("mostra mensagem amigavel quando nao ha profissional publico e nao cria booking", async () => {
+    const harness = await createBookingHarness({}, { professionals: [] });
+
+    await harness.api.beginNewBooking();
+    await harness.api.onPickService("svc-barba");
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(text).toContain("Nenhum profissional disponível para este serviço no momento.");
+    expect(harness.api.getState()).toMatchObject({ selectedProfessional: null });
+    expect(harness.document.querySelector("[data-professional-id]")).toBeNull();
+    expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
+    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(false);
+    expect(harness.requests.some((request) => request.method === "POST" && request.path === "/public/booking")).toBe(false);
   });
 
   it("nao contamina o formulario ativo com dados suspeitos do localStorage", async () => {

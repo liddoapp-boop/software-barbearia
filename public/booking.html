@@ -1072,7 +1072,7 @@ async function onPickService(id, runId = bookingRunId) {
   confirmData = {};
   bookingSubmitting = false;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
-  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha! Escolha um profissional:`, 400);
+  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha!`, 400);
   step = STEPS.PROFESSIONAL;
   await loadProfessionals(runId);
 }
@@ -1091,6 +1091,34 @@ async function loadProfessionals(runId = bookingRunId) {
     }
   } catch {}
   hideTyping();
+  if (!canMutateBookingFlow(runId)) return;
+  if (serviceProfessionals.length === 0) {
+    selectedProfessional = null;
+    selectedDate = null;
+    selectedSlot = null;
+    selectedSlotProfessional = null;
+    bookingSubmitting = false;
+    step = STEPS.SERVICE;
+    await say('Nenhum profissional disponível para este serviço no momento. Escolha outro serviço ou tente novamente mais tarde.', 300);
+    return;
+  }
+  if (serviceProfessionals.length === 1) {
+    const professional = serviceProfessionals[0];
+    selectedProfessional = {
+      id: professional.id || '',
+      name: professional.displayName || professional.name || 'Profissional',
+    };
+    selectedDate = null;
+    selectedSlot = null;
+    selectedSlotProfessional = null;
+    bookingSubmitting = false;
+    await say(`Profissional: <strong>${escapeHtml(selectedProfessional.name)}</strong>`, 300);
+    await say('Selecione uma data:', 300);
+    step = STEPS.CALENDAR;
+    await loadCalendar();
+    return;
+  }
+  await say('Escolha um profissional:', 300);
   renderProfessionals(runId);
 }
 
