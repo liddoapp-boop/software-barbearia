@@ -144,6 +144,41 @@ function getContentSecurityPolicy() {
   ].join("; ");
 }
 
+const normalizePublicFilterText = (value: unknown) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const hasPublicDataTestMarker = (...values: unknown[]) => {
+  const text = values.map(normalizePublicFilterText).join(" ");
+  return ["teste", "tg", "demo", "db"].some((marker) => text.includes(marker));
+};
+
+export const hasPublicIdTestMarker = (value: unknown) => {
+  const text = normalizePublicFilterText(value);
+  if (["teste", "tg", "demo"].some((marker) => text.includes(marker))) return true;
+  return /(^|[^a-z0-9])db([^a-z0-9]|$)/.test(text);
+};
+
+const isPublicOperationalService = (item: {
+  id?: unknown;
+  name?: unknown;
+  description?: unknown;
+  category?: unknown;
+  notes?: unknown;
+  active?: unknown;
+  isActive?: unknown;
+}) =>
+  item.active !== false &&
+  item.isActive !== false &&
+  !hasPublicIdTestMarker(item.id) &&
+  !hasPublicDataTestMarker(item.name, item.description, item.category, item.notes);
+
+const isPublicOperationalProfessional = (item: { id?: unknown; name?: unknown }) =>
+  !hasPublicIdTestMarker(item.id) &&
+  !hasPublicDataTestMarker(item.name);
+
 const DEFAULT_WORKING_HOURS = {
   timezone: "America/Sao_Paulo",
   weekly: [
@@ -4318,33 +4353,6 @@ export function createApp() {
       const byName = a.name.localeCompare(b.name, "pt-BR");
       return byName || a.id.localeCompare(b.id, "pt-BR");
     });
-
-  const normalizePublicFilterText = (value: unknown) =>
-    String(value ?? "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-  const hasPublicTestMarker = (...values: unknown[]) => {
-    const text = values.map(normalizePublicFilterText).join(" ");
-    return ["teste", "tg", "demo", "db"].some((marker) => text.includes(marker));
-  };
-
-  const isPublicOperationalService = (item: {
-    id?: unknown;
-    name?: unknown;
-    description?: unknown;
-    category?: unknown;
-    notes?: unknown;
-    active?: unknown;
-    isActive?: unknown;
-  }) =>
-    item.active !== false &&
-    item.isActive !== false &&
-    !hasPublicTestMarker(item.id, item.name, item.description, item.category, item.notes);
-
-  const isPublicOperationalProfessional = (item: PublicBookingProfessional) =>
-    !hasPublicTestMarker(item.id, item.name);
 
   const normalizePublicProfessionalId = (value?: unknown) => {
     const normalized = String(value ?? "").trim();

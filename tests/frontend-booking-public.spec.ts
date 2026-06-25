@@ -498,7 +498,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.onPickService("svc-barba");
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Escolha um profissional:");
+    expect(text).toContain("Escolha o profissional");
     expect(text).toContain("Sem preferência");
     expect(text).toContain("Geovane Borges");
     expect(text).toContain("Rafael Andrade");
@@ -521,7 +521,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.onPickService("svc-barba");
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Nenhum profissional disponível para este serviço no momento.");
+    expect(text).toContain("Este serviço não tem profissional disponível no momento.");
     expect(harness.api.getState()).toMatchObject({ selectedProfessional: null });
     expect(harness.document.querySelector("[data-professional-id]")).toBeNull();
     expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
@@ -597,7 +597,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.beginNewBooking();
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Não foi possível carregar os serviços disponíveis");
+    expect(text).toContain("Não conseguimos carregar os serviços agora");
     expect(text).not.toContain("Corte Clássico");
     expect(text).not.toContain("Barba Completa");
     expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { createApp } from "../src/http/app";
+import { createApp, hasPublicIdTestMarker } from "../src/http/app";
 import {
   computeBillingWebhookSignature,
   getBillingWebhookSecret,
@@ -4522,12 +4522,19 @@ describe("API MVP", () => {
     }
   });
 
+  it("nao trata ocorrencia acidental de db em UUID como marcador publico de teste", () => {
+    expect(hasPublicIdTestMarker("8efbcffa-b8d2-42a7-85f1-a0adccf877db")).toBe(false);
+    expect(hasPublicIdTestMarker("svc-db-import")).toBe(true);
+    expect(hasPublicIdTestMarker("demo-pro-02")).toBe(true);
+  });
+
   it("mantem profissionais de demonstracao fora do contrato publico", async () => {
     const apiSource = readFileSync("src/http/app.ts", "utf8");
     const demoSeedSource = readFileSync("prisma/demo-seed.ts", "utf8");
 
     expect(demoSeedSource).toContain('id: "demo-pro-02"');
-    expect(apiSource).toContain('!hasPublicTestMarker(item.id, item.name)');
+    expect(apiSource).toContain("!hasPublicIdTestMarker(item.id)");
+    expect(apiSource).toContain("!hasPublicDataTestMarker(item.name)");
   });
 
   it("rejeita profissional publico nao vinculado ao servico", async () => {

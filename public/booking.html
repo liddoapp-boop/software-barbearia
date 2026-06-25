@@ -635,7 +635,7 @@
     </svg>
     <div>
       <div class="brand-name" id="brandName">Agendamento</div>
-      <div class="brand-sub">chat</div>
+      <div class="brand-sub">Agendamento online</div>
     </div>
   </div>
   <button class="btn-appts" id="btnAppts" aria-label="Ver meus agendamentos">
@@ -644,7 +644,7 @@
       <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
       <line x1="3" y1="10" x2="21" y2="10"/>
     </svg>
-    Meus Agendamentos
+    Meus agendamentos
   </button>
 </header>
 
@@ -666,9 +666,9 @@
 
 <!-- Bottom Sheet -->
 <div class="overlay" id="overlay" aria-hidden="true"></div>
-<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Meus Agendamentos" aria-hidden="true">
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Meus agendamentos" aria-hidden="true">
   <div class="sheet-handle"></div>
-  <div class="sheet-title">Meus Agendamentos</div>
+  <div class="sheet-title">Meus agendamentos</div>
   <div class="sheet-body" id="sheetBody"></div>
 </div>
 
@@ -684,6 +684,7 @@ let selectedService = null, selectedProfessional = null, selectedDate = null, se
 let serviceProfessionals = [];
 let weekStart = null, phoneMask = null, confirmData = {};
 let publicWorkingHours = null;
+let slotsLoadFailed = false;
 let bookingSubmitting = false;
 let bookingCompleted = false;
 let bookingRunId = 0;
@@ -965,8 +966,8 @@ function canMutateBookingFlow(runId = bookingRunId) {
 async function beginNewBooking(fromUserAction = false) {
   disableInput();
   resetBookingFlowState();
-  if (fromUserAction) appendBubble('Quero agendar novamente', true);
-  await say('Claro! Escolha o serviço:', 300);
+  if (fromUserAction) appendBubble('Novo agendamento', true);
+  await say('Escolha o serviço', 300);
   step = STEPS.SERVICE;
   await loadServices();
 }
@@ -986,7 +987,7 @@ async function handleSend() {
     }
     appendBubble(name, true);
     setClient({ name });
-    await say(`Prazer, <strong>${escapeHtml(name)}</strong>! Qual é o seu WhatsApp com DDD?`);
+    await say(`Prazer, <strong>${escapeHtml(name)}</strong>! Informe seu WhatsApp com DDD.`);
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
 
@@ -1000,7 +1001,7 @@ async function handleSend() {
     appendBubble(phoneMask ? phoneMask.value : raw, true);
     setClient({ phone: digits });
     chatInput.value = '';
-    await say('Ótimo! E o seu e-mail? <span style="color:var(--tx3);font-size:13px">(opcional — confirmação)</span>');
+    await say('Informe seu e-mail, se quiser receber a confirmação. <span style="color:var(--tx3);font-size:13px">(opcional)</span>');
     step = STEPS.EMAIL;
     enableInput('E-mail opcional', 'email');
 
@@ -1014,7 +1015,7 @@ async function handleSend() {
     appendBubble(email || 'Prefiro não informar', true);
     setClient({ email });
     chatInput.value = '';
-    await say('Perfeito! Escolha o serviço:', 400);
+    await say('Escolha o serviço', 400);
     step = STEPS.SERVICE;
     await loadServices();
   }
@@ -1045,7 +1046,7 @@ function renderServices() {
     appendWidget(`
       <div class="svc-scroll" role="status" aria-live="polite">
         <div class="svc-row">
-          <div class="svc-empty">Não foi possível carregar os serviços disponíveis. Tente novamente em instantes.</div>
+          <div class="svc-empty">Não conseguimos carregar os serviços agora. Tente novamente em instantes.</div>
         </div>
       </div>`);
     return;
@@ -1093,7 +1094,7 @@ async function onPickService(id, runId = bookingRunId) {
   confirmData = {};
   bookingSubmitting = false;
   document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
-  await say(`<strong>${escapeHtml(svc.name)}</strong> — ótima escolha!`, 400);
+  await say(`Serviço escolhido: <strong>${escapeHtml(svc.name)}</strong>`, 400);
   step = STEPS.PROFESSIONAL;
   await loadProfessionals(runId);
 }
@@ -1120,7 +1121,7 @@ async function loadProfessionals(runId = bookingRunId) {
     selectedSlotProfessional = null;
     bookingSubmitting = false;
     step = STEPS.SERVICE;
-    await say('Nenhum profissional disponível para este serviço no momento. Escolha outro serviço ou tente novamente mais tarde.', 300);
+    await say('Este serviço não tem profissional disponível no momento. Escolha outro serviço ou tente novamente em instantes.', 300);
     return;
   }
   if (serviceProfessionals.length === 1) {
@@ -1134,12 +1135,12 @@ async function loadProfessionals(runId = bookingRunId) {
     selectedSlotProfessional = null;
     bookingSubmitting = false;
     await say(`Profissional: <strong>${escapeHtml(selectedProfessional.name)}</strong>`, 300);
-    await say('Selecione uma data:', 300);
+    await say('Escolha uma data', 300);
     step = STEPS.CALENDAR;
     await loadCalendar();
     return;
   }
-  await say('Escolha um profissional:', 300);
+  await say('Escolha o profissional', 300);
   renderProfessionals(runId);
 }
 
@@ -1181,7 +1182,7 @@ async function onPickProfessional(id, runId = bookingRunId) {
   selectedSlotProfessional = null;
   bookingSubmitting = false;
   appendBubble(selectedProfessional.name, true);
-  await say('Selecione uma data:', 300);
+  await say('Escolha uma data', 300);
   step = STEPS.CALENDAR;
   await loadCalendar();
 }
@@ -1193,8 +1194,12 @@ async function fetchSlotsForWeek(ws) {
   try {
     const professionalQuery = selectedProfessional?.id ? `&professionalId=${encodeURIComponent(selectedProfessional.id)}` : '';
     const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}${professionalQuery}`));
-    if (r.ok) Object.assign(slots, await r.json());
-  } catch {}
+    if (!r.ok) throw new Error('slots unavailable');
+    Object.assign(slots, await r.json());
+    slotsLoadFailed = false;
+  } catch {
+    slotsLoadFailed = true;
+  }
 }
 
 async function loadCalendar() {
@@ -1203,6 +1208,7 @@ async function loadCalendar() {
   const today = new Date(); today.setHours(0,0,0,0);
   weekStart = new Date(today);
   slots = {};
+  slotsLoadFailed = false;
   showTyping();
   await Promise.all([
     fetchSlotsForWeek(weekStart),
@@ -1264,10 +1270,10 @@ function renderCalendar() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>
       </div>
-      <div class="cal-grid" role="group" aria-label="Selecione uma data">${hdrs}${cells}</div>
+      <div class="cal-grid" role="group" aria-label="Escolha uma data">${hdrs}${cells}</div>
       ${renderWorkingHoursBlock()}
       <div class="slots-wrap" id="slotsWrap" aria-live="polite">
-        <div class="slots-grid" id="slotsGrid"></div>
+        <div class="slots-grid" id="slotsGrid">${slotsLoadFailed ? '<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Não conseguimos carregar os horários agora. Tente novamente em instantes.</p>' : ''}</div>
       </div>
     </div>`);
 
@@ -1305,7 +1311,10 @@ function onPickDay(key, runId = bookingRunId) {
   const avail = (slots[key]||[]).filter(s => s.available !== false);
   const taken = (slots[key]||[]).filter(s => s.available === false);
   if (avail.length === 0 && taken.length === 0) {
-    grid.innerHTML = `<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Nenhum horário disponível.</p>`;
+    const message = slotsLoadFailed
+      ? 'Não conseguimos carregar os horários agora. Tente novamente em instantes.'
+      : 'Não há horários disponíveis para esta data.';
+    grid.innerHTML = `<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">${message}</p>`;
   } else {
     const all = [...avail,...taken].sort((a,b) => a.time.localeCompare(b.time));
     grid.innerHTML = all.map(s =>
@@ -1368,7 +1377,7 @@ async function showConfirm(runId = bookingRunId) {
       <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
       <button class="btn-confirm" id="btnConfirm" aria-label="Confirmar agendamento">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
-        Confirmar Agendamento
+        Confirmar agendamento
       </button>
     </div>`);
   w.querySelector('#btnConfirm').addEventListener('click', () => submitBooking(runId));
@@ -1381,7 +1390,7 @@ async function submitBooking(runId = bookingRunId) {
   if (!confirmData?.date || !confirmData?.time || !selectedSlot) return;
   bookingSubmitting = true;
   const btn = document.querySelector('#confirmWidgetWrap #btnConfirm');
-  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirmando…'; }
   try {
     const submittedData = { ...confirmData };
     const iso = new Date(`${confirmData.date}T${confirmData.time}:00.000-03:00`).toISOString();
@@ -1407,7 +1416,7 @@ async function submitBooking(runId = bookingRunId) {
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      const err = new Error('Não foi possível concluir o agendamento. Verifique os dados e tente novamente.');
+      const err = new Error('Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.');
       err.status = r.status;
       err.backendError = data?.error || '';
       throw err;
@@ -1433,8 +1442,8 @@ async function submitBooking(runId = bookingRunId) {
       ? 'Esse horário acabou de ficar indisponível. Escolha outro horário na agenda acima.'
       : error?.status === 400 && backendError.includes('e-mail')
         ? 'Informe um e-mail válido ou deixe o campo em branco.'
-        : 'Não foi possível concluir o agendamento. Verifique os dados e tente novamente.';
-    if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar Novamente`; }
+        : 'Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
+    if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar novamente`; }
     await say(escapeHtml(message), 400);
     if (error?.status === 409 && selectedService && weekStart) {
       slots = {};
@@ -1450,7 +1459,7 @@ function renderBookingSuccess(summary) {
   const oldSuccessMessage = document.getElementById('bookingSuccessMessageWrap');
   if (oldSuccessMessage) oldSuccessMessage.remove();
   const successMessage = appendBubble(
-    `<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} · ${escapeHtml(summary.time)} — ${escapeHtml(summary.dateStr)}.</span>`,
+    `<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} · ${escapeHtml(summary.dateStr)} às ${escapeHtml(summary.time)}.</span>`,
   );
   successMessage.id = 'bookingSuccessMessageWrap';
   const success = appendWidget(`
@@ -1519,14 +1528,14 @@ function showVerifyCard(c) {
 
   w.querySelector('#btnVOk').addEventListener('click', async () => {
     appendBubble('Está correto', true);
-    await say('Ótimo! Escolha o serviço:', 400);
+    await say('Escolha o serviço', 400);
     step = STEPS.SERVICE;
     await loadServices();
   });
 
   w.querySelector('#btnVAlt').addEventListener('click', async () => {
     appendBubble('Quero alterar os dados', true);
-    await say(`Ok! Vamos atualizar. Qual é o seu nome? <span style="color:var(--tx3);font-size:13px">atual: ${escapeHtml(c.name)}</span>`, 400);
+    await say(`Vamos atualizar seus dados. Qual é o seu nome? <span style="color:var(--tx3);font-size:13px">atual: ${escapeHtml(c.name)}</span>`, 400);
     step = STEPS.NAME;
     enableInput('Seu nome…');
     chatInput.value = c.name;
@@ -1562,12 +1571,12 @@ async function init() {
   await loadBusinessName();
   const c = getClient();
   if (c.name && c.phone) {
-    await say(`Olá de novo, <strong>${escapeHtml(c.name)}</strong>! Que bom te ver. 👋`);
+    await say(`Olá de novo, <strong>${escapeHtml(c.name)}</strong>! Que bom te ver.`);
     await say('Seus dados estão salvos. Confirme antes de continuar:', 400);
     step = STEPS.VERIFY;
     showVerifyCard(c);
   } else if (c.name) {
-    await say(`Olá, <strong>${escapeHtml(c.name)}</strong>! Qual é o seu WhatsApp com DDD?`);
+    await say(`Olá, <strong>${escapeHtml(c.name)}</strong>! Informe seu WhatsApp com DDD.`);
     step = STEPS.PHONE;
     enableInput('(00) 00000-0000', 'tel');
   } else {
