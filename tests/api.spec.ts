@@ -4367,6 +4367,73 @@ describe("API MVP", () => {
     });
   });
 
+  it("blinda /public/services contra servicos de teste, demo, TG, db e inativos", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const unsafeServices = [
+      { name: "Servico Teste Comissao TG", category: "TESTE_TG" },
+      { name: "Corte demo", category: "CORTE" },
+      { name: "Servico db importado", category: "CORTE" },
+    ];
+    for (const service of unsafeServices) {
+      const created = await app.inject({
+        method: "POST",
+        url: "/services",
+        payload: {
+          unitId: "unit-01",
+          name: service.name,
+          category: service.category,
+          description: "Registro usado apenas em teste operacional.",
+          price: 100,
+          durationMinutes: 30,
+          professionalIds: ["pro-01"],
+          isActive: true,
+        },
+      });
+      expect(created.statusCode).toBe(200);
+    }
+
+    const inactive = await app.inject({
+      method: "POST",
+      url: "/services",
+      payload: {
+        unitId: "unit-01",
+        name: "Servico Interno Inativo",
+        category: "INTERNO",
+        price: 70,
+        durationMinutes: 30,
+        professionalIds: ["pro-01"],
+        isActive: false,
+      },
+    });
+    expect(inactive.statusCode).toBe(200);
+
+    const services = await app.inject({
+      method: "GET",
+      url: "/public/services?unitId=unit-01",
+    });
+
+    expect(services.statusCode).toBe(200);
+    const publicServices = services.json() as Array<Record<string, unknown>>;
+    const publicNames = publicServices.map((item) => String(item.name));
+    const normalizedPublicText = JSON.stringify(publicServices)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    expect(publicNames).toContain("Barba Terapia");
+    expect(publicNames).toContain("Corte Premium");
+    expect(publicNames).not.toContain("Servico Teste Comissao TG");
+    expect(publicNames).not.toContain("Corte demo");
+    expect(publicNames).not.toContain("Servico db importado");
+    expect(publicNames).not.toContain("Servico Interno Inativo");
+    expect(normalizedPublicText).not.toContain("teste");
+    expect(normalizedPublicText).not.toContain("tg");
+    expect(normalizedPublicText).not.toContain("demo");
+    expect(normalizedPublicText).not.toContain("db");
+  });
+
   it("grava no booking publico o profissional escolhido explicitamente", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -4426,7 +4493,9 @@ describe("API MVP", () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
     const rafael = await createProfessional(app, "Rafael Andrade");
-    await setBarbaProfessionals(app, ["pro-01", rafael.id]);
+    const profissionalDb = await createProfessional(app, "Profissional DB");
+    const profissionalTg = await createProfessional(app, "Profissional Teste Comissao TG");
+    await setBarbaProfessionals(app, ["pro-01", rafael.id, profissionalDb.id, profissionalTg.id]);
 
     const professionals = await app.inject({
       method: "GET",
@@ -4442,6 +4511,8 @@ describe("API MVP", () => {
       { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
       { id: rafael.id, name: "Rafael Andrade", displayName: "Rafael Andrade" },
     ]);
+    expect(JSON.stringify(professionals.json())).not.toContain("Profissional DB");
+    expect(JSON.stringify(professionals.json())).not.toContain("Profissional Teste Comissao TG");
     for (const item of professionals.json().professionals as Array<Record<string, unknown>>) {
       expect(Object.keys(item).sort()).toEqual(["displayName", "id", "name"]);
       expect(item).not.toHaveProperty("email");
@@ -4456,7 +4527,7 @@ describe("API MVP", () => {
     const demoSeedSource = readFileSync("prisma/demo-seed.ts", "utf8");
 
     expect(demoSeedSource).toContain('id: "demo-pro-02"');
-    expect(apiSource).toContain('!item.id.startsWith("demo-pro-")');
+    expect(apiSource).toContain('!hasPublicTestMarker(item.id, item.name)');
   });
 
   it("rejeita profissional publico nao vinculado ao servico", async () => {
@@ -4547,6 +4618,10 @@ describe("API MVP", () => {
       professionalId: "pro-01",
       professionalName: "Geovane Borges",
     });
+    expect(automaticSlot).not.toHaveProperty("clientPhone");
+    expect(automaticSlot).not.toHaveProperty("clientEmail");
+    expect(automaticSlot).not.toHaveProperty("commission");
+    expect(automaticSlot).not.toHaveProperty("financial");
 
     const booking = await app.inject({
       method: "POST",
@@ -4562,6 +4637,10 @@ describe("API MVP", () => {
     expect(booking.statusCode).toBe(201);
     expect(booking.json().professionalId).toBe(automaticSlot?.professionalId);
     expect(booking.json().professionalName).toBe(automaticSlot?.professionalName);
+    expect(booking.json()).not.toHaveProperty("clientPhone");
+    expect(booking.json()).not.toHaveProperty("clientEmail");
+    expect(booking.json()).not.toHaveProperty("financial");
+    expect(booking.json()).not.toHaveProperty("commission");
   });
 
   it("registra auditoria ao criar agendamento pelo booking publico", async () => {

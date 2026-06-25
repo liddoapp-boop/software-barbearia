@@ -4287,6 +4287,9 @@ export function createApp() {
   type PublicBookingService = {
     id: string;
     name: string;
+    description?: string | null;
+    category?: string | null;
+    notes?: string | null;
     price: number | bigint | { toNumber(): number };
     durationMin: number;
     active: boolean;
@@ -4316,8 +4319,32 @@ export function createApp() {
       return byName || a.id.localeCompare(b.id, "pt-BR");
     });
 
+  const normalizePublicFilterText = (value: unknown) =>
+    String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  const hasPublicTestMarker = (...values: unknown[]) => {
+    const text = values.map(normalizePublicFilterText).join(" ");
+    return ["teste", "tg", "demo", "db"].some((marker) => text.includes(marker));
+  };
+
+  const isPublicOperationalService = (item: {
+    id?: unknown;
+    name?: unknown;
+    description?: unknown;
+    category?: unknown;
+    notes?: unknown;
+    active?: unknown;
+    isActive?: unknown;
+  }) =>
+    item.active !== false &&
+    item.isActive !== false &&
+    !hasPublicTestMarker(item.id, item.name, item.description, item.category, item.notes);
+
   const isPublicOperationalProfessional = (item: PublicBookingProfessional) =>
-    !item.id.startsWith("demo-pro-");
+    !hasPublicTestMarker(item.id, item.name);
 
   const normalizePublicProfessionalId = (value?: unknown) => {
     const normalized = String(value ?? "").trim();
@@ -4336,22 +4363,36 @@ export function createApp() {
     serviceId: string,
   ): Promise<PublicBookingService | null> => {
     if (backend === "prisma") {
-      return await prisma.service.findFirst({
+      const service = await prisma.service.findFirst({
         where: { id: serviceId, businessId: unitId, active: true },
-        select: { id: true, name: true, price: true, durationMin: true, active: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          category: true,
+          notes: true,
+          price: true,
+          durationMin: true,
+          active: true,
+        },
       });
+      return service && isPublicOperationalService(service) ? service : null;
     }
     const service = memoryStore.services.find(
       (item) => item.id === serviceId && item.active && (item.businessId ?? unitId) === unitId,
     );
     if (!service) return null;
-    return {
+    const publicService = {
       id: service.id,
       name: service.name,
+      description: service.description,
+      category: service.category,
+      notes: service.notes,
       price: service.price,
       durationMin: service.durationMin,
       active: service.active,
     };
+    return isPublicOperationalService(publicService) ? publicService : null;
   };
 
   const getPublicEligibleProfessionals = async (
@@ -4481,7 +4522,7 @@ export function createApp() {
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
     const unitId = publicUnitId(query.unitId);
     if (backend === "prisma") {
-      const services = await prisma.service.findMany({
+      const services = (await prisma.service.findMany({
         where: { businessId: unitId, active: true },
         orderBy: { name: "asc" },
         select: {
@@ -4489,21 +4530,32 @@ export function createApp() {
           name: true,
           description: true,
           category: true,
+          notes: true,
           price: true,
           durationMin: true,
         },
-      });
+      })).filter(isPublicOperationalService);
       return services.map((s) => ({
-        ...s,
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category,
         price: Number(s.price),
         durationMinutes: s.durationMin,
       }));
     }
     const result = await operations.getServices({ unitId, status: "ACTIVE" });
-    return (result.services ?? []).map((service: any) => ({
-      ...service,
-      durationMinutes: service.durationMinutes ?? service.durationMin ?? service.duration,
-    }));
+    return (result.services ?? [])
+      .filter(isPublicOperationalService)
+      .map((service: any) => ({
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        category: service.category,
+        price: service.price,
+        imageUrl: service.imageUrl,
+        durationMinutes: service.durationMinutes ?? service.durationMin ?? service.duration,
+      }));
   });
 
   app.get("/public/services/:serviceId/professionals", async (request, reply) => {
@@ -4740,7 +4792,7 @@ export function createApp() {
     if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
       reply.status(409).send({
         error:
-          "Horario fora do expediente do barbeiro. Escolha um horario dentro da grade semanal.",
+          "Horario fora do expediente. Escolha um horario disponivel na agenda.",
         workingHours,
       });
       return;

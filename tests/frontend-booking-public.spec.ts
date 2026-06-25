@@ -180,6 +180,8 @@ type PublicProfessional = {
 
 type BookingHarnessOptions = {
   professionals?: PublicProfessional[];
+  services?: Array<Record<string, unknown>>;
+  servicesStatus?: number;
 };
 
 function stripTags(value: string) {
@@ -245,6 +247,9 @@ function createFetchMock(requests: FetchRequest[], options: BookingHarnessOption
   const professionals = options.professionals ?? [
     { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
   ];
+  const services = options.services ?? [
+    { id: "svc-barba", name: "Barba Terapia", price: 5500, durationMinutes: 35, imageUrl: "" },
+  ];
   return async (input: string, init?: { method?: string; body?: string }) => {
     const url = new URL(input, "http://booking.local");
     const method = init?.method ?? "GET";
@@ -253,9 +258,7 @@ function createFetchMock(requests: FetchRequest[], options: BookingHarnessOption
 
     if (url.pathname === "/public/business") return jsonResponse({ name: "Barbearia Harness" });
     if (url.pathname === "/public/services") {
-      return jsonResponse([
-        { id: "svc-barba", name: "Barba Terapia", price: 5500, durationMinutes: 35, imageUrl: "" },
-      ]);
+      return jsonResponse(services, options.servicesStatus ?? 200);
     }
     if (url.pathname === "/public/services/svc-barba/professionals") {
       return jsonResponse({
@@ -453,6 +456,7 @@ describe("booking publico - trava pos-sucesso", () => {
     const html = source();
     const api = readFileSync("src/http/app.ts", "utf8");
 
+    expect(html).toContain("isPublicServiceVisible");
     expect(html).toContain("payload.professionalId = confirmData.professionalId");
     expect(html).toContain("if (email) payload.clientEmail = email");
     expect(html).toContain("isValidEmail(email)");
@@ -566,6 +570,37 @@ describe("booking publico - trava pos-sucesso", () => {
 
     expect(emptyEmail.document.querySelectorAll(".svc-card").length).toBeGreaterThan(0);
     expect(emptyEmail.requests.filter((request) => request.path === "/public/booking")).toHaveLength(0);
+  });
+
+  it("nao renderiza servicos publicos com marcadores de teste, TG, demo ou db", async () => {
+    const harness = await createBookingHarness({}, {
+      services: [
+        { id: "svc-barba", name: "Barba Terapia", price: 5500, durationMinutes: 35, imageUrl: "" },
+        { id: "svc-teste", name: "Servico Teste Comissao TG", category: "TESTE_TG", price: 10000, durationMinutes: 30 },
+        { id: "demo-svc-combo", name: "Combo demo", price: 11500, durationMinutes: 75 },
+        { id: "svc-db-import", name: "Servico DB", price: 9000, durationMinutes: 30 },
+      ],
+    });
+
+    await harness.api.beginNewBooking();
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(text).toContain("Barba Terapia");
+    expect(text).not.toContain("Servico Teste Comissao TG");
+    expect(text).not.toContain("Combo demo");
+    expect(text).not.toContain("Servico DB");
+  });
+
+  it("nao usa catalogo ficticio quando a API publica de servicos falha", async () => {
+    const harness = await createBookingHarness({}, { servicesStatus: 500 });
+
+    await harness.api.beginNewBooking();
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(text).toContain("Não foi possível carregar os serviços disponíveis");
+    expect(text).not.toContain("Corte Clássico");
+    expect(text).not.toContain("Barba Completa");
+    expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);
   });
 
   it("executa o fluxo mobile com profissionais publicos, trava double tap e bloqueia estado antigo apos sucesso", async () => {

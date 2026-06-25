@@ -719,6 +719,21 @@ function isSuspiciousStoredText(value) {
   ].some(term => normalized.includes(term));
 }
 
+function normalizePublicFilterText(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function isPublicServiceVisible(service) {
+  const text = [
+    service?.id,
+    service?.name,
+    service?.description,
+    service?.category,
+    service?.notes,
+  ].map(normalizePublicFilterText).join(' ');
+  return !['teste', 'tg', 'demo', 'db'].some(term => text.includes(term));
+}
+
 function normalizePhoneDigits(value) {
   const digits = String(value ?? '').replace(/\D/g, '');
   return digits.length >= 10 && digits.length <= 11 ? digits : '';
@@ -1011,15 +1026,12 @@ async function loadServices() {
   showTyping();
   try {
     const r = await fetch(publicUrl('/public/services'));
-    if (r.ok) services = (await r.json()).map(s => ({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
+    if (r.ok) services = (await r.json())
+      .filter(isPublicServiceVisible)
+      .map(s => ({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
     else throw 0;
   } catch {
-    services = [
-      { id: '1', name: 'Corte Clássico', price: 5500, duration: 30, imageUrl: '' },
-      { id: '2', name: 'Barba Completa', price: 4000, duration: 25, imageUrl: '' },
-      { id: '3', name: 'Corte + Barba',  price: 8500, duration: 55, imageUrl: '' },
-      { id: '4', name: 'Degradê',        price: 6000, duration: 40, imageUrl: '' },
-    ];
+    services = [];
   }
   hideTyping();
   renderServices();
@@ -1029,6 +1041,15 @@ const IMG_PH = `<svg class="svc-img-icon" viewBox="0 0 24 24" fill="none" stroke
 
 function renderServices() {
   const runId = bookingRunId;
+  if (!services.length) {
+    appendWidget(`
+      <div class="svc-scroll" role="status" aria-live="polite">
+        <div class="svc-row">
+          <div class="svc-empty">Não foi possível carregar os serviços disponíveis. Tente novamente em instantes.</div>
+        </div>
+      </div>`);
+    return;
+  }
   const cards = services.map((s, i) => {
     const hasImg = s.imageUrl && s.imageUrl.length > 0;
     const safeName = escapeHtml(s.name);
