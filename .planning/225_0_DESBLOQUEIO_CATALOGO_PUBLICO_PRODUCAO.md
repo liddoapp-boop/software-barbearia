@@ -213,3 +213,259 @@ O diagnostico da Sprint 225.0 esta aprovado como causa mais provavel e plano de 
 ## 16. Proxima acao recomendada
 
 Solicitar autorizacao explicita para restart/reload controlado do PM2 e executar a validacao readonly pos-restart. Se `/public/services` passar no dominio publico, retomar a Sprint 225. Se falhar mesmo apos restart, tratar como bug de codigo/runtime e abrir correcao antes de qualquer validacao mobile.
+
+---
+
+# Atualizacao pos-restart controlado
+
+Data: 2026-06-26
+
+## 17. Autorizacao recebida
+
+Foi recebida autorizacao explicita para executar apenas o comando operacional:
+
+```bash
+pm2 restart software-barbearia --update-env
+```
+
+Nao foram autorizados deploy adicional, migration, seed, alteracao de `.env`, alteracao manual de banco, limpeza de dados, mudanca de Nginx/firewall/certificado ou qualquer operacao transacional de venda, checkout, pagamento, comissao, refund ou agendamento.
+
+## 18. Pre-check antes do restart
+
+Comandos readonly executados:
+
+- `pwd`: `/root/software-barbearia`
+- `git status -sb`: `## main...origin/main`
+- `git log --oneline -10`: HEAD em `fca5375 docs: diagnosticar bloqueio do catalogo publico em producao`
+- `git rev-parse HEAD`: `fca5375d102c476ee42ccb78d33436b3af28b130`
+- `git rev-parse origin/main`: `fca5375d102c476ee42ccb78d33436b3af28b130`
+- `pm2 list`
+- `pm2 describe software-barbearia`
+
+Confirmacoes:
+
+- Branch: `main`.
+- Git limpo e HEAD igual a `origin/main`.
+- Processo `software-barbearia` existe.
+- Script path: `/root/software-barbearia/dist/src/server.js`.
+- Exec cwd: `/root/software-barbearia`.
+
+Estado PM2 antes:
+
+- Status: `online`.
+- PID: `331011`.
+- Uptime: `4D`.
+- Restarts: `8`.
+- Created at: `2026-06-21T15:19:55.006Z`.
+
+## 19. Restart executado
+
+Comando executado:
+
+```bash
+pm2 restart software-barbearia --update-env
+```
+
+Resultado imediato:
+
+- Processo `software-barbearia` reiniciado com sucesso pelo PM2.
+- Novo PID: `618594`.
+- Status: `online`.
+- Uptime inicial: `0s`.
+- Restarts: `9`.
+
+## 20. Pos-check PM2
+
+`pm2 list` e `pm2 describe software-barbearia` apos o restart confirmaram:
+
+- Status: `online`.
+- Uptime novo observado: `13s` e depois `46s`.
+- PID novo: `618594`.
+- Restarts: `9`, sem incremento adicional depois do restart autorizado.
+- Unstable restarts: `0`.
+- Script path mantido em `/root/software-barbearia/dist/src/server.js`.
+- Exec cwd mantido em `/root/software-barbearia`.
+- Sem evidencia de restart loop ou erro imediato.
+
+## 21. Health check
+
+Localhost:
+
+```text
+GET http://127.0.0.1:3333/health -> 200
+{"ok":true,"authEnforced":true}
+```
+
+Dominio publico:
+
+```text
+GET https://barbearia.76-13-161-250.nip.io/health -> 200
+{"ok":true,"authEnforced":true}
+```
+
+## 22. Catalogo publico pos-restart
+
+Localhost:
+
+```text
+GET http://127.0.0.1:3333/public/services?unitId=unit-01 -> 200
+```
+
+Resposta:
+
+```json
+[
+  {
+    "id": "svc-barba",
+    "name": "Barba Terapia",
+    "description": "Modelagem e hidratacao de barba com toalha quente.",
+    "category": "BARBA",
+    "price": 55,
+    "durationMinutes": 35
+  },
+  {
+    "id": "svc-corte",
+    "name": "Corte Premium",
+    "description": "Corte com acabamento premium e finalizacao personalizada.",
+    "category": "CORTE",
+    "price": 75,
+    "durationMinutes": 45
+  }
+]
+```
+
+Dominio publico:
+
+```text
+GET https://barbearia.76-13-161-250.nip.io/public/services?unitId=unit-01 -> 200
+```
+
+Resposta equivalente ao localhost, contendo apenas:
+
+- `svc-barba` / `Barba Terapia`
+- `svc-corte` / `Corte Premium`
+
+Confirmacoes:
+
+- Nenhum `demo-svc-*` retornou.
+- `Servico Teste Comissao TG` nao retornou.
+- O dominio publico passou a servir o `dist` atual.
+
+## 23. Profissionais publicos
+
+Localhost e dominio publico:
+
+```text
+GET /public/services/svc-barba/professionals?unitId=unit-01 -> 200
+```
+
+Resposta:
+
+```json
+{
+  "service": {
+    "id": "svc-barba",
+    "name": "Barba Terapia"
+  },
+  "professionals": [
+    {
+      "id": "pro-01",
+      "name": "Geovane Borges",
+      "displayName": "Geovane Borges"
+    }
+  ]
+}
+```
+
+Contrato publico confirmado:
+
+- Chaves expostas por profissional: `id`, `name`, `displayName`.
+- Sem telefone.
+- Sem e-mail.
+- Sem financeiro.
+- Sem comissao.
+- Sem documento ou dados internos de auditoria.
+
+## 24. Slots publicos
+
+Localhost e dominio publico:
+
+```text
+GET /public/slots?unitId=unit-01&serviceId=svc-barba&professionalId=pro-01&weekStart=2026-06-22 -> 200
+```
+
+A resposta retornou disponibilidade por data, com itens no formato publico:
+
+```json
+{
+  "time": "09:00",
+  "available": true,
+  "professionalId": "pro-01",
+  "professionalName": "Geovane Borges"
+}
+```
+
+Tambem ha slots indisponiveis somente com `time` e `available`, ou com `professionalId`/`professionalName` quando aplicavel.
+
+Contrato publico confirmado:
+
+- Sem telefone.
+- Sem e-mail.
+- Sem financeiro.
+- Sem comissao.
+- Sem cliente.
+- Sem dados internos de auditoria.
+
+## 25. Logs pos-restart
+
+Comando readonly executado:
+
+```bash
+pm2 logs software-barbearia --lines 120 --nostream
+```
+
+Evidencias relevantes:
+
+- Novo processo iniciou com PID `618594`.
+- Log de start: `Server listening at http://127.0.0.1:3333`.
+- Health local e dominio retornaram `200`.
+- `/public/services` local e dominio retornaram `200`.
+- `/public/services/:serviceId/professionals` local e dominio retornaram `200`.
+
+Nao foi observada evidencia de:
+
+- Crash.
+- Restart loop.
+- 500 critico novo.
+- Erro Prisma critico novo.
+- Erro de bind/porta.
+- Erro de env.
+
+Observacao: houve `401` para requisicoes de navegador a `apple-touch-icon*.png` antes do restart e tambem no periodo recente do dominio. Isso foi registrado como requisicao anonima bloqueada por auth em asset nao-publico, nao como falha critica do restart nem como exposicao do booking publico.
+
+## 26. Decisao da Sprint 225.0 apos restart
+
+APROVADO para desbloqueio da Sprint 225.
+
+O restart controlado resolveu o desalinhamento entre o processo PM2 em memoria e o `dist` atual em disco. A evidencia decisiva e que, apos o restart, localhost e dominio publico passaram a retornar apenas `Barba Terapia` e `Corte Premium` em `/public/services?unitId=unit-01`.
+
+Gates de avanco:
+
+1. PM2 online com uptime novo: passou.
+2. Health OK em localhost e dominio: passou.
+3. `/public/services` localhost limpo: passou.
+4. `/public/services` dominio limpo: passou.
+5. Nenhum `demo-svc-*`: passou.
+6. Nenhum `Servico Teste Comissao TG`: passou.
+7. Profissionais publicos sem dados sensiveis: passou.
+8. Slots publicos sem dados sensiveis: passou.
+9. Logs sem erro critico novo: passou.
+10. Git limpo antes desta atualizacao documental: passou.
+
+## 27. Opiniao tecnica CTO pos-restart
+
+O diagnostico da Sprint 225.0 estava correto: a causa operacional mais forte era o processo PM2 antigo em memoria. O codigo em `main` e o `dist` em disco ja estavam corretos; faltava o restart controlado para a producao realmente carregar a blindagem.
+
+O risco principal remanescente nao e mais a exposicao imediata do catalogo, mas a disciplina operacional de deploy. Sem uma rotina padrao que inclua build, restart/reload controlado e smoke readonly do dominio, este tipo de desalinhamento pode voltar.
+
+Recomendacao: documentar uma rotina padrao de deploy/restart com smoke obrigatorio para `/health`, `/public/services`, profissionais e slots antes de qualquer validacao humana ou piloto.
