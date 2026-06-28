@@ -94,7 +94,7 @@ Estes tempos sao proposta operacional inicial para teste/local. Nao aplicar em p
 | --- | ---: | ---: | ---: |
 | Gel | R$ 10,00 | R$ 5,50 | 30 |
 | Pomada | R$ 25,00 | R$ 7,50 | 10 |
-| Bucha para Dread | R$ 25,00 | R$ 12,50 | 3 |
+| Bucha Nudread | R$ 25,00 | R$ 12,50 | 3 |
 | Oleo para Barba | R$ 35,00 | R$ 13,00 | 4 |
 | Shampoo | R$ 25,00 | R$ 7,50 | 10 |
 | Condicionador | R$ 25,00 | R$ 7,50 | 10 |
@@ -167,7 +167,7 @@ Consulta readonly local em `unit-01`:
 | --- | --- | ---: | ---: | ---: | --- | --- | --- |
 | Gel | Nenhum confiavel | N/A | N/A | N/A | N/A | N/A | Criar canonico futuro. |
 | Pomada | `prd-pomada` Pomada Matte | R$ 59,00 | R$ 24,00 | 22 | sem marcador | 4 vendas, 4 financ., 3 com., 1 mov., 1 consumo | Preservar como legado; criar Pomada canonica. |
-| Bucha para Dread | Nenhum confiavel | N/A | N/A | N/A | N/A | N/A | Criar canonico futuro. |
+| Bucha Nudread | Nenhum confiavel | N/A | N/A | N/A | N/A | N/A | Criar canonico futuro. |
 | Oleo para Barba | `prd-oleo-barba` Oleo para Barba | R$ 39,00 | R$ 14,00 | 18 | sem marcador | 2 vendas, 2 financ., 2 com., 1 mov., 1 consumo | Nome proximo, mas preco/custo/estoque divergem; preferir canonico novo. |
 | Shampoo | `demo-prd-shampoo` Shampoo Anticaspa Premium | R$ 49,00 | R$ 19,00 | 30 | demo | 3 vendas, 3 financ., 3 com., 1 mov. | Nao reaproveitar; criar Shampoo canonico. |
 | Condicionador | `demo-prd-cond` Condicionador Reparador | R$ 45,00 | R$ 17,00 | 28 | demo | 2 vendas, 2 financ., 2 com., 1 mov. | Nao reaproveitar; criar Condicionador canonico. |
@@ -203,7 +203,7 @@ Produto canonico futuro:
 
 - Gel;
 - Pomada;
-- Bucha para Dread;
+- Bucha Nudread;
 - Oleo para Barba;
 - Shampoo;
 - Condicionador;

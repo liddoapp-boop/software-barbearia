@@ -61,7 +61,7 @@ IDs usados apenas em teste:
 | --- | --- | ---: | ---: | ---: |
 | Gel | `fixture-canonico-produto-gel` | R$ 10,00 | R$ 5,50 | 30 |
 | Pomada | `fixture-canonico-produto-pomada` | R$ 25,00 | R$ 7,50 | 10 |
-| Bucha para Dread | `fixture-canonico-produto-bucha-dread` | R$ 25,00 | R$ 12,50 | 3 |
+| Bucha Nudread | `fixture-canonico-produto-bucha-nudread` | R$ 25,00 | R$ 12,50 | 3 |
 | Oleo para Barba | `fixture-canonico-produto-oleo-barba` | R$ 35,00 | R$ 13,00 | 4 |
 | Shampoo | `fixture-canonico-produto-shampoo` | R$ 25,00 | R$ 7,50 | 10 |
 | Condicionador | `fixture-canonico-produto-condicionador` | R$ 25,00 | R$ 7,50 | 10 |

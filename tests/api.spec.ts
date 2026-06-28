@@ -21,7 +21,7 @@ const CANONICAL_SERVICE_FIXTURE_IDS = {
 const CANONICAL_PRODUCT_FIXTURE_IDS = {
   gel: "fixture-canonico-produto-gel",
   pomada: "fixture-canonico-produto-pomada",
-  buchaDread: "fixture-canonico-produto-bucha-dread",
+  buchaNudread: "fixture-canonico-produto-bucha-nudread",
   oleoBarba: "fixture-canonico-produto-oleo-barba",
   shampoo: "fixture-canonico-produto-shampoo",
   condicionador: "fixture-canonico-produto-condicionador",
@@ -128,8 +128,8 @@ const CANONICAL_REAL_PRODUCT_FIXTURES: Product[] = [
     active: true,
   },
   {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.buchaDread,
-    name: "Bucha para Dread",
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.buchaNudread,
+    name: "Bucha Nudread",
     category: "Dread",
     salePrice: 25,
     costPrice: 12.5,
