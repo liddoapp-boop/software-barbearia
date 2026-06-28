@@ -2657,6 +2657,9 @@ export class PrismaOperationsService {
     }
 
     const appointment = this.mapAppointment(row);
+    if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
+      throw new Error("Use checkout ou conclusao de atendimento para finalizar com financeiro");
+    }
     const updated = this.engine.changeAppointmentStatus(
       appointment,
       input.status,

@@ -2042,6 +2042,9 @@ export class OperationsService {
     if (input.unitId && appointment.unitId !== input.unitId) {
       throw new Error("Unidade nao autorizada");
     }
+    if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
+      throw new Error("Use checkout ou conclusao de atendimento para finalizar com financeiro");
+    }
 
     const updated = this.engine.changeAppointmentStatus(
       appointment,

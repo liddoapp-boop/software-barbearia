@@ -4,10 +4,193 @@ import type { FastifyInstance } from "fastify";
 import { createApp, hasPublicIdTestMarker } from "../src/http/app";
 import { OperationsService } from "../src/application/operations-service";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
+import type { Product, Service } from "../src/domain/types";
 import {
   computeBillingWebhookSignature,
   getBillingWebhookSecret,
 } from "../src/http/security";
+
+const CANONICAL_SERVICE_FIXTURE_IDS = {
+  corte: "fixture-canonico-servico-corte",
+  barba: "fixture-canonico-servico-barba",
+  hidratacao: "fixture-canonico-servico-hidratacao",
+  luzes: "fixture-canonico-servico-luzes",
+  pigmentacao: "fixture-canonico-servico-pigmentacao",
+} as const;
+
+const CANONICAL_PRODUCT_FIXTURE_IDS = {
+  gel: "fixture-canonico-produto-gel",
+  pomada: "fixture-canonico-produto-pomada",
+  buchaDread: "fixture-canonico-produto-bucha-dread",
+  oleoBarba: "fixture-canonico-produto-oleo-barba",
+  shampoo: "fixture-canonico-produto-shampoo",
+  condicionador: "fixture-canonico-produto-condicionador",
+  mascaraHidratacao: "fixture-canonico-produto-mascara-hidratacao",
+} as const;
+
+const CANONICAL_REAL_SERVICE_FIXTURES: Service[] = [
+  {
+    id: CANONICAL_SERVICE_FIXTURE_IDS.corte,
+    businessId: "unit-01",
+    name: "Corte",
+    description: "Fixture local canonica real da Sprint 227.1.",
+    category: "CORTE",
+    price: 30,
+    durationMin: 30,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: "fixture-local-sprint-227-1",
+    active: true,
+    createdAt: new Date("2026-06-28T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+  },
+  {
+    id: CANONICAL_SERVICE_FIXTURE_IDS.barba,
+    businessId: "unit-01",
+    name: "Barba",
+    description: "Fixture local canonica real da Sprint 227.1.",
+    category: "BARBA",
+    price: 20,
+    durationMin: 30,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: "fixture-local-sprint-227-1",
+    active: true,
+    createdAt: new Date("2026-06-28T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+  },
+  {
+    id: CANONICAL_SERVICE_FIXTURE_IDS.hidratacao,
+    businessId: "unit-01",
+    name: "Hidratacao",
+    description: "Fixture local canonica real da Sprint 227.1.",
+    category: "TRATAMENTO",
+    price: 20,
+    durationMin: 30,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: "fixture-local-sprint-227-1",
+    active: true,
+    createdAt: new Date("2026-06-28T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+  },
+  {
+    id: CANONICAL_SERVICE_FIXTURE_IDS.luzes,
+    businessId: "unit-01",
+    name: "Luzes",
+    description: "Fixture local canonica real da Sprint 227.1.",
+    category: "TECNICO",
+    price: 50,
+    durationMin: 60,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: "fixture-local-sprint-227-1",
+    active: true,
+    createdAt: new Date("2026-06-28T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+  },
+  {
+    id: CANONICAL_SERVICE_FIXTURE_IDS.pigmentacao,
+    businessId: "unit-01",
+    name: "Pigmentacao",
+    description: "Fixture local canonica real da Sprint 227.1.",
+    category: "TECNICO",
+    price: 45,
+    durationMin: 60,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: "fixture-local-sprint-227-1",
+    active: true,
+    createdAt: new Date("2026-06-28T00:00:00.000Z"),
+    updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+  },
+];
+
+const CANONICAL_REAL_PRODUCT_FIXTURES: Product[] = [
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.gel,
+    name: "Gel",
+    category: "Finalizacao",
+    salePrice: 10,
+    costPrice: 5.5,
+    stockQty: 30,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.pomada,
+    name: "Pomada",
+    category: "Finalizacao",
+    salePrice: 25,
+    costPrice: 7.5,
+    stockQty: 10,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.buchaDread,
+    name: "Bucha para Dread",
+    category: "Dread",
+    salePrice: 25,
+    costPrice: 12.5,
+    stockQty: 3,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.oleoBarba,
+    name: "Oleo para Barba",
+    category: "Barba",
+    salePrice: 35,
+    costPrice: 13,
+    stockQty: 4,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.shampoo,
+    name: "Shampoo",
+    category: "Cabelo",
+    salePrice: 25,
+    costPrice: 7.5,
+    stockQty: 10,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.condicionador,
+    name: "Condicionador",
+    category: "Cabelo",
+    salePrice: 25,
+    costPrice: 7.5,
+    stockQty: 10,
+    minStockAlert: 0,
+    active: true,
+  },
+  {
+    id: CANONICAL_PRODUCT_FIXTURE_IDS.mascaraHidratacao,
+    name: "Mascara de Hidratacao",
+    category: "Tratamento",
+    salePrice: 30,
+    costPrice: 7.5,
+    stockQty: 10,
+    minStockAlert: 0,
+    active: true,
+  },
+];
+
+function installCanonicalRealFixtures(store: InMemoryStore) {
+  const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
+  if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
+  store.services.push(...CANONICAL_REAL_SERVICE_FIXTURES.map((item) => ({ ...item })));
+  store.products.push(...CANONICAL_REAL_PRODUCT_FIXTURES.map((item) => ({ ...item })));
+  store.serviceProfessionalAssignments.push(
+    ...CANONICAL_REAL_SERVICE_FIXTURES.map((service) => ({
+      serviceId: service.id,
+      professionalId: "pro-01",
+    })),
+  );
+}
 
 async function loginAs(
   app: FastifyInstance,
@@ -763,6 +946,170 @@ describe("API MVP", () => {
     expect(transactions.json().summary.income).toBe(0);
     expect(transactions.json().summary.expense).toBe(0);
     expect(transactions.json().transactions).toHaveLength(0);
+  });
+
+  it("valida fluxo de atendimento controlado com canonicos reais e product fixtures sem checkout financeiro", () => {
+    const store = new InMemoryStore();
+    installCanonicalRealFixtures(store);
+    const operations = new OperationsService(store);
+
+    const catalog = operations.getCatalog({ unitId: "unit-01" });
+    const fixtureServiceIds = new Set(CANONICAL_REAL_SERVICE_FIXTURES.map((item) => item.id));
+    const fixtureProductIds = new Set(CANONICAL_REAL_PRODUCT_FIXTURES.map((item) => item.id));
+
+    expect(CANONICAL_REAL_SERVICE_FIXTURES).toHaveLength(5);
+    expect(CANONICAL_REAL_PRODUCT_FIXTURES).toHaveLength(7);
+    expect(catalog.services.filter((item) => fixtureServiceIds.has(item.id))).toEqual(
+      expect.arrayContaining(
+        CANONICAL_REAL_SERVICE_FIXTURES.map((item) =>
+          expect.objectContaining({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            durationMin: item.durationMin,
+            active: true,
+          }),
+        ),
+      ),
+    );
+    expect(catalog.services.some((item) => item.name === "Corte + Barba")).toBe(false);
+
+    for (const fixtureId of fixtureServiceIds) {
+      expect(["svc-corte", "svc-barba", "demo-svc-hidratacao", "demo-svc-combo"]).not.toContain(
+        fixtureId,
+      );
+    }
+    for (const fixtureId of fixtureProductIds) {
+      expect(["prd-pomada", "prd-oleo-barba", "demo-prd-shampoo", "demo-prd-cond"]).not.toContain(
+        fixtureId,
+      );
+    }
+
+    const cancelled = operations.schedule({
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceId: CANONICAL_SERVICE_FIXTURE_IDS.corte,
+      startsAt: new Date("2026-07-11T10:00:00.000Z"),
+      changedBy: "owner",
+    });
+    operations.updateStatus({
+      appointmentId: cancelled.id,
+      unitId: "unit-01",
+      status: "CANCELLED",
+      changedBy: "owner",
+    });
+    const reusedSlot = operations.schedule({
+      unitId: "unit-01",
+      clientId: "cli-02",
+      professionalId: "pro-01",
+      serviceId: CANONICAL_SERVICE_FIXTURE_IDS.barba,
+      startsAt: new Date("2026-07-11T10:00:00.000Z"),
+      changedBy: "owner",
+    });
+    expect(reusedSlot.startsAt.toISOString()).toBe("2026-07-11T10:00:00.000Z");
+
+    const appointment = operations.schedule({
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceId: CANONICAL_SERVICE_FIXTURE_IDS.corte,
+      startsAt: new Date("2026-07-11T12:00:00.000Z"),
+      changedBy: "owner",
+    });
+    expect(appointment.endsAt.toISOString()).toBe("2026-07-11T12:30:00.000Z");
+    expect(appointment.serviceNameSnapshot).toBe("Corte");
+    expect(appointment.servicePriceSnapshot).toBe(30);
+    expect(appointment.serviceDurationMinSnapshot).toBe(30);
+
+    expect(() =>
+      operations.schedule({
+        unitId: "unit-01",
+        clientId: "cli-02",
+        professionalId: "pro-01",
+        serviceId: CANONICAL_SERVICE_FIXTURE_IDS.barba,
+        startsAt: new Date("2026-07-11T12:15:00.000Z"),
+        changedBy: "owner",
+      }),
+    ).toThrow("Conflito de horario detectado");
+
+    const liveCatalogService = store.services.find(
+      (item) => item.id === CANONICAL_SERVICE_FIXTURE_IDS.corte,
+    );
+    expect(liveCatalogService).toBeTruthy();
+    liveCatalogService!.name = "Corte Alterado Fora do Snapshot";
+    liveCatalogService!.price = 999;
+    liveCatalogService!.durationMin = 90;
+
+    const detailAfterCatalogChange = operations.getAppointmentById({
+      appointmentId: appointment.id,
+      unitId: "unit-01",
+    });
+    expect(detailAfterCatalogChange.service).toBe("Corte");
+    expect(detailAfterCatalogChange.servicePrice).toBe(30);
+    expect(detailAfterCatalogChange.serviceDurationMin).toBe(30);
+
+    const rescheduled = operations.reschedule({
+      appointmentId: appointment.id,
+      unitId: "unit-01",
+      startsAt: new Date("2026-07-11T13:00:00.000Z"),
+      changedBy: "owner",
+    });
+    expect(rescheduled.endsAt.toISOString()).toBe("2026-07-11T13:30:00.000Z");
+
+    const confirmed = operations.updateStatus({
+      appointmentId: appointment.id,
+      unitId: "unit-01",
+      status: "CONFIRMED",
+      changedBy: "owner",
+    });
+    expect(confirmed.status).toBe("CONFIRMED");
+
+    const inService = operations.updateStatus({
+      appointmentId: appointment.id,
+      unitId: "unit-01",
+      status: "IN_SERVICE",
+      changedBy: "owner",
+    });
+    expect(inService.status).toBe("IN_SERVICE");
+    expect(() =>
+      operations.updateStatus({
+        appointmentId: appointment.id,
+        unitId: "unit-01",
+        status: "COMPLETED",
+        changedBy: "owner",
+      }),
+    ).toThrow("Use checkout ou conclusao de atendimento");
+
+    const inventory = operations.getInventory({ unitId: "unit-01", status: "ALL", limit: 20 });
+    for (const product of CANONICAL_REAL_PRODUCT_FIXTURES) {
+      const row = inventory.products.find((item) => item.id === product.id);
+      expect(row).toMatchObject({
+        id: product.id,
+        name: product.name,
+        salePrice: product.salePrice,
+        costPrice: product.costPrice,
+        quantity: product.stockQty,
+        status: "IN_STOCK",
+      });
+      expect(row!.quantity).toBeGreaterThanOrEqual(0);
+    }
+
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.commissionEntries).toHaveLength(0);
+    expect(store.productSales).toHaveLength(0);
+    expect(store.stockMovements).toHaveLength(0);
+    expect(
+      store.products.filter((item) => fixtureProductIds.has(item.id)).map((item) => ({
+        id: item.id,
+        stockQty: item.stockQty,
+      })),
+    ).toEqual(
+      CANONICAL_REAL_PRODUCT_FIXTURES.map((item) => ({
+        id: item.id,
+        stockQty: item.stockQty,
+      })),
+    );
   });
 
   it("sugere horarios alternativos ordenados por proximidade", async () => {
