@@ -678,6 +678,93 @@ describe("API MVP", () => {
     expect(conflictReschedule.statusCode).toBe(409);
   });
 
+  it("mantem fluxo de atendimento controlado sem checkout real nem financeiro indevido", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const cancelled = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-07-10T10:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(cancelled.statusCode).toBe(200);
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${cancelled.json().appointment.id}/status`,
+      payload: { status: "CANCELLED", changedBy: "owner" },
+    });
+
+    const reusedSlot = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-02",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-07-10T10:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(reusedSlot.statusCode).toBe(200);
+
+    const controlled = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-07-10T12:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(controlled.statusCode).toBe(200);
+    const appointmentId = controlled.json().appointment.id as string;
+
+    const rescheduled = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/reschedule`,
+      payload: {
+        startsAt: "2026-07-10T13:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(rescheduled.statusCode).toBe(200);
+    expect(rescheduled.json().appointment.endsAt).toBe("2026-07-10T13:55:00.000Z");
+
+    const confirmed = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "CONFIRMED", changedBy: "owner" },
+    });
+    expect(confirmed.statusCode).toBe(200);
+
+    const inService = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "IN_SERVICE", changedBy: "owner" },
+    });
+    expect(inService.statusCode).toBe(200);
+
+    const transactions = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-07-10T00:00:00.000Z&end=2026-07-10T23:59:59.999Z",
+    });
+    expect(transactions.statusCode).toBe(200);
+    expect(transactions.json().summary.income).toBe(0);
+    expect(transactions.json().summary.expense).toBe(0);
+    expect(transactions.json().transactions).toHaveLength(0);
+  });
+
   it("sugere horarios alternativos ordenados por proximidade", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
