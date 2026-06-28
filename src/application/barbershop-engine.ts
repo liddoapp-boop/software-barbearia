@@ -113,6 +113,9 @@ export class BarbershopEngine {
       status: "SCHEDULED",
       isFitting: Boolean(input.isFitting),
       notes: input.notes,
+      serviceNameSnapshot: input.service.name,
+      servicePriceSnapshot: input.service.price,
+      serviceDurationMinSnapshot: input.service.durationMin,
       history,
     };
   }

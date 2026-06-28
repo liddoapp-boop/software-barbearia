@@ -218,6 +218,9 @@ export interface Appointment {
   status: AppointmentStatus;
   isFitting: boolean;
   notes?: string;
+  serviceNameSnapshot?: string;
+  servicePriceSnapshot?: number;
+  serviceDurationMinSnapshot?: number;
   history: AppointmentHistoryItem[];
 }
 

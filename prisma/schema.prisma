@@ -416,6 +416,9 @@ model Appointment {
   status         AppointmentStatus
   isFitting      Boolean               @default(false)
   notes          String?
+  serviceNameSnapshot        String?
+  servicePriceSnapshot       Decimal?  @db.Decimal(10, 2)
+  serviceDurationMinSnapshot Int?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   unit           Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)

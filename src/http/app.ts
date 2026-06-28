@@ -4839,8 +4839,20 @@ export function createApp() {
       clientId = client.id;
       appointmentId = crypto.randomUUID();
       await prisma.appointment.create({
-        data: { id: appointmentId, unitId, clientId, professionalId: profId, serviceId: service.id,
-          startsAt, endsAt, status: "SCHEDULED", notes: `Agendamento online — ${body.clientName}` },
+        data: {
+          id: appointmentId,
+          unitId,
+          clientId,
+          professionalId: profId,
+          serviceId: service.id,
+          startsAt,
+          endsAt,
+          status: "SCHEDULED",
+          notes: `Agendamento online — ${body.clientName}`,
+          serviceNameSnapshot: service.name,
+          servicePriceSnapshot: Number(service.price),
+          serviceDurationMinSnapshot: service.durationMin,
+        },
       });
     } else {
       // Memory backend
@@ -4853,9 +4865,20 @@ export function createApp() {
 
       appointmentId = crypto.randomUUID();
       memoryStore.appointments.push({
-        id: appointmentId, unitId, clientId, professionalId: profId, serviceId: service.id,
-        startsAt, endsAt, status: "SCHEDULED", isFitting: false,
-        notes: `Agendamento online — ${body.clientName}`, history: [],
+        id: appointmentId,
+        unitId,
+        clientId,
+        professionalId: profId,
+        serviceId: service.id,
+        startsAt,
+        endsAt,
+        status: "SCHEDULED",
+        isFitting: false,
+        serviceNameSnapshot: service.name,
+        servicePriceSnapshot: Number(service.price),
+        serviceDurationMinSnapshot: service.durationMin,
+        notes: `Agendamento online — ${body.clientName}`,
+        history: [],
       });
     }
 

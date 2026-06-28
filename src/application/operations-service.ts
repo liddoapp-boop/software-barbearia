@@ -1996,16 +1996,17 @@ export class OperationsService {
 
     const service = this.store.services.find((item) => item.id === appointment.serviceId);
     if (!service) throw new Error("Servico do agendamento nao encontrado");
+    const effectiveService = this.buildEffectiveAppointmentService(appointment, service);
     const settings = this.ensureBusinessSettings(appointment.unitId);
     const businessHours = this.ensureBusinessHours(appointment.unitId);
     const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-    const newEnd = new Date(input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000);
+    const newEnd = new Date(input.startsAt.getTime() + (effectiveService.durationMin + bufferAfterMin) * 60_000);
 
     const updated = this.engine.rescheduleAppointment(
       appointment,
       input.startsAt,
-      service.durationMin,
+      effectiveService.durationMin,
       this.store.appointments.filter(
         (item) =>
           item.unitId === appointment.unitId &&
@@ -2069,6 +2070,7 @@ export class OperationsService {
 
     const service = this.store.services.find((item) => item.id === appointment.serviceId);
     if (!service) throw new Error("Servico nao encontrado");
+    const effectiveService = this.buildEffectiveAppointmentService(appointment, service);
 
     const professional = this.store.professionals.find(
       (item) => item.id === appointment.professionalId,
@@ -2087,7 +2089,7 @@ export class OperationsService {
 
     const result = this.engine.completeAppointment({
       appointment,
-      service,
+      service: effectiveService,
       professional,
       monthlyProducedValue,
       changedBy: input.changedBy,
@@ -3587,7 +3589,7 @@ export class OperationsService {
       const price =
         status === "COMPLETED"
           ? serviceIncomeByAppointment.get(row.id) ?? Number(row.servicePrice ?? service?.price ?? 0)
-          : Number(service?.price ?? row.servicePrice ?? 0);
+          : Number(row.servicePrice ?? service?.price ?? 0);
       if (status === "COMPLETED") statusCounts.completed += 1;
       if (status === "CONFIRMED") statusCounts.confirmed += 1;
       if (status === "IN_SERVICE") statusCounts.inService += 1;
@@ -6602,6 +6604,13 @@ export class OperationsService {
       serviceId: nextService.id,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
+      ...(nextService.id !== appointment.serviceId
+        ? {
+            serviceNameSnapshot: nextService.name,
+            servicePriceSnapshot: nextService.price,
+            serviceDurationMinSnapshot: nextService.durationMin,
+          }
+        : {}),
       notes:
         input.notes !== undefined
           ? input.notes || undefined
@@ -7500,6 +7509,15 @@ export class OperationsService {
     this.store.appointments[index] = updated;
   }
 
+  private buildEffectiveAppointmentService(appointment: Appointment, service: Service): Service {
+    return {
+      ...service,
+      name: appointment.serviceNameSnapshot ?? service.name,
+      price: appointment.servicePriceSnapshot ?? service.price,
+      durationMin: appointment.serviceDurationMinSnapshot ?? service.durationMin,
+    };
+  }
+
   private buildAppointmentView(appointment: (typeof this.store.appointments)[number]) {
     const client = this.store.clients.find((item) => item.id === appointment.clientId);
     const professional = this.store.professionals.find(
@@ -7535,9 +7553,9 @@ export class OperationsService {
       clientPhone: client?.phone ?? null,
       clientTags: client?.tags ?? [],
       professional: professional?.name ?? "Profissional",
-      service: service?.name ?? "Servico",
-      servicePrice: service?.price ?? 0,
-      serviceDurationMin: service?.durationMin ?? 0,
+      service: appointment.serviceNameSnapshot ?? service?.name ?? "Servico",
+      servicePrice: appointment.servicePriceSnapshot ?? service?.price ?? 0,
+      serviceDurationMin: appointment.serviceDurationMinSnapshot ?? service?.durationMin ?? 0,
       origin: "MANUAL",
       confirmation: isConfirmed,
       createdAt: firstHistory.toISOString(),

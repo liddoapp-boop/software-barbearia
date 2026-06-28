@@ -2473,6 +2473,9 @@ export class PrismaOperationsService {
             status: appointment.status,
             isFitting: appointment.isFitting,
             notes: appointment.notes,
+            serviceNameSnapshot: appointment.serviceNameSnapshot,
+            servicePriceSnapshot: appointment.servicePriceSnapshot,
+            serviceDurationMinSnapshot: appointment.serviceDurationMinSnapshot,
             history: {
               create: appointment.history.map((entry) => ({
                 id: crypto.randomUUID(),
@@ -2538,7 +2541,7 @@ export class PrismaOperationsService {
           await this.lockAppointmentScheduling(tx, row.unitId, row.professionalId, row.clientId);
 
           const appointment = this.mapAppointment(row);
-          const service = this.mapService(row.service);
+          const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
           const [settings, businessHours, unitRow] = await Promise.all([
             this.ensureBusinessSettingsInTransaction(tx, appointment.unitId),
             this.ensureBusinessHoursInTransaction(tx, appointment.unitId),
@@ -2701,7 +2704,7 @@ export class PrismaOperationsService {
     }
 
     const appointment = this.mapAppointment(row);
-    const service = this.mapService(row.service);
+    const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
     const professional = this.mapProfessional(row.professional);
     const range = monthRange(input.completedAt);
 
@@ -3299,7 +3302,7 @@ export class PrismaOperationsService {
     const notes = String(input.notes || "").trim() || undefined;
 
     const appointment = this.mapAppointment(row);
-    const service = this.mapService(row.service);
+    const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
     const professional = this.mapProfessional(row.professional);
     const range = monthRange(completedAt);
     const serviceIncomeAgg = await this.prisma.financialEntry.aggregate({
@@ -8809,6 +8812,13 @@ export class PrismaOperationsService {
               serviceId: nextServiceId,
               startsAt: nextStartsAt,
               endsAt: nextEndsAt,
+              ...(nextServiceId !== current.serviceId
+                ? {
+                    serviceNameSnapshot: serviceRow.name,
+                    servicePriceSnapshot: serviceRow.price,
+                    serviceDurationMinSnapshot: serviceRow.durationMin,
+                  }
+                : {}),
               notes: input.notes !== undefined ? input.notes : current.notes,
               isFitting: input.isFitting !== undefined ? Boolean(input.isFitting) : current.isFitting,
               ...(hasMainChange
@@ -10190,6 +10200,9 @@ export class PrismaOperationsService {
     status: AppointmentStatus;
     isFitting: boolean;
     notes: string | null;
+    serviceNameSnapshot?: string | null;
+    servicePriceSnapshot?: Prisma.Decimal | number | null;
+    serviceDurationMinSnapshot?: number | null;
     history?: Array<{
       changedAt: Date;
       changedBy: string;
@@ -10208,12 +10221,25 @@ export class PrismaOperationsService {
       status: item.status,
       isFitting: item.isFitting,
       notes: item.notes ?? undefined,
+      serviceNameSnapshot: item.serviceNameSnapshot ?? undefined,
+      servicePriceSnapshot:
+        item.servicePriceSnapshot == null ? undefined : asNumber(item.servicePriceSnapshot),
+      serviceDurationMinSnapshot: item.serviceDurationMinSnapshot ?? undefined,
       history: (item.history ?? []).map((entry) => ({
         changedAt: entry.changedAt,
         changedBy: entry.changedBy,
         action: entry.action as Appointment["history"][number]["action"],
         reason: entry.reason ?? undefined,
       })),
+    };
+  }
+
+  private buildEffectiveAppointmentService(appointment: Appointment, service: Service): Service {
+    return {
+      ...service,
+      name: appointment.serviceNameSnapshot ?? service.name,
+      price: appointment.servicePriceSnapshot ?? service.price,
+      durationMin: appointment.serviceDurationMinSnapshot ?? service.durationMin,
     };
   }
 
@@ -10228,6 +10254,9 @@ export class PrismaOperationsService {
     status: AppointmentStatus;
     isFitting: boolean;
     notes: string | null;
+    serviceNameSnapshot?: string | null;
+    servicePriceSnapshot?: Prisma.Decimal | number | null;
+    serviceDurationMinSnapshot?: number | null;
     createdAt: Date;
     updatedAt: Date;
     client: {
@@ -10264,9 +10293,12 @@ export class PrismaOperationsService {
       clientPhone: item.client.phone,
       clientTags: item.client.tags as Array<"NEW" | "RECURRING" | "VIP" | "INACTIVE">,
       professional: item.professional.name,
-      service: item.service.name,
-      servicePrice: asNumber(item.service.price),
-      serviceDurationMin: item.service.durationMin,
+      service: item.serviceNameSnapshot ?? item.service.name,
+      servicePrice:
+        item.servicePriceSnapshot == null
+          ? asNumber(item.service.price)
+          : asNumber(item.servicePriceSnapshot),
+      serviceDurationMin: item.serviceDurationMinSnapshot ?? item.service.durationMin,
       origin: "MANUAL",
       confirmation,
       createdAt: item.createdAt.toISOString(),

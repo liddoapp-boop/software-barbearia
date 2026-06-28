@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp, hasPublicIdTestMarker } from "../src/http/app";
+import { OperationsService } from "../src/application/operations-service";
+import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 import {
   computeBillingWebhookSignature,
   getBillingWebhookSecret,
@@ -5112,6 +5114,113 @@ describe("API MVP", () => {
 
     expect(updateStatus.statusCode).toBe(403);
     process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("mantem snapshot de servico em novos agendamentos apos alteracao do catalogo", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const appointment = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-04-28T10:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(appointment.statusCode).toBe(200);
+    const appointmentId = appointment.json().appointment.id as string;
+
+    const catalogChange = await app.inject({
+      method: "PATCH",
+      url: "/services/svc-corte",
+      payload: {
+        unitId: "unit-01",
+        name: "Corte Catalogo Novo",
+        price: 999,
+        durationMinutes: 15,
+        changedBy: "owner",
+      },
+    });
+    expect(catalogChange.statusCode).toBe(200);
+
+    const detail = await app.inject({ method: "GET", url: `/appointments/${appointmentId}` });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().appointment.service).toBe("Corte Premium");
+    expect(detail.json().appointment.servicePrice).toBe(75);
+    expect(detail.json().appointment.serviceDurationMin).toBe(45);
+
+    const base = "unitId=unit-01&start=2026-04-28T00:00:00.000Z&end=2026-04-28T23:59:59.999Z";
+    const appointmentsReport = await app.inject({
+      method: "GET",
+      url: `/reports/management/appointments?${base}`,
+    });
+    expect(appointmentsReport.statusCode).toBe(200);
+    expect(appointmentsReport.json().summary.estimatedRevenue).toBe(75);
+    expect(appointmentsReport.json().appointments[0].serviceName).toBe("Corte Premium");
+    expect(appointmentsReport.json().appointments[0].price).toBe(75);
+
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "CONFIRMED", changedBy: "owner" },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "IN_SERVICE", changedBy: "owner" },
+    });
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "service-snapshot-checkout" },
+      payload: {
+        unitId: "unit-01",
+        completedAt: "2026-04-28T10:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 75,
+        changedBy: "owner",
+      },
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().serviceRevenue.amount).toBe(75);
+    expect(checkout.json().serviceRevenue.description).toContain("Corte Premium");
+  });
+
+  it("mantem fallback legado para agendamento sem snapshot de servico", async () => {
+    const store = new InMemoryStore();
+    const operations = new OperationsService(store);
+    store.appointments.push({
+      id: "apt-legacy-no-snapshot",
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceId: "svc-corte",
+      startsAt: new Date("2026-04-29T10:00:00.000Z"),
+      endsAt: new Date("2026-04-29T10:45:00.000Z"),
+      status: "SCHEDULED",
+      isFitting: false,
+      history: [
+        {
+          changedAt: new Date("2026-04-29T09:00:00.000Z"),
+          changedBy: "legacy",
+          action: "CREATED",
+        },
+      ],
+    });
+
+    const appointment = operations.getAppointmentById({
+      appointmentId: "apt-legacy-no-snapshot",
+      unitId: "unit-01",
+    });
+
+    expect(appointment.service).toBe("Corte Premium");
+    expect(appointment.servicePrice).toBe(75);
+    expect(appointment.serviceDurationMin).toBe(45);
   });
 
   it("retorna contratos gerenciais de financeiro, atendimentos, vendas, estoque e profissionais por periodo", async () => {
