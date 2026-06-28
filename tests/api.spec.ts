@@ -5155,16 +5155,31 @@ describe("API MVP", () => {
       },
     });
     expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().serviceRevenue.amount).toBe(75);
+
+    const servicePriceChange = await app.inject({
+      method: "PATCH",
+      url: "/services/svc-corte",
+      payload: {
+        unitId: "unit-01",
+        price: 999,
+        changedBy: "owner",
+      },
+    });
+    expect(servicePriceChange.statusCode).toBe(200);
+    expect(servicePriceChange.json().service.price).toBe(999);
 
     const base = "unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z";
     const financial = await app.inject({ method: "GET", url: `/reports/management/financial?${base}` });
     expect(financial.statusCode).toBe(200);
-    expect(financial.json().summary.serviceRevenue).toBeGreaterThan(0);
+    expect(financial.json().summary.serviceRevenue).toBe(75);
     expect(financial.json().breakdown.byOrigin[0].label).toBeTruthy();
 
     const appointments = await app.inject({ method: "GET", url: `/reports/management/appointments?${base}` });
     expect(appointments.statusCode).toBe(200);
     expect(appointments.json().summary.completed).toBe(1);
+    expect(appointments.json().summary.realizedRevenue).toBe(75);
+    expect(appointments.json().appointments[0].price).toBe(75);
 
     const productSales = await app.inject({ method: "GET", url: `/reports/management/product-sales?${base}` });
     expect(productSales.statusCode).toBe(200);
@@ -5175,12 +5190,23 @@ describe("API MVP", () => {
     expect(stock.json().movements.some((row: { label: string }) => row.label === "Saida por venda")).toBe(true);
 
     const professionals = await app.inject({ method: "GET", url: `/reports/management/professionals?${base}` });
-    expect(professionals.statusCode).toBe(200);
+    expect(professionals.statusCode, professionals.body).toBe(200);
     expect(professionals.json().professionals[0].professionalName).toBeTruthy();
+    expect(professionals.json().summary.serviceRevenue).toBe(75);
 
     const summary = await app.inject({ method: "GET", url: `/reports/management/summary?${base}` });
     expect(summary.statusCode).toBe(200);
     expect(summary.json().reports.map((item: { type: string }) => item.type)).toContain("financial");
+
+    const performanceServices = await app.inject({
+      method: "GET",
+      url: "/performance/services?unitId=unit-01&month=4&year=2026",
+    });
+    expect(performanceServices.statusCode).toBe(200);
+    const cortePerformance = performanceServices
+      .json()
+      .services.find((item: { serviceId: string }) => item.serviceId === "svc-corte");
+    expect(cortePerformance.revenue).toBe(75);
   });
 
   it("exporta CSV gerencial com cabecalhos humanos", async () => {

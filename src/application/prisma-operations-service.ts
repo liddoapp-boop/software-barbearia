@@ -1255,6 +1255,7 @@ export class PrismaOperationsService {
         status: "COMPLETED",
       },
       select: {
+        id: true,
         serviceId: true,
         startsAt: true,
         service: {
@@ -1263,6 +1264,10 @@ export class PrismaOperationsService {
           },
         },
       },
+    });
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId,
+      appointmentIds: rows.map((item) => item.id),
     });
     const usageMap = new Map<
       string,
@@ -1279,13 +1284,51 @@ export class PrismaOperationsService {
         lastCompletedAt: null,
       };
       current.salesCount += 1;
-      current.revenueGenerated += asNumber(row.service.price);
+      current.revenueGenerated += serviceIncomeByAppointment.get(row.id) ?? asNumber(row.service.price);
       if (!current.lastCompletedAt || row.startsAt > current.lastCompletedAt) {
         current.lastCompletedAt = row.startsAt;
       }
       usageMap.set(row.serviceId, current);
     }
     return usageMap;
+  }
+
+  private async getAppointmentServiceIncomeMap(input: {
+    unitId: string;
+    start?: Date;
+    end?: Date;
+    appointmentIds?: string[];
+  }) {
+    if (input.appointmentIds && input.appointmentIds.length === 0) {
+      return new Map<string, number>();
+    }
+    const rows = await this.prisma.financialEntry.findMany({
+      where: {
+        unitId: input.unitId,
+        kind: "INCOME",
+        source: "SERVICE",
+        referenceType: "APPOINTMENT",
+        referenceId: input.appointmentIds ? { in: input.appointmentIds } : { not: null },
+        ...(input.start || input.end
+          ? {
+              occurredAt: {
+                ...(input.start ? { gte: input.start } : {}),
+                ...(input.end ? { lte: input.end } : {}),
+              },
+            }
+          : {}),
+      },
+      select: {
+        referenceId: true,
+        amount: true,
+      },
+    });
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.referenceId) continue;
+      map.set(row.referenceId, (map.get(row.referenceId) ?? 0) + asNumber(row.amount));
+    }
+    return map;
   }
 
   private async getServiceProfessionalIds(serviceId: string) {
@@ -5094,11 +5137,16 @@ export class PrismaOperationsService {
           startsAt: { gte: input.start, lte: input.end },
         },
         select: {
+          id: true,
           serviceId: true,
           service: { select: { name: true, price: true } },
         },
       }),
     ]);
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: appointments.map((item) => item.id),
+    });
 
     const revenueByProfessionalMap = new Map<string, { professionalId: string; professionalName: string; revenue: number }>();
     const revenueByPaymentMethodMap = new Map<string, { paymentMethod: string; revenue: number; transactions: number }>();
@@ -5145,7 +5193,7 @@ export class PrismaOperationsService {
         revenue: 0,
         appointments: 0,
       };
-      current.revenue += asNumber(row.service.price);
+      current.revenue += serviceIncomeByAppointment.get(row.id) ?? asNumber(row.service.price);
       current.appointments += 1;
       revenueByServiceMap.set(row.serviceId, current);
     }
@@ -5293,13 +5341,20 @@ export class PrismaOperationsService {
       end: input.end,
       professionalId: input.professionalId,
     })).slice(0, Math.min(Math.max(input.limit ?? 300, 1), 1000));
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: appointments.map((item) => item.id),
+    });
     const summary = { total: appointments.length, completed: 0, confirmed: 0, inService: 0, cancelled: 0, noShow: 0, blocked: 0, estimatedRevenue: 0, realizedRevenue: 0 };
     const byService = new Map<string, { serviceId: string; serviceName: string; count: number; revenue: number }>();
     const byProfessional = new Map<string, { professionalId: string; professionalName: string; count: number; revenue: number }>();
     const byDay = new Map<string, { day: string; count: number }>();
     for (const row of appointments) {
-      const price = Number(row.servicePrice ?? 0);
       const status = String(row.status).toUpperCase();
+      const price =
+        status === "COMPLETED"
+          ? serviceIncomeByAppointment.get(row.id) ?? Number(row.servicePrice ?? 0)
+          : Number(row.servicePrice ?? 0);
       if (status === "COMPLETED") summary.completed += 1;
       if (status === "CONFIRMED") summary.confirmed += 1;
       if (status === "IN_SERVICE") summary.inService += 1;
@@ -5332,7 +5387,10 @@ export class PrismaOperationsService {
         clientName: row.client,
         professionalName: row.professional,
         serviceName: row.service,
-        price: Number(row.servicePrice ?? 0),
+        price:
+          String(row.status).toUpperCase() === "COMPLETED"
+            ? this.roundMoney(serviceIncomeByAppointment.get(row.id) ?? Number(row.servicePrice ?? 0))
+            : Number(row.servicePrice ?? 0),
       })),
     };
   }
@@ -5913,6 +5971,7 @@ export class PrismaOperationsService {
           status: "COMPLETED",
         },
         select: {
+          id: true,
           clientId: true,
           endsAt: true,
           service: {
@@ -5921,12 +5980,21 @@ export class PrismaOperationsService {
         },
       }),
     ]);
+    const periodServiceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedInRange.map((item) => item.id),
+    });
+    const allTimeServiceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAllTime.map((item) => item.id),
+    });
 
     const periodByClient = new Map<string, { visits: number; revenue: number }>();
     for (const appointment of completedInRange) {
       const current = periodByClient.get(appointment.clientId) ?? { visits: 0, revenue: 0 };
       current.visits += 1;
-      current.revenue += asNumber(appointment.service.price);
+      current.revenue +=
+        periodServiceIncomeByAppointment.get(appointment.id) ?? asNumber(appointment.service.price);
       periodByClient.set(appointment.clientId, current);
     }
 
@@ -5934,7 +6002,7 @@ export class PrismaOperationsService {
     for (const row of completedAllTime) {
       const current = allTimeByClient.get(row.clientId) ?? { visits: 0, revenue: 0, visitDates: [] };
       current.visits += 1;
-      current.revenue += asNumber(row.service.price);
+      current.revenue += allTimeServiceIncomeByAppointment.get(row.id) ?? asNumber(row.service.price);
       current.visitDates.push(row.endsAt);
       allTimeByClient.set(row.clientId, current);
     }
@@ -6061,6 +6129,13 @@ export class PrismaOperationsService {
         },
       },
     });
+    const completedAppointmentIds = appointments
+      .filter((item) => item.status === "COMPLETED")
+      .map((item) => item.id);
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAppointmentIds,
+    });
 
     const map = new Map<
       string,
@@ -6082,7 +6157,7 @@ export class PrismaOperationsService {
       current.total += 1;
       if (item.status === "COMPLETED") {
         current.completed += 1;
-        current.revenue += asNumber(item.service.price);
+        current.revenue += serviceIncomeByAppointment.get(item.id) ?? asNumber(item.service.price);
       }
     }
 
@@ -6304,9 +6379,13 @@ export class PrismaOperationsService {
       this.getPerformanceProfessionals({ unitId: input.unitId, month, year }),
       this.getPerformanceServices({ unitId: input.unitId, month, year }),
     ]);
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
 
     const appointmentRevenue = completedAppointments.reduce(
-      (acc, item) => acc + asNumber(item.service.price),
+      (acc, item) => acc + (serviceIncomeByAppointment.get(item.id) ?? asNumber(item.service.price)),
       0,
     );
     const salesRevenue = asNumber(salesAgg._sum.grossAmount);
@@ -6460,12 +6539,22 @@ export class PrismaOperationsService {
     const commissionsByProfessionalMap = new Map(
       commissionsByProfessional.map((item) => [item.professionalId, asNumber(item._sum.commissionAmount)]),
     );
+    const completedAppointmentIds = appointments
+      .filter((item) => item.status === "COMPLETED")
+      .map((item) => item.id);
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAppointmentIds,
+    });
 
     const rows = professionals
       .map((professional) => {
         const total = appointments.filter((item) => item.professionalId === professional.id);
         const completed = total.filter((item) => item.status === "COMPLETED");
-        const revenue = completed.reduce((acc, item) => acc + asNumber(item.service.price), 0);
+        const revenue = completed.reduce(
+          (acc, item) => acc + (serviceIncomeByAppointment.get(item.id) ?? asNumber(item.service.price)),
+          0,
+        );
 
         return {
           professionalId: professional.id,
@@ -6529,6 +6618,10 @@ export class PrismaOperationsService {
         },
       },
     });
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completed.map((item) => item.id),
+    });
 
     const map = new Map<string, { serviceId: string; name: string; quantity: number; revenue: number }>();
     for (const appointment of completed) {
@@ -6539,7 +6632,7 @@ export class PrismaOperationsService {
         revenue: 0,
       };
       current.quantity += 1;
-      current.revenue += asNumber(appointment.service.price);
+      current.revenue += serviceIncomeByAppointment.get(appointment.id) ?? asNumber(appointment.service.price);
       map.set(appointment.service.id, current);
     }
 
@@ -9118,6 +9211,14 @@ export class PrismaOperationsService {
     const completedMonth = appointmentsMonth.filter((item) => item.status === "COMPLETED");
     const cancelledMonth = appointmentsMonth.filter((item) => item.status === "CANCELLED");
     const noShowMonth = appointmentsMonth.filter((item) => item.status === "NO_SHOW");
+    const serviceIncomeByAppointmentMonth = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedMonth.map((item) => item.id),
+    });
+    const serviceIncomeByHistoricalAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedRevenueHistory.map((item) => item.id),
+    });
 
     const revenueToday = asNumber(incomeDay._sum.amount);
     const revenueWeek = asNumber(incomeWeek._sum.amount);
@@ -9160,7 +9261,7 @@ export class PrismaOperationsService {
         revenue: 0,
         count: 0,
       };
-      current.revenue += asNumber(item.service.price);
+      current.revenue += serviceIncomeByAppointmentMonth.get(item.id) ?? asNumber(item.service.price);
       current.count += 1;
       topProfessionalsMap.set(item.professionalId, current);
     }
@@ -9181,7 +9282,7 @@ export class PrismaOperationsService {
         revenue: 0,
       };
       current.count += 1;
-      current.revenue += asNumber(item.service.price);
+      current.revenue += serviceIncomeByAppointmentMonth.get(item.id) ?? asNumber(item.service.price);
       topServicesMap.set(item.serviceId, current);
     }
     const topServices = Array.from(topServicesMap.values())
@@ -9236,7 +9337,7 @@ export class PrismaOperationsService {
       current.total += 1;
       if (item.status === "COMPLETED") {
         current.completed += 1;
-        current.revenue += asNumber(item.service.price);
+        current.revenue += serviceIncomeByAppointmentMonth.get(item.id) ?? asNumber(item.service.price);
       }
       professionalPerformanceMap.set(item.professionalId, current);
     }
@@ -9263,7 +9364,7 @@ export class PrismaOperationsService {
         revenue: 0,
         visits: 0,
       };
-      current.revenue += asNumber(item.service.price);
+      current.revenue += serviceIncomeByAppointmentMonth.get(item.id) ?? asNumber(item.service.price);
       current.visits += 1;
       topClientsMap.set(item.clientId, current);
     }
@@ -9387,7 +9488,8 @@ export class PrismaOperationsService {
         revenue: 0,
         visits: 0,
       };
-      current.revenue += asNumber(appointment.service.price);
+      current.revenue +=
+        serviceIncomeByHistoricalAppointment.get(appointment.id) ?? asNumber(appointment.service.price);
       current.visits += 1;
       completedByClientRevenue.set(appointment.client.id, current);
     }
@@ -9726,6 +9828,7 @@ export class PrismaOperationsService {
             startsAt: { gte: input.start, lte: input.end },
           },
           select: {
+            id: true,
             professionalId: true,
             service: {
               select: {
@@ -9776,6 +9879,12 @@ export class PrismaOperationsService {
           select: { id: true, name: true },
         }),
       ]);
+    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      start: input.start,
+      end: input.end,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
 
     let serviceRevenue = 0;
     let serviceCost = 0;
@@ -9795,7 +9904,7 @@ export class PrismaOperationsService {
     >();
 
     for (const appointment of completedAppointments) {
-      const price = asNumber(appointment.service.price);
+      const price = serviceIncomeByAppointment.get(appointment.id) ?? asNumber(appointment.service.price);
       const cost = asNumber(appointment.service.costEstimate);
       serviceRevenue += price;
       serviceCost += cost;

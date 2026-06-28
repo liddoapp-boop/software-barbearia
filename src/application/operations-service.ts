@@ -1068,6 +1068,10 @@ export class OperationsService {
     const completedAppointments = this.store.appointments.filter(
       (item) => item.unitId === unitId && item.status === "COMPLETED",
     );
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
     const statsMap = new Map<
       string,
       {
@@ -1085,7 +1089,7 @@ export class OperationsService {
         lastCompletedAt: null,
       };
       current.salesCount += 1;
-      current.revenueGenerated += Number(service.price || 0);
+      current.revenueGenerated += serviceIncomeByAppointment.get(appointment.id) ?? Number(service.price || 0);
       if (!current.lastCompletedAt || appointment.startsAt > current.lastCompletedAt) {
         current.lastCompletedAt = appointment.startsAt;
       }
@@ -3356,6 +3360,12 @@ export class OperationsService {
         item.startsAt >= input.start &&
         item.startsAt <= input.end,
     );
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      start: input.start,
+      end: input.end,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
     for (const appointment of completedAppointments) {
       const service = this.store.services.find((row) => row.id === appointment.serviceId);
       const key = appointment.serviceId;
@@ -3365,7 +3375,7 @@ export class OperationsService {
         revenue: 0,
         appointments: 0,
       };
-      current.revenue += Number(service?.price ?? 0);
+      current.revenue += serviceIncomeByAppointment.get(appointment.id) ?? Number(service?.price ?? 0);
       current.appointments += 1;
       revenueByServiceMap.set(key, current);
     }
@@ -3399,6 +3409,27 @@ export class OperationsService {
 
   private roundMoney(value: number) {
     return Number((Number(value) || 0).toFixed(2));
+  }
+
+  private getAppointmentServiceIncomeMap(input: {
+    unitId: string;
+    start?: Date;
+    end?: Date;
+    appointmentIds?: string[];
+  }) {
+    const ids = input.appointmentIds ? new Set(input.appointmentIds) : null;
+    const map = new Map<string, number>();
+    for (const entry of this.store.financialEntries) {
+      if (entry.unitId !== input.unitId) continue;
+      if (entry.kind !== "INCOME") continue;
+      if (entry.source !== "SERVICE" || entry.referenceType !== "APPOINTMENT") continue;
+      if (!entry.referenceId) continue;
+      if (ids && !ids.has(entry.referenceId)) continue;
+      if (input.start && entry.occurredAt < input.start) continue;
+      if (input.end && entry.occurredAt > input.end) continue;
+      map.set(entry.referenceId, (map.get(entry.referenceId) ?? 0) + Number(entry.amount ?? 0));
+    }
+    return map;
   }
 
   private humanizeFinancialOrigin(input: { source?: string | null; referenceType?: string | null }) {
@@ -3532,6 +3563,10 @@ export class OperationsService {
       end: input.end,
       professionalId: input.professionalId,
     }).slice(0, limit);
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: appointments.map((item) => item.id),
+    });
     const statusCounts: Record<string, number> = {
       total: appointments.length,
       completed: 0,
@@ -3548,8 +3583,11 @@ export class OperationsService {
     const byDay = new Map<string, { day: string; count: number }>();
     for (const row of appointments) {
       const service = this.store.services.find((item) => item.id === row.serviceId);
-      const price = Number(service?.price ?? row.servicePrice ?? 0);
       const status = String(row.status).toUpperCase();
+      const price =
+        status === "COMPLETED"
+          ? serviceIncomeByAppointment.get(row.id) ?? Number(row.servicePrice ?? service?.price ?? 0)
+          : Number(service?.price ?? row.servicePrice ?? 0);
       if (status === "COMPLETED") statusCounts.completed += 1;
       if (status === "CONFIRMED") statusCounts.confirmed += 1;
       if (status === "IN_SERVICE") statusCounts.inService += 1;
@@ -3598,7 +3636,10 @@ export class OperationsService {
         clientName: row.client,
         professionalName: row.professional,
         serviceName: row.service,
-        price: Number(row.servicePrice ?? 0),
+        price:
+          String(row.status).toUpperCase() === "COMPLETED"
+            ? this.roundMoney(serviceIncomeByAppointment.get(row.id) ?? Number(row.servicePrice ?? 0))
+            : Number(row.servicePrice ?? 0),
       })),
     };
   }
@@ -4145,13 +4186,21 @@ export class OperationsService {
     const completedAllTime = this.store.appointments.filter(
       (item) => item.unitId === input.unitId && item.status === "COMPLETED",
     );
+    const periodServiceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedInRange.map((item) => item.id),
+    });
+    const allTimeServiceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAllTime.map((item) => item.id),
+    });
 
     const periodByClient = new Map<string, { visits: number; revenue: number }>();
     for (const appointment of completedInRange) {
       const service = this.store.services.find((item) => item.id === appointment.serviceId);
       const current = periodByClient.get(appointment.clientId) ?? { visits: 0, revenue: 0 };
       current.visits += 1;
-      current.revenue += service?.price ?? 0;
+      current.revenue += periodServiceIncomeByAppointment.get(appointment.id) ?? service?.price ?? 0;
       periodByClient.set(appointment.clientId, current);
     }
 
@@ -4164,7 +4213,7 @@ export class OperationsService {
         visitDates: [],
       };
       current.visits += 1;
-      current.revenue += service?.price ?? 0;
+      current.revenue += allTimeServiceIncomeByAppointment.get(appointment.id) ?? service?.price ?? 0;
       current.visitDates.push(appointment.endsAt);
       allTimeByClient.set(appointment.clientId, current);
     }
@@ -4312,6 +4361,11 @@ export class OperationsService {
         item.startsAt <= input.end &&
         (!input.professionalId || item.professionalId === input.professionalId),
     );
+    const completedInRange = appointmentsInRange.filter((item) => item.status === "COMPLETED");
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedInRange.map((item) => item.id),
+    });
 
     const professionals = this.store.professionals
       .filter((item) => item.active)
@@ -4323,7 +4377,7 @@ export class OperationsService {
         const completed = total.filter((item) => item.status === "COMPLETED");
         const revenue = completed.reduce((acc, appointment) => {
           const service = this.store.services.find((item) => item.id === appointment.serviceId);
-          return acc + (service?.price ?? 0);
+          return acc + (serviceIncomeByAppointment.get(appointment.id) ?? service?.price ?? 0);
         }, 0);
 
         const member = this.store.businessTeamMembers.find((m) => m.id === professional.id);
@@ -4535,9 +4589,13 @@ export class OperationsService {
         item.startsAt >= period.start &&
         item.startsAt <= period.end,
     );
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
     const appointmentRevenue = completedAppointments.reduce((acc, item) => {
       const service = this.store.services.find((serviceRow) => serviceRow.id === item.serviceId);
-      return acc + Number(service?.price ?? 0);
+      return acc + (serviceIncomeByAppointment.get(item.id) ?? Number(service?.price ?? 0));
     }, 0);
     const salesRevenue = this.store.productSales
       .filter(
@@ -4664,6 +4722,10 @@ export class OperationsService {
         item.startsAt <= period.end,
     );
     const completed = appointments.filter((item) => item.status === "COMPLETED");
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completed.map((item) => item.id),
+    });
 
     const professionals = activeProfessionals
       .map((professional) => {
@@ -4675,7 +4737,7 @@ export class OperationsService {
         );
         const revenue = professionalCompleted.reduce((acc, item) => {
           const service = this.store.services.find((serviceRow) => serviceRow.id === item.serviceId);
-          return acc + Number(service?.price ?? 0);
+          return acc + (serviceIncomeByAppointment.get(item.id) ?? Number(service?.price ?? 0));
         }, 0);
         const commissionEstimated = this.store.commissionEntries
           .filter(
@@ -4742,6 +4804,10 @@ export class OperationsService {
         item.startsAt >= period.start &&
         item.startsAt <= period.end,
     );
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completed.map((item) => item.id),
+    });
 
     const map = new Map<
       string,
@@ -4757,7 +4823,7 @@ export class OperationsService {
         revenue: 0,
       };
       current.quantity += 1;
-      current.revenue += Number(service.price ?? 0);
+      current.revenue += serviceIncomeByAppointment.get(appointment.id) ?? Number(service.price ?? 0);
       map.set(service.id, current);
     }
 
@@ -6717,6 +6783,10 @@ export class OperationsService {
     );
 
     const completedMonth = appointmentsMonth.filter((item) => item.status === "COMPLETED");
+    const serviceIncomeByAppointmentMonth = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      appointmentIds: completedMonth.map((item) => item.id),
+    });
     const monthServiceCost = completedMonth.reduce((acc, appointment) => {
       const service = this.store.services.find((item) => item.id === appointment.serviceId);
       return acc + (service?.costEstimate ?? 0);
@@ -6760,7 +6830,8 @@ export class OperationsService {
       if (!professionalMap[professional.id]) {
         professionalMap[professional.id] = { name: professional.name, revenue: 0, count: 0 };
       }
-      professionalMap[professional.id].revenue += service.price;
+      professionalMap[professional.id].revenue +=
+        serviceIncomeByAppointmentMonth.get(appointment.id) ?? service.price;
       professionalMap[professional.id].count += 1;
     }
     const topProfessionals = Object.values(professionalMap)
@@ -6780,7 +6851,7 @@ export class OperationsService {
         serviceMap[service.id] = { name: service.name, count: 0, revenue: 0 };
       }
       serviceMap[service.id].count += 1;
-      serviceMap[service.id].revenue += service.price;
+      serviceMap[service.id].revenue += serviceIncomeByAppointmentMonth.get(appointment.id) ?? service.price;
     }
     const topServices = Object.values(serviceMap)
       .sort((a, b) => b.count - a.count)
@@ -6886,7 +6957,7 @@ export class OperationsService {
       );
       const revenue = completed.reduce((acc, item) => {
         const service = this.store.services.find((row) => row.id === item.serviceId);
-        return acc + (service?.price ?? 0);
+        return acc + (serviceIncomeByAppointmentMonth.get(item.id) ?? service?.price ?? 0);
       }, 0);
       return {
         professionalId: professional.id,
@@ -6910,7 +6981,8 @@ export class OperationsService {
       if (!clientRevenueMap[client.id]) {
         clientRevenueMap[client.id] = { fullName: client.fullName, revenue: 0, visits: 0 };
       }
-      clientRevenueMap[client.id].revenue += service.price;
+      clientRevenueMap[client.id].revenue +=
+        serviceIncomeByAppointmentMonth.get(appointment.id) ?? service.price;
       clientRevenueMap[client.id].visits += 1;
     }
     const topClients = Object.values(clientRevenueMap)
@@ -7625,6 +7697,12 @@ export class OperationsService {
         item.startsAt >= input.start &&
         item.startsAt <= input.end,
     );
+    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
+      unitId: input.unitId,
+      start: input.start,
+      end: input.end,
+      appointmentIds: completedAppointments.map((item) => item.id),
+    });
     const productSales = this.store.productSales.filter(
       (item) =>
         item.unitId === input.unitId &&
@@ -7666,7 +7744,7 @@ export class OperationsService {
       const professional = this.store.professionals.find(
         (row) => row.id === appointment.professionalId,
       );
-      const price = Number(service?.price ?? 0);
+      const price = serviceIncomeByAppointment.get(appointment.id) ?? Number(service?.price ?? 0);
       const cost = Number(service?.costEstimate ?? 0);
       serviceRevenue += price;
       serviceCost += cost;
