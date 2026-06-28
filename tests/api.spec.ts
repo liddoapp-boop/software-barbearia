@@ -1112,6 +1112,21 @@ describe("API MVP", () => {
     );
   });
 
+  it("valida produto Bucha Nudread nos canonicos reais", () => {
+    const product = CANONICAL_REAL_PRODUCT_FIXTURES.find(
+      (item) => item.id === CANONICAL_PRODUCT_FIXTURE_IDS.buchaNudread,
+    );
+
+    expect(product).toMatchObject({
+      id: "fixture-canonico-produto-bucha-nudread",
+      name: "Bucha Nudread",
+      salePrice: 25,
+      costPrice: 12.5,
+      stockQty: 3,
+      active: true,
+    });
+  });
+
   it("sugere horarios alternativos ordenados por proximidade", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
