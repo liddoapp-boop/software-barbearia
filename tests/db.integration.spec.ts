@@ -11,6 +11,7 @@ const SENSITIVE_DATABASE_URL_PATTERNS = [
   /render/i,
   /railway/i,
 ];
+const LOCAL_DATABASE_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 function assertDbTestsAreSafe() {
   if (process.env.RUN_DB_TESTS !== "1") return false;
@@ -23,6 +24,11 @@ function assertDbTestsAreSafe() {
   const decodedUrl = decodeURIComponent(databaseUrl);
   if (SENSITIVE_DATABASE_URL_PATTERNS.some((pattern) => pattern.test(decodedUrl))) {
     throw new Error("test:db recusou DATABASE_URL com indicio de producao");
+  }
+  const url = new URL(databaseUrl);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  if (!LOCAL_DATABASE_HOSTS.has(url.hostname) || !/test/i.test(databaseName)) {
+    throw new Error("test:db exige host local e nome de banco contendo test");
   }
 
   return true;
@@ -214,6 +220,28 @@ async function checkoutAppointment(
       expectedTotal: 75,
     },
   });
+}
+
+async function expectSingleCheckoutSideEffects(unitId: string, appointmentId: string) {
+  const serviceRevenueCount = await prisma.financialEntry.count({
+    where: {
+      unitId,
+      kind: "INCOME",
+      source: "SERVICE",
+      referenceType: "APPOINTMENT",
+      referenceId: appointmentId,
+    },
+  });
+  expect(serviceRevenueCount).toBe(1);
+
+  const commissionCount = await prisma.commissionEntry.count({
+    where: {
+      unitId,
+      appointmentId,
+      source: "SERVICE",
+    },
+  });
+  expect(commissionCount).toBe(1);
 }
 
 async function createProductSale(app: FastifyInstance, scenario: DbScenario, idempotencyKey: string) {
@@ -534,7 +562,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(commissionCount).toBe(0);
   });
 
-  it("aplica RBAC do checkout no Prisma para owner, recepcao e profissional", async () => {
+  it("aplica RBAC do checkout no Prisma para owner, recepcao e profissional sem duplicar efeitos", async () => {
     process.env.AUTH_ENFORCED = "true";
     const scenario = await createScenario();
     const app = createApp();
@@ -560,19 +588,85 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       unitIds: [scenario.unitId],
     });
 
-    const login = async (email: string, password: string) => {
+    const login = async (email: string, password: string, expectedRole: "owner" | "recepcao" | "profissional") => {
       const response = await app.inject({
         method: "POST",
         url: "/auth/login",
         payload: { email, password, activeUnitId: scenario.unitId },
       });
       expect(response.statusCode).toBe(200);
-      return { authorization: `Bearer ${response.json().accessToken}` };
+      const headers = { authorization: `Bearer ${response.json().accessToken}` };
+      const me = await app.inject({
+        method: "GET",
+        url: "/auth/me",
+        headers,
+      });
+      expect(me.statusCode).toBe(200);
+      expect(me.json().user.role).toBe(expectedRole);
+      return headers;
     };
 
-    const ownerHeaders = await login(ownerEmail, "owner-checkout-db-123");
-    const receptionHeaders = await login(receptionEmail, "reception-checkout-db-123");
-    const professionalHeaders = await login(professionalEmail, "professional-checkout-db-123");
+    const ownerHeaders = await login(ownerEmail, "owner-checkout-db-123", "owner");
+    const receptionHeaders = await login(receptionEmail, "reception-checkout-db-123", "recepcao");
+    const professionalHeaders = await login(professionalEmail, "professional-checkout-db-123", "profissional");
+
+    const ownerCreated = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      headers: ownerHeaders,
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-10T14:00:00.000Z",
+      },
+    });
+    expect(ownerCreated.statusCode).toBe(200);
+    const ownerAppointmentId = ownerCreated.json().appointment.id as string;
+
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${ownerAppointmentId}/status`,
+        headers: ownerHeaders,
+        payload: { status },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const ownerPayload = {
+      completedAt: "2026-05-10T14:45:00.000Z",
+      paymentMethod: "PIX",
+      expectedTotal: 75,
+    };
+    const ownerIdempotencyKey = uniqueId("checkout-owner-allowed");
+    const ownerCheckout = await app.inject({
+      method: "POST",
+      url: `/appointments/${ownerAppointmentId}/checkout`,
+      headers: {
+        ...ownerHeaders,
+        "idempotency-key": ownerIdempotencyKey,
+      },
+      payload: ownerPayload,
+    });
+    expect(ownerCheckout.statusCode).toBe(200);
+    expect(ownerCheckout.json().appointment.status).toBe("COMPLETED");
+    expect(ownerCheckout.json().commissions).toHaveLength(1);
+
+    const ownerReplay = await app.inject({
+      method: "POST",
+      url: `/appointments/${ownerAppointmentId}/checkout`,
+      headers: {
+        ...ownerHeaders,
+        "idempotency-key": ownerIdempotencyKey,
+      },
+      payload: ownerPayload,
+    });
+    expect(ownerReplay.statusCode).toBe(200);
+    expect(ownerReplay.json().serviceRevenue.id).toBe(ownerCheckout.json().serviceRevenue.id);
+    expect(ownerReplay.json().commissions[0].id).toBe(ownerCheckout.json().commissions[0].id);
+    await expectSingleCheckoutSideEffects(scenario.unitId, ownerAppointmentId);
 
     const created = await app.inject({
       method: "POST",
@@ -605,6 +699,14 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     });
     expect(inService.statusCode).toBe(200);
 
+    const professionalCompleteByStatus = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      headers: professionalHeaders,
+      payload: { status: "COMPLETED" },
+    });
+    expect(professionalCompleteByStatus.statusCode).toBe(400);
+
     const professionalCheckout = await app.inject({
       method: "POST",
       url: `/appointments/${appointmentId}/checkout`,
@@ -618,21 +720,62 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       },
     });
     expect(professionalCheckout.statusCode).toBe(403);
+    await expectSingleCheckoutSideEffects(scenario.unitId, ownerAppointmentId);
+    const deniedAppointment = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+    });
+    expect(deniedAppointment.status).toBe("IN_SERVICE");
+    const deniedRevenueCount = await prisma.financialEntry.count({
+      where: { unitId: scenario.unitId, referenceId: appointmentId, source: "SERVICE" },
+    });
+    expect(deniedRevenueCount).toBe(0);
+    const deniedCommissionCount = await prisma.commissionEntry.count({
+      where: { appointmentId },
+    });
+    expect(deniedCommissionCount).toBe(0);
 
+    const legacyComplete = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/complete`,
+      headers: ownerHeaders,
+      payload: {
+        completedAt: "2026-05-10T15:45:00.000Z",
+      },
+    });
+    expect(legacyComplete.statusCode).toBe(410);
+
+    const receptionPayload = {
+      completedAt: "2026-05-10T15:45:00.000Z",
+      paymentMethod: "PIX",
+      expectedTotal: 75,
+    };
+    const receptionIdempotencyKey = uniqueId("checkout-reception-allowed");
     const receptionCheckout = await app.inject({
       method: "POST",
       url: `/appointments/${appointmentId}/checkout`,
       headers: {
         ...receptionHeaders,
-        "idempotency-key": uniqueId("checkout-reception-allowed"),
+        "idempotency-key": receptionIdempotencyKey,
       },
-      payload: {
-        completedAt: "2026-05-10T15:45:00.000Z",
-        paymentMethod: "PIX",
-      },
+      payload: receptionPayload,
     });
     expect(receptionCheckout.statusCode).toBe(200);
     expect(receptionCheckout.json().appointment.status).toBe("COMPLETED");
+    expect(receptionCheckout.json().commissions).toHaveLength(1);
+
+    const receptionReplay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: {
+        ...receptionHeaders,
+        "idempotency-key": receptionIdempotencyKey,
+      },
+      payload: receptionPayload,
+    });
+    expect(receptionReplay.statusCode).toBe(200);
+    expect(receptionReplay.json().serviceRevenue.id).toBe(receptionCheckout.json().serviceRevenue.id);
+    expect(receptionReplay.json().commissions[0].id).toBe(receptionCheckout.json().commissions[0].id);
+    await expectSingleCheckoutSideEffects(scenario.unitId, appointmentId);
     process.env.AUTH_ENFORCED = "false";
   });
 

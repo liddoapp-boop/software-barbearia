@@ -21,7 +21,7 @@
     "db:seed:demo": "tsx prisma/demo-seed.ts",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "test:db": "cross-env RUN_DB_TESTS=1 DATA_BACKEND=prisma vitest run tests/db.integration.spec.ts",
+    "test:db": "tsx scripts/run-db-tests.ts",
     "smoke:api": "node scripts/smoke-api-flow.mjs",
     "smoke:api:readonly": "node scripts/smoke-api-readonly.mjs",
     "smoke:api:ps": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"
