@@ -206,6 +206,11 @@ export class OperationsService {
     });
   }
 
+  private clearMemoryIdempotency(scope: ReturnType<OperationsService["idempotencyScope"]>) {
+    if (!scope) return;
+    this.idempotencyRecords.delete(scope.mapKey);
+  }
+
   private getInventoryStatus(quantity: number, minimumStock: number) {
     if (quantity <= 0) return "OUT_OF_STOCK" as const;
     if (quantity <= minimumStock) return "LOW_STOCK" as const;
@@ -2351,90 +2356,110 @@ export class OperationsService {
     const paymentMethod = String(input.paymentMethod || "").trim();
     if (!paymentMethod) throw new Error("Metodo de pagamento obrigatorio");
 
-    this.startMemoryIdempotency(checkoutScope);
-    const serviceResult = this.complete({
-      appointmentId: input.appointmentId,
-      unitId: input.unitId,
-      changedBy: input.changedBy,
-      completedAt: input.completedAt,
-    });
-    serviceResult.revenue.paymentMethod = paymentMethod;
-    if (input.notes) serviceResult.revenue.notes = String(input.notes).trim();
-
-    const groupedProducts = new Map<string, number>();
-    const rawCheckoutProducts = Array.isArray(input.products)
-      ? input.products.filter((item) => item && item.productId && item.quantity > 0)
-      : [];
-    for (const item of rawCheckoutProducts) {
-      const productId = String(item.productId || "").trim();
-      if (!productId) continue;
-      groupedProducts.set(productId, (groupedProducts.get(productId) ?? 0) + Math.trunc(Number(item.quantity) || 0));
-    }
-    const checkoutProducts = Array.from(groupedProducts.entries())
-      .map(([productId, quantity]) => ({ productId, quantity }))
-      .filter((item) => item.quantity > 0);
-    let saleResult:
-      | ReturnType<BarbershopEngine["registerProductSale"]>
-      | undefined;
-    if (checkoutProducts.length > 0) {
-      saleResult = this.registerProductSale({
-        unitId: appointment.unitId,
-        professionalId: appointment.professionalId,
-        clientId: appointment.clientId,
-        soldAt: input.completedAt,
-        items: checkoutProducts,
-      });
-      saleResult.revenue.paymentMethod = paymentMethod;
-      if (input.notes) saleResult.revenue.notes = String(input.notes).trim();
-    }
-
-    if (input.expectedTotal != null) {
-      const expectedTotal = Number(input.expectedTotal);
-      const computedTotal = Number(
-        ((serviceResult.revenue.amount ?? 0) + (saleResult?.revenue.amount ?? 0)).toFixed(2),
-      );
-      if (!Number.isFinite(expectedTotal) || Math.abs(computedTotal - expectedTotal) > 0.01) {
-        throw new Error(
-          `Total inconsistente no checkout. Esperado=${expectedTotal.toFixed(2)}, calculado=${computedTotal.toFixed(2)}`,
-        );
-      }
-    }
-
-    const clientAppointments = this.store.appointments
-      .filter(
-        (item) =>
-          item.unitId === appointment.unitId &&
-          item.clientId === appointment.clientId &&
-          item.status === "COMPLETED",
-      )
-      .sort((a, b) => b.endsAt.getTime() - a.endsAt.getTime());
-    const totalSpent = this.store.financialEntries
-      .filter(
-        (entry) =>
-          entry.unitId === appointment.unitId &&
-          entry.customerId === appointment.clientId &&
-          entry.kind === "INCOME",
-      )
-      .reduce((acc, entry) => acc + Number(entry.amount || 0), 0);
-    const window90 = new Date(input.completedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
-    const frequency90d = clientAppointments.filter((item) => item.endsAt >= window90).length;
-
-    const response = {
-      appointment: serviceResult.appointment,
-      serviceRevenue: serviceResult.revenue,
-      productRevenue: saleResult?.revenue,
-      sale: saleResult?.sale,
-      stockMovements: saleResult?.stockMovements ?? [],
-      commissions: [serviceResult.commission, saleResult?.commission].filter(Boolean),
-      clientMetrics: {
-        lastVisitAt: clientAppointments[0]?.endsAt ?? input.completedAt,
-        totalSpent: Number(totalSpent.toFixed(2)),
-        frequency90d,
-      },
-      stockConsumption: serviceResult.stockConsumption,
+    const rollback = {
+      appointments: structuredClone(this.store.appointments),
+      financialEntries: structuredClone(this.store.financialEntries),
+      commissionEntries: structuredClone(this.store.commissionEntries),
+      productSales: structuredClone(this.store.productSales),
+      stockMovements: structuredClone(this.store.stockMovements),
+      products: structuredClone(this.store.products),
     };
-    this.finishMemoryIdempotency(checkoutScope, response);
-    return response;
+
+    this.startMemoryIdempotency(checkoutScope);
+    try {
+      const serviceResult = this.complete({
+        appointmentId: input.appointmentId,
+        unitId: input.unitId,
+        changedBy: input.changedBy,
+        completedAt: input.completedAt,
+      });
+      serviceResult.revenue.paymentMethod = paymentMethod;
+      if (input.notes) serviceResult.revenue.notes = String(input.notes).trim();
+
+      const groupedProducts = new Map<string, number>();
+      const rawCheckoutProducts = Array.isArray(input.products)
+        ? input.products.filter((item) => item && item.productId && item.quantity > 0)
+        : [];
+      for (const item of rawCheckoutProducts) {
+        const productId = String(item.productId || "").trim();
+        if (!productId) continue;
+        groupedProducts.set(productId, (groupedProducts.get(productId) ?? 0) + Math.trunc(Number(item.quantity) || 0));
+      }
+      const checkoutProducts = Array.from(groupedProducts.entries())
+        .map(([productId, quantity]) => ({ productId, quantity }))
+        .filter((item) => item.quantity > 0);
+      let saleResult:
+        | ReturnType<BarbershopEngine["registerProductSale"]>
+        | undefined;
+      if (checkoutProducts.length > 0) {
+        saleResult = this.registerProductSale({
+          unitId: appointment.unitId,
+          professionalId: appointment.professionalId,
+          clientId: appointment.clientId,
+          soldAt: input.completedAt,
+          items: checkoutProducts,
+        });
+        saleResult.revenue.paymentMethod = paymentMethod;
+        if (input.notes) saleResult.revenue.notes = String(input.notes).trim();
+      }
+
+      if (input.expectedTotal != null) {
+        const expectedTotal = Number(input.expectedTotal);
+        const computedTotal = Number(
+          ((serviceResult.revenue.amount ?? 0) + (saleResult?.revenue.amount ?? 0)).toFixed(2),
+        );
+        if (!Number.isFinite(expectedTotal) || Math.abs(computedTotal - expectedTotal) > 0.01) {
+          throw new Error(
+            `Total inconsistente no checkout. Esperado=${expectedTotal.toFixed(2)}, calculado=${computedTotal.toFixed(2)}`,
+          );
+        }
+      }
+
+      const clientAppointments = this.store.appointments
+        .filter(
+          (item) =>
+            item.unitId === appointment.unitId &&
+            item.clientId === appointment.clientId &&
+            item.status === "COMPLETED",
+        )
+        .sort((a, b) => b.endsAt.getTime() - a.endsAt.getTime());
+      const totalSpent = this.store.financialEntries
+        .filter(
+          (entry) =>
+            entry.unitId === appointment.unitId &&
+            entry.customerId === appointment.clientId &&
+            entry.kind === "INCOME",
+        )
+        .reduce((acc, entry) => acc + Number(entry.amount || 0), 0);
+      const window90 = new Date(input.completedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const frequency90d = clientAppointments.filter((item) => item.endsAt >= window90).length;
+
+      const response = {
+        appointment: serviceResult.appointment,
+        serviceRevenue: serviceResult.revenue,
+        productRevenue: saleResult?.revenue,
+        sale: saleResult?.sale,
+        stockMovements: saleResult?.stockMovements ?? [],
+        commissions: [serviceResult.commission, saleResult?.commission].filter(Boolean),
+        clientMetrics: {
+          lastVisitAt: clientAppointments[0]?.endsAt ?? input.completedAt,
+          totalSpent: Number(totalSpent.toFixed(2)),
+          frequency90d,
+        },
+        stockConsumption: serviceResult.stockConsumption,
+      };
+      this.finishMemoryIdempotency(checkoutScope, response);
+      return response;
+    } catch (error) {
+      this.store.appointments = rollback.appointments;
+      this.store.financialEntries = rollback.financialEntries;
+      this.store.commissionEntries = rollback.commissionEntries;
+      this.store.productSales = rollback.productSales;
+      this.store.stockMovements = rollback.stockMovements;
+      this.store.products = rollback.products;
+      this.clearMemoryIdempotency(checkoutScope);
+      throw error;
+    }
   }
 
   refundAppointment(input: {
