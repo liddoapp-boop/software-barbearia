@@ -1356,6 +1356,24 @@ describe("API MVP", () => {
       );
     expect(productMovements).toHaveLength(1);
     expect(stock.json().totals.totalStockQty).toBe(25);
+
+    const audit = await app.inject({
+      method: "GET",
+      url: "/audit/events?unitId=unit-01&action=APPOINTMENT_CHECKOUT_COMPLETED&entity=appointment_checkout&limit=20",
+    });
+    expect(audit.statusCode).toBe(200);
+    const checkoutEvents = (audit.json().events as Array<{
+      entityId: string;
+      idempotencyKey: string;
+      route: string;
+      method: string;
+    }>).filter((event) => event.entityId === appointmentId);
+    expect(checkoutEvents).toHaveLength(1);
+    expect(checkoutEvents[0]).toMatchObject({
+      idempotencyKey: "checkout-retry-001",
+      route: "/appointments/:id/checkout",
+      method: "POST",
+    });
   });
 
   it("mantem venda, lancamento manual e pagamento de comissao idempotentes e rejeita payload divergente", async () => {
@@ -3082,6 +3100,66 @@ describe("API MVP", () => {
     expect(checkout.statusCode).toBe(400);
   });
 
+  it("bloqueia checkout de agendamento cancelado sem efeitos colaterais", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-04-23T11:30:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    const appointmentId = created.json().appointment.id as string;
+
+    const cancel = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "CANCELLED", changedBy: "owner", reason: "Cliente cancelou" },
+    });
+    expect(cancel.statusCode).toBe(200);
+
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "checkout-canceled-appointment" },
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-04-23T11:50:00.000Z",
+        paymentMethod: "PIX",
+      },
+    });
+
+    expect(checkout.statusCode).toBe(400);
+    expect(String(checkout.json().error || "")).toContain(
+      "Atendimento precisa estar em andamento para concluir",
+    );
+
+    const appointmentAfterFailure = await app.inject({
+      method: "GET",
+      url: `/appointments/${appointmentId}`,
+    });
+    expect(appointmentAfterFailure.json().appointment.status).toBe("CANCELLED");
+
+    const transactionsAfterFailure = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    expect(transactionsAfterFailure.json().transactions).toHaveLength(0);
+
+    const commissionsAfterFailure = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    expect(commissionsAfterFailure.json().entries).toHaveLength(0);
+  });
+
   it("valida consistencia do total no checkout", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -3125,6 +3203,60 @@ describe("API MVP", () => {
 
     expect(checkout.statusCode).toBe(400);
     expect(String(checkout.json().error || "")).toContain("Total inconsistente");
+
+    const appointmentAfterFailure = await app.inject({
+      method: "GET",
+      url: `/appointments/${appointmentId}`,
+    });
+    expect(appointmentAfterFailure.statusCode).toBe(200);
+    expect(appointmentAfterFailure.json().appointment.status).toBe("IN_SERVICE");
+
+    const transactionsAfterFailure = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    expect(transactionsAfterFailure.statusCode).toBe(200);
+    expect(transactionsAfterFailure.json().transactions).toHaveLength(0);
+
+    const commissionsAfterFailure = await app.inject({
+      method: "GET",
+      url: "/financial/commissions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    expect(commissionsAfterFailure.statusCode).toBe(200);
+    expect(commissionsAfterFailure.json().entries).toHaveLength(0);
+
+    const stockAfterFailure = await app.inject({
+      method: "GET",
+      url: "/stock/overview?unitId=unit-01&limit=20",
+    });
+    expect(stockAfterFailure.statusCode).toBe(200);
+    const saleMovementsAfterFailure = stockAfterFailure
+      .json()
+      .recentMovements.filter(
+        (item: { referenceType: string }) => item.referenceType === "PRODUCT_SALE",
+      );
+    const serviceConsumptionsAfterFailure = stockAfterFailure
+      .json()
+      .recentMovements.filter(
+        (item: { referenceType: string }) => item.referenceType === "SERVICE_CONSUMPTION",
+      );
+    expect(saleMovementsAfterFailure).toHaveLength(0);
+    expect(serviceConsumptionsAfterFailure).toHaveLength(0);
+
+    const retry = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "checkout-total-validation" },
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-04-23T12:50:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 75,
+      },
+    });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().appointment.status).toBe("COMPLETED");
+    expect(retry.json().serviceRevenue.amount).toBe(75);
   });
 
   it("bloqueia venda quando estoque e insuficiente", async () => {
