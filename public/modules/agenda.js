@@ -70,8 +70,12 @@ function actionButtonClass(action) {
   return "ux-btn ux-btn-muted";
 }
 
-function actionsForStatus(status) {
-  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") {
+function actionsForStatus(status, options = {}) {
+  const canCheckout = options.canCheckout !== false;
+  if (status === "IN_SERVICE") {
+    return canCheckout ? ["COMPLETE", "CANCELLED"] : ["CANCELLED"];
+  }
+  if (status === "SCHEDULED" || status === "CONFIRMED") {
     return ["CANCELLED"];
   }
   if (status === "COMPLETED") return ["DETAIL", "REFUND"];
@@ -236,7 +240,7 @@ function renderAgendaList(elements, list, handlers) {
         hour: "2-digit",
         minute: "2-digit",
       });
-      const actions = actionsForStatus(item.status);
+      const actions = actionsForStatus(item.status, { canCheckout: handlers?.canCheckout });
       const clientTag = item.clientTags[0] || "NEW";
       const clientTagLabel =
         clientTag === "VIP"

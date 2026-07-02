@@ -1364,6 +1364,10 @@ if (!isAllowedModule(state.activeModule)) {
   state.mobileTab = mapModuleToMobileTab(state.activeModule);
 }
 
+function canCheckoutAppointment() {
+  return state.role === "owner" || state.role === "recepcao";
+}
+
 const STORAGE_THEME_MODE = "sb.themeMode";
 const STORAGE_THEME_MODE_USER_SET = "sb.themeModeUserSet";
 const systemThemeQuery =
@@ -3868,6 +3872,7 @@ function renderAgendaView() {
     if (agendaListMode && state.activeModule === "agenda") agendaListMode.classList.remove("hidden");
     const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
     renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
+      canCheckout: canCheckoutAppointment(),
       onAction: updateStatus,
       onError: (error) => {
         setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
@@ -3882,6 +3887,7 @@ function renderAgendaView() {
   if (agendaListMode) agendaListMode.classList.add("hidden");
   const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
   renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
+    canCheckout: canCheckoutAppointment(),
     onAction: updateStatus,
     onError: (error) => {
       setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
@@ -4148,6 +4154,7 @@ function syncLocalAppointmentFromPayload(rawAppointment) {
 function renderAppointmentDetailPanel() {
   const selected = currentAppointments.find((item) => item.id === selectedAppointmentId) || null;
   renderAppointmentDetail(appointmentsElements.detail, selected, currentAppointments, {
+    canCheckout: canCheckoutAppointment(),
     onAction: handleAppointmentsAction,
   });
 }
@@ -4287,6 +4294,7 @@ function renderAppointmentsView() {
     now: new Date(),
     periodLabel: label,
     filterSummary,
+    canCheckout: canCheckoutAppointment(),
     onAction: handleAppointmentsAction,
   });
   renderAppointmentDetailPanel();

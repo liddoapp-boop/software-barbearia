@@ -120,15 +120,21 @@ function quickFlags(item, now, allItems) {
   return { flags, late, profile };
 }
 
-function actionsForStatus(status) {
-  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") {
+function actionsForStatus(status, options = {}) {
+  const canCheckout = options.canCheckout !== false;
+  if (status === "IN_SERVICE") {
+    return canCheckout ? ["COMPLETE", "CANCELLED", "DETAIL", "WHATSAPP"] : ["CANCELLED", "DETAIL", "WHATSAPP"];
+  }
+  if (status === "SCHEDULED" || status === "CONFIRMED") {
     return ["CANCELLED", "DETAIL", "WHATSAPP"];
   }
   if (status === "COMPLETED") return ["REFUND", "DETAIL", "WHATSAPP"];
   return ["DETAIL", "WHATSAPP"];
 }
 
-function primaryActionForStatus(status) {
+function primaryActionForStatus(status, options = {}) {
+  const canCheckout = options.canCheckout !== false;
+  if (status === "IN_SERVICE" && canCheckout) return "COMPLETE";
   if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") return "CANCELLED";
   if (status === "COMPLETED") return "REFUND";
   return "DETAIL";
@@ -275,8 +281,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
   elements.tableBody.innerHTML = items
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
-      const actions = actionsForStatus(item.status);
-      const primaryAction = primaryActionForStatus(item.status);
+      const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout });
+      const primaryAction = primaryActionForStatus(item.status, { canCheckout: options.canCheckout });
       return `
         <tr class="${late ? "appts-row-late" : ""}">
           <td class="appts-td">${formatTime(item.startsAt)}</td>
@@ -314,8 +320,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
   elements.mobileList.innerHTML = items
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
-      const actions = actionsForStatus(item.status);
-      const primaryAction = primaryActionForStatus(item.status);
+      const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout });
+      const primaryAction = primaryActionForStatus(item.status, { canCheckout: options.canCheckout });
       return `
         <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
           <div class="appts-mobile-head">
@@ -371,7 +377,9 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
   const cancelledCount = fromClient.filter((row) => row.status === "CANCELLED").length;
   const profile = computeClientProfile(item, allItems);
 
-  const actions = actionsForStatus(item.status).filter((action) => action !== "DETAIL" && action !== "WHATSAPP");
+  const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout }).filter(
+    (action) => action !== "DETAIL" && action !== "WHATSAPP",
+  );
   const historyEntries = Array.isArray(item.history) && item.history.length
     ? item.history
     : [
@@ -426,7 +434,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
       ${actions
         .map(
           (action) =>
-            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status) ? "ux-btn-primary" : actionButtonTone(action)}">${actionLabel(action)}</button>`,
+            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status, { canCheckout: options.canCheckout }) ? "ux-btn-primary" : actionButtonTone(action)}">${actionLabel(action)}</button>`,
         )
         .join("")}
     `,

@@ -381,6 +381,12 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
       unitSource: method === "GET" ? "query" : "body",
     };
   }
+  if (route === "/appointments/:id/checkout") {
+    return { isPublic: false, roles: ["owner", "recepcao"] };
+  }
+  if (route === "/appointments/:id/complete") {
+    return { isPublic: false, roles: ["owner"] };
+  }
   if (route.startsWith("/appointments/:id/")) {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"] };
   }
@@ -2721,32 +2727,13 @@ export function createApp() {
     return { appointment };
   });
 
-  app.post("/appointments/:id/complete", async (request) => {
-    const params = z.object({ id: z.string().min(1) }).parse(request.params);
-    const body = completeSchema.parse(request.body);
-    const req = request as RequestWithAuth;
-    const result = await operations.complete({
-      appointmentId: params.id,
-      unitId: req.auth?.activeUnitId,
-      changedBy: body.changedBy,
-      completedAt: new Date(body.completedAt),
+  app.post("/appointments/:id/complete", async (request, reply) => {
+    z.object({ id: z.string().min(1) }).parse(request.params);
+    completeSchema.parse(request.body);
+    return reply.status(410).send({
+      error:
+        "Rota legada desativada. Use POST /appointments/:id/checkout para concluir atendimento com financeiro.",
     });
-    await recordAudit(request, {
-      unitId: result.appointment.unitId,
-      action: "APPOINTMENT_COMPLETED",
-      entity: "appointment",
-      entityId: result.appointment.id,
-      after: {
-        revenue: result.revenue.amount,
-        completedAt: result.appointment.endsAt.toISOString(),
-        stockConsumptionApplied: Boolean(result.stockConsumption?.applied),
-        stockMovementsCount: Number(result.stockConsumption?.movementsCount ?? 0),
-        stockWarnings: Array.isArray(result.stockConsumption?.warnings)
-          ? result.stockConsumption.warnings.length
-          : 0,
-      },
-    });
-    return result;
   });
 
   app.post("/appointments/:id/checkout", async (request) => {
