@@ -209,6 +209,24 @@ async function loginAs(
   return login.json().accessToken as string;
 }
 
+async function checkoutForTest(
+  app: FastifyInstance,
+  appointmentId: string,
+  completedAt: string,
+  idempotencyKey: string,
+) {
+  return await app.inject({
+    method: "POST",
+    url: `/appointments/${appointmentId}/checkout`,
+    payload: {
+      changedBy: "owner",
+      completedAt,
+      paymentMethod: "PIX",
+      idempotencyKey,
+    },
+  });
+}
+
 async function createProfessional(app: FastifyInstance, name: string) {
   const response = await app.inject({
     method: "POST",
@@ -302,17 +320,15 @@ describe("API MVP", () => {
     });
     expect(inServiceResponse.statusCode).toBe(200);
 
-    const completeResponse = await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: {
-        changedBy: "owner",
-        completedAt: "2026-04-22T14:00:00.000Z",
-      },
-    });
+    const completeResponse = await checkoutForTest(
+      app,
+      appointmentId,
+      "2026-04-22T14:00:00.000Z",
+      "checkout-basic-flow",
+    );
     expect(completeResponse.statusCode).toBe(200);
     const completed = completeResponse.json();
-    expect(completed.revenue.amount).toBe(75);
+    expect(completed.serviceRevenue.amount).toBe(75);
     expect(completed.appointment.status).toBe("COMPLETED");
   });
 
@@ -481,11 +497,7 @@ describe("API MVP", () => {
       url: `/appointments/${secondId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${secondId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-22T14:45:00.000Z" },
-    });
+    await checkoutForTest(app, secondId, "2026-04-22T14:45:00.000Z", "checkout-conflict-second");
 
     const third = await app.inject({
       method: "POST",
@@ -1079,7 +1091,7 @@ describe("API MVP", () => {
         status: "COMPLETED",
         changedBy: "owner",
       }),
-    ).toThrow("Use checkout ou conclusao de atendimento");
+    ).toThrow("Use checkout para finalizar atendimento com financeiro");
 
     const inventory = operations.getInventory({ unitId: "unit-01", status: "ALL", limit: 20 });
     for (const product of CANONICAL_REAL_PRODUCT_FIXTURES) {
@@ -1460,11 +1472,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-24T15:45:00.000Z" },
-    });
+    await checkoutForTest(app, appointmentId, "2026-04-24T15:45:00.000Z", "checkout-commission-pay-source");
     const commissions = await app.inject({
       method: "GET",
       url: "/financial/commissions?unitId=unit-01&start=2026-04-24T00:00:00.000Z&end=2026-04-24T23:59:59.999Z",
@@ -2485,11 +2493,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-28T10:50:00.000Z" },
-    });
+    await checkoutForTest(app, appointmentId, "2026-04-28T10:50:00.000Z", "checkout-commission-expense-source");
 
     const commissions = await app.inject({
       method: "GET",
@@ -3025,11 +3029,12 @@ describe("API MVP", () => {
       url: `/appointments/${commissionAppointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${commissionAppointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-27T10:50:00.000Z" },
-    });
+    await checkoutForTest(
+      app,
+      commissionAppointmentId,
+      "2026-04-27T10:50:00.000Z",
+      "checkout-missing-key-commission-setup",
+    );
     const commissions = await app.inject({
       method: "GET",
       url: "/financial/commissions?unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z",
@@ -3158,6 +3163,59 @@ describe("API MVP", () => {
       url: "/financial/commissions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
     });
     expect(commissionsAfterFailure.json().entries).toHaveLength(0);
+  });
+
+  it("mantem /complete como rota legada bloqueada sem concluir atendimento", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: "2026-04-23T11:45:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    const appointmentId = created.json().appointment.id as string;
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "CONFIRMED", changedBy: "owner" },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      payload: { status: "IN_SERVICE", changedBy: "owner" },
+    });
+
+    const legacyComplete = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/complete`,
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-04-23T12:30:00.000Z",
+      },
+    });
+
+    expect(legacyComplete.statusCode).toBe(410);
+    expect(String(legacyComplete.json().error || "")).toContain("Rota legada desativada");
+
+    const appointmentAfterFailure = await app.inject({
+      method: "GET",
+      url: `/appointments/${appointmentId}`,
+    });
+    expect(appointmentAfterFailure.json().appointment.status).toBe("IN_SERVICE");
+
+    const transactionsAfterFailure = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    expect(transactionsAfterFailure.json().transactions).toHaveLength(0);
   });
 
   it("valida consistencia do total no checkout", async () => {
@@ -3330,14 +3388,12 @@ describe("API MVP", () => {
       },
     });
 
-    const completed = await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: {
-        changedBy: "owner",
-        completedAt: "2026-04-24T14:00:00.000Z",
-      },
-    });
+    const completed = await checkoutForTest(
+      app,
+      appointmentId,
+      "2026-04-24T14:00:00.000Z",
+      "checkout-stock-consumption-complete",
+    );
     expect(completed.statusCode).toBe(200);
     const completedBody = completed.json();
     expect(completedBody.stockConsumption.applied).toBe(true);
@@ -3707,11 +3763,7 @@ describe("API MVP", () => {
         url: `/appointments/${appointmentId}/status`,
         payload: { status: "IN_SERVICE", changedBy: "owner" },
       });
-      await app.inject({
-        method: "POST",
-        url: `/appointments/${appointmentId}/complete`,
-        payload: { changedBy: "owner", completedAt },
-      });
+      await checkoutForTest(app, appointmentId, completedAt, `checkout-management-overview-${appointmentId}`);
     };
 
     await createAndComplete("2026-04-10T10:00:00.000Z", "2026-04-10T11:00:00.000Z");
@@ -3846,11 +3898,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-24T14:00:00.000Z" },
-    });
+    await checkoutForTest(app, appointmentId, "2026-04-24T14:00:00.000Z", "checkout-financial-commission-module");
 
     const commissions = await app.inject({
       method: "GET",
@@ -3983,11 +4031,7 @@ describe("API MVP", () => {
         url: `/appointments/${appointmentId}/status`,
         payload: { status: "IN_SERVICE", changedBy: "owner" },
       });
-      await app.inject({
-        method: "POST",
-        url: `/appointments/${appointmentId}/complete`,
-        payload: { changedBy: "owner", completedAt },
-      });
+      await checkoutForTest(app, appointmentId, completedAt, `checkout-clients-overview-${appointmentId}`);
     };
 
     await createAndComplete("cli-01", "2026-04-02T10:00:00.000Z", "2026-04-02T11:00:00.000Z");
@@ -4226,11 +4270,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-04-22T14:00:00.000Z" },
-    });
+    await checkoutForTest(app, appointmentId, "2026-04-22T14:00:00.000Z", "checkout-professional-performance");
 
     await app.inject({
       method: "POST",
@@ -4463,11 +4503,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/status`,
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await app.inject({
-      method: "POST",
-      url: `/appointments/${appointmentId}/complete`,
-      payload: { changedBy: "owner", completedAt: "2026-01-01T11:00:00.000Z" },
-    });
+    await checkoutForTest(app, appointmentId, "2026-01-01T11:00:00.000Z", "checkout-retention-history");
 
     vi.setSystemTime(new Date("2026-04-23T00:00:00.000Z"));
     const retention = await app.inject({
@@ -5560,12 +5596,26 @@ describe("API MVP", () => {
       headers: { authorization: `Bearer ${ownerToken}` },
       payload: { status: "IN_SERVICE" },
     });
+    const professionalCheckout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: {
+        authorization: `Bearer ${professionalToken}`,
+        "idempotency-key": "permissions-professional-checkout-denied",
+      },
+      payload: {
+        completedAt: "2026-04-26T10:50:00.000Z",
+        paymentMethod: "PIX",
+      },
+    });
+    expect(professionalCheckout.statusCode).toBe(403);
+
     const checkout = await app.inject({
       method: "POST",
       url: `/appointments/${appointmentId}/checkout`,
       headers: {
-        authorization: `Bearer ${ownerToken}`,
-        "idempotency-key": "permissions-checkout-commission",
+        authorization: `Bearer ${receptionToken}`,
+        "idempotency-key": "permissions-reception-checkout-commission",
       },
       payload: {
         completedAt: "2026-04-26T10:50:00.000Z",

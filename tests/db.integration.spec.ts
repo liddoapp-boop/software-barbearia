@@ -495,6 +495,147 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(persisted).not.toBeNull();
   });
 
+  it("bloqueia /complete legado no Prisma sem efeitos financeiros", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-10T14:00:00.000Z",
+    );
+
+    const complete = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/complete`,
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-10T14:45:00.000Z",
+      },
+    });
+    expect(complete.statusCode).toBe(410);
+
+    const appointment = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+    });
+    expect(appointment.status).toBe("IN_SERVICE");
+
+    const serviceRevenueCount = await prisma.financialEntry.count({
+      where: {
+        unitId: scenario.unitId,
+        referenceId: appointmentId,
+        source: "SERVICE",
+      },
+    });
+    expect(serviceRevenueCount).toBe(0);
+
+    const commissionCount = await prisma.commissionEntry.count({
+      where: { appointmentId },
+    });
+    expect(commissionCount).toBe(0);
+  });
+
+  it("aplica RBAC do checkout no Prisma para owner, recepcao e profissional", async () => {
+    process.env.AUTH_ENFORCED = "true";
+    const scenario = await createScenario();
+    const app = createApp();
+    const ownerEmail = `${uniqueId("owner-checkout")}@barbearia.local`;
+    const receptionEmail = `${uniqueId("reception-checkout")}@barbearia.local`;
+    const professionalEmail = `${uniqueId("professional-checkout")}@barbearia.local`;
+    await createPersistentUser({
+      email: ownerEmail,
+      password: "owner-checkout-db-123",
+      role: "owner",
+      unitIds: [scenario.unitId],
+    });
+    await createPersistentUser({
+      email: receptionEmail,
+      password: "reception-checkout-db-123",
+      role: "recepcao",
+      unitIds: [scenario.unitId],
+    });
+    await createPersistentUser({
+      email: professionalEmail,
+      password: "professional-checkout-db-123",
+      role: "profissional",
+      unitIds: [scenario.unitId],
+    });
+
+    const login = async (email: string, password: string) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/auth/login",
+        payload: { email, password, activeUnitId: scenario.unitId },
+      });
+      expect(response.statusCode).toBe(200);
+      return { authorization: `Bearer ${response.json().accessToken}` };
+    };
+
+    const ownerHeaders = await login(ownerEmail, "owner-checkout-db-123");
+    const receptionHeaders = await login(receptionEmail, "reception-checkout-db-123");
+    const professionalHeaders = await login(professionalEmail, "professional-checkout-db-123");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      headers: ownerHeaders,
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-10T15:00:00.000Z",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+
+    const confirmed = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      headers: ownerHeaders,
+      payload: { status: "CONFIRMED" },
+    });
+    expect(confirmed.statusCode).toBe(200);
+
+    const inService = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/status`,
+      headers: ownerHeaders,
+      payload: { status: "IN_SERVICE" },
+    });
+    expect(inService.statusCode).toBe(200);
+
+    const professionalCheckout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: {
+        ...professionalHeaders,
+        "idempotency-key": uniqueId("checkout-professional-denied"),
+      },
+      payload: {
+        completedAt: "2026-05-10T15:45:00.000Z",
+        paymentMethod: "PIX",
+      },
+    });
+    expect(professionalCheckout.statusCode).toBe(403);
+
+    const receptionCheckout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: {
+        ...receptionHeaders,
+        "idempotency-key": uniqueId("checkout-reception-allowed"),
+      },
+      payload: {
+        completedAt: "2026-05-10T15:45:00.000Z",
+        paymentMethod: "PIX",
+      },
+    });
+    expect(receptionCheckout.statusCode).toBe(200);
+    expect(receptionCheckout.json().appointment.status).toBe("COMPLETED");
+    process.env.AUTH_ENFORCED = "false";
+  });
+
   it("cancela comissao pendente no estorno de atendimento e mantem idempotencia", async () => {
     const app = createApp();
     const scenario = await createScenario();
