@@ -22,6 +22,33 @@ function safeText(value, fallback = "") {
   return fallback;
 }
 
+function nestedText(value, keys = [], fallback = "") {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (value && typeof value === "object") {
+    for (const key of keys) {
+      const nested = value[key];
+      if (typeof nested === "string" && nested.trim()) return nested.trim();
+    }
+  }
+  return fallback;
+}
+
+function nestedNumber(value, keys = [], fallback = 0) {
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+  if (value && typeof value === "object") {
+    for (const key of keys) {
+      const nested = Number(value[key]);
+      if (Number.isFinite(nested)) return nested;
+    }
+  }
+  return fallback;
+}
+
+function nestedId(value, fallback = "") {
+  return nestedText(value, ["id"], fallback);
+}
+
 function money(value) {
   return value.toLocaleString("pt-BR", {
     style: "currency",
@@ -122,11 +149,16 @@ function quickFlags(item, now, allItems) {
 
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
-  if (status === "IN_SERVICE") {
-    return canCheckout ? ["COMPLETE", "CANCELLED", "DETAIL", "WHATSAPP"] : ["CANCELLED", "DETAIL", "WHATSAPP"];
+  if (status === "SCHEDULED") {
+    return ["CONFIRMED", "DETAIL", "WHATSAPP", "CANCELLED"];
   }
-  if (status === "SCHEDULED" || status === "CONFIRMED") {
-    return ["CANCELLED", "DETAIL", "WHATSAPP"];
+  if (status === "CONFIRMED") {
+    return ["IN_SERVICE", "DETAIL", "WHATSAPP", "NO_SHOW", "CANCELLED"];
+  }
+  if (status === "IN_SERVICE") {
+    return canCheckout
+      ? ["COMPLETE", "DETAIL", "WHATSAPP", "CANCELLED"]
+      : ["DETAIL", "WHATSAPP", "CANCELLED"];
   }
   if (status === "COMPLETED") return ["REFUND", "DETAIL", "WHATSAPP"];
   return ["DETAIL", "WHATSAPP"];
@@ -134,13 +166,19 @@ function actionsForStatus(status, options = {}) {
 
 function primaryActionForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
+  if (status === "SCHEDULED") return "CONFIRMED";
+  if (status === "CONFIRMED") return "IN_SERVICE";
   if (status === "IN_SERVICE" && canCheckout) return "COMPLETE";
-  if (status === "SCHEDULED" || status === "CONFIRMED" || status === "IN_SERVICE") return "CANCELLED";
+  if (status === "IN_SERVICE") return "DETAIL";
   if (status === "COMPLETED") return "REFUND";
   return "DETAIL";
 }
 
 function actionLabel(action) {
+  if (action === "CONFIRMED") return "Confirmar";
+  if (action === "IN_SERVICE") return "Iniciar";
+  if (action === "COMPLETE") return "Checkout";
+  if (action === "NO_SHOW") return "Falta";
   if (action === "CANCELLED") return "Cancelar";
   if (action === "DETAIL") return "Detalhes";
   if (action === "WHATSAPP") return "WhatsApp";
@@ -149,6 +187,8 @@ function actionLabel(action) {
 }
 
 function actionClass(action) {
+  if (action === "CONFIRMED") return "ux-btn ux-btn-primary";
+  if (action === "IN_SERVICE") return "ux-btn ux-btn-primary";
   if (action === "COMPLETE") return "ux-btn ux-btn-success";
   if (action === "CANCELLED") return "ux-btn ux-btn-danger";
   if (action === "NO_SHOW") return "ux-btn ux-btn-danger";
@@ -168,22 +208,22 @@ export function normalizeAppointmentsPayload(payload) {
       return {
         id: safeText(item.id),
         unitId: safeText(item.unitId),
-        clientId: safeText(item.clientId),
-        professionalId: safeText(item.professionalId),
-        serviceId: safeText(item.serviceId),
+        clientId: safeText(item.clientId) || nestedId(item.client),
+        professionalId: safeText(item.professionalId) || nestedId(item.professional),
+        serviceId: safeText(item.serviceId) || nestedId(item.service),
         startsAt,
         endsAt,
         status: safeText(item.status, "SCHEDULED"),
-        client: safeText(item.client, "Cliente"),
-        clientPhone: safeText(item.clientPhone, ""),
-        professional: safeText(item.professional, "Profissional"),
-        service: safeText(item.service, "Servico"),
+        client: nestedText(item.client, ["fullName", "name"], "Cliente"),
+        clientPhone: safeText(item.clientPhone) || nestedText(item.client, ["phone"], ""),
+        professional: nestedText(item.professional, ["name", "fullName"], "Profissional"),
+        service: nestedText(item.service, ["name"], "Servico"),
         notes: safeText(item.notes, ""),
         origin: safeText(item.origin, "MANUAL"),
         confirmation: Boolean(item.confirmation),
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
-        servicePrice: asNumber(item.servicePrice),
-        serviceDurationMin: asNumber(item.serviceDurationMin),
+        servicePrice: asNumber(item.servicePrice, nestedNumber(item.service, ["price"])),
+        serviceDurationMin: asNumber(item.serviceDurationMin, nestedNumber(item.service, ["durationMin", "durationMinutes"])),
         createdAt: asDate(item.createdAt) || startsAt,
         updatedAt: asDate(item.updatedAt) || startsAt,
         history: Array.isArray(item.history) ? item.history : [],
@@ -354,7 +394,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
     root.querySelectorAll("[data-action][data-id]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (typeof options.onAction === "function") {
-          await options.onAction(button.dataset.id, button.dataset.action);
+          await options.onAction(button.dataset.id, button.dataset.action, { openerElement: button });
         }
       });
     });
@@ -444,7 +484,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
     .forEach((button) => {
       button.addEventListener("click", async () => {
         if (typeof options.onAction === "function") {
-          await options.onAction(button.dataset.id, button.dataset.drawerAppointmentAction);
+          await options.onAction(button.dataset.id, button.dataset.drawerAppointmentAction, { openerElement: button });
         }
       });
     });
@@ -455,5 +495,6 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
 function actionButtonTone(action) {
   if (action === "CANCELLED" || action === "NO_SHOW" || action === "REFUND") return "ux-btn-danger";
   if (action === "COMPLETE") return "ux-btn-success";
+  if (action === "CONFIRMED" || action === "IN_SERVICE") return "ux-btn-primary";
   return "ux-btn-muted";
 }

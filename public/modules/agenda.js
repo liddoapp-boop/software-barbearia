@@ -13,6 +13,33 @@ function safeText(value, fallback = "") {
   return fallback;
 }
 
+function nestedText(value, keys = [], fallback = "") {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (value && typeof value === "object") {
+    for (const key of keys) {
+      const nested = value[key];
+      if (typeof nested === "string" && nested.trim()) return nested.trim();
+    }
+  }
+  return fallback;
+}
+
+function nestedNumber(value, keys = [], fallback = 0) {
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+  if (value && typeof value === "object") {
+    for (const key of keys) {
+      const nested = Number(value[key]);
+      if (Number.isFinite(nested)) return nested;
+    }
+  }
+  return fallback;
+}
+
+function nestedId(value, fallback = "") {
+  return nestedText(value, ["id"], fallback);
+}
+
 function normalizeDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -46,6 +73,9 @@ function actionButtonClass(action) {
   if (action === "DETAIL") {
     return "ux-btn ux-btn-muted";
   }
+  if (action === "IN_SERVICE") {
+    return "ux-btn ux-btn-primary";
+  }
   if (action === "COMPLETE") {
     return "ux-btn ux-btn-success";
   }
@@ -72,11 +102,14 @@ function actionButtonClass(action) {
 
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
-  if (status === "IN_SERVICE") {
-    return canCheckout ? ["COMPLETE", "CANCELLED"] : ["CANCELLED"];
+  if (status === "SCHEDULED") {
+    return ["CONFIRMED", "DETAIL", "CANCELLED"];
   }
-  if (status === "SCHEDULED" || status === "CONFIRMED") {
-    return ["CANCELLED"];
+  if (status === "CONFIRMED") {
+    return ["IN_SERVICE", "DETAIL", "NO_SHOW", "CANCELLED"];
+  }
+  if (status === "IN_SERVICE") {
+    return canCheckout ? ["COMPLETE", "DETAIL", "CANCELLED"] : ["DETAIL", "CANCELLED"];
   }
   if (status === "COMPLETED") return ["DETAIL", "REFUND"];
   return ["DETAIL"];
@@ -96,18 +129,18 @@ export function normalizeAgendaItems(payload) {
       return {
         id: safeText(item.id),
         unitId: safeText(item.unitId),
-        clientId: safeText(item.clientId),
-        professionalId: safeText(item.professionalId),
-        serviceId: safeText(item.serviceId),
-        client: safeText(item.client, "Cliente"),
-        professional: safeText(item.professional, "-"),
-        service: safeText(item.service, "-"),
+        clientId: safeText(item.clientId) || nestedId(item.client),
+        professionalId: safeText(item.professionalId) || nestedId(item.professional),
+        serviceId: safeText(item.serviceId) || nestedId(item.service),
+        client: nestedText(item.client, ["fullName", "name"], "Cliente"),
+        professional: nestedText(item.professional, ["name", "fullName"], "-"),
+        service: nestedText(item.service, ["name"], "-"),
         startsAt,
         endsAt,
         status: safeText(item.status, "SCHEDULED"),
         isFitting: Boolean(item.isFitting),
-        servicePrice: asNumber(item.servicePrice),
-        serviceDurationMin: asNumber(item.serviceDurationMin),
+        servicePrice: asNumber(item.servicePrice, nestedNumber(item.service, ["price"])),
+        serviceDurationMin: asNumber(item.serviceDurationMin, nestedNumber(item.service, ["durationMin", "durationMinutes"])),
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
         hasProductSale: Boolean(item.hasProductSale),
         productSalesCount: asNumber(item.productSalesCount),
@@ -287,7 +320,7 @@ function renderAgendaList(elements, list, handlers) {
       const item = list.find((row) => row.id === button.dataset.id);
       if (!item) return;
       try {
-        await handlers.onAction(item, button.dataset.action);
+        await handlers.onAction(item, button.dataset.action, { openerElement: button });
       } catch (error) {
         if (typeof handlers.onError === "function") {
           handlers.onError(error);

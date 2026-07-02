@@ -32,6 +32,11 @@ import {
   validateSlotLocally,
 } from "./modules/agendamento.js";
 import {
+  SCHEDULE_CLIENT_REQUIRED_MESSAGE,
+  friendlyApiValidationMessage,
+  validateScheduleClientSelection,
+} from "./modules/schedule-validation.js";
+import {
   normalizeAppointmentsPayload,
   renderAppointmentDetail,
   renderAppointmentsData,
@@ -39,6 +44,12 @@ import {
   renderAppointmentsFeedback,
   renderAppointmentsLoading,
 } from "./modules/agendamentos.js";
+import {
+  CHECKOUT_FINAL_BUTTON_LABEL,
+  CHECKOUT_SUCCESS_MESSAGE,
+  buildCheckoutTotals,
+  validateAppointmentCheckoutTarget,
+} from "./modules/checkout-flow.js";
 import {
   addItemToCart,
   computeCartTotals,
@@ -1241,6 +1252,7 @@ let accountMenuOpen = false;
 let currentMetasPayload = null;
 let currentAuditPayload = null;
 let currentReportsPayload = null;
+let loadAllRunId = 0;
 let activeReportId = "financeiro";
 let inventoryFilters = {
   search: "",
@@ -1262,7 +1274,11 @@ let checkoutModalState = {
   appointment: null,
   products: [],
   total: 0,
+  productsSubtotal: 0,
+  submitting: false,
+  openerElement: null,
 };
+let checkoutPaymentMethods = [];
 let appointmentRefundState = {
   appointment: null,
 };
@@ -1276,6 +1292,8 @@ let schedulingCatalog = {
 };
 
 const actionLabel = {
+  CONFIRMED: "Confirmar",
+  IN_SERVICE: "Iniciar",
   COMPLETE: "Concluir",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
@@ -1366,6 +1384,25 @@ if (!isAllowedModule(state.activeModule)) {
 
 function canCheckoutAppointment() {
   return state.role === "owner" || state.role === "recepcao";
+}
+
+function agendaListActionsForStatus(status) {
+  if (status === "SCHEDULED") return ["CONFIRMED", "CANCELLED"];
+  if (status === "CONFIRMED") return ["IN_SERVICE", "NO_SHOW", "CANCELLED"];
+  if (status === "IN_SERVICE") {
+    return canCheckoutAppointment() ? ["COMPLETE", "CANCELLED"] : ["CANCELLED"];
+  }
+  return [];
+}
+
+function syncWeekCalendarToActivePeriod() {
+  const period = String(filterPeriod?.value || "").trim().toLowerCase();
+  if (period !== "week") return;
+  const nextWeekStart = rangeFromPeriod("week").start;
+  if (!wcWeekStart || wcWeekStart.getTime() !== nextWeekStart.getTime()) {
+    wcWeekStart = nextWeekStart;
+    wcLoaded = false;
+  }
 }
 
 const STORAGE_THEME_MODE = "sb.themeMode";
@@ -2421,6 +2458,11 @@ function initClientSearch(clients) {
   if (!clientSearch || !clientSearchDropdown) return;
   clientSearch.oninput = () => {
     const q = clientSearch.value.trim().toLowerCase();
+    const selectedClient = clientsById[clientId.value];
+    if (selectedClient && selectedClient.fullName !== clientSearch.value.trim()) {
+      clientId.value = "";
+      clientId.dispatchEvent(new Event("change"));
+    }
     if (!q) { clientSearchDropdown.classList.add("hidden"); clientId.value = ""; return; }
     const matches = _clientsForSearch.filter(c =>
       c.fullName.toLowerCase().includes(q) || (c.phone || "").replace(/\D/g,"").includes(q.replace(/\D/g,""))
@@ -2694,6 +2736,33 @@ function fillSelect(select, items, label, options = {}) {
   const blank = options.blankLabel ? `<option value="">${escapeHtml(options.blankLabel)}</option>` : "";
   select.innerHTML =
     blank + items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join("");
+}
+
+function checkoutPaymentMethodOptions() {
+  const configured = checkoutPaymentMethods
+    .map((item) => String(item?.name || "").trim())
+    .filter(Boolean);
+  if (configured.length) return configured;
+  return ["PIX", "Cartao de credito", "Cartao de debito", "Dinheiro"];
+}
+
+function checkoutDefaultPaymentMethod() {
+  const configuredDefault = checkoutPaymentMethods.find((item) => item?.isDefault && item?.name);
+  if (configuredDefault?.name) return String(configuredDefault.name).trim();
+  return checkoutPaymentMethodOptions()[0] || "PIX";
+}
+
+function renderCheckoutPaymentMethodSelect(select, selectedValue) {
+  if (!select) return;
+  const options = checkoutPaymentMethodOptions();
+  const requested = String(selectedValue || "").trim();
+  const selected = requested && options.includes(requested) ? requested : checkoutDefaultPaymentMethod();
+  select.innerHTML = options
+    .map(
+      (option) =>
+        `<option value="${escapeHtml(option)}"${option === selected ? " selected" : ""}>${escapeHtml(option)}</option>`,
+    )
+    .join("");
 }
 
 function fillMultiSelect(select, items, label) {
@@ -3186,6 +3255,13 @@ async function loadCatalog() {
   fillSelect(financialTransactionCustomer, data.clients, (item) => item.fullName, {
     blankLabel: "Nao vincular",
   });
+  checkoutPaymentMethods = (Array.isArray(data.paymentMethods) ? data.paymentMethods : []).filter(
+    (item) => item?.isActive !== false && String(item?.name || "").trim(),
+  );
+  renderCheckoutPaymentMethodSelect(
+    document.getElementById("checkoutPaymentMethod"),
+    document.getElementById("checkoutPaymentMethod")?.value,
+  );
   fillSelect(saleProfessionalId, data.professionals, (item) => item.name, {
     blankLabel: "Sem profissional",
   });
@@ -3311,7 +3387,7 @@ function extractApiErrorMessage(response, payload, fallbackMessage) {
     if (normalized.includes("atendimento nao concluido") || normalized.includes("atendimento ja estornado")) {
       return "Erro ao estornar atendimento. Verifique se ele ja foi concluido ou ja estornado.";
     }
-    return fromPayload;
+    return friendlyApiValidationMessage(fromPayload, fallbackMessage);
   }
   return fallbackMessage;
 }
@@ -3322,12 +3398,13 @@ function ensureCheckoutModal() {
   modal = document.createElement("div");
   modal.id = "appointmentCheckoutModal";
   modal.className = "ds-modal-backdrop hidden";
+  modal.setAttribute("role", "presentation");
   modal.innerHTML = `
-    <div class="ds-modal-panel checkout-modal" style="max-width:660px">
+    <div class="ds-modal-panel checkout-modal" style="max-width:660px" role="dialog" aria-modal="true" aria-labelledby="appointmentCheckoutTitle" tabindex="-1">
       <div class="checkout-modal-header ds-modal-head">
         <div>
           <p class="ux-label">Checkout do atendimento</p>
-          <h3 class="ux-section-label">Finalizar atendimento</h3>
+          <h3 id="appointmentCheckoutTitle" class="ux-section-label">Finalizar atendimento</h3>
         </div>
         <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
@@ -3341,9 +3418,10 @@ function ensureCheckoutModal() {
           <summary>Produtos adicionais</summary>
           <div id="checkoutProductsList"></div>
           <button type="button" id="checkoutAddProduct" class="ux-btn ux-btn-muted">Adicionar produto</button>
+          <div class="checkout-products-subtotal ds-cell-secondary">Subtotal dos produtos: <strong id="checkoutProductsSubtotal">R$ 0,00</strong></div>
         </details>
         <label class="ds-form-label">Metodo de pagamento
-          <input id="checkoutPaymentMethod" type="text" value="PIX" class="ds-input" />
+          <select id="checkoutPaymentMethod" class="ds-input" required></select>
         </label>
         <label class="ds-form-label">Valor total
           <input id="checkoutTotal" type="text" readonly class="ds-input" />
@@ -3355,7 +3433,7 @@ function ensureCheckoutModal() {
         <div id="checkoutFeedback" class="ds-form-full panel-msg-host"></div>
         <div class="ds-form-full catalog-row-actions">
           <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Cancelar</button>
-          ${renderPrimaryAction({ label: "Finalizar atendimento", id: "checkoutSubmitBtn", type: "submit" })}
+          ${renderPrimaryAction({ label: CHECKOUT_FINAL_BUTTON_LABEL, id: "checkoutSubmitBtn", type: "submit" })}
         </div>
       </form>
     </div>
@@ -3363,15 +3441,61 @@ function ensureCheckoutModal() {
   document.body.appendChild(modal);
   modal.querySelectorAll("[data-checkout-close]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      modal.classList.add("hidden");
+      closeCheckoutModal({ returnFocus: true });
     });
   });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCheckoutModal({ returnFocus: true });
+    }
+  });
   modal.querySelector("#checkoutAddProduct")?.addEventListener("click", () => {
+    if (checkoutModalState.submitting) return;
     checkoutModalState.products.push({ productId: "", quantity: 1 });
     renderCheckoutProducts();
+    recomputeCheckoutTotal();
   });
   modal.querySelector("#appointmentCheckoutForm")?.addEventListener("submit", submitCheckoutModal);
   return modal;
+}
+
+function resetCheckoutModalState() {
+  checkoutModalState = {
+    appointment: null,
+    products: [],
+    total: 0,
+    productsSubtotal: 0,
+    submitting: false,
+    openerElement: null,
+  };
+}
+
+function closeCheckoutModal(options = {}) {
+  const modal = document.getElementById("appointmentCheckoutModal");
+  if (!modal || checkoutModalState.submitting) return false;
+  const openerElement = checkoutModalState.openerElement;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  resetCheckoutModalState();
+  if (
+    options.returnFocus !== false &&
+    openerElement &&
+    openerElement.isConnected &&
+    typeof openerElement.focus === "function"
+  ) {
+    openerElement.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function closeAppointmentDetailPanel() {
+  selectedAppointmentId = "";
+  renderAppointmentDetail(appointmentsElements.detail, null, currentAppointments, {
+    canCheckout: canCheckoutAppointment(),
+    onAction: handleAppointmentsAction,
+  });
+  closeScheduleDrawer();
 }
 
 function renderCheckoutProducts() {
@@ -3435,23 +3559,32 @@ function renderCheckoutProducts() {
 
 function recomputeCheckoutTotal() {
   const modal = ensureCheckoutModal();
-  const servicePrice = Number(checkoutModalState.appointment?.servicePrice || 0);
-  const productsTotal = checkoutModalState.products.reduce((acc, item) => {
-    const product = productsById[item.productId];
-    if (!product) return acc;
-    return acc + Number(product.salePrice || 0) * Number(item.quantity || 0);
-  }, 0);
-  const total = servicePrice + productsTotal;
-  checkoutModalState.total = Number(total.toFixed(2));
+  const totals = buildCheckoutTotals(checkoutModalState.appointment, checkoutModalState.products, productsById);
+  checkoutModalState.total = totals.total;
+  checkoutModalState.productsSubtotal = totals.productsSubtotal;
   const totalInput = modal.querySelector("#checkoutTotal");
-  if (totalInput) totalInput.value = total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  if (totalInput) totalInput.value = totals.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const totalDisplay = modal.querySelector("#checkoutTotalDisplay");
-  if (totalDisplay) totalDisplay.textContent = total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  if (totalDisplay) totalDisplay.textContent = totals.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const subtotalDisplay = modal.querySelector("#checkoutProductsSubtotal");
+  if (subtotalDisplay) {
+    subtotalDisplay.textContent = totals.productsSubtotal.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+  }
 }
 
-function openCheckoutModal(appointment) {
+function openCheckoutModal(appointment, options = {}) {
   const modal = ensureCheckoutModal();
-  checkoutModalState = { appointment, products: [], total: 0 };
+  checkoutModalState = {
+    appointment,
+    products: [],
+    total: 0,
+    productsSubtotal: 0,
+    submitting: false,
+    openerElement: options.openerElement || null,
+  };
   const summary = modal.querySelector("#checkoutSummary");
   if (summary) {
     summary.innerHTML = `
@@ -3481,10 +3614,30 @@ function openCheckoutModal(appointment) {
   const notes = modal.querySelector("#checkoutNotes");
   if (notes) notes.value = "";
   const payment = modal.querySelector("#checkoutPaymentMethod");
-  if (payment) payment.value = "PIX";
+  renderCheckoutPaymentMethodSelect(payment, checkoutDefaultPaymentMethod());
   renderCheckoutProducts();
   recomputeCheckoutTotal();
   modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  const scheduleFocus = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (callback) => setTimeout(callback, 0);
+  scheduleFocus(() => {
+    const focusTarget = payment || modal.querySelector("#checkoutAddProduct") || modal.querySelector(".checkout-modal");
+    if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus({ preventScroll: true });
+  });
+}
+
+function openAppointmentCheckout(appointment, options = {}) {
+  const validation = validateAppointmentCheckoutTarget(appointment);
+  if (!validation.ok) {
+    const message = validation.message || "Nao foi possivel abrir o checkout.";
+    setScheduleFeedback("warning", message);
+    renderAppointmentsFeedback(appointmentsElements, "warning", message);
+    return false;
+  }
+  const openerElement = options.openerElement || document.activeElement || null;
+  closeAppointmentDetailPanel();
+  openCheckoutModal(appointment, { openerElement });
+  return true;
 }
 
 async function submitCheckoutModal(event) {
@@ -3516,9 +3669,10 @@ async function submitCheckoutModal(event) {
     }
   }
   try {
+    checkoutModalState.submitting = true;
     if (submitBtn) submitBtn.disabled = true;
-    if (submitBtn) submitBtn.textContent = "Finalizando...";
-    await callJson(`${API}/appointments/${appointment.id}/checkout`, "POST", {
+    if (submitBtn) submitBtn.textContent = "Registrando pagamento...";
+    const result = await callJson(`${API}/appointments/${appointment.id}/checkout`, "POST", {
       idempotencyKey: buildOperationIdempotencyKey("appointment-checkout"),
       changedBy: "owner",
       completedAt: new Date().toISOString(),
@@ -3527,17 +3681,27 @@ async function submitCheckoutModal(event) {
       notes: notes || undefined,
       products,
     });
-    modal.classList.add("hidden");
-    setScheduleFeedback("success", "Atendimento finalizado com sucesso.");
-    renderAppointmentsFeedback(appointmentsElements, "success", "Atendimento finalizado com sucesso.");
+    const completedAppointment = result?.appointment;
+    if (!completedAppointment || completedAppointment.id !== appointment.id || completedAppointment.status !== "COMPLETED") {
+      throw new Error("Checkout nao confirmou a conclusao do atendimento. Atualize a agenda e tente novamente.");
+    }
+    syncLocalAppointmentFromPayload(completedAppointment);
+    renderAgendaView();
+    renderAppointmentsView();
+    checkoutModalState.submitting = false;
+    closeCheckoutModal({ returnFocus: false });
+    setScheduleFeedback("success", CHECKOUT_SUCCESS_MESSAGE);
+    renderAppointmentsFeedback(appointmentsElements, "success", CHECKOUT_SUCCESS_MESSAGE);
     await loadAll();
   } catch (error) {
+    checkoutModalState.submitting = false;
     if (feedback) {
       feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error.message || "Falha ao finalizar atendimento.")}</p>`;
     }
   } finally {
+    checkoutModalState.submitting = false;
     if (submitBtn) submitBtn.disabled = false;
-    if (submitBtn) submitBtn.textContent = "Finalizar atendimento";
+    if (submitBtn) submitBtn.textContent = CHECKOUT_FINAL_BUTTON_LABEL;
   }
 }
 
@@ -3794,7 +3958,7 @@ async function submitProductRefund(event) {
   }
 }
 
-async function updateStatus(item, action) {
+async function updateStatus(item, action, options = {}) {
   if (action === "DETAIL") {
     selectedAppointmentId = item.id;
     renderAppointmentDetailPanel();
@@ -3829,7 +3993,7 @@ async function updateStatus(item, action) {
     });
     setScheduleFeedback("success", "Atendimento remarcado com sucesso.");
   } else if (action === "COMPLETE" || action === "PAYMENT") {
-    openCheckoutModal(item);
+    openAppointmentCheckout(item, { openerElement: options.openerElement });
     return;
   } else {
     const needsReason = action === "CANCELLED" || action === "NO_SHOW";
@@ -3866,6 +4030,7 @@ function getAgendaFilterState() {
 }
 
 function renderAgendaView() {
+  syncWeekCalendarToActivePeriod();
   if (currentView === "list") {
     if (agendaCardsMode) agendaCardsMode.classList.remove("hidden");
     if (agendaCalendarMode) agendaCalendarMode.classList.add("hidden");
@@ -4031,6 +4196,7 @@ function renderAgendaListMode() {
       const serviceLabel = item.service || "Servico";
       const professionalLabel = item.professional || "Profissional";
       const priceLabel = money(item.servicePrice || item.price || 0);
+      const actions = agendaListActionsForStatus(item.status);
       return `
         <article class="al-card ${isLate ? "is-late" : ""}" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar[item.status] || "#26251e"};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
           <div class="al-card-time">
@@ -4048,7 +4214,17 @@ function renderAgendaListMode() {
           <div class="al-card-right">
             <span class="al-chip">${statusLabelMap[item.status] || item.status}</span>
             <div class="al-card-actions">
-              ${isSlotBlockingStatus(item.status) ? `<button class="al-btn al-btn-cancel" data-al-action="CANCELLED" data-al-id="${item.id}">Cancelar</button>` : ""}
+              ${actions.map((action) => {
+                const isDanger = action === "CANCELLED" || action === "NO_SHOW";
+                const isSuccess = action === "COMPLETE";
+                const label = actionLabel[action] || action;
+                const className = isSuccess
+                  ? "al-btn al-btn-primary"
+                  : isDanger
+                    ? "al-btn al-btn-cancel"
+                    : "al-btn";
+                return `<button class="${className}" data-al-action="${action}" data-al-id="${item.id}">${label}</button>`;
+              }).join("")}
             </div>
           </div>
         </article>
@@ -4065,7 +4241,7 @@ function renderAgendaListMode() {
       const action = btn.getAttribute("data-al-action");
       if (!appointmentId || !action) return;
       try {
-        await handleAppointmentsAction(appointmentId, action);
+        await handleAppointmentsAction(appointmentId, action, { openerElement: btn });
       } catch (error) {
         renderAppointmentsFeedback(
           appointmentsElements,
@@ -4159,7 +4335,7 @@ function renderAppointmentDetailPanel() {
   });
 }
 
-async function handleAppointmentsAction(appointmentId, action) {
+async function handleAppointmentsAction(appointmentId, action, options = {}) {
   let item = currentAppointments.find((row) => row.id === appointmentId);
   if (!item) {
     item = await ensureAppointmentLoaded(appointmentId);
@@ -4210,7 +4386,7 @@ async function handleAppointmentsAction(appointmentId, action) {
   }
 
   if (action === "COMPLETE") {
-    openCheckoutModal(item);
+    openAppointmentCheckout(item, { openerElement: options.openerElement });
     return;
   }
 
@@ -4224,6 +4400,8 @@ async function handleAppointmentsAction(appointmentId, action) {
   }
 
   const statusMap = {
+    CONFIRMED: "CONFIRMED",
+    IN_SERVICE: "IN_SERVICE",
     CANCELLED: "CANCELLED",
     NO_SHOW: "NO_SHOW",
   };
@@ -5574,6 +5752,7 @@ function isSkippedModuleLoad(result) {
 }
 
 async function loadAll() {
+  const runId = ++loadAllRunId;
   renderDashboardLoading(dashboardElements);
   renderAgendaLoading(agendaElements);
   renderFinancialLoading(financialElements);
@@ -5625,6 +5804,7 @@ async function loadAll() {
     loadModuleIfAllowed("operacao", loadProductSalesHistory),
     loadModuleIfAllowed("relatorios", loadReportsBundle),
   ]);
+  if (runId !== loadAllRunId) return;
   const financialSkipped = isSkippedModuleLoad(financialResult);
   const commissionsSkipped = isSkippedModuleLoad(commissionsResult);
   const fidelizacaoSkipped = isSkippedModuleLoad(fidelizacaoResult);
@@ -6264,6 +6444,16 @@ if (settingsRoot) {
 appointmentForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
+    const clientValidation = validateScheduleClientSelection({
+      clientId: clientId.value,
+      clientSearchValue: clientSearch?.value,
+      clientsById,
+    });
+    if (!clientValidation.ok) {
+      setScheduleFeedback("warning", clientValidation.message || SCHEDULE_CLIENT_REQUIRED_MESSAGE);
+      clientSearch?.focus();
+      return;
+    }
     const precheck = await validateScheduleSlot();
     if (!precheck.ok) return;
     const selectedStartsAt = startsAt.value;
@@ -8549,6 +8739,14 @@ if (commissionsDrawerHost) {
   });
 }
 clientId?.addEventListener("change", () => {
+  const validation = validateScheduleClientSelection({
+    clientId: clientId.value,
+    clientSearchValue: clientSearch?.value,
+    clientsById,
+  });
+  if (validation.ok) {
+    setScheduleFeedback("", "");
+  }
   refreshScheduleAssist();
 });
 serviceId?.addEventListener("change", async () => {

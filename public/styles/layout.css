@@ -990,6 +990,11 @@ textarea.ds-input {
   text-align: right;
 }
 
+.checkout-products-subtotal {
+  margin-top: 10px;
+  text-align: right;
+}
+
 .pdv-funnel-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -2630,6 +2635,15 @@ body {
   .checkout-total-panel {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .checkout-product-row {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout-products-subtotal,
+  .checkout-product-subtotal {
+    text-align: left;
   }
 
   .pdv-sale-surface {
