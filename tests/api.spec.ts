@@ -5890,6 +5890,140 @@ describe("API MVP", () => {
     expect(store.appointmentServiceItems.filter((item) => item.appointmentId === created.id)).toHaveLength(1);
   });
 
+  it("cria, edita e lista agendamento com multiplos servicos pelo contrato interno", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceIds: ["svc-corte", "svc-barba"],
+        startsAt: "2026-07-13T12:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointment = created.json().appointment;
+    expect(appointment.serviceId).toBe("svc-corte");
+    expect(appointment.serviceItems).toHaveLength(2);
+    expect(appointment.totalPriceSnapshot).toBe(130);
+    expect(appointment.effectiveDurationMinSnapshot).toBe(45);
+    expect(appointment.durationCalculationMode).toBe("COMBINATION_RULE");
+    expect(new Date(appointment.endsAt).toISOString()).toBe("2026-07-13T12:55:00.000Z");
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointment.id}`,
+      payload: {
+        serviceIds: ["svc-barba", "svc-corte"],
+        changedBy: "owner",
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().appointment.serviceId).toBe("svc-barba");
+    expect(updated.json().appointment.serviceItems.map((item: { serviceId: string }) => item.serviceId)).toEqual([
+      "svc-barba",
+      "svc-corte",
+    ]);
+
+    const filtered = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01&serviceId=svc-corte",
+    });
+    expect(filtered.statusCode).toBe(200);
+    expect(
+      filtered.json().appointments.some((item: { id: string }) => item.id === appointment.id),
+    ).toBe(true);
+  });
+
+  it("bloqueia checkout multi-servico antes de efeitos financeiros e idempotencia de sucesso", async () => {
+    const store = new InMemoryStore();
+    const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
+    if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
+    const operations = new OperationsService(store);
+    const appointment = operations.schedule({
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceIds: ["svc-corte", "svc-barba"],
+      startsAt: new Date("2026-07-14T12:00:00.000Z"),
+      changedBy: "owner",
+    });
+    const before = {
+      status: appointment.status,
+      financialEntries: store.financialEntries.length,
+      commissionEntries: store.commissionEntries.length,
+      stockMovements: store.stockMovements.length,
+      idempotencyRecords: (operations as unknown as { idempotencyRecords: Map<string, unknown> })
+        .idempotencyRecords.size,
+    };
+
+    let checkoutError: unknown;
+    try {
+      operations.checkoutAppointment({
+        appointmentId: appointment.id,
+        unitId: "unit-01",
+        changedBy: "owner",
+        completedAt: new Date("2026-07-14T12:45:00.000Z"),
+        paymentMethod: "PIX",
+        idempotencyKey: "checkout-multi-service-blocked",
+      });
+    } catch (error) {
+      checkoutError = error;
+    }
+    expect(checkoutError).toMatchObject({
+      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
+      message: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+    });
+
+    const afterAppointment = store.appointments.find((item) => item.id === appointment.id);
+    expect(afterAppointment?.status).toBe(before.status);
+    expect(store.financialEntries).toHaveLength(before.financialEntries);
+    expect(store.commissionEntries).toHaveLength(before.commissionEntries);
+    expect(store.stockMovements).toHaveLength(before.stockMovements);
+    expect(
+      (operations as unknown as { idempotencyRecords: Map<string, unknown> }).idempotencyRecords.size,
+    ).toBe(before.idempotencyRecords);
+  });
+
+  it("retorna 409 e codigo de negocio no checkout HTTP multi-servico", async () => {
+    process.env.DATA_BACKEND = "memory";
+    const app = createApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceIds: ["svc-corte", "svc-barba"],
+        startsAt: "2026-07-15T12:00:00.000Z",
+        changedBy: "owner",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${created.json().appointment.id}/checkout`,
+      headers: { "idempotency-key": "checkout-http-multi-service-blocked" },
+      payload: {
+        changedBy: "owner",
+        completedAt: "2026-07-15T12:45:00.000Z",
+        paymentMethod: "PIX",
+      },
+    });
+    expect(checkout.statusCode).toBe(409);
+    expect(checkout.json()).toMatchObject({
+      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
+      error: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+    });
+  });
+
   it("retorna contratos gerenciais de financeiro, atendimentos, vendas, estoque e profissionais por periodo", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();

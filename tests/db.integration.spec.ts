@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
 import { prisma } from "../src/infrastructure/database/prisma";
 import { hashPassword } from "../src/http/security";
+import { buildServiceSetKey } from "../src/domain/appointment-services";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -46,6 +47,18 @@ type DbScenario = {
   professionalId: string;
   clientId: string;
   productId: string;
+};
+
+type DbMultiServiceScenario = {
+  unitId: string;
+  corteId: string;
+  barbaId: string;
+  hidratacaoId: string;
+  professionalId: string;
+  partialProfessionalId: string;
+  clientId: string;
+  otherClientId: string;
+  thirdClientId: string;
 };
 
 async function createPersistentUser(input: {
@@ -169,6 +182,139 @@ async function createScenario(): Promise<DbScenario> {
   });
 
   return { unitId, serviceId, professionalId, clientId, productId };
+}
+
+async function createMultiServiceScenario(): Promise<DbMultiServiceScenario> {
+  const suffix = crypto.randomUUID().replace(/-/g, "");
+  const unitId = `unit-ms-${suffix}`;
+  const corteId = `svc-corte-${suffix}`;
+  const barbaId = `svc-barba-${suffix}`;
+  const hidratacaoId = `svc-hidratacao-${suffix}`;
+  const professionalId = `pro-main-${suffix}`;
+  const partialProfessionalId = `pro-partial-${suffix}`;
+  const clientId = `cli-main-${suffix}`;
+  const otherClientId = `cli-other-${suffix}`;
+  const thirdClientId = `cli-third-${suffix}`;
+
+  await prisma.unit.create({
+    data: { id: unitId, name: `Unidade Alpha ${suffix.slice(0, 8)}` },
+  });
+  await prisma.businessSettings.create({
+    data: {
+      id: `settings-ms-${suffix}`,
+      unitId,
+      businessName: `Barbearia Alpha ${suffix.slice(0, 8)}`,
+      segment: "barbearia",
+      bufferBetweenAppointmentsMinutes: 0,
+      minimumAdvanceMinutes: 0,
+    },
+  });
+  await prisma.businessHour.createMany({
+    data: Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      id: `bh-ms-${suffix}-${dayOfWeek}`,
+      unitId,
+      dayOfWeek,
+      opensAt: "00:00",
+      closesAt: "23:59",
+      isClosed: false,
+    })),
+  });
+  await prisma.service.createMany({
+    data: [
+      {
+        id: corteId,
+        businessId: unitId,
+        name: "Corte",
+        category: "CORTE",
+        price: 30,
+        durationMin: 30,
+        costEstimate: 5,
+      },
+      {
+        id: barbaId,
+        businessId: unitId,
+        name: "Barba",
+        category: "BARBA",
+        price: 20,
+        durationMin: 20,
+        costEstimate: 4,
+      },
+      {
+        id: hidratacaoId,
+        businessId: unitId,
+        name: "Hidratacao",
+        category: "TRATAMENTO",
+        price: 15,
+        durationMin: 25,
+        costEstimate: 3,
+      },
+    ],
+  });
+  await prisma.professional.createMany({
+    data: [
+      { id: professionalId, businessId: unitId, name: "Ana Principal" },
+      { id: partialProfessionalId, businessId: unitId, name: "Bruno Parcial" },
+    ],
+  });
+  await prisma.commissionRule.createMany({
+    data: [
+      {
+        id: `rule-service-main-${suffix}`,
+        professionalId,
+        appliesTo: "SERVICE",
+        percentage: 0.4,
+      },
+      {
+        id: `rule-service-partial-${suffix}`,
+        professionalId: partialProfessionalId,
+        appliesTo: "SERVICE",
+        percentage: 0.4,
+      },
+    ],
+  });
+  await prisma.serviceProfessional.createMany({
+    data: [
+      { id: `sp-main-corte-${suffix}`, serviceId: corteId, professionalId },
+      { id: `sp-main-barba-${suffix}`, serviceId: barbaId, professionalId },
+      { id: `sp-main-hid-${suffix}`, serviceId: hidratacaoId, professionalId },
+      { id: `sp-partial-corte-${suffix}`, serviceId: corteId, professionalId: partialProfessionalId },
+    ],
+  });
+  await prisma.client.createMany({
+    data: [
+      { id: clientId, businessId: unitId, fullName: "Cliente Alpha" },
+      { id: otherClientId, businessId: unitId, fullName: "Cliente Beta" },
+      { id: thirdClientId, businessId: unitId, fullName: "Cliente Gama" },
+    ],
+  });
+  await prisma.serviceCombinationRule.create({
+    data: {
+      id: `combo-corte-barba-${suffix}`,
+      unitId,
+      serviceSetKey: buildServiceSetKey([corteId, barbaId]),
+      label: "Corte + Barba - 45 min",
+      effectiveDurationMin: 45,
+      active: true,
+      items: {
+        create: [
+          { id: `combo-item-corte-${suffix}`, serviceId: corteId, position: 0 },
+          { id: `combo-item-barba-${suffix}`, serviceId: barbaId, position: 1 },
+        ],
+      },
+    },
+  });
+
+  return {
+    unitId,
+    corteId,
+    barbaId,
+    hidratacaoId,
+    professionalId,
+    partialProfessionalId,
+    clientId,
+    otherClientId,
+    thirdClientId,
+  };
 }
 
 async function createAppointment(app: FastifyInstance, scenario: DbScenario, startsAt: string) {
@@ -312,6 +458,500 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       serviceNameSnapshot: "Corte DB",
       serviceDurationMinSnapshot: 45,
     });
+  });
+
+  it("persiste criacao Prisma multi-servico com regra, ordem inversa e soma sem regra", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+
+    const createPayload = {
+      unitId: scenario.unitId,
+      clientId: scenario.clientId,
+      professionalId: scenario.professionalId,
+      serviceIds: [scenario.corteId, scenario.barbaId],
+      startsAt: "2026-05-22T13:00:00.000Z",
+      changedBy: "db-test",
+    };
+    const created = await app.inject({ method: "POST", url: "/appointments", payload: createPayload });
+    expect(created.statusCode).toBe(200);
+    const createdId = created.json().appointment.id as string;
+    const persisted = await prisma.appointment.findUniqueOrThrow({
+      where: { id: createdId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(persisted.serviceId).toBe(scenario.corteId);
+    expect(Number(persisted.totalPriceSnapshot)).toBe(50);
+    expect(persisted.effectiveDurationMinSnapshot).toBe(45);
+    expect(persisted.durationCalculationMode).toBe("COMBINATION_RULE");
+    expect(persisted.endsAt.toISOString()).toBe("2026-05-22T13:45:00.000Z");
+    expect(persisted.serviceItems.map((item) => item.serviceId)).toEqual([
+      scenario.corteId,
+      scenario.barbaId,
+    ]);
+    expect(persisted.serviceItems.map((item) => item.position)).toEqual([0, 1]);
+    expect(persisted.serviceItems.map((item) => item.serviceNameSnapshot)).toEqual(["Corte", "Barba"]);
+    expect(persisted.serviceItems.map((item) => Number(item.servicePriceSnapshot))).toEqual([30, 20]);
+
+    const reversed = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.otherClientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.barbaId, scenario.corteId],
+        startsAt: "2026-05-22T15:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(reversed.statusCode).toBe(200);
+    const reversedRow = await prisma.appointment.findUniqueOrThrow({
+      where: { id: reversed.json().appointment.id },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(reversedRow.serviceId).toBe(scenario.barbaId);
+    expect(reversedRow.effectiveDurationMinSnapshot).toBe(45);
+    expect(reversedRow.durationCalculationMode).toBe("COMBINATION_RULE");
+    expect(reversedRow.serviceItems.map((item) => item.serviceId)).toEqual([
+      scenario.barbaId,
+      scenario.corteId,
+    ]);
+
+    const summed = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.thirdClientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId, scenario.hidratacaoId],
+        startsAt: "2026-05-22T17:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(summed.statusCode).toBe(200);
+    const summedRow = await prisma.appointment.findUniqueOrThrow({
+      where: { id: summed.json().appointment.id },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(Number(summedRow.totalPriceSnapshot)).toBe(65);
+    expect(summedRow.effectiveDurationMinSnapshot).toBe(75);
+    expect(summedRow.durationCalculationMode).toBe("SUM");
+    expect(summedRow.endsAt.toISOString()).toBe("2026-05-22T18:15:00.000Z");
+    expect(summedRow.serviceItems.map((item) => item.serviceId)).toEqual([
+      scenario.corteId,
+      scenario.barbaId,
+      scenario.hidratacaoId,
+    ]);
+  });
+
+  it("rejeita profissional incompatível e conflito Prisma sem persistencia parcial", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+
+    const beforeIncompatible = {
+      appointments: await prisma.appointment.count({ where: { unitId: scenario.unitId } }),
+      items: await prisma.appointmentServiceItem.count({
+        where: { appointment: { unitId: scenario.unitId } },
+      }),
+    };
+    const incompatible = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.partialProfessionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-23T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(incompatible.statusCode).toBe(400);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(
+      beforeIncompatible.appointments,
+    );
+    expect(await prisma.appointmentServiceItem.count({ where: { appointment: { unitId: scenario.unitId } } })).toBe(
+      beforeIncompatible.items,
+    );
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-23T14:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(first.statusCode).toBe(200);
+    const adjacent = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.otherClientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.hidratacaoId,
+        startsAt: "2026-05-23T14:45:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(adjacent.statusCode).toBe(200);
+
+    const beforeConflict = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const conflict = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.thirdClientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.hidratacaoId,
+        startsAt: "2026-05-23T14:44:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(beforeConflict);
+  });
+
+  it("edita atomicamente servicos Prisma e preserva estado anterior em falha", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.corteId,
+        startsAt: "2026-05-24T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+
+    const toMulti = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}`,
+      payload: {
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        changedBy: "db-test",
+      },
+    });
+    expect(toMulti.statusCode).toBe(200);
+    let row = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(row.serviceItems.map((item) => item.serviceId)).toEqual([scenario.corteId, scenario.barbaId]);
+    expect(Number(row.totalPriceSnapshot)).toBe(50);
+    expect(row.effectiveDurationMinSnapshot).toBe(45);
+    expect(row.endsAt.toISOString()).toBe("2026-05-24T13:45:00.000Z");
+
+    const toSingle = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}`,
+      payload: {
+        serviceId: scenario.barbaId,
+        changedBy: "db-test",
+      },
+    });
+    expect(toSingle.statusCode).toBe(200);
+    row = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(row.serviceId).toBe(scenario.barbaId);
+    expect(row.serviceItems.map((item) => item.serviceId)).toEqual([scenario.barbaId]);
+    expect(Number(row.totalPriceSnapshot)).toBe(20);
+    expect(row.effectiveDurationMinSnapshot).toBe(20);
+
+    const beforeFailureItems = row.serviceItems.map((item) => ({
+      serviceId: item.serviceId,
+      position: item.position,
+      serviceNameSnapshot: item.serviceNameSnapshot,
+    }));
+    const failed = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}`,
+      payload: {
+        professionalId: scenario.partialProfessionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        changedBy: "db-test",
+      },
+    });
+    expect(failed.statusCode).toBe(400);
+    const afterFailure = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(afterFailure.professionalId).toBe(scenario.professionalId);
+    expect(afterFailure.serviceId).toBe(scenario.barbaId);
+    expect(afterFailure.serviceItems.map((item) => ({
+      serviceId: item.serviceId,
+      position: item.position,
+      serviceNameSnapshot: item.serviceNameSnapshot,
+    }))).toEqual(beforeFailureItems);
+  });
+
+  it("remarca Prisma usando snapshot de duracao e mantendo itens intactos", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-25T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+    const before = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    await prisma.service.update({
+      where: { id: scenario.corteId },
+      data: { durationMin: 120, price: 300 },
+    });
+
+    const rescheduled = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${appointmentId}/reschedule`,
+      payload: {
+        startsAt: "2026-05-25T16:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(rescheduled.statusCode).toBe(200);
+    const after = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(after.startsAt.toISOString()).toBe("2026-05-25T16:00:00.000Z");
+    expect(after.endsAt.toISOString()).toBe("2026-05-25T16:45:00.000Z");
+    expect(after.effectiveDurationMinSnapshot).toBe(45);
+    expect(Number(after.totalPriceSnapshot)).toBe(50);
+    expect(after.serviceItems.map((item) => ({
+      serviceId: item.serviceId,
+      price: Number(item.servicePriceSnapshot),
+      duration: item.serviceDurationMinSnapshot,
+    }))).toEqual(
+      before.serviceItems.map((item) => ({
+        serviceId: item.serviceId,
+        price: Number(item.servicePriceSnapshot),
+        duration: item.serviceDurationMinSnapshot,
+      })),
+    );
+  });
+
+  it("bloqueia checkout multi-servico Prisma sem efeitos e preserva checkout single-service", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-26T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const multiAppointmentId = created.json().appointment.id as string;
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${multiAppointmentId}/status`,
+        payload: { status, changedBy: "db-test" },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const blockedKey = uniqueId("checkout-multi-blocked");
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/appointments/${multiAppointmentId}/checkout`,
+      headers: { "idempotency-key": blockedKey },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-26T13:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 50,
+      },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({
+      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
+      error: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+    });
+    const blockedAppointment = await prisma.appointment.findUniqueOrThrow({
+      where: { id: multiAppointmentId },
+    });
+    expect(blockedAppointment.status).toBe("IN_SERVICE");
+    expect(await prisma.financialEntry.count({ where: { unitId: scenario.unitId, referenceId: multiAppointmentId } })).toBe(0);
+    expect(await prisma.commissionEntry.count({ where: { unitId: scenario.unitId, appointmentId: multiAppointmentId } })).toBe(0);
+    expect(await prisma.stockMovement.count({ where: { unitId: scenario.unitId, referenceId: multiAppointmentId } })).toBe(0);
+    expect(await prisma.auditLog.count({
+      where: {
+        unitId: scenario.unitId,
+        action: "APPOINTMENT_CHECKOUT_COMPLETED",
+        entityId: multiAppointmentId,
+      },
+    })).toBe(0);
+    expect(await prisma.idempotencyRecord.count({
+      where: {
+        unitId: scenario.unitId,
+        action: "APPOINTMENT_CHECKOUT",
+        idempotencyKey: blockedKey,
+        status: "SUCCEEDED",
+      },
+    })).toBe(0);
+
+    const singleScenario = await createScenario();
+    const singleAppointmentId = await createAppointment(
+      app,
+      singleScenario,
+      "2026-05-26T15:00:00.000Z",
+    );
+    const singleKey = uniqueId("checkout-single-regression");
+    const single = await checkoutAppointment(app, singleAppointmentId, singleKey);
+    expect(single.statusCode).toBe(200);
+    expect(single.json().appointment.status).toBe("COMPLETED");
+    const replay = await checkoutAppointment(app, singleAppointmentId, singleKey);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().serviceRevenue.id).toBe(single.json().serviceRevenue.id);
+    expect(await prisma.financialEntry.count({
+      where: {
+        unitId: singleScenario.unitId,
+        referenceId: singleAppointmentId,
+        source: "SERVICE",
+      },
+    })).toBe(1);
+    expect(await prisma.commissionEntry.count({
+      where: { unitId: singleScenario.unitId, appointmentId: singleAppointmentId, source: "SERVICE" },
+    })).toBe(1);
+    expect(await prisma.idempotencyRecord.count({
+      where: {
+        unitId: singleScenario.unitId,
+        action: "APPOINTMENT_CHECKOUT",
+        idempotencyKey: singleKey,
+        status: "SUCCEEDED",
+      },
+    })).toBe(1);
+  });
+
+  it("valida booking publico multi-servico Prisma com compatibilidade e contrato do backend", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+
+    const legacy = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Um",
+        clientPhone: "11900000001",
+        serviceId: scenario.corteId,
+        startsAt: "2026-05-27T09:00:00.000Z",
+      },
+    });
+    expect(legacy.statusCode).toBe(201);
+    const legacyRow = await prisma.appointment.findUniqueOrThrow({
+      where: { id: legacy.json().id },
+      include: { serviceItems: true },
+    });
+    expect(legacyRow.serviceId).toBe(scenario.corteId);
+    expect(legacyRow.serviceItems).toHaveLength(1);
+    expect(Number(legacyRow.totalPriceSnapshot)).toBe(30);
+
+    const multi = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Dois",
+        clientPhone: "11900000002",
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        professionalId: scenario.professionalId,
+        startsAt: "2026-05-27T10:00:00.000Z",
+        totalPriceSnapshot: 1,
+        effectiveDurationMinSnapshot: 1,
+      },
+    });
+    expect(multi.statusCode).toBe(201);
+    const multiRow = await prisma.appointment.findUniqueOrThrow({
+      where: { id: multi.json().id },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(multiRow.serviceItems.map((item) => item.serviceId)).toEqual([scenario.corteId, scenario.barbaId]);
+    expect(Number(multiRow.totalPriceSnapshot)).toBe(50);
+    expect(multiRow.effectiveDurationMinSnapshot).toBe(45);
+    expect(multiRow.durationCalculationMode).toBe("COMBINATION_RULE");
+    expect(multiRow.endsAt.toISOString()).toBe("2026-05-27T10:45:00.000Z");
+
+    const bothContracts = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Tres",
+        clientPhone: "11900000003",
+        serviceId: scenario.corteId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-27T12:00:00.000Z",
+      },
+    });
+    expect(bothContracts.statusCode).toBe(400);
+
+    const incompatibleBefore = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const incompatible = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Quatro",
+        clientPhone: "11900000004",
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        professionalId: scenario.partialProfessionalId,
+        startsAt: "2026-05-27T12:00:00.000Z",
+      },
+    });
+    expect(incompatible.statusCode).toBe(409);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(incompatibleBefore);
+
+    const conflictBefore = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const conflict = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Cinco",
+        clientPhone: "11900000005",
+        serviceId: scenario.hidratacaoId,
+        professionalId: scenario.professionalId,
+        startsAt: "2026-05-27T10:30:00.000Z",
+      },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(conflictBefore);
   });
 
   it("normaliza defaultCommissionRate no Prisma antes de persistir", async () => {
