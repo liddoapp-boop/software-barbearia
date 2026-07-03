@@ -267,10 +267,45 @@ async function main() {
         update: {
           unitId: UNIT_ID, clientId: cliIds[cliIdx], professionalId: proIds[proIdx],
           serviceId: svc.id, startsAt, endsAt, status,
+          serviceNameSnapshot: svc.name,
+          servicePriceSnapshot: D(svc.price),
+          serviceDurationMinSnapshot: svc.duration,
+          totalPriceSnapshot: D(svc.price),
+          effectiveDurationMinSnapshot: svc.duration,
+          durationCalculationMode: "SUM",
         },
         create: {
           id, unitId: UNIT_ID, clientId: cliIds[cliIdx], professionalId: proIds[proIdx],
           serviceId: svc.id, startsAt, endsAt, status,
+          serviceNameSnapshot: svc.name,
+          servicePriceSnapshot: D(svc.price),
+          serviceDurationMinSnapshot: svc.duration,
+          totalPriceSnapshot: D(svc.price),
+          effectiveDurationMinSnapshot: svc.duration,
+          durationCalculationMode: "SUM",
+        },
+      });
+      await prisma.appointmentServiceItem.upsert({
+        where: {
+          appointmentId_position: {
+            appointmentId: id,
+            position: 0,
+          },
+        },
+        update: {
+          serviceId: svc.id,
+          serviceNameSnapshot: svc.name,
+          servicePriceSnapshot: D(svc.price),
+          serviceDurationMinSnapshot: svc.duration,
+        },
+        create: {
+          id: `demo-asi-${id}`,
+          appointmentId: id,
+          serviceId: svc.id,
+          position: 0,
+          serviceNameSnapshot: svc.name,
+          servicePriceSnapshot: D(svc.price),
+          serviceDurationMinSnapshot: svc.duration,
         },
       });
 

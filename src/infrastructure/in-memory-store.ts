@@ -1,5 +1,6 @@
 import {
   Appointment,
+  AppointmentServiceItem,
   AuditEvent,
   BusinessCommissionRule,
   BusinessHour,
@@ -26,6 +27,7 @@ import {
   RetentionCase,
   RetentionEvent,
   Service,
+  ServiceCombinationRule,
   ServicePackage,
   ServiceProfessionalAssignment,
   ServiceStockConsumptionProfile,
@@ -205,6 +207,8 @@ export class InMemoryStore {
     },
   ];
   appointments: Appointment[] = [];
+  appointmentServiceItems: AppointmentServiceItem[] = [];
+  serviceCombinationRules: ServiceCombinationRule[] = [];
   financialEntries: FinancialEntry[] = [];
   commissionEntries: CommissionEntry[] = [];
   productSales: ProductSale[] = [];

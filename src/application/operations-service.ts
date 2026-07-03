@@ -61,6 +61,11 @@ import {
   hasAppointmentConflict,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
+import {
+  calculateAppointmentServicesTotal,
+  resolveEffectiveAppointmentDuration,
+  resolveLegacyPrimaryServiceId,
+} from "../domain/appointment-services";
 import { buildClientsOverviewPredictive } from "./client-predictive";
 import {
   buildReplenishmentSuggestions,
@@ -1982,6 +1987,7 @@ export class OperationsService {
     );
 
     this.store.appointments.push(appointment);
+    this.store.appointmentServiceItems.push(...(appointment.serviceItems ?? []));
     return appointment;
   }
 
@@ -2002,16 +2008,17 @@ export class OperationsService {
     const service = this.store.services.find((item) => item.id === appointment.serviceId);
     if (!service) throw new Error("Servico do agendamento nao encontrado");
     const effectiveService = this.buildEffectiveAppointmentService(appointment, service);
+    const effectiveDurationMin = appointment.effectiveDurationMinSnapshot ?? effectiveService.durationMin;
     const settings = this.ensureBusinessSettings(appointment.unitId);
     const businessHours = this.ensureBusinessHours(appointment.unitId);
     const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-    const newEnd = new Date(input.startsAt.getTime() + (effectiveService.durationMin + bufferAfterMin) * 60_000);
+    const newEnd = new Date(input.startsAt.getTime() + (effectiveDurationMin + bufferAfterMin) * 60_000);
 
     const updated = this.engine.rescheduleAppointment(
       appointment,
       input.startsAt,
-      effectiveService.durationMin,
+      effectiveDurationMin,
       this.store.appointments.filter(
         (item) =>
           item.unitId === appointment.unitId &&
@@ -6601,12 +6608,33 @@ export class OperationsService {
     const businessHours = this.ensureBusinessHours(appointment.unitId);
     const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-    const nextEndsAt = new Date(nextStartsAt.getTime() + (nextService.durationMin + bufferAfterMin) * 60_000);
+    const nextServiceItem = {
+      id:
+        this.store.appointmentServiceItems.find((item) => item.appointmentId === appointment.id)?.id ??
+        appointment.serviceItems?.[0]?.id ??
+        crypto.randomUUID(),
+      appointmentId: appointment.id,
+      serviceId: nextService.id,
+      position: 0,
+      serviceNameSnapshot: nextService.name,
+      servicePriceSnapshot: nextService.price,
+      serviceDurationMinSnapshot: nextService.durationMin,
+      createdAt:
+        this.store.appointmentServiceItems.find((item) => item.appointmentId === appointment.id)?.createdAt ??
+        appointment.serviceItems?.[0]?.createdAt,
+      updatedAt: new Date(),
+    };
+    const duration = resolveEffectiveAppointmentDuration({
+      items: [nextServiceItem],
+      activeRules: this.store.serviceCombinationRules.filter((rule) => rule.unitId === appointment.unitId && rule.active),
+    });
+    const totalPriceSnapshot = calculateAppointmentServicesTotal([nextServiceItem]);
+    const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
     validateAppointmentSchedulingWindow({
       unitId: appointment.unitId,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
-      serviceDurationMin: nextService.durationMin,
+      serviceDurationMin: duration.effectiveDurationMin,
       bufferAfterMin,
       settings,
       businessHours,
@@ -6629,9 +6657,15 @@ export class OperationsService {
       ...appointment,
       clientId: nextClient.id,
       professionalId: nextProfessional.id,
-      serviceId: nextService.id,
+      serviceId: resolveLegacyPrimaryServiceId([nextServiceItem]),
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
+      serviceItems: [nextServiceItem],
+      totalPriceSnapshot,
+      effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+      durationCalculationMode: duration.calculationMode,
+      durationRuleIdSnapshot: duration.matchedRuleId,
+      durationRuleLabelSnapshot: duration.matchedRuleLabel,
       ...(nextService.id !== appointment.serviceId
         ? {
             serviceNameSnapshot: nextService.name,
@@ -6679,6 +6713,10 @@ export class OperationsService {
     }
 
     this.replaceAppointment(updated);
+    this.store.appointmentServiceItems = this.store.appointmentServiceItems.filter(
+      (item) => item.appointmentId !== updated.id,
+    );
+    this.store.appointmentServiceItems.push(...(updated.serviceItems ?? []));
     return this.buildAppointmentView(updated);
   }
 
@@ -7574,6 +7612,7 @@ export class OperationsService {
       (acc, sale) => acc + sale.items.reduce((itemsAcc, item) => itemsAcc + item.quantity, 0),
       0,
     );
+    const serviceItems = this.getAppointmentServiceItems(appointment);
 
     return {
       ...appointment,
@@ -7584,6 +7623,28 @@ export class OperationsService {
       service: appointment.serviceNameSnapshot ?? service?.name ?? "Servico",
       servicePrice: appointment.servicePriceSnapshot ?? service?.price ?? 0,
       serviceDurationMin: appointment.serviceDurationMinSnapshot ?? service?.durationMin ?? 0,
+      totalPriceSnapshot:
+        appointment.totalPriceSnapshot ??
+        appointment.servicePriceSnapshot ??
+        service?.price ??
+        0,
+      effectiveDurationMinSnapshot:
+        appointment.effectiveDurationMinSnapshot ??
+        appointment.serviceDurationMinSnapshot ??
+        service?.durationMin ??
+        1,
+      durationCalculationMode: appointment.durationCalculationMode ?? "SUM",
+      durationRuleIdSnapshot: appointment.durationRuleIdSnapshot ?? null,
+      durationRuleLabelSnapshot: appointment.durationRuleLabelSnapshot ?? null,
+      serviceItems: serviceItems.map((item) => ({
+        id: item.id,
+        appointmentId: item.appointmentId,
+        serviceId: item.serviceId,
+        position: item.position,
+        serviceNameSnapshot: item.serviceNameSnapshot,
+        servicePriceSnapshot: item.servicePriceSnapshot,
+        serviceDurationMinSnapshot: item.serviceDurationMinSnapshot,
+      })),
       origin: "MANUAL",
       confirmation: isConfirmed,
       createdAt: firstHistory.toISOString(),
@@ -7592,6 +7653,28 @@ export class OperationsService {
       productSalesCount: productSalesForClient.length,
       productItemsSoldCount,
     };
+  }
+
+  private getAppointmentServiceItems(appointment: Appointment) {
+    const persisted = this.store.appointmentServiceItems
+      .filter((item) => item.appointmentId === appointment.id)
+      .sort((a, b) => a.position - b.position);
+    if (persisted.length) return persisted;
+    if (appointment.serviceItems?.length) {
+      return appointment.serviceItems.slice().sort((a, b) => a.position - b.position);
+    }
+    const service = this.store.services.find((item) => item.id === appointment.serviceId);
+    return [
+      {
+        id: `asi-legacy-${appointment.id}`,
+        appointmentId: appointment.id,
+        serviceId: appointment.serviceId,
+        position: 0,
+        serviceNameSnapshot: appointment.serviceNameSnapshot ?? service?.name ?? "Servico",
+        servicePriceSnapshot: appointment.servicePriceSnapshot ?? service?.price ?? 0,
+        serviceDurationMinSnapshot: appointment.serviceDurationMinSnapshot ?? service?.durationMin ?? 1,
+      },
+    ];
   }
 
   private buildAutomationIdempotencyKey(input: {

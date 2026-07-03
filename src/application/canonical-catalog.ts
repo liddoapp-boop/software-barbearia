@@ -1,3 +1,5 @@
+import { buildServiceSetKey } from "../domain/appointment-services";
+
 export type CanonicalServiceRecord = {
   id: string;
   businessId: string;
@@ -25,6 +27,20 @@ export type CanonicalProductRecord = {
   active: boolean;
 };
 
+export type CanonicalServiceCombinationRuleRecord = {
+  id: string;
+  unitId: string;
+  serviceSetKey: string;
+  label: string;
+  effectiveDurationMin: number;
+  active: boolean;
+  items: Array<{
+    id: string;
+    serviceId: string;
+    position: number;
+  }>;
+};
+
 export type ExistingCanonicalService = Partial<CanonicalServiceRecord> & {
   id: string;
 };
@@ -36,8 +52,10 @@ export type ExistingCanonicalProduct = Partial<CanonicalProductRecord> & {
 export type CanonicalProvisionPlan = {
   servicesToCreate: CanonicalServiceRecord[];
   productsToCreate: CanonicalProductRecord[];
+  serviceCombinationRulesToCreate: CanonicalServiceCombinationRuleRecord[];
   matchingServiceIds: string[];
   matchingProductIds: string[];
+  matchingServiceCombinationRuleIds: string[];
   errors: string[];
 };
 
@@ -199,6 +217,21 @@ export const CANONICAL_REAL_PRODUCTS: CanonicalProductRecord[] = [
   },
 ];
 
+export const CANONICAL_SERVICE_COMBINATION_RULES: CanonicalServiceCombinationRuleRecord[] = [
+  {
+    id: "canon-rule-corte-barba-45",
+    unitId: UNIT_ID,
+    serviceSetKey: buildServiceSetKey(["canon-svc-corte", "canon-svc-barba"]),
+    label: "Corte + Barba - 45 min",
+    effectiveDurationMin: 45,
+    active: true,
+    items: [
+      { id: "canon-rule-corte-barba-45-item-corte", serviceId: "canon-svc-corte", position: 0 },
+      { id: "canon-rule-corte-barba-45-item-barba", serviceId: "canon-svc-barba", position: 1 },
+    ],
+  },
+];
+
 const SERVICE_FIELDS: Array<keyof CanonicalServiceRecord> = [
   "businessId",
   "name",
@@ -209,6 +242,14 @@ const SERVICE_FIELDS: Array<keyof CanonicalServiceRecord> = [
   "defaultCommissionRate",
   "costEstimate",
   "notes",
+  "active",
+];
+
+const COMBINATION_RULE_FIELDS: Array<keyof Omit<CanonicalServiceCombinationRuleRecord, "items">> = [
+  "unitId",
+  "serviceSetKey",
+  "label",
+  "effectiveDurationMin",
   "active",
 ];
 
@@ -252,14 +293,23 @@ function findDivergences<T extends { id: string }>(
 export function buildCanonicalProvisionPlan(input: {
   existingServices: ExistingCanonicalService[];
   existingProducts: ExistingCanonicalProduct[];
+  existingServiceCombinationRules?: Array<
+    Partial<CanonicalServiceCombinationRuleRecord> & {
+      id: string;
+      items?: Array<Partial<CanonicalServiceCombinationRuleRecord["items"][number]> & { id: string }>;
+    }
+  >;
 }): CanonicalProvisionPlan {
   const servicesById = new Map(input.existingServices.map((item) => [item.id, item]));
   const productsById = new Map(input.existingProducts.map((item) => [item.id, item]));
+  const rulesById = new Map((input.existingServiceCombinationRules ?? []).map((item) => [item.id, item]));
   const plan: CanonicalProvisionPlan = {
     servicesToCreate: [],
     productsToCreate: [],
+    serviceCombinationRulesToCreate: [],
     matchingServiceIds: [],
     matchingProductIds: [],
+    matchingServiceCombinationRuleIds: [],
     errors: [],
   };
 
@@ -285,6 +335,28 @@ export function buildCanonicalProvisionPlan(input: {
     else plan.matchingProductIds.push(product.id);
   }
 
+  for (const rule of CANONICAL_SERVICE_COMBINATION_RULES) {
+    const existing = rulesById.get(rule.id);
+    if (!existing) {
+      plan.serviceCombinationRulesToCreate.push(rule);
+      continue;
+    }
+    const divergences = findDivergences(rule, existing, COMBINATION_RULE_FIELDS);
+    const existingItems = new Map((existing.items ?? []).map((item) => [item.serviceId, item]));
+    for (const item of rule.items) {
+      const existingItem = existingItems.get(item.serviceId);
+      if (!existingItem) {
+        divergences.push(`${rule.id}.items.${item.serviceId} ausente`);
+      } else if (normalize(existingItem.position) !== normalize(item.position)) {
+        divergences.push(
+          `${rule.id}.items.${item.serviceId}.position esperado=${item.position} encontrado=${existingItem.position}`,
+        );
+      }
+    }
+    if (divergences.length) plan.errors.push(...divergences);
+    else plan.matchingServiceCombinationRuleIds.push(rule.id);
+  }
+
   return plan;
 }
 
@@ -294,4 +366,8 @@ export function canonicalServiceIds() {
 
 export function canonicalProductIds() {
   return CANONICAL_REAL_PRODUCTS.map((item) => item.id);
+}
+
+export function canonicalServiceCombinationRuleIds() {
+  return CANONICAL_SERVICE_COMBINATION_RULES.map((item) => item.id);
 }

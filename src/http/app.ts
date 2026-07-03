@@ -727,6 +727,7 @@ export function createApp() {
     clientId: z.string().min(1),
     professionalId: z.string().min(1),
     serviceId: z.string().min(1),
+    serviceIds: z.never().optional(),
     startsAt: z.string().datetime(),
     bufferAfterMin: z.number().int().min(0).max(120).optional(),
     isFitting: z.boolean().optional(),
@@ -773,6 +774,7 @@ export function createApp() {
       clientId: z.string().min(1).optional(),
       professionalId: z.string().min(1).optional(),
       serviceId: z.string().min(1).optional(),
+      serviceIds: z.never().optional(),
       notes: z.string().max(500).optional(),
       isFitting: z.boolean().optional(),
       confirmation: z.boolean().optional(),
@@ -4741,6 +4743,7 @@ export function createApp() {
       z.string().email("Informe um e-mail valido ou deixe o campo em branco.").optional(),
     ),
     serviceId: z.string().min(1),
+    serviceIds: z.never().optional(),
     professionalId: z.preprocess(
       (value) => normalizePublicProfessionalId(value),
       z.string().min(1).optional(),
@@ -4839,6 +4842,20 @@ export function createApp() {
           serviceNameSnapshot: service.name,
           servicePriceSnapshot: Number(service.price),
           serviceDurationMinSnapshot: service.durationMin,
+          totalPriceSnapshot: Number(service.price),
+          effectiveDurationMinSnapshot: service.durationMin,
+          durationCalculationMode: "SUM",
+        },
+      });
+      await prisma.appointmentServiceItem.create({
+        data: {
+          id: crypto.randomUUID(),
+          appointmentId,
+          serviceId: service.id,
+          position: 0,
+          serviceNameSnapshot: service.name,
+          servicePriceSnapshot: Number(service.price),
+          serviceDurationMinSnapshot: service.durationMin,
         },
       });
     } else {
@@ -4851,6 +4868,23 @@ export function createApp() {
       clientId = memClient.id;
 
       appointmentId = crypto.randomUUID();
+      const serviceItem: {
+        id: string;
+        appointmentId: string;
+        serviceId: string;
+        position: number;
+        serviceNameSnapshot: string;
+        servicePriceSnapshot: number;
+        serviceDurationMinSnapshot: number;
+      } = {
+        id: crypto.randomUUID(),
+        appointmentId,
+        serviceId: service.id,
+        position: 0,
+        serviceNameSnapshot: service.name,
+        servicePriceSnapshot: Number(service.price),
+        serviceDurationMinSnapshot: service.durationMin,
+      };
       memoryStore.appointments.push({
         id: appointmentId,
         unitId,
@@ -4864,9 +4898,14 @@ export function createApp() {
         serviceNameSnapshot: service.name,
         servicePriceSnapshot: Number(service.price),
         serviceDurationMinSnapshot: service.durationMin,
+        totalPriceSnapshot: Number(service.price),
+        effectiveDurationMinSnapshot: service.durationMin,
+        durationCalculationMode: "SUM",
+        serviceItems: [serviceItem],
         notes: `Agendamento online — ${body.clientName}`,
         history: [],
       });
+      memoryStore.appointmentServiceItems.push(serviceItem);
     }
 
     const appointment = { id: appointmentId, startsAt, endsAt };

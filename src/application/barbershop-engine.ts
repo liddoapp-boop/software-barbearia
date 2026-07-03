@@ -10,6 +10,10 @@ import {
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import {
+  calculateAppointmentServicesTotal,
+  resolveEffectiveAppointmentDuration,
+} from "../domain/appointment-services";
+import {
   Appointment,
   AppointmentHistoryItem,
   CommissionEntry,
@@ -18,6 +22,7 @@ import {
   ProductSale,
   Professional,
   Service,
+  ServiceCombinationRule,
   BusinessHour,
   BusinessSettings,
   StockMovement,
@@ -41,6 +46,7 @@ export interface ScheduleAppointmentInput {
   isFitting?: boolean;
   notes?: string;
   changedBy: string;
+  activeCombinationRules?: ServiceCombinationRule[];
 }
 
 export interface CompleteAppointmentInput {
@@ -64,8 +70,22 @@ export class BarbershopEngine {
     existingAppointments: Appointment[],
   ): Appointment {
     const bufferMin = input.bufferAfterMin ?? 0;
+    const serviceItem = {
+      id: crypto.randomUUID(),
+      appointmentId: "",
+      serviceId: input.service.id,
+      position: 0,
+      serviceNameSnapshot: input.service.name,
+      servicePriceSnapshot: input.service.price,
+      serviceDurationMinSnapshot: input.service.durationMin,
+    };
+    const totalPriceSnapshot = calculateAppointmentServicesTotal([serviceItem]);
+    const duration = resolveEffectiveAppointmentDuration({
+      items: [serviceItem],
+      activeRules: input.activeCombinationRules,
+    });
     const endsAt = new Date(
-      input.startsAt.getTime() + (input.service.durationMin + bufferMin) * 60_000,
+      input.startsAt.getTime() + (duration.effectiveDurationMin + bufferMin) * 60_000,
     );
 
     if (input.schedulingSettings && input.businessHours) {
@@ -73,7 +93,7 @@ export class BarbershopEngine {
         unitId: input.unitId,
         startsAt: input.startsAt,
         endsAt,
-        serviceDurationMin: input.service.durationMin,
+        serviceDurationMin: duration.effectiveDurationMin,
         bufferAfterMin: bufferMin,
         settings: input.schedulingSettings,
         businessHours: input.businessHours,
@@ -102,8 +122,14 @@ export class BarbershopEngine {
       },
     ];
 
+    const appointmentId = crypto.randomUUID();
+    const appointmentServiceItem = {
+      ...serviceItem,
+      appointmentId,
+    };
+
     return {
-      id: crypto.randomUUID(),
+      id: appointmentId,
       unitId: input.unitId,
       clientId: input.clientId,
       professionalId: input.professionalId,
@@ -116,6 +142,12 @@ export class BarbershopEngine {
       serviceNameSnapshot: input.service.name,
       servicePriceSnapshot: input.service.price,
       serviceDurationMinSnapshot: input.service.durationMin,
+      totalPriceSnapshot,
+      effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+      durationCalculationMode: duration.calculationMode,
+      durationRuleIdSnapshot: duration.matchedRuleId,
+      durationRuleLabelSnapshot: duration.matchedRuleLabel,
+      serviceItems: [appointmentServiceItem],
       history,
     };
   }

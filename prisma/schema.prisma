@@ -29,6 +29,11 @@ enum RevenueSource {
   REFUND
 }
 
+enum AppointmentDurationCalculationMode {
+  SUM
+  COMBINATION_RULE
+}
+
 enum StockMovementType {
   IN
   OUT
@@ -91,52 +96,53 @@ enum IntegrationWebhookStatus {
 }
 
 model Unit {
-  id               String           @id
-  name             String
-  timezone         String           @default("America/Sao_Paulo")
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  businessSettings BusinessSettings?
-  businessHours    BusinessHour[]
-  paymentMethods   PaymentMethod[]
-  businessCommissionRules BusinessCommissionRule[]
-  teamMembers      TeamMember[]
-  clients          Client[]
-  appointments     Appointment[]
-  financialEntries FinancialEntry[]
-  productSales     ProductSale[]
-  refunds          Refund[]
-  stockMovements   StockMovement[]
-  loyaltyPrograms  LoyaltyProgram[]
-  loyaltyLedger    LoyaltyLedger[]
-  servicePackages  ServicePackage[]
-  clientPackages   ClientPackage[]
-  subscriptionPlans SubscriptionPlan[]
-  clientSubscriptions ClientSubscription[]
-  retentionCases   RetentionCase[]
-  automationRules  AutomationRule[]
-  automationExecutions AutomationExecution[]
-  retentionScoreSnapshots RetentionScoreSnapshot[]
-  integrationWebhookLogs IntegrationWebhookLog[]
+  id                        String                     @id
+  name                      String
+  timezone                  String                     @default("America/Sao_Paulo")
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  businessSettings          BusinessSettings?
+  businessHours             BusinessHour[]
+  paymentMethods            PaymentMethod[]
+  businessCommissionRules   BusinessCommissionRule[]
+  teamMembers               TeamMember[]
+  clients                   Client[]
+  appointments              Appointment[]
+  financialEntries          FinancialEntry[]
+  productSales              ProductSale[]
+  refunds                   Refund[]
+  stockMovements            StockMovement[]
+  loyaltyPrograms           LoyaltyProgram[]
+  loyaltyLedger             LoyaltyLedger[]
+  servicePackages           ServicePackage[]
+  clientPackages            ClientPackage[]
+  subscriptionPlans         SubscriptionPlan[]
+  clientSubscriptions       ClientSubscription[]
+  retentionCases            RetentionCase[]
+  automationRules           AutomationRule[]
+  automationExecutions      AutomationExecution[]
+  retentionScoreSnapshots   RetentionScoreSnapshot[]
+  integrationWebhookLogs    IntegrationWebhookLog[]
+  serviceCombinationRules   ServiceCombinationRule[]
   billingSubscriptionEvents BillingSubscriptionEvent[]
-  serviceStockConsumptions ServiceStockConsumption[]
-  monthlyGoals    MonthlyGoal[]
-  idempotencyRecords IdempotencyRecord[]
-  auditLogs       AuditLog[]
-  userAccesses    UserUnitAccess[]
-  professionals   Professional[]
+  serviceStockConsumptions  ServiceStockConsumption[]
+  monthlyGoals              MonthlyGoal[]
+  idempotencyRecords        IdempotencyRecord[]
+  auditLogs                 AuditLog[]
+  userAccesses              UserUnitAccess[]
+  professionals             Professional[]
 }
 
 model User {
-  id            String           @id
-  email         String           @unique
-  passwordHash  String
-  name          String
-  role          String
-  isActive      Boolean          @default(true)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  unitAccesses  UserUnitAccess[]
+  id           String           @id
+  email        String           @unique
+  passwordHash String
+  name         String
+  role         String
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  unitAccesses UserUnitAccess[]
 
   @@index([role, isActive])
 }
@@ -157,48 +163,48 @@ model UserUnitAccess {
 }
 
 model BusinessSettings {
-  id                             String   @id
-  unitId                         String   @unique
-  businessName                   String
-  segment                        String
-  phone                          String?
-  email                          String?
-  address                        String?
-  city                           String?
-  state                          String?
-  document                       String?
-  displayName                    String?
-  primaryColor                   String?
-  themeMode                      String   @default("system")
-  defaultAppointmentDuration     Int      @default(45)
-  minimumAdvanceMinutes          Int      @default(30)
-  bufferBetweenAppointmentsMinutes Int    @default(10)
-  reminderLeadMinutes            Int      @default(60)
-  sendAppointmentReminders       Boolean  @default(true)
-  inactiveCustomerDays           Int      @default(60)
-  atRiskCustomerDays             Int      @default(30)
-  allowWalkIns                   Boolean  @default(true)
-  allowOutOfHoursAppointments    Boolean  @default(false)
-  allowOverbooking               Boolean  @default(false)
-  houseCommissionType            String   @default("PERCENTAGE")
-  houseCommissionValue           Decimal  @db.Decimal(10, 2) @default(40)
-  createdAt                      DateTime @default(now())
-  updatedAt                      DateTime @updatedAt
-  unit                           Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  id                               String   @id
+  unitId                           String   @unique
+  businessName                     String
+  segment                          String
+  phone                            String?
+  email                            String?
+  address                          String?
+  city                             String?
+  state                            String?
+  document                         String?
+  displayName                      String?
+  primaryColor                     String?
+  themeMode                        String   @default("system")
+  defaultAppointmentDuration       Int      @default(45)
+  minimumAdvanceMinutes            Int      @default(30)
+  bufferBetweenAppointmentsMinutes Int      @default(10)
+  reminderLeadMinutes              Int      @default(60)
+  sendAppointmentReminders         Boolean  @default(true)
+  inactiveCustomerDays             Int      @default(60)
+  atRiskCustomerDays               Int      @default(30)
+  allowWalkIns                     Boolean  @default(true)
+  allowOutOfHoursAppointments      Boolean  @default(false)
+  allowOverbooking                 Boolean  @default(false)
+  houseCommissionType              String   @default("PERCENTAGE")
+  houseCommissionValue             Decimal  @default(40) @db.Decimal(10, 2)
+  createdAt                        DateTime @default(now())
+  updatedAt                        DateTime @updatedAt
+  unit                             Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
 }
 
 model MonthlyGoal {
-  id                   String   @id
-  businessId           String
-  month                Int
-  year                 Int
-  revenueTarget        Decimal  @db.Decimal(12, 2)
-  appointmentsTarget   Int
-  averageTicketTarget  Decimal? @db.Decimal(10, 2)
-  notes                String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  business             Unit     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  id                  String   @id
+  businessId          String
+  month               Int
+  year                Int
+  revenueTarget       Decimal  @db.Decimal(12, 2)
+  appointmentsTarget  Int
+  averageTicketTarget Decimal? @db.Decimal(10, 2)
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  business            Unit     @relation(fields: [businessId], references: [id], onDelete: Restrict)
 
   @@unique([businessId, year, month])
   @@index([businessId, year, month])
@@ -235,18 +241,18 @@ model PaymentMethod {
 }
 
 model BusinessCommissionRule {
-  id             String   @id
+  id             String        @id
   unitId         String
   professionalId String?
   serviceId      String?
   type           String
-  value          Decimal  @db.Decimal(10, 2)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  unit           Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  value          Decimal       @db.Decimal(10, 2)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  unit           Unit          @relation(fields: [unitId], references: [id], onDelete: Restrict)
   professional   Professional? @relation(fields: [professionalId], references: [id], onDelete: SetNull)
-  service        Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  service        Service?      @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
   @@index([unitId, isActive])
   @@index([professionalId])
@@ -270,42 +276,44 @@ model TeamMember {
 }
 
 model Service {
-  id             String        @id
-  businessId     String        @default("unit-01")
-  name           String
-  description    String?
-  category       String?
-  price          Decimal       @db.Decimal(10, 2)
-  durationMin    Int
-  defaultCommissionRate Decimal @db.Decimal(5, 4) @default(0)
-  costEstimate   Decimal       @db.Decimal(10, 2)
-  notes          String?
-  active         Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  appointments   Appointment[]
-  professionals  ServiceProfessional[]
-  stockConsumptions ServiceStockConsumption[]
-  businessCommissionRules BusinessCommissionRule[]
+  id                          String                       @id
+  businessId                  String                       @default("unit-01")
+  name                        String
+  description                 String?
+  category                    String?
+  price                       Decimal                      @db.Decimal(10, 2)
+  durationMin                 Int
+  defaultCommissionRate       Decimal                      @default(0) @db.Decimal(5, 4)
+  costEstimate                Decimal                      @db.Decimal(10, 2)
+  notes                       String?
+  active                      Boolean                      @default(true)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  appointments                Appointment[]
+  professionals               ServiceProfessional[]
+  stockConsumptions           ServiceStockConsumption[]
+  businessCommissionRules     BusinessCommissionRule[]
+  appointmentServiceItems     AppointmentServiceItem[]
+  serviceCombinationRuleItems ServiceCombinationRuleItem[]
 
   @@index([businessId, active])
   @@index([businessId, category])
 }
 
 model Professional {
-  id              String           @id
-  businessId      String           @default("unit-01")
-  name            String
-  active          Boolean          @default(true)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  business        Unit             @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  appointments    Appointment[]
-  commissionRules CommissionRule[]
+  id                      String                   @id
+  businessId              String                   @default("unit-01")
+  name                    String
+  active                  Boolean                  @default(true)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  business                Unit                     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  appointments            Appointment[]
+  commissionRules         CommissionRule[]
   businessCommissionRules BusinessCommissionRule[]
-  commissions     CommissionEntry[]
-  productSales    ProductSale[]
-  services        ServiceProfessional[]
+  commissions             CommissionEntry[]
+  productSales            ProductSale[]
+  services                ServiceProfessional[]
 
   @@index([businessId, active])
 }
@@ -324,63 +332,63 @@ model ServiceProfessional {
 }
 
 model CommissionRule {
-  id                       String       @id
+  id                       String        @id
   professionalId           String
   appliesTo                RevenueSource
   serviceCategory          String?
-  percentage               Decimal?     @db.Decimal(8, 4)
-  fixedAmount              Decimal?     @db.Decimal(10, 2)
-  goalThreshold            Decimal?     @db.Decimal(10, 2)
-  extraPercentageAfterGoal Decimal?     @db.Decimal(8, 4)
-  createdAt                DateTime     @default(now())
-  updatedAt                DateTime     @updatedAt
-  professional             Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  percentage               Decimal?      @db.Decimal(8, 4)
+  fixedAmount              Decimal?      @db.Decimal(10, 2)
+  goalThreshold            Decimal?      @db.Decimal(10, 2)
+  extraPercentageAfterGoal Decimal?      @db.Decimal(8, 4)
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  professional             Professional  @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 
   @@index([professionalId, appliesTo])
 }
 
 model Client {
-  id                       String        @id
-  businessId               String        @default("unit-01")
-  fullName                 String
-  phone                    String?
-  email                    String?
-  birthDate                DateTime?
-  notes                    String?
-  preferredProfessionalId  String?
-  tags                     String[]
-  createdAt                DateTime      @default(now())
-  updatedAt                DateTime      @updatedAt
-  business                 Unit          @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  appointments             Appointment[]
-  productSales             ProductSale[]
-  loyaltyLedger            LoyaltyLedger[]
-  clientPackages           ClientPackage[]
-  clientSubscriptions      ClientSubscription[]
-  retentionCases           RetentionCase[]
-  automationExecutions     AutomationExecution[]
-  retentionScoreSnapshots  RetentionScoreSnapshot[]
+  id                      String                   @id
+  businessId              String                   @default("unit-01")
+  fullName                String
+  phone                   String?
+  email                   String?
+  birthDate               DateTime?
+  notes                   String?
+  preferredProfessionalId String?
+  tags                    String[]
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  business                Unit                     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  appointments            Appointment[]
+  productSales            ProductSale[]
+  loyaltyLedger           LoyaltyLedger[]
+  clientPackages          ClientPackage[]
+  clientSubscriptions     ClientSubscription[]
+  retentionCases          RetentionCase[]
+  automationExecutions    AutomationExecution[]
+  retentionScoreSnapshots RetentionScoreSnapshot[]
 
   @@index([businessId, fullName])
   @@index([businessId, phone])
 }
 
 model Product {
-  id               String          @id
-  businessId       String          @default("unit-01")
-  name             String
-  category         String
-  salePrice        Decimal         @db.Decimal(10, 2)
-  costPrice        Decimal         @db.Decimal(10, 2)
-  stockQty         Int             @default(0)
-  minStockAlert    Int             @default(0)
-  notes            String?
-  active           Boolean         @default(true)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  productSaleItems ProductSaleItem[]
-  stockMovements   StockMovement[]
-  refundItems      RefundItem[]
+  id                  String                    @id
+  businessId          String                    @default("unit-01")
+  name                String
+  category            String
+  salePrice           Decimal                   @db.Decimal(10, 2)
+  costPrice           Decimal                   @db.Decimal(10, 2)
+  stockQty            Int                       @default(0)
+  minStockAlert       Int                       @default(0)
+  notes               String?
+  active              Boolean                   @default(true)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  productSaleItems    ProductSaleItem[]
+  stockMovements      StockMovement[]
+  refundItems         RefundItem[]
   serviceConsumptions ServiceStockConsumption[]
 
   @@index([businessId, active])
@@ -392,7 +400,7 @@ model ServiceStockConsumption {
   serviceId          String
   productId          String
   quantityPerService Decimal  @db.Decimal(10, 3)
-  wastePct           Decimal  @db.Decimal(5, 2) @default(0)
+  wastePct           Decimal  @default(0) @db.Decimal(5, 2)
   isCritical         Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -406,32 +414,86 @@ model ServiceStockConsumption {
 }
 
 model Appointment {
-  id             String                @id
-  unitId         String
-  clientId       String
-  professionalId String
-  serviceId      String
-  startsAt       DateTime
-  endsAt         DateTime
-  status         AppointmentStatus
-  isFitting      Boolean               @default(false)
-  notes          String?
-  serviceNameSnapshot        String?
-  servicePriceSnapshot       Decimal?  @db.Decimal(10, 2)
-  serviceDurationMinSnapshot Int?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  unit           Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  client         Client                @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  professional   Professional          @relation(fields: [professionalId], references: [id], onDelete: Restrict)
-  service        Service               @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  history        AppointmentHistory[]
-  commissions    CommissionEntry[]
-  refunds        Refund[]
+  id                           String                             @id
+  unitId                       String
+  clientId                     String
+  professionalId               String
+  serviceId                    String
+  startsAt                     DateTime
+  endsAt                       DateTime
+  status                       AppointmentStatus
+  isFitting                    Boolean                            @default(false)
+  notes                        String?
+  serviceNameSnapshot          String?
+  servicePriceSnapshot         Decimal?                           @db.Decimal(10, 2)
+  serviceDurationMinSnapshot   Int?
+  totalPriceSnapshot           Decimal                            @db.Decimal(10, 2)
+  effectiveDurationMinSnapshot Int
+  durationCalculationMode      AppointmentDurationCalculationMode
+  durationRuleIdSnapshot       String?
+  durationRuleLabelSnapshot    String?
+  createdAt                    DateTime                           @default(now())
+  updatedAt                    DateTime                           @updatedAt
+  unit                         Unit                               @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  client                       Client                             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  professional                 Professional                       @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+  service                      Service                            @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  serviceItems                 AppointmentServiceItem[]
+  history                      AppointmentHistory[]
+  commissions                  CommissionEntry[]
+  refunds                      Refund[]
 
   @@index([unitId, startsAt])
   @@index([professionalId, startsAt])
   @@index([clientId, startsAt])
+}
+
+model AppointmentServiceItem {
+  id                         String      @id
+  appointmentId              String
+  serviceId                  String
+  position                   Int
+  serviceNameSnapshot        String
+  servicePriceSnapshot       Decimal     @db.Decimal(10, 2)
+  serviceDurationMinSnapshot Int
+  createdAt                  DateTime    @default(now())
+  updatedAt                  DateTime    @updatedAt
+  appointment                Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  service                    Service     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@unique([appointmentId, position])
+  @@unique([appointmentId, serviceId])
+  @@index([appointmentId])
+  @@index([serviceId])
+}
+
+model ServiceCombinationRule {
+  id                   String                       @id
+  unitId               String
+  serviceSetKey        String
+  label                String
+  effectiveDurationMin Int
+  active               Boolean                      @default(true)
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  unit                 Unit                         @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  items                ServiceCombinationRuleItem[]
+
+  @@unique([unitId, serviceSetKey])
+  @@index([unitId, active])
+}
+
+model ServiceCombinationRuleItem {
+  id        String                 @id
+  ruleId    String
+  serviceId String
+  position  Int?
+  createdAt DateTime               @default(now())
+  rule      ServiceCombinationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  service   Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@unique([ruleId, serviceId])
+  @@index([serviceId])
 }
 
 model AppointmentHistory {
@@ -447,24 +509,24 @@ model AppointmentHistory {
 }
 
 model FinancialEntry {
-  id            String        @id
-  unitId        String
-  kind          FinancialKind
-  source        RevenueSource?
-  category      String?
-  paymentMethod String?
-  amount        Decimal       @db.Decimal(10, 2)
-  occurredAt    DateTime
-  referenceType String
-  referenceId   String?
+  id             String         @id
+  unitId         String
+  kind           FinancialKind
+  source         RevenueSource?
+  category       String?
+  paymentMethod  String?
+  amount         Decimal        @db.Decimal(10, 2)
+  occurredAt     DateTime
+  referenceType  String
+  referenceId    String?
   professionalId String?
-  customerId    String?
-  description   String
-  notes         String?
+  customerId     String?
+  description    String
+  notes          String?
   idempotencyKey String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  unit          Unit          @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  unit           Unit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, idempotencyKey])
   @@unique([unitId, referenceType, referenceId, source])
@@ -519,31 +581,31 @@ model ProductSale {
 }
 
 model ProductSaleItem {
-  id           String      @id
+  id            String      @id
   productSaleId String
-  productId    String
-  quantity     Int
-  unitPrice    Decimal     @db.Decimal(10, 2)
-  unitCost     Decimal     @db.Decimal(10, 2)
-  productSale  ProductSale @relation(fields: [productSaleId], references: [id], onDelete: Cascade)
-  product      Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId     String
+  quantity      Int
+  unitPrice     Decimal     @db.Decimal(10, 2)
+  unitCost      Decimal     @db.Decimal(10, 2)
+  productSale   ProductSale @relation(fields: [productSaleId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([productSaleId])
   @@index([productId])
 }
 
 model Refund {
-  id             String   @id
+  id             String       @id
   unitId         String
   appointmentId  String?
   productSaleId  String?
-  totalAmount    Decimal  @db.Decimal(10, 2)
+  totalAmount    Decimal      @db.Decimal(10, 2)
   reason         String
   refundedAt     DateTime
   changedBy      String
   idempotencyKey String?
-  createdAt      DateTime @default(now())
-  unit           Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+  unit           Unit         @relation(fields: [unitId], references: [id], onDelete: Restrict)
   appointment    Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   productSale    ProductSale? @relation(fields: [productSaleId], references: [id], onDelete: SetNull)
   items          RefundItem[]
@@ -588,7 +650,7 @@ model StockMovement {
 }
 
 model IdempotencyRecord {
-  id             String   @id
+  id             String    @id
   unitId         String
   action         String
   idempotencyKey String
@@ -597,9 +659,9 @@ model IdempotencyRecord {
   responseJson   Json?
   resolution     String?
   expiresAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  unit           Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  unit           Unit      @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, action, idempotencyKey])
   @@index([unitId, action, status, createdAt])
@@ -634,15 +696,15 @@ model AuditLog {
 }
 
 model LoyaltyProgram {
-  id             String       @id
+  id             String      @id
   unitId         String
   name           String
   type           LoyaltyType
-  conversionRate Decimal      @db.Decimal(10, 4)
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  unit           Unit         @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  conversionRate Decimal     @db.Decimal(10, 4)
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  unit           Unit        @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@index([unitId, isActive])
 }
@@ -682,7 +744,7 @@ model ServicePackage {
 }
 
 model ClientPackage {
-  id                String             @id
+  id                String              @id
   unitId            String
   clientId          String
   packageId         String
@@ -690,52 +752,52 @@ model ClientPackage {
   expiresAt         DateTime
   sessionsRemaining Int
   status            ClientPackageStatus
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  unit              Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  client            Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  package           ServicePackage     @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  unit              Unit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  client            Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  package           ServicePackage      @relation(fields: [packageId], references: [id], onDelete: Restrict)
 
   @@index([unitId, clientId, status])
 }
 
 model SubscriptionPlan {
-  id              String               @id
-  unitId          String
-  name            String
-  priceMonthly    Decimal              @db.Decimal(10, 2)
-  billingDay      Int
-  benefits        Json?
-  isActive        Boolean              @default(true)
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  unit            Unit                 @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  subscriptions   ClientSubscription[]
+  id            String               @id
+  unitId        String
+  name          String
+  priceMonthly  Decimal              @db.Decimal(10, 2)
+  billingDay    Int
+  benefits      Json?
+  isActive      Boolean              @default(true)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  unit          Unit                 @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  subscriptions ClientSubscription[]
 
   @@index([unitId, isActive])
 }
 
 model ClientSubscription {
-  id            String                   @id
+  id            String                     @id
   unitId        String
   clientId      String
   planId        String
   startedAt     DateTime
   nextBillingAt DateTime
   status        ClientSubscriptionStatus
-  cycleCount    Int                      @default(1)
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
-  unit          Unit                     @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  client        Client                   @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  plan          SubscriptionPlan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  cycleCount    Int                        @default(1)
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  unit          Unit                       @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  client        Client                     @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  plan          SubscriptionPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
   billingEvents BillingSubscriptionEvent[]
 
   @@index([unitId, clientId, status])
 }
 
 model RetentionCase {
-  id                String             @id
+  id                String              @id
   unitId            String
   clientId          String
   status            RetentionCaseStatus
@@ -743,44 +805,44 @@ model RetentionCase {
   reason            String
   recommendedAction String
   lastVisitAt       DateTime?
-  daysWithoutReturn Int                @default(0)
+  daysWithoutReturn Int                 @default(0)
   ownerUser         String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  unit              Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  client            Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  unit              Unit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  client            Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
   events            RetentionEvent[]
 
   @@index([unitId, status, riskLevel])
 }
 
 model RetentionEvent {
-  id         String         @id
-  caseId     String
-  channel    String
-  note       String
-  outcome    String?
-  occurredAt DateTime
-  createdBy  String
-  createdAt  DateTime       @default(now())
+  id            String        @id
+  caseId        String
+  channel       String
+  note          String
+  outcome       String?
+  occurredAt    DateTime
+  createdBy     String
+  createdAt     DateTime      @default(now())
   retentionCase RetentionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId, occurredAt])
 }
 
 model AutomationRule {
-  id              String               @id
+  id              String                @id
   unitId          String
   name            String
   triggerType     String
   channel         String
   target          String
   messageTemplate String
-  isActive        Boolean              @default(true)
+  isActive        Boolean               @default(true)
   createdBy       String
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  unit            Unit                 @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  unit            Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
   executions      AutomationExecution[]
 
   @@index([unitId, isActive])
@@ -808,55 +870,55 @@ model AutomationExecution {
 }
 
 model RetentionScoreSnapshot {
-  id                String            @id
+  id                String             @id
   unitId            String
   clientId          String
-  riskScore         Decimal           @db.Decimal(5, 2)
+  riskScore         Decimal            @db.Decimal(5, 2)
   riskLevel         RetentionRiskLevel
-  returnProbability Decimal           @db.Decimal(5, 2)
+  returnProbability Decimal            @db.Decimal(5, 2)
   reasons           Json
   modelVersion      String
   scoredAt          DateTime
-  createdAt         DateTime          @default(now())
-  unit              Unit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  client            Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdAt         DateTime           @default(now())
+  unit              Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  client            Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
 
   @@index([unitId, scoredAt])
   @@index([unitId, riskLevel, scoredAt])
 }
 
 model IntegrationWebhookLog {
-  id            String                    @id
+  id            String                      @id
   unitId        String
   provider      String
   direction     IntegrationWebhookDirection
   endpoint      String
   status        IntegrationWebhookStatus
   httpStatus    Int?
-  attempt       Int                       @default(1)
+  attempt       Int                         @default(1)
   correlationId String
   payload       Json?
   responseBody  Json?
   errorMessage  String?
   occurredAt    DateTime
-  createdAt     DateTime                  @default(now())
-  unit          Unit                      @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt     DateTime                    @default(now())
+  unit          Unit                        @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@index([unitId, provider, status, occurredAt])
 }
 
 model BillingSubscriptionEvent {
-  id                     String             @id
+  id                     String              @id
   unitId                 String
   subscriptionId         String?
   externalSubscriptionId String?
   eventType              String
-  amount                 Decimal?           @db.Decimal(10, 2)
+  amount                 Decimal?            @db.Decimal(10, 2)
   status                 String
   occurredAt             DateTime
   payload                Json?
-  createdAt              DateTime           @default(now())
-  unit                   Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdAt              DateTime            @default(now())
+  unit                   Unit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
   subscription           ClientSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@index([unitId, status, occurredAt])

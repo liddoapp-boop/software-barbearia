@@ -3,8 +3,10 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import {
   CANONICAL_REAL_PRODUCTS,
   CANONICAL_REAL_SERVICES,
+  CANONICAL_SERVICE_COMBINATION_RULES,
   buildCanonicalProvisionPlan,
   canonicalProductIds,
+  canonicalServiceCombinationRuleIds,
   canonicalServiceIds,
 } from "../src/application/canonical-catalog";
 
@@ -72,7 +74,7 @@ function assertSafeTarget(options: Options) {
 }
 
 async function readExistingCanonicals() {
-  const [services, products] = await Promise.all([
+  const [services, products, serviceCombinationRules] = await Promise.all([
     prisma.service.findMany({
       where: { id: { in: canonicalServiceIds() } },
       select: {
@@ -104,6 +106,10 @@ async function readExistingCanonicals() {
         active: true,
       },
     }),
+    prisma.serviceCombinationRule.findMany({
+      where: { id: { in: canonicalServiceCombinationRuleIds() } },
+      include: { items: true },
+    }),
   ]);
 
   return {
@@ -122,6 +128,19 @@ async function readExistingCanonicals() {
       costPrice: Number(item.costPrice),
       notes: item.notes ?? "",
     })),
+    serviceCombinationRules: serviceCombinationRules.map((item) => ({
+      id: item.id,
+      unitId: item.unitId,
+      serviceSetKey: item.serviceSetKey,
+      label: item.label,
+      effectiveDurationMin: item.effectiveDurationMin,
+      active: item.active,
+      items: item.items.map((ruleItem) => ({
+        id: ruleItem.id,
+        serviceId: ruleItem.serviceId,
+        position: ruleItem.position ?? 0,
+      })),
+    })),
   };
 }
 
@@ -130,14 +149,19 @@ function printPlan(options: Options, plan: ReturnType<typeof buildCanonicalProvi
   console.log(`target=${options.target}`);
   console.log(`services_to_create=${plan.servicesToCreate.length}`);
   console.log(`products_to_create=${plan.productsToCreate.length}`);
+  console.log(`service_combination_rules_to_create=${plan.serviceCombinationRulesToCreate.length}`);
   console.log(`services_matching=${plan.matchingServiceIds.length}`);
   console.log(`products_matching=${plan.matchingProductIds.length}`);
+  console.log(`service_combination_rules_matching=${plan.matchingServiceCombinationRuleIds.length}`);
   console.log(`errors=${plan.errors.length}`);
   if (plan.servicesToCreate.length) {
     console.log(`service_ids_to_create=${plan.servicesToCreate.map((item) => item.id).join(",")}`);
   }
   if (plan.productsToCreate.length) {
     console.log(`product_ids_to_create=${plan.productsToCreate.map((item) => item.id).join(",")}`);
+  }
+  if (plan.serviceCombinationRulesToCreate.length) {
+    console.log(`service_combination_rule_ids_to_create=${plan.serviceCombinationRulesToCreate.map((item) => item.id).join(",")}`);
   }
 }
 
@@ -177,6 +201,26 @@ async function applyPlan(plan: ReturnType<typeof buildCanonicalProvisionPlan>) {
         },
       });
     }
+
+    for (const rule of plan.serviceCombinationRulesToCreate) {
+      await tx.serviceCombinationRule.create({
+        data: {
+          id: rule.id,
+          unitId: rule.unitId,
+          serviceSetKey: rule.serviceSetKey,
+          label: rule.label,
+          effectiveDurationMin: rule.effectiveDurationMin,
+          active: rule.active,
+          items: {
+            create: rule.items.map((item) => ({
+              id: item.id,
+              serviceId: item.serviceId,
+              position: item.position,
+            })),
+          },
+        },
+      });
+    }
   });
 }
 
@@ -188,6 +232,7 @@ async function main() {
   const plan = buildCanonicalProvisionPlan({
     existingServices: existing.services,
     existingProducts: existing.products,
+    existingServiceCombinationRules: existing.serviceCombinationRules,
   });
 
   printPlan(options, plan);
@@ -205,8 +250,14 @@ async function main() {
   const afterPlan = buildCanonicalProvisionPlan({
     existingServices: after.services,
     existingProducts: after.products,
+    existingServiceCombinationRules: after.serviceCombinationRules,
   });
-  if (afterPlan.errors.length || afterPlan.servicesToCreate.length || afterPlan.productsToCreate.length) {
+  if (
+    afterPlan.errors.length ||
+    afterPlan.servicesToCreate.length ||
+    afterPlan.productsToCreate.length ||
+    afterPlan.serviceCombinationRulesToCreate.length
+  ) {
     throw new Error("Validacao pos-apply falhou");
   }
 

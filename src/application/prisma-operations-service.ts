@@ -60,6 +60,11 @@ import {
   hasAppointmentConflict,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
+import {
+  calculateAppointmentServicesTotal,
+  resolveEffectiveAppointmentDuration,
+  resolveLegacyPrimaryServiceId,
+} from "../domain/appointment-services";
 import { buildClientsOverviewPredictive } from "./client-predictive";
 import {
   buildReplenishmentSuggestions,
@@ -2476,6 +2481,11 @@ export class PrismaOperationsService {
             serviceNameSnapshot: appointment.serviceNameSnapshot,
             servicePriceSnapshot: appointment.servicePriceSnapshot,
             serviceDurationMinSnapshot: appointment.serviceDurationMinSnapshot,
+            totalPriceSnapshot: appointment.totalPriceSnapshot ?? appointment.servicePriceSnapshot ?? service.price,
+            effectiveDurationMinSnapshot: appointment.effectiveDurationMinSnapshot ?? appointment.serviceDurationMinSnapshot ?? service.durationMin,
+            durationCalculationMode: appointment.durationCalculationMode ?? "SUM",
+            durationRuleIdSnapshot: appointment.durationRuleIdSnapshot,
+            durationRuleLabelSnapshot: appointment.durationRuleLabelSnapshot,
             history: {
               create: appointment.history.map((entry) => ({
                 id: crypto.randomUUID(),
@@ -2487,6 +2497,19 @@ export class PrismaOperationsService {
             },
           },
           include: { history: { orderBy: { changedAt: "asc" } } },
+        });
+        await tx.appointmentServiceItem.createMany({
+          data: (appointment.serviceItems ?? []).map((item) => ({
+            id: item.id,
+            appointmentId: appointment!.id,
+            serviceId: item.serviceId,
+            position: item.position,
+            serviceNameSnapshot: item.serviceNameSnapshot,
+            servicePriceSnapshot: item.servicePriceSnapshot,
+            serviceDurationMinSnapshot: item.serviceDurationMinSnapshot,
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
+          })),
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -2531,7 +2554,11 @@ export class PrismaOperationsService {
         async (tx) => {
           const row = await tx.appointment.findUnique({
             where: { id: input.appointmentId },
-            include: { history: { orderBy: { changedAt: "asc" } }, service: true },
+            include: {
+              history: { orderBy: { changedAt: "asc" } },
+              service: true,
+              serviceItems: { orderBy: { position: "asc" } },
+            },
           });
           if (!row) throw new Error("Agendamento nao encontrado");
           if (input.unitId && row.unitId !== input.unitId) {
@@ -2542,6 +2569,7 @@ export class PrismaOperationsService {
 
           const appointment = this.mapAppointment(row);
           const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
+          const effectiveDurationMin = appointment.effectiveDurationMinSnapshot ?? service.durationMin;
           const [settings, businessHours, unitRow] = await Promise.all([
             this.ensureBusinessSettingsInTransaction(tx, appointment.unitId),
             this.ensureBusinessHoursInTransaction(tx, appointment.unitId),
@@ -2549,7 +2577,7 @@ export class PrismaOperationsService {
           ]);
 
           const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-          const newEnd = new Date(input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000);
+          const newEnd = new Date(input.startsAt.getTime() + (effectiveDurationMin + bufferAfterMin) * 60_000);
           const overlappingRows = await tx.appointment.findMany({
             where: {
               unitId: appointment.unitId,
@@ -2565,7 +2593,7 @@ export class PrismaOperationsService {
           updated = this.engine.rescheduleAppointment(
             appointment,
             input.startsAt,
-            service.durationMin,
+            effectiveDurationMin,
             overlappingRows.map((item) => this.mapAppointment(item)),
             input.changedBy,
             {
@@ -8595,6 +8623,7 @@ export class PrismaOperationsService {
         client: true,
         professional: true,
         service: true,
+        serviceItems: { orderBy: { position: "asc" } },
       },
       orderBy: { startsAt: "asc" },
     });
@@ -8642,6 +8671,7 @@ export class PrismaOperationsService {
         client: true,
         professional: true,
         service: true,
+        serviceItems: { orderBy: { position: "asc" } },
         history: { orderBy: { changedAt: "asc" } },
       },
       orderBy: { startsAt: "asc" },
@@ -8663,6 +8693,7 @@ export class PrismaOperationsService {
         client: true,
         professional: true,
         service: true,
+        serviceItems: { orderBy: { position: "asc" } },
         history: { orderBy: { changedAt: "desc" } },
       },
     });
@@ -8701,6 +8732,7 @@ export class PrismaOperationsService {
             include: {
               history: { orderBy: { changedAt: "asc" } },
               service: true,
+              serviceItems: { orderBy: { position: "asc" } },
             },
           });
           if (!current) throw new Error("Agendamento nao encontrado");
@@ -8720,7 +8752,7 @@ export class PrismaOperationsService {
             [current.clientId, nextClientId],
           );
 
-          const [serviceRow, professionalRow, clientRow, settings, businessHours, unitRow] = await Promise.all([
+          const [serviceRow, professionalRow, clientRow, settings, businessHours, unitRow, activeCombinationRules] = await Promise.all([
             tx.service.findFirst({
               where: { id: nextServiceId, businessId: current.unitId },
             }),
@@ -8731,6 +8763,10 @@ export class PrismaOperationsService {
             this.ensureBusinessSettingsInTransaction(tx, current.unitId),
             this.ensureBusinessHoursInTransaction(tx, current.unitId),
             tx.unit.findUnique({ where: { id: current.unitId }, select: { timezone: true } }),
+            tx.serviceCombinationRule.findMany({
+              where: { unitId: current.unitId, active: true },
+              include: { items: true },
+            }),
           ]);
 
           if (!serviceRow || !serviceRow.active) throw new Error("Servico nao encontrado ou inativo");
@@ -8740,13 +8776,45 @@ export class PrismaOperationsService {
           await this.assertProfessionalCanExecuteServiceInTransaction(tx, serviceRow.id, professionalRow.id);
           if (!clientRow) throw new Error("Cliente nao encontrado");
 
+          const existingItem = current.serviceItems[0];
+          const nextServiceItem = {
+            id: existingItem?.id ?? crypto.randomUUID(),
+            appointmentId: current.id,
+            serviceId: serviceRow.id,
+            position: 0,
+            serviceNameSnapshot: serviceRow.name,
+            servicePriceSnapshot: asNumber(serviceRow.price),
+            serviceDurationMinSnapshot: serviceRow.durationMin,
+          };
+          const duration = resolveEffectiveAppointmentDuration({
+            items: [nextServiceItem],
+            activeRules: activeCombinationRules.map((rule) => ({
+              id: rule.id,
+              unitId: rule.unitId,
+              serviceSetKey: rule.serviceSetKey,
+              label: rule.label,
+              effectiveDurationMin: rule.effectiveDurationMin,
+              active: rule.active,
+              items: rule.items.map((item) => ({
+                id: item.id,
+                ruleId: item.ruleId,
+                serviceId: item.serviceId,
+                position: item.position ?? undefined,
+                createdAt: item.createdAt,
+              })),
+              createdAt: rule.createdAt,
+              updatedAt: rule.updatedAt,
+            })),
+          });
+          const totalPriceSnapshot = calculateAppointmentServicesTotal([nextServiceItem]);
+          const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId([nextServiceItem]);
           const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-          const nextEndsAt = new Date(nextStartsAt.getTime() + (serviceRow.durationMin + bufferAfterMin) * 60_000);
+          const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
           validateAppointmentSchedulingWindow({
             unitId: current.unitId,
             startsAt: nextStartsAt,
             endsAt: nextEndsAt,
-            serviceDurationMin: serviceRow.durationMin,
+            serviceDurationMin: duration.effectiveDurationMin,
             bufferAfterMin,
             settings,
             businessHours: businessHours.map((item) => ({
@@ -8800,22 +8868,40 @@ export class PrismaOperationsService {
           const hasMainChange =
             nextClientId !== current.clientId ||
             nextProfessionalId !== current.professionalId ||
-            nextServiceId !== current.serviceId ||
+            legacyPrimaryServiceId !== current.serviceId ||
             nextStartsAt.getTime() !== current.startsAt.getTime() ||
             (input.notes !== undefined ? input.notes : current.notes ?? undefined) !==
               (current.notes ?? undefined) ||
             (input.isFitting !== undefined ? Boolean(input.isFitting) : current.isFitting) !==
               current.isFitting;
 
+          await tx.appointmentServiceItem.deleteMany({ where: { appointmentId: current.id } });
+          await tx.appointmentServiceItem.create({
+            data: {
+              id: nextServiceItem.id,
+              appointmentId: current.id,
+              serviceId: nextServiceItem.serviceId,
+              position: nextServiceItem.position,
+              serviceNameSnapshot: nextServiceItem.serviceNameSnapshot,
+              servicePriceSnapshot: nextServiceItem.servicePriceSnapshot,
+              serviceDurationMinSnapshot: nextServiceItem.serviceDurationMinSnapshot,
+            },
+          });
+
           return await tx.appointment.update({
             where: { id: current.id },
             data: {
               clientId: nextClientId,
               professionalId: nextProfessionalId,
-              serviceId: nextServiceId,
+              serviceId: legacyPrimaryServiceId,
               startsAt: nextStartsAt,
               endsAt: nextEndsAt,
-              ...(nextServiceId !== current.serviceId
+              totalPriceSnapshot,
+              effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+              durationCalculationMode: duration.calculationMode,
+              durationRuleIdSnapshot: duration.matchedRuleId,
+              durationRuleLabelSnapshot: duration.matchedRuleLabel,
+              ...(legacyPrimaryServiceId !== current.serviceId
                 ? {
                     serviceNameSnapshot: serviceRow.name,
                     servicePriceSnapshot: serviceRow.price,
@@ -8842,6 +8928,7 @@ export class PrismaOperationsService {
               client: true,
               professional: true,
               service: true,
+              serviceItems: { orderBy: { position: "asc" } },
               history: { orderBy: { changedAt: "asc" } },
             },
           });
@@ -10206,6 +10293,22 @@ export class PrismaOperationsService {
     serviceNameSnapshot?: string | null;
     servicePriceSnapshot?: Prisma.Decimal | number | null;
     serviceDurationMinSnapshot?: number | null;
+    totalPriceSnapshot?: Prisma.Decimal | number | null;
+    effectiveDurationMinSnapshot?: number | null;
+    durationCalculationMode?: "SUM" | "COMBINATION_RULE" | null;
+    durationRuleIdSnapshot?: string | null;
+    durationRuleLabelSnapshot?: string | null;
+    serviceItems?: Array<{
+      id: string;
+      appointmentId: string;
+      serviceId: string;
+      position: number;
+      serviceNameSnapshot: string;
+      servicePriceSnapshot: Prisma.Decimal | number;
+      serviceDurationMinSnapshot: number;
+      createdAt?: Date;
+      updatedAt?: Date;
+    }>;
     history?: Array<{
       changedAt: Date;
       changedBy: string;
@@ -10228,6 +10331,41 @@ export class PrismaOperationsService {
       servicePriceSnapshot:
         item.servicePriceSnapshot == null ? undefined : asNumber(item.servicePriceSnapshot),
       serviceDurationMinSnapshot: item.serviceDurationMinSnapshot ?? undefined,
+      totalPriceSnapshot:
+        item.totalPriceSnapshot == null
+          ? item.servicePriceSnapshot == null
+            ? 0
+            : asNumber(item.servicePriceSnapshot)
+          : asNumber(item.totalPriceSnapshot),
+      effectiveDurationMinSnapshot:
+        item.effectiveDurationMinSnapshot ?? item.serviceDurationMinSnapshot ?? 1,
+      durationCalculationMode: item.durationCalculationMode ?? "SUM",
+      durationRuleIdSnapshot: item.durationRuleIdSnapshot ?? undefined,
+      durationRuleLabelSnapshot: item.durationRuleLabelSnapshot ?? undefined,
+      serviceItems: (item.serviceItems?.length
+        ? item.serviceItems
+        : [
+            {
+              id: `asi-legacy-${item.id}`,
+              appointmentId: item.id,
+              serviceId: item.serviceId,
+              position: 0,
+              serviceNameSnapshot: item.serviceNameSnapshot ?? "Servico",
+              servicePriceSnapshot: item.servicePriceSnapshot ?? 0,
+              serviceDurationMinSnapshot: item.serviceDurationMinSnapshot ?? 1,
+            },
+          ]
+      ).map((serviceItem) => ({
+        id: serviceItem.id,
+        appointmentId: serviceItem.appointmentId,
+        serviceId: serviceItem.serviceId,
+        position: serviceItem.position,
+        serviceNameSnapshot: serviceItem.serviceNameSnapshot,
+        servicePriceSnapshot: asNumber(serviceItem.servicePriceSnapshot),
+        serviceDurationMinSnapshot: serviceItem.serviceDurationMinSnapshot,
+        createdAt: serviceItem.createdAt,
+        updatedAt: serviceItem.updatedAt,
+      })),
       history: (item.history ?? []).map((entry) => ({
         changedAt: entry.changedAt,
         changedBy: entry.changedBy,
@@ -10260,6 +10398,20 @@ export class PrismaOperationsService {
     serviceNameSnapshot?: string | null;
     servicePriceSnapshot?: Prisma.Decimal | number | null;
     serviceDurationMinSnapshot?: number | null;
+    totalPriceSnapshot?: Prisma.Decimal | number | null;
+    effectiveDurationMinSnapshot?: number | null;
+    durationCalculationMode?: "SUM" | "COMBINATION_RULE" | null;
+    durationRuleIdSnapshot?: string | null;
+    durationRuleLabelSnapshot?: string | null;
+    serviceItems?: Array<{
+      id: string;
+      appointmentId: string;
+      serviceId: string;
+      position: number;
+      serviceNameSnapshot: string;
+      servicePriceSnapshot: Prisma.Decimal | number;
+      serviceDurationMinSnapshot: number;
+    }>;
     createdAt: Date;
     updatedAt: Date;
     client: {
@@ -10302,6 +10454,39 @@ export class PrismaOperationsService {
           ? asNumber(item.service.price)
           : asNumber(item.servicePriceSnapshot),
       serviceDurationMin: item.serviceDurationMinSnapshot ?? item.service.durationMin,
+      totalPriceSnapshot:
+        item.totalPriceSnapshot == null
+          ? item.servicePriceSnapshot == null
+            ? asNumber(item.service.price)
+            : asNumber(item.servicePriceSnapshot)
+          : asNumber(item.totalPriceSnapshot),
+      effectiveDurationMinSnapshot:
+        item.effectiveDurationMinSnapshot ?? item.serviceDurationMinSnapshot ?? item.service.durationMin,
+      durationCalculationMode: item.durationCalculationMode ?? "SUM",
+      durationRuleIdSnapshot: item.durationRuleIdSnapshot ?? null,
+      durationRuleLabelSnapshot: item.durationRuleLabelSnapshot ?? null,
+      serviceItems: (item.serviceItems?.length
+        ? item.serviceItems
+        : [
+            {
+              id: `asi-legacy-${item.id}`,
+              appointmentId: item.id,
+              serviceId: item.serviceId,
+              position: 0,
+              serviceNameSnapshot: item.serviceNameSnapshot ?? item.service.name,
+              servicePriceSnapshot: item.servicePriceSnapshot ?? item.service.price,
+              serviceDurationMinSnapshot: item.serviceDurationMinSnapshot ?? item.service.durationMin,
+            },
+          ]
+      ).map((serviceItem) => ({
+        id: serviceItem.id,
+        appointmentId: serviceItem.appointmentId,
+        serviceId: serviceItem.serviceId,
+        position: serviceItem.position,
+        serviceNameSnapshot: serviceItem.serviceNameSnapshot,
+        servicePriceSnapshot: asNumber(serviceItem.servicePriceSnapshot),
+        serviceDurationMinSnapshot: serviceItem.serviceDurationMinSnapshot,
+      })),
       origin: "MANUAL",
       confirmation,
       createdAt: item.createdAt.toISOString(),

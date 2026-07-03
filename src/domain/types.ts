@@ -14,6 +14,7 @@ export type FinancialKind = "INCOME" | "EXPENSE";
 export type RevenueSource = "SERVICE" | "PRODUCT";
 export type FinancialSource = RevenueSource | "COMMISSION" | "REFUND";
 export type AuditActorRole = "owner" | "recepcao" | "profissional" | "anonymous";
+export type AppointmentDurationCalculationMode = "SUM" | "COMBINATION_RULE";
 
 export interface AuditEvent {
   id: UUID;
@@ -54,6 +55,38 @@ export interface Service {
 export interface ServiceProfessionalAssignment {
   serviceId: UUID;
   professionalId: UUID;
+}
+
+export interface AppointmentServiceItem {
+  id: UUID;
+  appointmentId: UUID;
+  serviceId: UUID;
+  position: number;
+  serviceNameSnapshot: string;
+  servicePriceSnapshot: number;
+  serviceDurationMinSnapshot: number;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface ServiceCombinationRule {
+  id: UUID;
+  unitId: UUID;
+  serviceSetKey: string;
+  label: string;
+  effectiveDurationMin: number;
+  active: boolean;
+  items: ServiceCombinationRuleItem[];
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface ServiceCombinationRuleItem {
+  id: UUID;
+  ruleId: UUID;
+  serviceId: UUID;
+  position?: number;
+  createdAt?: Date;
 }
 
 export interface Professional {
@@ -221,6 +254,12 @@ export interface Appointment {
   serviceNameSnapshot?: string;
   servicePriceSnapshot?: number;
   serviceDurationMinSnapshot?: number;
+  totalPriceSnapshot?: number;
+  effectiveDurationMinSnapshot?: number;
+  durationCalculationMode?: AppointmentDurationCalculationMode;
+  durationRuleIdSnapshot?: UUID;
+  durationRuleLabelSnapshot?: string;
+  serviceItems?: AppointmentServiceItem[];
   history: AppointmentHistoryItem[];
 }
 

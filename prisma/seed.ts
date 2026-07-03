@@ -86,6 +86,9 @@ async function main() {
   await prisma.commissionEntry.deleteMany();
   await prisma.financialEntry.deleteMany();
   await prisma.stockMovement.deleteMany();
+  await prisma.appointmentServiceItem.deleteMany();
+  await prisma.serviceCombinationRuleItem.deleteMany();
+  await prisma.serviceCombinationRule.deleteMany();
   await prisma.serviceProfessional.deleteMany();
   await prisma.serviceStockConsumption.deleteMany();
   await prisma.productSaleItem.deleteMany();
@@ -576,6 +579,12 @@ async function main() {
       endsAt: serviceEnd,
       status: "COMPLETED",
       notes: "Atendimento seed financeiro",
+      serviceNameSnapshot: "Corte Premium",
+      servicePriceSnapshot: 75,
+      serviceDurationMinSnapshot: 45,
+      totalPriceSnapshot: 75,
+      effectiveDurationMinSnapshot: 45,
+      durationCalculationMode: "SUM",
     },
     create: {
       id: "appt-seed-fin-01",
@@ -587,6 +596,36 @@ async function main() {
       endsAt: serviceEnd,
       status: "COMPLETED",
       notes: "Atendimento seed financeiro",
+      serviceNameSnapshot: "Corte Premium",
+      servicePriceSnapshot: 75,
+      serviceDurationMinSnapshot: 45,
+      totalPriceSnapshot: 75,
+      effectiveDurationMinSnapshot: 45,
+      durationCalculationMode: "SUM",
+    },
+  });
+
+  await prisma.appointmentServiceItem.upsert({
+    where: {
+      appointmentId_position: {
+        appointmentId: "appt-seed-fin-01",
+        position: 0,
+      },
+    },
+    update: {
+      serviceId: "svc-corte",
+      serviceNameSnapshot: "Corte Premium",
+      servicePriceSnapshot: 75,
+      serviceDurationMinSnapshot: 45,
+    },
+    create: {
+      id: "asi-appt-seed-fin-01-svc-corte",
+      appointmentId: "appt-seed-fin-01",
+      serviceId: "svc-corte",
+      position: 0,
+      serviceNameSnapshot: "Corte Premium",
+      servicePriceSnapshot: 75,
+      serviceDurationMinSnapshot: 45,
     },
   });
 
