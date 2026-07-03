@@ -3,6 +3,7 @@ import { BarbershopEngine } from "./barbershop-engine";
 import {
   Appointment,
   AppointmentStatus,
+  AppointmentServiceItem,
   BusinessCommissionRule,
   BusinessHour,
   BusinessPaymentMethod,
@@ -62,6 +63,10 @@ import {
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
+  createBusinessRuleError,
+  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
+  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
+  normalizeServiceIds,
   resolveEffectiveAppointmentDuration,
   resolveLegacyPrimaryServiceId,
 } from "../domain/appointment-services";
@@ -1344,6 +1349,86 @@ export class PrismaOperationsService {
     return rows.map((item) => item.professionalId);
   }
 
+  private resolveAppointmentServiceIds(input: { serviceId?: string; serviceIds?: string[] }) {
+    if (input.serviceId !== undefined && input.serviceIds !== undefined) {
+      throw new Error("Informe serviceId ou serviceIds, nao ambos");
+    }
+    if (Array.isArray(input.serviceIds)) {
+      return normalizeServiceIds(input.serviceIds);
+    }
+    return normalizeServiceIds([input.serviceId]);
+  }
+
+  private buildAppointmentServiceItems(input: {
+    appointmentId: string;
+    services: Service[];
+    existingItems?: AppointmentServiceItem[];
+  }) {
+    const existingByService = new Map(
+      (input.existingItems ?? []).map((item) => [item.serviceId, item]),
+    );
+    return input.services.map((service, position) => {
+      const existing = existingByService.get(service.id);
+      return {
+        id: existing?.id ?? crypto.randomUUID(),
+        appointmentId: input.appointmentId,
+        serviceId: service.id,
+        position,
+        serviceNameSnapshot: service.name,
+        servicePriceSnapshot: service.price,
+        serviceDurationMinSnapshot: service.durationMin,
+      };
+    });
+  }
+
+  private mapCombinationRules(
+    rules: Array<{
+      id: string;
+      unitId: string;
+      serviceSetKey: string;
+      label: string;
+      effectiveDurationMin: number;
+      active: boolean;
+      createdAt: Date;
+      updatedAt: Date;
+      items: Array<{
+        id: string;
+        ruleId: string;
+        serviceId: string;
+        position: number | null;
+        createdAt: Date;
+      }>;
+    }>,
+  ) {
+    return rules.map((rule) => ({
+      id: rule.id,
+      unitId: rule.unitId,
+      serviceSetKey: rule.serviceSetKey,
+      label: rule.label,
+      effectiveDurationMin: rule.effectiveDurationMin,
+      active: rule.active,
+      items: rule.items.map((item) => ({
+        id: item.id,
+        ruleId: item.ruleId,
+        serviceId: item.serviceId,
+        position: item.position ?? undefined,
+        createdAt: item.createdAt,
+      })),
+      createdAt: rule.createdAt,
+      updatedAt: rule.updatedAt,
+    }));
+  }
+
+  private async assertProfessionalCanExecuteServicesInTransaction(
+    tx: Prisma.TransactionClient,
+    serviceIds: string[],
+    professionalId: string,
+  ) {
+    for (const serviceId of serviceIds) {
+      await this.assertProfessionalCanExecuteServiceInTransaction(tx, serviceId, professionalId);
+    }
+  }
+
   private async canProfessionalExecuteService(serviceId: string, professionalId: string) {
     const rows = await this.prisma.serviceProfessional.findMany({
       where: { serviceId },
@@ -2362,24 +2447,35 @@ export class PrismaOperationsService {
     unitId: string;
     clientId: string;
     professionalId: string;
-    serviceId: string;
+    serviceId?: string;
+    serviceIds?: string[];
     startsAt: Date;
     bufferAfterMin?: number;
     isFitting?: boolean;
     notes?: string;
     changedBy: string;
   }) {
-    const [serviceRow, settings, businessHours, unitRow] = await Promise.all([
-      this.prisma.service.findFirst({
-        where: { id: input.serviceId, businessId: input.unitId },
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const [serviceRows, settings, businessHours, unitRow, activeCombinationRules] = await Promise.all([
+      this.prisma.service.findMany({
+        where: { id: { in: serviceIds }, businessId: input.unitId },
       }),
       this.ensureBusinessSettings(input.unitId),
       this.ensureBusinessHours(input.unitId),
       this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
+      this.prisma.serviceCombinationRule.findMany({
+        where: { unitId: input.unitId, active: true },
+        include: { items: true },
+      }),
     ]);
-    if (!serviceRow || !serviceRow.active) {
+    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
+    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
+    if (orderedServices.some((item) => !item || !item.active)) {
       throw new Error("Servico nao encontrado ou inativo");
     }
+    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+      this.mapService(item),
+    );
 
     const professionalRow = await this.prisma.professional.findFirst({
       where: { id: input.professionalId, businessId: input.unitId },
@@ -2388,25 +2484,35 @@ export class PrismaOperationsService {
     if (!professionalRow || !professionalRow.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
-    await this.assertProfessionalCanExecuteService(serviceRow.id, professionalRow.id);
+    for (const serviceId of serviceIds) {
+      await this.assertProfessionalCanExecuteService(serviceId, professionalRow.id);
+    }
 
     const clientRow = await this.prisma.client.findFirst({
       where: { id: input.clientId, businessId: input.unitId },
     });
     if (!clientRow) throw new Error("Cliente nao encontrado");
 
-    const service = this.mapService(serviceRow);
     const bufferAfterMin = input.bufferAfterMin ?? settings.bufferBetweenAppointmentsMinutes;
+    const appointmentId = crypto.randomUUID();
+    const serviceItems = this.buildAppointmentServiceItems({ appointmentId, services });
+    const totalPriceSnapshot = calculateAppointmentServicesTotal(serviceItems);
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.mapCombinationRules(activeCombinationRules),
+    });
+    const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
+    const primaryServiceItem = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
     const expectedEnd = new Date(
       input.startsAt.getTime() +
-        (service.durationMin + bufferAfterMin) * 60_000,
+        (duration.effectiveDurationMin + bufferAfterMin) * 60_000,
     );
 
     validateAppointmentSchedulingWindow({
       unitId: input.unitId,
       startsAt: input.startsAt,
       endsAt: expectedEnd,
-      serviceDurationMin: service.durationMin,
+      serviceDurationMin: duration.effectiveDurationMin,
       bufferAfterMin,
       settings,
       businessHours: businessHours.map((item) => ({
@@ -2439,32 +2545,46 @@ export class PrismaOperationsService {
           include: { history: { orderBy: { changedAt: "asc" } } },
         });
 
-        appointment = this.engine.scheduleAppointment(
-          {
-            unitId: input.unitId,
-            clientId: input.clientId,
-            professionalId: input.professionalId,
-            service,
-            startsAt: input.startsAt,
-            bufferAfterMin,
-            schedulingSettings: settings,
-            businessHours: businessHours.map((item) => ({
-              id: item.id,
-              unitId: item.unitId,
-              dayOfWeek: item.dayOfWeek,
-              opensAt: item.opensAt ?? undefined,
-              closesAt: item.closesAt ?? undefined,
-              breakStart: item.breakStart ?? undefined,
-              breakEnd: item.breakEnd ?? undefined,
-              isClosed: item.isClosed,
-            })),
-            timezone: unitRow?.timezone ?? undefined,
-            isFitting: input.isFitting,
-            notes: input.notes,
-            changedBy: input.changedBy,
-          },
-          existingRows.map((item) => this.mapAppointment(item)),
-        );
+        const hasConflict = hasAppointmentConflict({
+          businessId: input.unitId,
+          clientId: input.clientId,
+          professionalId: input.professionalId,
+          startsAt: input.startsAt,
+          endsAt: expectedEnd,
+          existingAppointments: existingRows.map((item) => this.mapAppointment(item)),
+        });
+        if (hasConflict && !settings.allowOverbooking) {
+          throw new Error("Conflito de horario detectado para o profissional");
+        }
+
+        appointment = {
+          id: appointmentId,
+          unitId: input.unitId,
+          clientId: input.clientId,
+          professionalId: input.professionalId,
+          serviceId: primaryServiceId,
+          startsAt: input.startsAt,
+          endsAt: expectedEnd,
+          status: "SCHEDULED",
+          isFitting: Boolean(input.isFitting),
+          notes: input.notes,
+          serviceNameSnapshot: primaryServiceItem.serviceNameSnapshot,
+          servicePriceSnapshot: primaryServiceItem.servicePriceSnapshot,
+          serviceDurationMinSnapshot: primaryServiceItem.serviceDurationMinSnapshot,
+          totalPriceSnapshot,
+          effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+          durationCalculationMode: duration.calculationMode,
+          durationRuleIdSnapshot: duration.matchedRuleId,
+          durationRuleLabelSnapshot: duration.matchedRuleLabel,
+          serviceItems,
+          history: [
+            {
+              changedAt: new Date(),
+              changedBy: input.changedBy,
+              action: "CREATED",
+            },
+          ],
+        };
 
         await tx.appointment.create({
           data: {
@@ -2481,9 +2601,9 @@ export class PrismaOperationsService {
             serviceNameSnapshot: appointment.serviceNameSnapshot,
             servicePriceSnapshot: appointment.servicePriceSnapshot,
             serviceDurationMinSnapshot: appointment.serviceDurationMinSnapshot,
-            totalPriceSnapshot: appointment.totalPriceSnapshot ?? appointment.servicePriceSnapshot ?? service.price,
-            effectiveDurationMinSnapshot: appointment.effectiveDurationMinSnapshot ?? appointment.serviceDurationMinSnapshot ?? service.durationMin,
-            durationCalculationMode: appointment.durationCalculationMode ?? "SUM",
+            totalPriceSnapshot,
+            effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+            durationCalculationMode: duration.calculationMode,
             durationRuleIdSnapshot: appointment.durationRuleIdSnapshot,
             durationRuleLabelSnapshot: appointment.durationRuleLabelSnapshot,
             history: {
@@ -2499,16 +2619,14 @@ export class PrismaOperationsService {
           include: { history: { orderBy: { changedAt: "asc" } } },
         });
         await tx.appointmentServiceItem.createMany({
-          data: (appointment.serviceItems ?? []).map((item) => ({
+          data: serviceItems.map((item) => ({
             id: item.id,
-            appointmentId: appointment!.id,
+            appointmentId: appointmentId,
             serviceId: item.serviceId,
             position: item.position,
             serviceNameSnapshot: item.serviceNameSnapshot,
             servicePriceSnapshot: item.servicePriceSnapshot,
             serviceDurationMinSnapshot: item.serviceDurationMinSnapshot,
-            createdAt: item.createdAt,
-            updatedAt: item.updatedAt,
           })),
         });
       },
@@ -3287,12 +3405,19 @@ export class PrismaOperationsService {
       where: { id: input.appointmentId },
       include: {
         service: true,
+        serviceItems: { orderBy: { position: "asc" } },
         professional: { include: { commissionRules: true } },
         client: true,
       },
     });
     if (!row) throw new Error("Agendamento nao encontrado");
     if (input.unitId && row.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
+    if ((this.mapAppointment(row).serviceItems?.length ?? 0) > 1) {
+      throw createBusinessRuleError(
+        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
+        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
+      );
+    }
 
     const scope = this.buildIdempotencyScope({
       unitId: row.unitId,
@@ -8655,7 +8780,18 @@ export class PrismaOperationsService {
         ...(input.status?.length ? { status: { in: input.status } } : {}),
         ...(input.clientId ? { clientId: input.clientId } : {}),
         ...(input.professionalId ? { professionalId: input.professionalId } : {}),
-        ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+        ...(input.serviceId
+          ? {
+              AND: [
+                {
+                  OR: [
+                    { serviceId: input.serviceId },
+                    { serviceItems: { some: { serviceId: input.serviceId } } },
+                  ],
+                },
+              ],
+            }
+          : {}),
         ...(input.search
           ? {
               OR: [
@@ -8663,6 +8799,13 @@ export class PrismaOperationsService {
                 { client: { phone: { contains: input.search, mode: "insensitive" } } },
                 { professional: { name: { contains: input.search, mode: "insensitive" } } },
                 { service: { name: { contains: input.search, mode: "insensitive" } } },
+                {
+                  serviceItems: {
+                    some: {
+                      serviceNameSnapshot: { contains: input.search, mode: "insensitive" },
+                    },
+                  },
+                },
               ],
             }
           : {}),
@@ -8718,6 +8861,7 @@ export class PrismaOperationsService {
     clientId?: string;
     professionalId?: string;
     serviceId?: string;
+    serviceIds?: string[];
     notes?: string;
     isFitting?: boolean;
     confirmation?: boolean;
@@ -8742,8 +8886,16 @@ export class PrismaOperationsService {
 
           const nextClientId = input.clientId ?? current.clientId;
           const nextProfessionalId = input.professionalId ?? current.professionalId;
-          const nextServiceId = input.serviceId ?? current.serviceId;
           const nextStartsAt = input.startsAt ?? current.startsAt;
+          const currentAppointment = this.mapAppointment(current);
+          const currentServiceItems = currentAppointment.serviceItems ?? [];
+          const hasServiceChange = input.serviceIds !== undefined || input.serviceId !== undefined;
+          const nextServiceIds = hasServiceChange
+            ? this.resolveAppointmentServiceIds({
+                serviceId: input.serviceId,
+                serviceIds: input.serviceIds,
+              })
+            : currentServiceItems.map((item) => item.serviceId);
 
           await this.lockAppointmentScheduling(
             tx,
@@ -8752,9 +8904,9 @@ export class PrismaOperationsService {
             [current.clientId, nextClientId],
           );
 
-          const [serviceRow, professionalRow, clientRow, settings, businessHours, unitRow, activeCombinationRules] = await Promise.all([
-            tx.service.findFirst({
-              where: { id: nextServiceId, businessId: current.unitId },
+          const [serviceRows, professionalRow, clientRow, settings, businessHours, unitRow, activeCombinationRules] = await Promise.all([
+            tx.service.findMany({
+              where: { id: { in: nextServiceIds }, businessId: current.unitId },
             }),
             tx.professional.findFirst({ where: { id: nextProfessionalId, businessId: current.unitId } }),
             tx.client.findFirst({
@@ -8769,45 +8921,38 @@ export class PrismaOperationsService {
             }),
           ]);
 
-          if (!serviceRow || !serviceRow.active) throw new Error("Servico nao encontrado ou inativo");
+          const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
+          const orderedServices = nextServiceIds.map((serviceId) => serviceById.get(serviceId));
+          if (orderedServices.some((item) => !item || !item.active)) {
+            throw new Error("Servico nao encontrado ou inativo");
+          }
+          const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+            this.mapService(item),
+          );
           if (!professionalRow || !professionalRow.active) {
             throw new Error("Profissional nao encontrado ou inativo");
           }
-          await this.assertProfessionalCanExecuteServiceInTransaction(tx, serviceRow.id, professionalRow.id);
+          await this.assertProfessionalCanExecuteServicesInTransaction(
+            tx,
+            nextServiceIds,
+            professionalRow.id,
+          );
           if (!clientRow) throw new Error("Cliente nao encontrado");
 
-          const existingItem = current.serviceItems[0];
-          const nextServiceItem = {
-            id: existingItem?.id ?? crypto.randomUUID(),
-            appointmentId: current.id,
-            serviceId: serviceRow.id,
-            position: 0,
-            serviceNameSnapshot: serviceRow.name,
-            servicePriceSnapshot: asNumber(serviceRow.price),
-            serviceDurationMinSnapshot: serviceRow.durationMin,
-          };
+          const nextServiceItems = hasServiceChange
+            ? this.buildAppointmentServiceItems({
+                appointmentId: current.id,
+                services,
+                existingItems: currentServiceItems,
+              })
+            : currentServiceItems;
           const duration = resolveEffectiveAppointmentDuration({
-            items: [nextServiceItem],
-            activeRules: activeCombinationRules.map((rule) => ({
-              id: rule.id,
-              unitId: rule.unitId,
-              serviceSetKey: rule.serviceSetKey,
-              label: rule.label,
-              effectiveDurationMin: rule.effectiveDurationMin,
-              active: rule.active,
-              items: rule.items.map((item) => ({
-                id: item.id,
-                ruleId: item.ruleId,
-                serviceId: item.serviceId,
-                position: item.position ?? undefined,
-                createdAt: item.createdAt,
-              })),
-              createdAt: rule.createdAt,
-              updatedAt: rule.updatedAt,
-            })),
+            items: nextServiceItems,
+            activeRules: this.mapCombinationRules(activeCombinationRules),
           });
-          const totalPriceSnapshot = calculateAppointmentServicesTotal([nextServiceItem]);
-          const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId([nextServiceItem]);
+          const totalPriceSnapshot = calculateAppointmentServicesTotal(nextServiceItems);
+          const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId(nextServiceItems);
+          const primaryServiceItem = nextServiceItems.find((item) => item.serviceId === legacyPrimaryServiceId)!;
           const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
           const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
           validateAppointmentSchedulingWindow({
@@ -8869,6 +9014,8 @@ export class PrismaOperationsService {
             nextClientId !== current.clientId ||
             nextProfessionalId !== current.professionalId ||
             legacyPrimaryServiceId !== current.serviceId ||
+            nextServiceItems.map((item) => item.serviceId).join("|") !==
+              currentServiceItems.map((item) => item.serviceId).join("|") ||
             nextStartsAt.getTime() !== current.startsAt.getTime() ||
             (input.notes !== undefined ? input.notes : current.notes ?? undefined) !==
               (current.notes ?? undefined) ||
@@ -8876,16 +9023,16 @@ export class PrismaOperationsService {
               current.isFitting;
 
           await tx.appointmentServiceItem.deleteMany({ where: { appointmentId: current.id } });
-          await tx.appointmentServiceItem.create({
-            data: {
-              id: nextServiceItem.id,
+          await tx.appointmentServiceItem.createMany({
+            data: nextServiceItems.map((item) => ({
+              id: item.id,
               appointmentId: current.id,
-              serviceId: nextServiceItem.serviceId,
-              position: nextServiceItem.position,
-              serviceNameSnapshot: nextServiceItem.serviceNameSnapshot,
-              servicePriceSnapshot: nextServiceItem.servicePriceSnapshot,
-              serviceDurationMinSnapshot: nextServiceItem.serviceDurationMinSnapshot,
-            },
+              serviceId: item.serviceId,
+              position: item.position,
+              serviceNameSnapshot: item.serviceNameSnapshot,
+              servicePriceSnapshot: item.servicePriceSnapshot,
+              serviceDurationMinSnapshot: item.serviceDurationMinSnapshot,
+            })),
           });
 
           return await tx.appointment.update({
@@ -8901,13 +9048,9 @@ export class PrismaOperationsService {
               durationCalculationMode: duration.calculationMode,
               durationRuleIdSnapshot: duration.matchedRuleId,
               durationRuleLabelSnapshot: duration.matchedRuleLabel,
-              ...(legacyPrimaryServiceId !== current.serviceId
-                ? {
-                    serviceNameSnapshot: serviceRow.name,
-                    servicePriceSnapshot: serviceRow.price,
-                    serviceDurationMinSnapshot: serviceRow.durationMin,
-                  }
-                : {}),
+              serviceNameSnapshot: primaryServiceItem.serviceNameSnapshot,
+              servicePriceSnapshot: primaryServiceItem.servicePriceSnapshot,
+              serviceDurationMinSnapshot: primaryServiceItem.serviceDurationMinSnapshot,
               notes: input.notes !== undefined ? input.notes : current.notes,
               isFitting: input.isFitting !== undefined ? Boolean(input.isFitting) : current.isFitting,
               ...(hasMainChange

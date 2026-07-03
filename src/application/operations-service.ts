@@ -3,6 +3,7 @@ import { InMemoryStore } from "../infrastructure/in-memory-store";
 import {
   Appointment,
   AppointmentStatus,
+  AppointmentServiceItem,
   AuditEvent,
   BusinessCommissionRule,
   BusinessHour,
@@ -63,6 +64,10 @@ import {
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
+  createBusinessRuleError,
+  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
+  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
+  normalizeServiceIds,
   resolveEffectiveAppointmentDuration,
   resolveLegacyPrimaryServiceId,
 } from "../domain/appointment-services";
@@ -1056,6 +1061,63 @@ export class OperationsService {
     return (service.businessId ?? unitId) === unitId;
   }
 
+  private resolveAppointmentServiceIds(input: { serviceId?: string; serviceIds?: string[] }) {
+    if (input.serviceId !== undefined && input.serviceIds !== undefined) {
+      throw new Error("Informe serviceId ou serviceIds, nao ambos");
+    }
+    if (Array.isArray(input.serviceIds)) {
+      return normalizeServiceIds(input.serviceIds);
+    }
+    return normalizeServiceIds([input.serviceId]);
+  }
+
+  private resolveServicesForAppointment(input: { unitId: string; serviceIds: string[] }) {
+    const rows = input.serviceIds.map((serviceId) =>
+      this.store.services.find(
+        (item) => item.id === serviceId && this.isServiceFromUnit(item, input.unitId),
+      ),
+    );
+    if (rows.some((item) => !item || !item.active)) {
+      throw new Error("Servico nao encontrado ou inativo");
+    }
+    return rows as Service[];
+  }
+
+  private buildAppointmentServiceItems(input: {
+    appointmentId: string;
+    services: Service[];
+    existingItems?: AppointmentServiceItem[];
+  }) {
+    const existingByService = new Map(
+      (input.existingItems ?? []).map((item) => [item.serviceId, item]),
+    );
+    const now = new Date();
+    return input.services.map((service, position) => {
+      const existing = existingByService.get(service.id);
+      return {
+        id: existing?.id ?? crypto.randomUUID(),
+        appointmentId: input.appointmentId,
+        serviceId: service.id,
+        position,
+        serviceNameSnapshot: service.name,
+        servicePriceSnapshot: service.price,
+        serviceDurationMinSnapshot: service.durationMin,
+        createdAt: existing?.createdAt,
+        updatedAt: now,
+      };
+    });
+  }
+
+  private assertProfessionalCanExecuteServices(serviceIds: string[], professionalId: string) {
+    for (const serviceId of serviceIds) {
+      this.assertProfessionalCanExecuteService(serviceId, professionalId);
+    }
+  }
+
+  private getAppointmentServiceItemCount(appointment: Appointment) {
+    return this.getAppointmentServiceItems(appointment).length;
+  }
+
   private getServiceProfessionalIds(serviceId: string) {
     return this.store.serviceProfessionalAssignments
       .filter((item) => item.serviceId === serviceId)
@@ -1930,17 +1992,16 @@ export class OperationsService {
     unitId: string;
     clientId: string;
     professionalId: string;
-    serviceId: string;
+    serviceId?: string;
+    serviceIds?: string[];
     startsAt: Date;
     bufferAfterMin?: number;
     isFitting?: boolean;
     notes?: string;
     changedBy: string;
   }) {
-    const service = this.store.services.find(
-      (item) => item.id === input.serviceId && item.businessId === input.unitId,
-    );
-    if (!service || !service.active) throw new Error("Servico nao encontrado ou inativo");
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const services = this.resolveServicesForAppointment({ unitId: input.unitId, serviceIds });
 
     const professional = this.store.professionals.find(
       (item) => item.id === input.professionalId && item.businessId === input.unitId,
@@ -1948,7 +2009,7 @@ export class OperationsService {
     if (!professional || !professional.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
-    this.assertProfessionalCanExecuteService(service.id, professional.id);
+    this.assertProfessionalCanExecuteServices(serviceIds, professional.id);
 
     const client = this.store.clients.find(
       (item) => item.id === input.clientId && (item.businessId ?? "unit-01") === input.unitId,
@@ -1959,35 +2020,79 @@ export class OperationsService {
     const businessHours = this.ensureBusinessHours(input.unitId);
     const timezone = this.store.units.find((item) => item.id === input.unitId)?.timezone;
     const bufferAfterMin = input.bufferAfterMin ?? settings.bufferBetweenAppointmentsMinutes;
+    const appointmentId = crypto.randomUUID();
+    const serviceItems = this.buildAppointmentServiceItems({ appointmentId, services });
+    const totalPriceSnapshot = calculateAppointmentServicesTotal(serviceItems);
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.store.serviceCombinationRules.filter(
+        (rule) => rule.unitId === input.unitId && rule.active,
+      ),
+    });
+    const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
+    const primaryServiceItem = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
     const expectedEnd = new Date(
-      input.startsAt.getTime() + (service.durationMin + bufferAfterMin) * 60_000,
+      input.startsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000,
     );
-    const appointment = this.engine.scheduleAppointment(
-      {
-        unitId: input.unitId,
-        clientId: client.id,
-        professionalId: professional.id,
-        service,
-        startsAt: input.startsAt,
-        bufferAfterMin,
-        schedulingSettings: settings,
-        businessHours,
-        timezone,
-        isFitting: input.isFitting,
-        notes: input.notes,
-        changedBy: input.changedBy,
-      },
-      this.store.appointments.filter(
+    validateAppointmentSchedulingWindow({
+      unitId: input.unitId,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
+      serviceDurationMin: duration.effectiveDurationMin,
+      bufferAfterMin,
+      settings,
+      businessHours,
+      timezone,
+    });
+    const conflict = hasAppointmentConflict({
+      businessId: input.unitId,
+      clientId: client.id,
+      professionalId: professional.id,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
+      existingAppointments: this.store.appointments.filter(
         (item) =>
           item.unitId === input.unitId &&
           (item.professionalId === professional.id || item.clientId === client.id) &&
           item.startsAt < expectedEnd &&
           item.endsAt > input.startsAt,
       ),
-    );
+    });
+    if (conflict && !settings.allowOverbooking) {
+      throw new Error("Conflito de horario detectado para o profissional");
+    }
+
+    const appointment: Appointment = {
+      id: appointmentId,
+      unitId: input.unitId,
+      clientId: client.id,
+      professionalId: professional.id,
+      serviceId: primaryServiceId,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
+      status: "SCHEDULED",
+      isFitting: Boolean(input.isFitting),
+      notes: input.notes,
+      serviceNameSnapshot: primaryServiceItem.serviceNameSnapshot,
+      servicePriceSnapshot: primaryServiceItem.servicePriceSnapshot,
+      serviceDurationMinSnapshot: primaryServiceItem.serviceDurationMinSnapshot,
+      totalPriceSnapshot,
+      effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+      durationCalculationMode: duration.calculationMode,
+      durationRuleIdSnapshot: duration.matchedRuleId,
+      durationRuleLabelSnapshot: duration.matchedRuleLabel,
+      serviceItems,
+      history: [
+        {
+          changedAt: new Date(),
+          changedBy: input.changedBy,
+          action: "CREATED",
+        },
+      ],
+    };
 
     this.store.appointments.push(appointment);
-    this.store.appointmentServiceItems.push(...(appointment.serviceItems ?? []));
+    this.store.appointmentServiceItems.push(...serviceItems);
     return appointment;
   }
 
@@ -2340,6 +2445,12 @@ export class OperationsService {
     const appointment = this.store.appointments.find((item) => item.id === input.appointmentId);
     if (!appointment) throw new Error("Agendamento nao encontrado");
     if (input.unitId && appointment.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
+    if (this.getAppointmentServiceItemCount(appointment) > 1) {
+      throw createBusinessRuleError(
+        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
+        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
+      );
+    }
     const checkoutScope = this.idempotencyScope({
       unitId: appointment.unitId,
       action: "APPOINTMENT_CHECKOUT",
@@ -6537,11 +6648,18 @@ export class OperationsService {
       .filter((item) => (statusSet ? statusSet.has(item.status) : true))
       .filter((item) => (input.clientId ? item.clientId === input.clientId : true))
       .filter((item) => (input.professionalId ? item.professionalId === input.professionalId : true))
-      .filter((item) => (input.serviceId ? item.serviceId === input.serviceId : true))
+      .filter((item) =>
+        input.serviceId
+          ? item.serviceId === input.serviceId ||
+            this.getAppointmentServiceItems(item).some((serviceItem) => serviceItem.serviceId === input.serviceId)
+          : true,
+      )
       .map((item) => this.buildAppointmentView(item))
       .filter((item) => {
         if (!search) return true;
-        const haystack = `${item.client} ${item.clientPhone || ""} ${item.professional} ${item.service}`.toLowerCase();
+        const haystack = `${item.client} ${item.clientPhone || ""} ${item.professional} ${item.service} ${(item.serviceItems ?? [])
+          .map((serviceItem: AppointmentServiceItem) => serviceItem.serviceNameSnapshot)
+          .join(" ")}`.toLowerCase();
         return haystack.includes(search);
       })
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
@@ -6573,6 +6691,7 @@ export class OperationsService {
     clientId?: string;
     professionalId?: string;
     serviceId?: string;
+    serviceIds?: string[];
     notes?: string;
     isFitting?: boolean;
     confirmation?: boolean;
@@ -6586,18 +6705,25 @@ export class OperationsService {
 
     const nextClientId = input.clientId ?? appointment.clientId;
     const nextProfessionalId = input.professionalId ?? appointment.professionalId;
-    const nextServiceId = input.serviceId ?? appointment.serviceId;
     const nextStartsAt = input.startsAt ?? appointment.startsAt;
-    const nextService = this.store.services.find(
-      (item) => item.id === nextServiceId && item.businessId === appointment.unitId && item.active,
-    );
-    if (!nextService) throw new Error("Servico nao encontrado ou inativo");
+    const currentServiceItems = this.getAppointmentServiceItems(appointment);
+    const hasServiceChange = input.serviceIds !== undefined || input.serviceId !== undefined;
+    const nextServiceIds = hasServiceChange
+      ? this.resolveAppointmentServiceIds({
+          serviceId: input.serviceId,
+          serviceIds: input.serviceIds,
+        })
+      : currentServiceItems.map((item) => item.serviceId);
+    const nextServices = this.resolveServicesForAppointment({
+      unitId: appointment.unitId,
+      serviceIds: nextServiceIds,
+    });
 
     const nextProfessional = this.store.professionals.find(
       (item) => item.id === nextProfessionalId && item.businessId === appointment.unitId && item.active,
     );
     if (!nextProfessional) throw new Error("Profissional nao encontrado ou inativo");
-    this.assertProfessionalCanExecuteService(nextService.id, nextProfessional.id);
+    this.assertProfessionalCanExecuteServices(nextServiceIds, nextProfessional.id);
 
     const nextClient = this.store.clients.find(
       (item) => item.id === nextClientId && (item.businessId ?? "unit-01") === appointment.unitId,
@@ -6608,27 +6734,20 @@ export class OperationsService {
     const businessHours = this.ensureBusinessHours(appointment.unitId);
     const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-    const nextServiceItem = {
-      id:
-        this.store.appointmentServiceItems.find((item) => item.appointmentId === appointment.id)?.id ??
-        appointment.serviceItems?.[0]?.id ??
-        crypto.randomUUID(),
-      appointmentId: appointment.id,
-      serviceId: nextService.id,
-      position: 0,
-      serviceNameSnapshot: nextService.name,
-      servicePriceSnapshot: nextService.price,
-      serviceDurationMinSnapshot: nextService.durationMin,
-      createdAt:
-        this.store.appointmentServiceItems.find((item) => item.appointmentId === appointment.id)?.createdAt ??
-        appointment.serviceItems?.[0]?.createdAt,
-      updatedAt: new Date(),
-    };
+    const nextServiceItems = hasServiceChange
+      ? this.buildAppointmentServiceItems({
+          appointmentId: appointment.id,
+          services: nextServices,
+          existingItems: currentServiceItems,
+        })
+      : currentServiceItems;
     const duration = resolveEffectiveAppointmentDuration({
-      items: [nextServiceItem],
+      items: nextServiceItems,
       activeRules: this.store.serviceCombinationRules.filter((rule) => rule.unitId === appointment.unitId && rule.active),
     });
-    const totalPriceSnapshot = calculateAppointmentServicesTotal([nextServiceItem]);
+    const totalPriceSnapshot = calculateAppointmentServicesTotal(nextServiceItems);
+    const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId(nextServiceItems);
+    const primaryServiceItem = nextServiceItems.find((item) => item.serviceId === legacyPrimaryServiceId)!;
     const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
     validateAppointmentSchedulingWindow({
       unitId: appointment.unitId,
@@ -6657,22 +6776,18 @@ export class OperationsService {
       ...appointment,
       clientId: nextClient.id,
       professionalId: nextProfessional.id,
-      serviceId: resolveLegacyPrimaryServiceId([nextServiceItem]),
+      serviceId: legacyPrimaryServiceId,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
-      serviceItems: [nextServiceItem],
+      serviceItems: nextServiceItems,
+      serviceNameSnapshot: primaryServiceItem.serviceNameSnapshot,
+      servicePriceSnapshot: primaryServiceItem.servicePriceSnapshot,
+      serviceDurationMinSnapshot: primaryServiceItem.serviceDurationMinSnapshot,
       totalPriceSnapshot,
       effectiveDurationMinSnapshot: duration.effectiveDurationMin,
       durationCalculationMode: duration.calculationMode,
       durationRuleIdSnapshot: duration.matchedRuleId,
       durationRuleLabelSnapshot: duration.matchedRuleLabel,
-      ...(nextService.id !== appointment.serviceId
-        ? {
-            serviceNameSnapshot: nextService.name,
-            servicePriceSnapshot: nextService.price,
-            serviceDurationMinSnapshot: nextService.durationMin,
-          }
-        : {}),
       notes:
         input.notes !== undefined
           ? input.notes || undefined
@@ -6684,6 +6799,8 @@ export class OperationsService {
       updated.clientId !== appointment.clientId ||
       updated.professionalId !== appointment.professionalId ||
       updated.serviceId !== appointment.serviceId ||
+      nextServiceItems.map((item) => item.serviceId).join("|") !==
+        currentServiceItems.map((item) => item.serviceId).join("|") ||
       updated.startsAt.getTime() !== appointment.startsAt.getTime() ||
       updated.notes !== appointment.notes ||
       updated.isFitting !== appointment.isFitting;

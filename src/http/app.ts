@@ -15,6 +15,14 @@ import {
   normalizeIdempotencyKey,
 } from "../application/idempotency";
 import {
+  calculateAppointmentServicesTotal,
+  resolveEffectiveAppointmentDuration,
+  resolveLegacyPrimaryServiceId,
+  MAX_APPOINTMENT_SERVICES,
+  MIN_APPOINTMENT_SERVICES,
+  normalizeServiceIds,
+} from "../domain/appointment-services";
+import {
   AuthSession,
   AuthUser,
   UserRole,
@@ -726,13 +734,17 @@ export function createApp() {
     unitId: z.string().min(1),
     clientId: z.string().min(1),
     professionalId: z.string().min(1),
-    serviceId: z.string().min(1),
-    serviceIds: z.never().optional(),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
     startsAt: z.string().datetime(),
     bufferAfterMin: z.number().int().min(0).max(120).optional(),
     isFitting: z.boolean().optional(),
     notes: z.string().max(500).optional(),
     changedBy: z.string().min(1),
+  }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico para o agendamento",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
   });
 
   const rescheduleSchema = z.object({
@@ -774,7 +786,7 @@ export function createApp() {
       clientId: z.string().min(1).optional(),
       professionalId: z.string().min(1).optional(),
       serviceId: z.string().min(1).optional(),
-      serviceIds: z.never().optional(),
+      serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
       notes: z.string().max(500).optional(),
       isFitting: z.boolean().optional(),
       confirmation: z.boolean().optional(),
@@ -786,11 +798,18 @@ export function createApp() {
         value.clientId != null ||
         value.professionalId != null ||
         value.serviceId != null ||
+        value.serviceIds != null ||
         value.notes != null ||
         value.isFitting != null ||
         value.confirmation != null,
       {
         message: "Informe ao menos um campo para atualizar o agendamento",
+      },
+    )
+    .refine(
+      (value) => !(value.serviceId != null && value.serviceIds != null),
+      {
+        message: "Informe serviceId ou serviceIds, nao ambos",
       },
     );
 
@@ -2659,6 +2678,7 @@ export function createApp() {
       clientId: body.clientId,
       professionalId: body.professionalId,
       serviceId: body.serviceId,
+      serviceIds: body.serviceIds,
       notes: body.notes,
       isFitting: body.isFitting,
       confirmation: body.confirmation,
@@ -4348,6 +4368,23 @@ export function createApp() {
     return normalized || undefined;
   };
 
+  const normalizePublicServiceIds = (input: { serviceId?: string; serviceIds?: string[] }) => {
+    if (input.serviceId !== undefined && input.serviceIds !== undefined) {
+      throw new Error("Informe serviceId ou serviceIds, nao ambos");
+    }
+    if (Array.isArray(input.serviceIds)) {
+      return normalizeServiceIds(input.serviceIds);
+    }
+    return normalizeServiceIds([input.serviceId]);
+  };
+
+  const parsePublicServiceIdsQuery = (value: unknown) => {
+    if (Array.isArray(value)) return value.map((item) => String(item));
+    const raw = String(value ?? "").trim();
+    if (!raw) return undefined;
+    return raw.split(",").map((item) => item.trim()).filter(Boolean);
+  };
+
   const normalizeOptionalPublicEmail = (value: unknown) => {
     if (value === null || value === undefined) return undefined;
     if (typeof value !== "string") return value;
@@ -4392,6 +4429,17 @@ export function createApp() {
     return isPublicOperationalService(publicService) ? publicService : null;
   };
 
+  const getPublicServicesForBooking = async (
+    unitId: string,
+    serviceIds: string[],
+  ): Promise<PublicBookingService[]> => {
+    const services = await Promise.all(
+      serviceIds.map((serviceId) => getPublicServiceForBooking(unitId, serviceId)),
+    );
+    if (services.some((item) => !item)) return [];
+    return services as PublicBookingService[];
+  };
+
   const getPublicEligibleProfessionals = async (
     unitId: string,
     serviceId: string,
@@ -4429,6 +4477,23 @@ export function createApp() {
       .filter(isPublicOperationalProfessional)
       .map((item) => ({ id: item.id, name: item.name }));
     return sortPublicProfessionals(professionals);
+  };
+
+  const getPublicEligibleProfessionalsForServices = async (
+    unitId: string,
+    serviceIds: string[],
+    professionalId?: string,
+  ): Promise<PublicBookingProfessional[]> => {
+    const lists = await Promise.all(
+      serviceIds.map((serviceId) => getPublicEligibleProfessionals(unitId, serviceId, professionalId)),
+    );
+    if (lists.some((items) => items.length === 0)) return [];
+    const [first, ...rest] = lists;
+    return sortPublicProfessionals(
+      first.filter((professional) =>
+        rest.every((items) => items.some((item) => item.id === professional.id)),
+      ),
+    );
   };
 
   const getPublicBusySlots = async (
@@ -4479,24 +4544,84 @@ export function createApp() {
         endsAt > item.startsAt,
     );
 
+  const resolvePublicServicesContract = async (unitId: string, serviceIds: string[]) => {
+    const services = await getPublicServicesForBooking(unitId, serviceIds);
+    if (services.length !== serviceIds.length) return null;
+    const serviceItems = services.map((service, position) => ({
+      id: `public-${service.id}`,
+      appointmentId: "public-preview",
+      serviceId: service.id,
+      position,
+      serviceNameSnapshot: service.name,
+      servicePriceSnapshot: Number(service.price),
+      serviceDurationMinSnapshot: service.durationMin,
+    }));
+    let activeRules: Array<{
+      id: string;
+      unitId: string;
+      serviceSetKey: string;
+      label: string;
+      effectiveDurationMin: number;
+      active: boolean;
+      items: [];
+    }> = [];
+    if (backend === "prisma") {
+      const rows = await prisma.serviceCombinationRule.findMany({
+        where: { unitId, active: true },
+        select: {
+          id: true,
+          unitId: true,
+          serviceSetKey: true,
+          label: true,
+          effectiveDurationMin: true,
+          active: true,
+        },
+      });
+      activeRules = rows.map((row) => ({ ...row, items: [] }));
+    } else {
+      activeRules = memoryStore.serviceCombinationRules
+        .filter((rule) => rule.unitId === unitId && rule.active)
+        .map((rule) => ({
+          id: rule.id,
+          unitId: rule.unitId,
+          serviceSetKey: rule.serviceSetKey,
+          label: rule.label,
+          effectiveDurationMin: rule.effectiveDurationMin,
+          active: rule.active,
+          items: [],
+        }));
+    }
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules,
+    });
+    return {
+      services,
+      serviceItems,
+      totalPriceSnapshot: calculateAppointmentServicesTotal(serviceItems),
+      effectiveDurationMin: duration.effectiveDurationMin,
+      duration,
+    };
+  };
+
   const resolvePublicProfessionalForSlot = async (input: {
     unitId: string;
-    serviceId: string;
+    serviceIds: string[];
     startsAt: Date;
     endsAt: Date;
     professionalId?: string;
   }) => {
-    const eligible = await getPublicEligibleProfessionals(
+    const eligible = await getPublicEligibleProfessionalsForServices(
       input.unitId,
-      input.serviceId,
+      input.serviceIds,
       input.professionalId,
     );
     if (!eligible.length) {
       return {
         professional: null,
         reason: input.professionalId
-          ? "Profissional indisponivel para este servico"
-          : "Nenhum profissional disponivel para este servico",
+          ? "Profissional indisponivel para todos os servicos"
+          : "Nenhum profissional disponivel para todos os servicos",
       };
     }
     const busySlots = await getPublicBusySlots(
@@ -4619,32 +4744,46 @@ export function createApp() {
   app.get("/public/slots", async (request, reply) => {
     const query = z
       .object({
-        serviceId: z.string().min(1),
+        serviceId: z.string().min(1).optional(),
+        serviceIds: z.preprocess(
+          parsePublicServiceIdsQuery,
+          z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
+        ),
         weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         unitId: z.string().min(1).optional(),
         professionalId: z.string().min(1).optional(),
+      })
+      .refine((value) => value.serviceId != null || value.serviceIds != null, {
+        message: "Informe ao menos um servico para consultar horarios",
+      })
+      .refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+        message: "Informe serviceId ou serviceIds, nao ambos",
       })
       .parse(request.query);
 
     const unitId = publicUnitId(query.unitId);
     const weekStartDate = new Date(`${query.weekStart}T00:00:00.000-03:00`);
 
-    const service = await getPublicServiceForBooking(unitId, query.serviceId);
-    if (!service) {
+    const serviceIds = normalizePublicServiceIds({
+      serviceId: query.serviceId,
+      serviceIds: query.serviceIds,
+    });
+    const contract = await resolvePublicServicesContract(unitId, serviceIds);
+    if (!contract) {
       reply.status(404).send({ error: "Servico nao encontrado" });
       return;
     }
-    const eligibleProfessionals = await getPublicEligibleProfessionals(
+    const eligibleProfessionals = await getPublicEligibleProfessionalsForServices(
       unitId,
-      query.serviceId,
+      serviceIds,
       query.professionalId,
     );
     if (query.professionalId && !eligibleProfessionals.length) {
-      reply.status(409).send({ error: "Profissional indisponivel para este servico" });
+      reply.status(409).send({ error: "Profissional indisponivel para todos os servicos" });
       return;
     }
     const eligibleProfessionalIds = eligibleProfessionals.map((item) => item.id);
-    const durationMin = service.durationMin;
+    const durationMin = contract.effectiveDurationMin;
 
     // Horários de funcionamento por dia da semana
     let businessHours: Array<{
@@ -4742,14 +4881,18 @@ export function createApp() {
       normalizeOptionalPublicEmail,
       z.string().email("Informe um e-mail valido ou deixe o campo em branco.").optional(),
     ),
-    serviceId: z.string().min(1),
-    serviceIds: z.never().optional(),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
     professionalId: z.preprocess(
       (value) => normalizePublicProfessionalId(value),
       z.string().min(1).optional(),
     ),
     startsAt: z.string().datetime(),
     unitId: z.string().min(1).optional(),
+  }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico para o agendamento",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
   });
 
   app.post("/public/booking", async (request, reply) => {
@@ -4771,7 +4914,6 @@ export function createApp() {
 
     const phone = body.clientPhone.replace(/\D/g, "");
 
-    let service: PublicBookingService;
     let clientId: string;
     let profId: string;
     let profName: string | undefined;
@@ -4779,14 +4921,18 @@ export function createApp() {
     let endsAt: Date;
     let appointmentId: string;
 
-    const svc = await getPublicServiceForBooking(unitId, body.serviceId);
-    if (!svc) {
+    const serviceIds = normalizePublicServiceIds({
+      serviceId: body.serviceId,
+      serviceIds: body.serviceIds,
+    });
+    const contract = await resolvePublicServicesContract(unitId, serviceIds);
+    if (!contract) {
       reply.status(404).send({ error: "Servico nao encontrado" });
       return;
     }
-    service = svc;
+    const primaryService = contract.services[0];
 
-    endsAt = new Date(startsAt.getTime() + service.durationMin * 60_000);
+    endsAt = new Date(startsAt.getTime() + contract.effectiveDurationMin * 60_000);
     if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
       reply.status(409).send({
         error:
@@ -4798,7 +4944,7 @@ export function createApp() {
 
     const resolvedProfessional = await resolvePublicProfessionalForSlot({
       unitId,
-      serviceId: service.id,
+      serviceIds,
       startsAt,
       endsAt,
       professionalId: body.professionalId,
@@ -4827,37 +4973,18 @@ export function createApp() {
         });
       }
       clientId = client.id;
-      appointmentId = crypto.randomUUID();
-      await prisma.appointment.create({
-        data: {
-          id: appointmentId,
-          unitId,
-          clientId,
-          professionalId: profId,
-          serviceId: service.id,
-          startsAt,
-          endsAt,
-          status: "SCHEDULED",
-          notes: `Agendamento online — ${body.clientName}`,
-          serviceNameSnapshot: service.name,
-          servicePriceSnapshot: Number(service.price),
-          serviceDurationMinSnapshot: service.durationMin,
-          totalPriceSnapshot: Number(service.price),
-          effectiveDurationMinSnapshot: service.durationMin,
-          durationCalculationMode: "SUM",
-        },
+      const created = await operations.schedule({
+        unitId,
+        clientId,
+        professionalId: profId,
+        serviceId: body.serviceId,
+        serviceIds: body.serviceIds,
+        startsAt,
+        notes: `Agendamento online - ${body.clientName}`,
+        changedBy: "public",
       });
-      await prisma.appointmentServiceItem.create({
-        data: {
-          id: crypto.randomUUID(),
-          appointmentId,
-          serviceId: service.id,
-          position: 0,
-          serviceNameSnapshot: service.name,
-          servicePriceSnapshot: Number(service.price),
-          serviceDurationMinSnapshot: service.durationMin,
-        },
-      });
+      appointmentId = created.id;
+      endsAt = created.endsAt;
     } else {
       // Memory backend
       let memClient = memoryStore.clients.find(c => c.phone?.replace(/\D/g,"") === phone);
@@ -4867,45 +4994,18 @@ export function createApp() {
       }
       clientId = memClient.id;
 
-      appointmentId = crypto.randomUUID();
-      const serviceItem: {
-        id: string;
-        appointmentId: string;
-        serviceId: string;
-        position: number;
-        serviceNameSnapshot: string;
-        servicePriceSnapshot: number;
-        serviceDurationMinSnapshot: number;
-      } = {
-        id: crypto.randomUUID(),
-        appointmentId,
-        serviceId: service.id,
-        position: 0,
-        serviceNameSnapshot: service.name,
-        servicePriceSnapshot: Number(service.price),
-        serviceDurationMinSnapshot: service.durationMin,
-      };
-      memoryStore.appointments.push({
-        id: appointmentId,
+      const created = await operations.schedule({
         unitId,
         clientId,
         professionalId: profId,
-        serviceId: service.id,
+        serviceId: body.serviceId,
+        serviceIds: body.serviceIds,
         startsAt,
-        endsAt,
-        status: "SCHEDULED",
-        isFitting: false,
-        serviceNameSnapshot: service.name,
-        servicePriceSnapshot: Number(service.price),
-        serviceDurationMinSnapshot: service.durationMin,
-        totalPriceSnapshot: Number(service.price),
-        effectiveDurationMinSnapshot: service.durationMin,
-        durationCalculationMode: "SUM",
-        serviceItems: [serviceItem],
-        notes: `Agendamento online — ${body.clientName}`,
-        history: [],
+        notes: `Agendamento online - ${body.clientName}`,
+        changedBy: "public",
       });
-      memoryStore.appointmentServiceItems.push(serviceItem);
+      appointmentId = created.id;
+      endsAt = created.endsAt;
     }
 
     const appointment = { id: appointmentId, startsAt, endsAt };
@@ -4918,8 +5018,10 @@ export function createApp() {
         origin: "public_booking",
         appointmentId,
         clientId,
-        serviceId: service.id,
-        serviceName: service.name,
+        serviceId: primaryService.id,
+        serviceIds,
+        serviceName: primaryService.name,
+        serviceNames: contract.services.map((service) => service.name),
         professionalId: profId,
         professionalName: profName,
         startsAt: startsAt.toISOString(),
@@ -4935,8 +5037,8 @@ export function createApp() {
       clientName: body.clientName,
       clientPhone: body.clientPhone,
       clientEmail: body.clientEmail,
-      serviceName: service.name,
-      servicePrice: Number(service.price),
+      serviceName: contract.services.map((item) => item.name).join(" + "),
+      servicePrice: contract.totalPriceSnapshot,
       startsAt,
       professionalName: profName,
     };
@@ -4949,7 +5051,7 @@ export function createApp() {
         try {
           await sendEmail(
             body.clientEmail,
-            `Agendamento confirmado — ${service.name}`,
+            `Agendamento confirmado - ${primaryService.name}`,
             buildBookingEmailHtml(bookingData),
           );
         } catch { /* ignora falha de email */ }
@@ -4987,6 +5089,7 @@ export function createApp() {
       const errorCode = (error as Error & { code?: string }).code;
       const isUniqueConstraint = errorCode === "P2002";
       const isWriteConflict = errorCode === "P2034";
+      const isBusinessConflict = errorCode === "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE";
       const message = isUniqueConstraint
         ? "Conflito: operacao critica ja processada para esta origem"
         : isWriteConflict
@@ -4994,7 +5097,7 @@ export function createApp() {
         : error.message || "Erro inesperado";
       const normalized = message.toLowerCase();
       const statusCode =
-        isUniqueConstraint || isWriteConflict
+        isUniqueConstraint || isWriteConflict || isBusinessConflict
           ? 409
           : normalized.includes("nao autenticado") ||
         normalized.includes("token invalido") ||
@@ -5016,7 +5119,10 @@ export function createApp() {
             ? 422
             : 400;
 
-      reply.status(statusCode).send({ error: message });
+      reply.status(statusCode).send({
+        error: message,
+        ...(isBusinessConflict ? { code: errorCode } : {}),
+      });
     },
   );
 

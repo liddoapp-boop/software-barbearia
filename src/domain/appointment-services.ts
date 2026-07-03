@@ -8,6 +8,9 @@ import {
 
 export const MIN_APPOINTMENT_SERVICES = 1;
 export const MAX_APPOINTMENT_SERVICES = 6;
+export const MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE = "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE";
+export const MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE =
+  "O checkout de atendimentos com varios servicos ainda nao esta disponivel.";
 
 export type AppointmentDurationResolution = {
   effectiveDurationMin: number;
@@ -104,4 +107,10 @@ export function resolveLegacyPrimaryServiceId(
   const primary = ordered[0]?.serviceId;
   if (!primary) throw new Error("Agendamento precisa ter servico principal legado");
   return primary;
+}
+
+export function createBusinessRuleError(message: string, code: string) {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
 }

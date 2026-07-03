@@ -35,6 +35,7 @@ import {
   SubscriptionPlan,
   UUID,
 } from "../domain/types";
+import { buildServiceSetKey } from "../domain/appointment-services";
 
 export class InMemoryStore {
   units: Array<{ id: UUID; name: string; timezone: string }> = [
@@ -208,7 +209,34 @@ export class InMemoryStore {
   ];
   appointments: Appointment[] = [];
   appointmentServiceItems: AppointmentServiceItem[] = [];
-  serviceCombinationRules: ServiceCombinationRule[] = [];
+  serviceCombinationRules: ServiceCombinationRule[] = [
+    {
+      id: "rule-unit-01-corte-barba-45",
+      unitId: "unit-01",
+      serviceSetKey: buildServiceSetKey(["svc-corte", "svc-barba"]),
+      label: "Corte + Barba - 45 min",
+      effectiveDurationMin: 45,
+      active: true,
+      items: [
+        {
+          id: "rule-item-unit-01-corte-barba-45-corte",
+          ruleId: "rule-unit-01-corte-barba-45",
+          serviceId: "svc-corte",
+          position: 0,
+          createdAt: new Date("2026-07-02T00:00:00.000Z"),
+        },
+        {
+          id: "rule-item-unit-01-corte-barba-45-barba",
+          ruleId: "rule-unit-01-corte-barba-45",
+          serviceId: "svc-barba",
+          position: 1,
+          createdAt: new Date("2026-07-02T00:00:00.000Z"),
+        },
+      ],
+      createdAt: new Date("2026-07-02T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-02T00:00:00.000Z"),
+    },
+  ];
   financialEntries: FinancialEntry[] = [];
   commissionEntries: CommissionEntry[] = [];
   productSales: ProductSale[] = [];
