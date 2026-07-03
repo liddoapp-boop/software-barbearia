@@ -5854,6 +5854,42 @@ describe("API MVP", () => {
     expect(appointment.serviceDurationMin).toBe(45);
   });
 
+  it("mantem dual-write memory de item unico e leitura compativel", () => {
+    const store = new InMemoryStore();
+    const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
+    if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
+    const operations = new OperationsService(store);
+
+    const created = operations.schedule({
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceId: "svc-corte",
+      startsAt: new Date("2026-07-12T12:00:00.000Z"),
+      changedBy: "test",
+    });
+
+    expect(created.serviceId).toBe("svc-corte");
+    expect(created.serviceItems).toHaveLength(1);
+    expect(store.appointmentServiceItems.filter((item) => item.appointmentId === created.id)).toHaveLength(1);
+
+    const updated = operations.updateAppointment({
+      appointmentId: created.id,
+      unitId: "unit-01",
+      serviceId: "svc-barba",
+      changedBy: "test",
+    });
+
+    expect(updated.serviceId).toBe("svc-barba");
+    expect(updated.serviceItems).toHaveLength(1);
+    expect(updated.serviceItems[0]).toMatchObject({
+      serviceId: "svc-barba",
+      position: 0,
+      serviceNameSnapshot: "Barba Terapia",
+    });
+    expect(store.appointmentServiceItems.filter((item) => item.appointmentId === created.id)).toHaveLength(1);
+  });
+
   it("retorna contratos gerenciais de financeiro, atendimentos, vendas, estoque e profissionais por periodo", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();

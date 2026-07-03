@@ -278,6 +278,42 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     await prisma.$disconnect();
   });
 
+  it("grava AppointmentServiceItem no dual-write Prisma de criacao", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-16T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const appointmentId = response.json().appointment.id as string;
+    const appointment = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointmentId },
+      include: { serviceItems: true },
+    });
+    expect(appointment.serviceId).toBe(scenario.serviceId);
+    expect(Number(appointment.totalPriceSnapshot)).toBe(75);
+    expect(appointment.effectiveDurationMinSnapshot).toBe(45);
+    expect(appointment.durationCalculationMode).toBe("SUM");
+    expect(appointment.serviceItems).toHaveLength(1);
+    expect(appointment.serviceItems[0]).toMatchObject({
+      serviceId: scenario.serviceId,
+      position: 0,
+      serviceNameSnapshot: "Corte DB",
+      serviceDurationMinSnapshot: 45,
+    });
+  });
+
   it("normaliza defaultCommissionRate no Prisma antes de persistir", async () => {
     const app = createApp();
     const scenario = await createScenario();
