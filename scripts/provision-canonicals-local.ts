@@ -18,6 +18,34 @@ type Options = {
 };
 
 const prisma = new PrismaClient();
+const CANONICAL_UNIT_ID = "unit-01";
+
+type ExistingProductRow = {
+  id: string;
+  businessId: string;
+  name: string;
+  category: string;
+  salePrice: number;
+  costPrice: number;
+  stockQty: number;
+  minStockAlert: number;
+  notes: string;
+  active: boolean;
+};
+
+type ProductProvisionUpdate = {
+  id: string;
+  canonicalId: string;
+  data: Omit<(typeof CANONICAL_REAL_PRODUCTS)[number], "id" | "stockQty">;
+  preservedStockQty: number;
+};
+
+type ProductProvisionPlan = {
+  productsToCreate: typeof CANONICAL_REAL_PRODUCTS;
+  productsToUpdate: ProductProvisionUpdate[];
+  matchingProductIds: string[];
+  errors: string[];
+};
 
 function parseOptions(argv: string[]): Options {
   let mode: Options["mode"] = "dry-run";
@@ -92,7 +120,13 @@ async function readExistingCanonicals() {
       },
     }),
     prisma.product.findMany({
-      where: { id: { in: canonicalProductIds() } },
+      where: {
+        businessId: CANONICAL_UNIT_ID,
+        OR: [
+          { id: { in: canonicalProductIds() } },
+          { name: { in: CANONICAL_REAL_PRODUCTS.map((item) => item.name) } },
+        ],
+      },
       select: {
         id: true,
         businessId: true,
@@ -144,28 +178,101 @@ async function readExistingCanonicals() {
   };
 }
 
-function printPlan(options: Options, plan: ReturnType<typeof buildCanonicalProvisionPlan>) {
+function normalizeProductName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function productValuesMatch(
+  existing: ExistingProductRow,
+  expected: (typeof CANONICAL_REAL_PRODUCTS)[number],
+) {
+  return (
+    existing.businessId === expected.businessId &&
+    existing.name === expected.name &&
+    existing.category === expected.category &&
+    Number(existing.salePrice) === expected.salePrice &&
+    Number(existing.costPrice) === expected.costPrice &&
+    Number(existing.minStockAlert) === expected.minStockAlert &&
+    existing.notes === expected.notes &&
+    existing.active === expected.active
+  );
+}
+
+function buildProductProvisionPlan(existingProducts: ExistingProductRow[]): ProductProvisionPlan {
+  const byId = new Map(existingProducts.map((item) => [item.id, item]));
+  const byName = new Map(existingProducts.map((item) => [normalizeProductName(item.name), item]));
+  const plan: ProductProvisionPlan = {
+    productsToCreate: [],
+    productsToUpdate: [],
+    matchingProductIds: [],
+    errors: [],
+  };
+  const matchedExistingIds = new Set<string>();
+
+  for (const product of CANONICAL_REAL_PRODUCTS) {
+    const existing = byId.get(product.id) ?? byName.get(normalizeProductName(product.name));
+    if (!existing) {
+      plan.productsToCreate.push(product);
+      continue;
+    }
+    if (matchedExistingIds.has(existing.id)) {
+      plan.errors.push(`${product.id}.duplicate_name produto existente ja usado: ${existing.id}`);
+      continue;
+    }
+    matchedExistingIds.add(existing.id);
+    if (productValuesMatch(existing, product)) {
+      plan.matchingProductIds.push(existing.id);
+      continue;
+    }
+    const { id: _id, stockQty: _stockQty, ...data } = product;
+    plan.productsToUpdate.push({
+      id: existing.id,
+      canonicalId: product.id,
+      data,
+      preservedStockQty: existing.stockQty,
+    });
+  }
+
+  return plan;
+}
+
+function printPlan(
+  options: Options,
+  plan: ReturnType<typeof buildCanonicalProvisionPlan>,
+  productPlan: ProductProvisionPlan,
+) {
   console.log(`mode=${options.mode}`);
   console.log(`target=${options.target}`);
   console.log(`services_to_create=${plan.servicesToCreate.length}`);
-  console.log(`products_to_create=${plan.productsToCreate.length}`);
+  console.log(`products_to_create=${productPlan.productsToCreate.length}`);
+  console.log(`products_to_update=${productPlan.productsToUpdate.length}`);
   console.log(`service_combination_rules_to_create=${plan.serviceCombinationRulesToCreate.length}`);
   console.log(`services_matching=${plan.matchingServiceIds.length}`);
-  console.log(`products_matching=${plan.matchingProductIds.length}`);
+  console.log(`products_matching=${productPlan.matchingProductIds.length}`);
   console.log(`service_combination_rules_matching=${plan.matchingServiceCombinationRuleIds.length}`);
-  console.log(`errors=${plan.errors.length}`);
+  console.log(`errors=${plan.errors.length + productPlan.errors.length}`);
   if (plan.servicesToCreate.length) {
     console.log(`service_ids_to_create=${plan.servicesToCreate.map((item) => item.id).join(",")}`);
   }
-  if (plan.productsToCreate.length) {
-    console.log(`product_ids_to_create=${plan.productsToCreate.map((item) => item.id).join(",")}`);
+  if (productPlan.productsToCreate.length) {
+    console.log(`product_ids_to_create=${productPlan.productsToCreate.map((item) => item.id).join(",")}`);
+  }
+  if (productPlan.productsToUpdate.length) {
+    console.log(`product_ids_to_update=${productPlan.productsToUpdate.map((item) => item.id).join(",")}`);
   }
   if (plan.serviceCombinationRulesToCreate.length) {
     console.log(`service_combination_rule_ids_to_create=${plan.serviceCombinationRulesToCreate.map((item) => item.id).join(",")}`);
   }
 }
 
-async function applyPlan(plan: ReturnType<typeof buildCanonicalProvisionPlan>) {
+async function applyPlan(
+  plan: ReturnType<typeof buildCanonicalProvisionPlan>,
+  productPlan: ProductProvisionPlan,
+) {
   await prisma.$transaction(async (tx) => {
     for (const service of plan.servicesToCreate) {
       await tx.service.create({
@@ -185,7 +292,7 @@ async function applyPlan(plan: ReturnType<typeof buildCanonicalProvisionPlan>) {
       });
     }
 
-    for (const product of plan.productsToCreate) {
+    for (const product of productPlan.productsToCreate) {
       await tx.product.create({
         data: {
           id: product.id,
@@ -198,6 +305,22 @@ async function applyPlan(plan: ReturnType<typeof buildCanonicalProvisionPlan>) {
           minStockAlert: product.minStockAlert,
           notes: product.notes,
           active: product.active,
+        },
+      });
+    }
+
+    for (const product of productPlan.productsToUpdate) {
+      await tx.product.update({
+        where: { id: product.id },
+        data: {
+          businessId: product.data.businessId,
+          name: product.data.name,
+          category: product.data.category,
+          salePrice: new Prisma.Decimal(product.data.salePrice),
+          costPrice: new Prisma.Decimal(product.data.costPrice),
+          minStockAlert: product.data.minStockAlert,
+          notes: product.data.notes,
+          active: product.data.active,
         },
       });
     }
@@ -234,28 +357,39 @@ async function main() {
     existingProducts: existing.products,
     existingServiceCombinationRules: existing.serviceCombinationRules,
   });
+  const productPlan = buildProductProvisionPlan(existing.products);
+  plan.productsToCreate = productPlan.productsToCreate;
+  plan.matchingProductIds = productPlan.matchingProductIds;
+  plan.errors = plan.errors.filter((item) => !item.startsWith("canon-prd-"));
 
-  printPlan(options, plan);
+  printPlan(options, plan, productPlan);
 
-  if (plan.errors.length) {
+  if (plan.errors.length || productPlan.errors.length) {
     for (const error of plan.errors) console.error(`divergence=${error}`);
+    for (const error of productPlan.errors) console.error(`divergence=${error}`);
     throw new Error("Canonico existente divergente; provisionamento bloqueado");
   }
 
   if (options.mode === "dry-run") return;
 
-  await applyPlan(plan);
+  await applyPlan(plan, productPlan);
 
   const after = await readExistingCanonicals();
+  const afterProductPlan = buildProductProvisionPlan(after.products);
   const afterPlan = buildCanonicalProvisionPlan({
     existingServices: after.services,
     existingProducts: after.products,
     existingServiceCombinationRules: after.serviceCombinationRules,
   });
+  afterPlan.productsToCreate = afterProductPlan.productsToCreate;
+  afterPlan.matchingProductIds = afterProductPlan.matchingProductIds;
+  afterPlan.errors = afterPlan.errors.filter((item) => !item.startsWith("canon-prd-"));
   if (
     afterPlan.errors.length ||
+    afterProductPlan.errors.length ||
     afterPlan.servicesToCreate.length ||
-    afterPlan.productsToCreate.length ||
+    afterProductPlan.productsToCreate.length ||
+    afterProductPlan.productsToUpdate.length ||
     afterPlan.serviceCombinationRulesToCreate.length
   ) {
     throw new Error("Validacao pos-apply falhou");

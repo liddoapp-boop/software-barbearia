@@ -54,14 +54,13 @@ const SERVICES = [
 ];
 
 const PRODUCTS = [
-  { id: "prd-pomada", name: "Pomada Matte", category: "Finalização", sale: 59, cost: 24, stock: 22 },
-  { id: "prd-oleo-barba", name: "Óleo para Barba", category: "Barba", sale: 39, cost: 14, stock: 18 },
-  { id: "demo-prd-shampoo", name: "Shampoo Anticaspa Premium", category: "Cabelo", sale: 49, cost: 19, stock: 30 },
-  { id: "demo-prd-cond", name: "Condicionador Reparador", category: "Cabelo", sale: 45, cost: 17, stock: 28 },
-  { id: "demo-prd-talco", name: "Talco Pós-Barba", category: "Barba", sale: 29, cost: 9, stock: 40 },
-  { id: "demo-prd-lamina", name: "Lâmina Profissional (pacote)", category: "Acessório", sale: 22, cost: 8, stock: 65 },
-  { id: "demo-prd-perfume", name: "Perfume Tradicional 100ml", category: "Perfumaria", sale: 89, cost: 38, stock: 12 },
-  { id: "demo-prd-kit", name: "Kit Cuidado Completo", category: "Kits", sale: 159, cost: 72, stock: 8 },
+  { id: "prd-gel", name: "Gel", category: "Finalizacao", sale: 10, cost: 5.5, stock: 30 },
+  { id: "prd-pomada", name: "Pomada", category: "Finalizacao", sale: 25, cost: 7.5, stock: 10 },
+  { id: "prd-bucha-nudread", name: "Bucha Nudread", category: "Dread", sale: 25, cost: 12.5, stock: 3 },
+  { id: "prd-oleo-barba", name: "Oleo para Barba", category: "Barba", sale: 35, cost: 13, stock: 4 },
+  { id: "prd-shampoo", name: "Shampoo", category: "Cabelo", sale: 25, cost: 7.5, stock: 10 },
+  { id: "prd-condicionador", name: "Condicionador", category: "Cabelo", sale: 25, cost: 7.5, stock: 10 },
+  { id: "prd-mascara-hidratacao", name: "Mascara de Hidratacao", category: "Tratamento", sale: 30, cost: 7.5, stock: 10 },
 ];
 
 const CLIENTS = [
@@ -98,6 +97,10 @@ async function main() {
       update: { name: p.name, businessId: UNIT_ID, active: true },
       create: { id: p.id, name: p.name, businessId: UNIT_ID, active: true },
     });
+    if (p.id === "pro-01") {
+      await prisma.commissionRule.deleteMany({ where: { professionalId: p.id } });
+      continue;
+    }
     await prisma.commissionRule.upsert({
       where: { id: `rule-${p.id}-service` },
       update: { percentage: D(0.4) },
@@ -144,11 +147,11 @@ async function main() {
       where: { id: p.id },
       update: {
         businessId: UNIT_ID, name: p.name, category: p.category,
-        salePrice: D(p.sale), costPrice: D(p.cost), stockQty: p.stock, minStockAlert: 4, active: true,
+        salePrice: D(p.sale), costPrice: D(p.cost), stockQty: p.stock, minStockAlert: 0, active: true,
       },
       create: {
         id: p.id, businessId: UNIT_ID, name: p.name, category: p.category,
-        salePrice: D(p.sale), costPrice: D(p.cost), stockQty: p.stock, minStockAlert: 4, active: true,
+        salePrice: D(p.sale), costPrice: D(p.cost), stockQty: p.stock, minStockAlert: 0, active: true,
       },
     });
   }
@@ -312,7 +315,7 @@ async function main() {
       if (status === "COMPLETED") {
         completedAppts.push({
           id, clientId: cliIds[cliIdx], professionalId: proIds[proIdx], serviceId: svc.id,
-          price: svc.price, cost: svc.cost, commissionRate: 0.4, endsAt, paymentMethod,
+          price: svc.price, cost: svc.cost, commissionRate: proIds[proIdx] === "pro-01" ? 0 : 0.4, endsAt, paymentMethod,
         });
       }
     }
@@ -335,33 +338,36 @@ async function main() {
         description: `Serviço concluído — ${SERVICES.find(s => s.id === a.serviceId)?.name}`,
       },
     });
-    await prisma.commissionEntry.upsert({
-      where: { unitId_source_appointmentId: { unitId: UNIT_ID, source: "SERVICE", appointmentId: a.id } },
-      update: { commissionAmount: D(a.price * a.commissionRate) },
-      create: {
-        id: `demo-comm-svc-${a.id}`,
-        professionalId: a.professionalId, unitId: UNIT_ID, appointmentId: a.id,
-        source: "SERVICE", baseAmount: D(a.price),
-        commissionRate: D(a.commissionRate), commissionAmount: D(a.price * a.commissionRate),
-        status: "PENDING", occurredAt: a.endsAt, ruleId: `rule-${a.professionalId}-service`,
-      },
-    });
+    if (a.commissionRate > 0) {
+      await prisma.commissionEntry.upsert({
+        where: { unitId_source_appointmentServiceItemId: { unitId: UNIT_ID, source: "SERVICE", appointmentServiceItemId: `demo-asi-${a.id}` } },
+        update: { commissionAmount: D(a.price * a.commissionRate) },
+        create: {
+          id: `demo-comm-svc-${a.id}`,
+          professionalId: a.professionalId, unitId: UNIT_ID, appointmentId: a.id,
+          appointmentServiceItemId: `demo-asi-${a.id}`,
+          source: "SERVICE", baseAmount: D(a.price),
+          commissionRate: D(a.commissionRate), commissionAmount: D(a.price * a.commissionRate),
+          status: "PENDING", occurredAt: a.endsAt, ruleId: `rule-${a.professionalId}-service`,
+        },
+      });
+    }
   }
 
   console.log("→ Vendas de produtos espalhadas...");
   const SALE_PROFILES = [
     { items: [{ pid: "prd-pomada", qty: 1 }] },
-    { items: [{ pid: "demo-prd-shampoo", qty: 1 }, { pid: "demo-prd-cond", qty: 1 }] },
-    { items: [{ pid: "prd-oleo-barba", qty: 1 }, { pid: "demo-prd-talco", qty: 1 }] },
-    { items: [{ pid: "demo-prd-kit", qty: 1 }] },
-    { items: [{ pid: "demo-prd-perfume", qty: 1 }] },
-    { items: [{ pid: "demo-prd-lamina", qty: 2 }] },
-    { items: [{ pid: "prd-pomada", qty: 1 }, { pid: "demo-prd-talco", qty: 1 }] },
-    { items: [{ pid: "demo-prd-shampoo", qty: 2 }] },
+    { items: [{ pid: "prd-shampoo", qty: 1 }, { pid: "prd-condicionador", qty: 1 }] },
+    { items: [{ pid: "prd-oleo-barba", qty: 1 }, { pid: "prd-gel", qty: 1 }] },
+    { items: [{ pid: "prd-mascara-hidratacao", qty: 1 }] },
+    { items: [{ pid: "prd-bucha-nudread", qty: 1 }] },
+    { items: [{ pid: "prd-gel", qty: 2 }] },
+    { items: [{ pid: "prd-pomada", qty: 1 }, { pid: "prd-gel", qty: 1 }] },
+    { items: [{ pid: "prd-shampoo", qty: 2 }] },
     { items: [{ pid: "prd-oleo-barba", qty: 1 }] },
-    { items: [{ pid: "demo-prd-cond", qty: 1 }, { pid: "demo-prd-shampoo", qty: 1 }] },
-    { items: [{ pid: "demo-prd-perfume", qty: 1 }, { pid: "prd-pomada", qty: 1 }] },
-    { items: [{ pid: "demo-prd-kit", qty: 1 }] },
+    { items: [{ pid: "prd-condicionador", qty: 1 }, { pid: "prd-shampoo", qty: 1 }] },
+    { items: [{ pid: "prd-mascara-hidratacao", qty: 1 }, { pid: "prd-pomada", qty: 1 }] },
+    { items: [{ pid: "prd-bucha-nudread", qty: 1 }] },
   ];
 
   for (let i = 0; i < SALE_PROFILES.length; i++) {
@@ -414,17 +420,19 @@ async function main() {
       },
     });
 
-    await prisma.commissionEntry.upsert({
-      where: { unitId_source_productSaleId: { unitId: UNIT_ID, source: "PRODUCT", productSaleId: id } },
-      update: { commissionAmount: D(gross * 0.1) },
-      create: {
-        id: `demo-comm-prd-${id}`,
-        professionalId, unitId: UNIT_ID, productSaleId: id,
-        source: "PRODUCT", baseAmount: D(gross),
-        commissionRate: D(0.1), commissionAmount: D(gross * 0.1),
-        status: "PENDING", occurredAt: soldAt, ruleId: `rule-${professionalId}-product`,
-      },
-    });
+    if (professionalId !== "pro-01") {
+      await prisma.commissionEntry.upsert({
+        where: { unitId_source_productSaleId: { unitId: UNIT_ID, source: "PRODUCT", productSaleId: id } },
+        update: { commissionAmount: D(gross * 0.1) },
+        create: {
+          id: `demo-comm-prd-${id}`,
+          professionalId, unitId: UNIT_ID, productSaleId: id,
+          source: "PRODUCT", baseAmount: D(gross),
+          commissionRate: D(0.1), commissionAmount: D(gross * 0.1),
+          status: "PENDING", occurredAt: soldAt, ruleId: `rule-${professionalId}-product`,
+        },
+      });
+    }
   }
 
   console.log("→ Despesas operacionais...");
@@ -458,12 +466,13 @@ async function main() {
 
   console.log("→ Movimentações de estoque (entradas de reposição)...");
   const stockMovements = [
-    { id: "demo-stk-1", pid: "prd-pomada", qty: 20, off: -20 },
-    { id: "demo-stk-2", pid: "prd-oleo-barba", qty: 15, off: -20 },
-    { id: "demo-stk-3", pid: "demo-prd-shampoo", qty: 30, off: -12 },
-    { id: "demo-stk-4", pid: "demo-prd-cond", qty: 30, off: -12 },
-    { id: "demo-stk-5", pid: "demo-prd-talco", qty: 40, off: -18 },
-    { id: "demo-stk-6", pid: "demo-prd-lamina", qty: 80, off: -10 },
+    { id: "demo-stk-1", pid: "prd-gel", qty: 30, off: -20 },
+    { id: "demo-stk-2", pid: "prd-pomada", qty: 10, off: -20 },
+    { id: "demo-stk-3", pid: "prd-bucha-nudread", qty: 3, off: -18 },
+    { id: "demo-stk-4", pid: "prd-oleo-barba", qty: 4, off: -18 },
+    { id: "demo-stk-5", pid: "prd-shampoo", qty: 10, off: -12 },
+    { id: "demo-stk-6", pid: "prd-condicionador", qty: 10, off: -12 },
+    { id: "demo-stk-7", pid: "prd-mascara-hidratacao", qty: 10, off: -10 },
   ];
   for (const m of stockMovements) {
     await prisma.stockMovement.upsert({

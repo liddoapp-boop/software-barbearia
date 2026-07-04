@@ -22,6 +22,16 @@ type SeedUser = {
   unitIds: string[];
 };
 
+const OFFICIAL_PRODUCTS = [
+  { id: "prd-gel", name: "Gel", category: "Finalizacao", salePrice: 10, costPrice: 5.5, stockQty: 30 },
+  { id: "prd-pomada", name: "Pomada", category: "Finalizacao", salePrice: 25, costPrice: 7.5, stockQty: 10 },
+  { id: "prd-bucha-nudread", name: "Bucha Nudread", category: "Dread", salePrice: 25, costPrice: 12.5, stockQty: 3 },
+  { id: "prd-oleo-barba", name: "Oleo para Barba", category: "Barba", salePrice: 35, costPrice: 13, stockQty: 4 },
+  { id: "prd-shampoo", name: "Shampoo", category: "Cabelo", salePrice: 25, costPrice: 7.5, stockQty: 10 },
+  { id: "prd-condicionador", name: "Condicionador", category: "Cabelo", salePrice: 25, costPrice: 7.5, stockQty: 10 },
+  { id: "prd-mascara-hidratacao", name: "Mascara de Hidratacao", category: "Tratamento", salePrice: 30, costPrice: 7.5, stockQty: 10 },
+];
+
 function requireProductionEnv(name: string) {
   const value = process.env[name]?.trim();
   if (process.env.NODE_ENV === "production" && !value) {
@@ -265,41 +275,12 @@ async function main() {
       businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
-      commissionRules: {
-        updateMany: [
-          {
-            where: { appliesTo: "SERVICE" },
-            data: { percentage: 0, fixedAmount: 0 },
-          },
-          {
-            where: { appliesTo: "PRODUCT" },
-            data: { percentage: 0, fixedAmount: 0 },
-          },
-        ],
-      },
     },
     create: {
       id: "pro-01",
       businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
-      commissionRules: {
-        createMany: {
-          data: [
-            {
-              id: "rule-pro-01-service",
-              appliesTo: "SERVICE",
-              percentage: 0,
-            },
-            {
-              id: "rule-pro-01-product",
-              appliesTo: "PRODUCT",
-              percentage: 0,
-            },
-          ],
-          skipDuplicates: true,
-        },
-      },
     },
   });
 
@@ -315,6 +296,9 @@ async function main() {
       { id: "svc-pro-svc-barba-pro-01", serviceId: "svc-barba", professionalId: "pro-01" },
     ],
     skipDuplicates: true,
+  });
+  await prisma.commissionRule.deleteMany({
+    where: { professionalId: "pro-01" },
   });
 
   await prisma.client.upsert({
@@ -339,26 +323,34 @@ async function main() {
     },
   });
 
-  await prisma.product.upsert({
-    where: { id: "prd-pomada" },
-    update: {
-      salePrice: 59,
-      costPrice: 24,
-      stockQty: 15,
-      minStockAlert: 4,
-      active: true,
-    },
-    create: {
-      id: "prd-pomada",
-      name: "Pomada Matte",
-      category: "Finalizacao",
-      salePrice: 59,
-      costPrice: 24,
-      stockQty: 15,
-      minStockAlert: 4,
-      active: true,
-    },
-  });
+  for (const product of OFFICIAL_PRODUCTS) {
+    await prisma.product.upsert({
+      where: { id: product.id },
+      update: {
+        businessId: "unit-01",
+        name: product.name,
+        category: product.category,
+        salePrice: product.salePrice,
+        costPrice: product.costPrice,
+        stockQty: product.stockQty,
+        minStockAlert: 0,
+        notes: "catalogo-real-geovane-seed",
+        active: true,
+      },
+      create: {
+        id: product.id,
+        businessId: "unit-01",
+        name: product.name,
+        category: product.category,
+        salePrice: product.salePrice,
+        costPrice: product.costPrice,
+        stockQty: product.stockQty,
+        minStockAlert: 0,
+        notes: "catalogo-real-geovane-seed",
+        active: true,
+      },
+    });
+  }
 
   await prisma.serviceStockConsumption.createMany({
     data: [
@@ -384,26 +376,6 @@ async function main() {
     skipDuplicates: true,
   });
 
-  await prisma.product.upsert({
-    where: { id: "prd-oleo-barba" },
-    update: {
-      salePrice: 39,
-      costPrice: 14,
-      stockQty: 12,
-      minStockAlert: 3,
-      active: true,
-    },
-    create: {
-      id: "prd-oleo-barba",
-      name: "Oleo para Barba",
-      category: "Barba",
-      salePrice: 39,
-      costPrice: 14,
-      stockQty: 12,
-      minStockAlert: 3,
-      active: true,
-    },
-  });
 
   await prisma.loyaltyProgram.upsert({
     where: { id: "loyalty-unit-01" },
@@ -655,7 +627,7 @@ async function main() {
       unitId: "unit-01",
       clientId: "cli-01",
       professionalId: "pro-01",
-      grossAmount: 59,
+      grossAmount: 25,
       soldAt: saleAt,
     },
     create: {
@@ -663,7 +635,7 @@ async function main() {
       unitId: "unit-01",
       clientId: "cli-01",
       professionalId: "pro-01",
-      grossAmount: 59,
+      grossAmount: 25,
       soldAt: saleAt,
     },
   });
@@ -674,16 +646,16 @@ async function main() {
       productSaleId: "sale-seed-fin-01",
       productId: "prd-pomada",
       quantity: 1,
-      unitPrice: 59,
-      unitCost: 24,
+      unitPrice: 25,
+      unitCost: 7.5,
     },
     create: {
       id: "sale-item-seed-fin-01",
       productSaleId: "sale-seed-fin-01",
       productId: "prd-pomada",
       quantity: 1,
-      unitPrice: 59,
-      unitCost: 24,
+      unitPrice: 25,
+      unitCost: 7.5,
     },
   });
 
@@ -730,7 +702,7 @@ async function main() {
       source: "PRODUCT",
       category: "PRODUTO",
       paymentMethod: "CARTAO",
-      amount: 59,
+      amount: 25,
       occurredAt: saleAt,
       referenceType: "PRODUCT_SALE",
       referenceId: "sale-seed-fin-01",
@@ -746,7 +718,7 @@ async function main() {
       source: "PRODUCT",
       category: "PRODUTO",
       paymentMethod: "CARTAO",
-      amount: 59,
+      amount: 25,
       occurredAt: saleAt,
       referenceType: "PRODUCT_SALE",
       referenceId: "sale-seed-fin-01",
@@ -788,38 +760,6 @@ async function main() {
     },
   });
 
-  await prisma.commissionEntry.upsert({
-    where: { id: "comm-seed-fin-01" },
-    update: {
-      professionalId: "pro-01",
-      unitId: "unit-01",
-      appointmentId: "appt-seed-fin-01",
-      productSaleId: null,
-      source: "SERVICE",
-      baseAmount: 75,
-      commissionRate: 0.1,
-      commissionAmount: 7.5,
-      status: "PENDING",
-      occurredAt: serviceEnd,
-      ruleId: "rule-pro-01-service",
-      paidAt: null,
-    },
-    create: {
-      id: "comm-seed-fin-01",
-      professionalId: "pro-01",
-      unitId: "unit-01",
-      appointmentId: "appt-seed-fin-01",
-      productSaleId: null,
-      source: "SERVICE",
-      baseAmount: 75,
-      commissionRate: 0.1,
-      commissionAmount: 7.5,
-      status: "PENDING",
-      occurredAt: serviceEnd,
-      ruleId: "rule-pro-01-service",
-      paidAt: null,
-    },
-  });
 }
 
 main()
