@@ -759,7 +759,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     );
   });
 
-  it("bloqueia checkout multi-servico Prisma sem efeitos e preserva checkout single-service", async () => {
+  it("conclui checkout multi-servico Prisma sem duplicidade e preserva checkout single-service", async () => {
     const app = createApp();
     const scenario = await createMultiServiceScenario();
     const created = await app.inject({
@@ -785,11 +785,11 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       expect(response.statusCode).toBe(200);
     }
 
-    const blockedKey = uniqueId("checkout-multi-blocked");
-    const blocked = await app.inject({
+    const multiKey = uniqueId("checkout-multi-success");
+    const multi = await app.inject({
       method: "POST",
       url: `/appointments/${multiAppointmentId}/checkout`,
-      headers: { "idempotency-key": blockedKey },
+      headers: { "idempotency-key": multiKey },
       payload: {
         changedBy: "db-test",
         completedAt: "2026-05-26T13:45:00.000Z",
@@ -797,17 +797,35 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         expectedTotal: 50,
       },
     });
-    expect(blocked.statusCode).toBe(409);
-    expect(blocked.json()).toMatchObject({
-      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
-      error: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+    expect(multi.statusCode).toBe(200);
+    expect(multi.json().appointment).toMatchObject({ id: multiAppointmentId, status: "COMPLETED" });
+    expect(multi.json().serviceRevenue).toMatchObject({ amount: 50 });
+    expect(multi.json().commissions).toHaveLength(2);
+    const multiReplay = await app.inject({
+      method: "POST",
+      url: `/appointments/${multiAppointmentId}/checkout`,
+      headers: { "idempotency-key": multiKey },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-26T13:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 50,
+      },
     });
-    const blockedAppointment = await prisma.appointment.findUniqueOrThrow({
+    expect(multiReplay.statusCode).toBe(200);
+    expect(multiReplay.json().serviceRevenue.id).toBe(multi.json().serviceRevenue.id);
+    const completedAppointment = await prisma.appointment.findUniqueOrThrow({
       where: { id: multiAppointmentId },
     });
-    expect(blockedAppointment.status).toBe("IN_SERVICE");
-    expect(await prisma.financialEntry.count({ where: { unitId: scenario.unitId, referenceId: multiAppointmentId } })).toBe(0);
-    expect(await prisma.commissionEntry.count({ where: { unitId: scenario.unitId, appointmentId: multiAppointmentId } })).toBe(0);
+    expect(completedAppointment.status).toBe("COMPLETED");
+    expect(await prisma.financialEntry.count({ where: { unitId: scenario.unitId, referenceId: multiAppointmentId, source: "SERVICE" } })).toBe(1);
+    const multiCommissions = await prisma.commissionEntry.findMany({
+      where: { unitId: scenario.unitId, appointmentId: multiAppointmentId, source: "SERVICE" },
+      orderBy: { baseAmount: "asc" },
+    });
+    expect(multiCommissions).toHaveLength(2);
+    expect(multiCommissions.every((commission) => commission.appointmentServiceItemId)).toBe(true);
+    expect(multiCommissions.map((commission) => Number(commission.baseAmount)).sort((a, b) => a - b)).toEqual([20, 30]);
     expect(await prisma.stockMovement.count({ where: { unitId: scenario.unitId, referenceId: multiAppointmentId } })).toBe(0);
     expect(await prisma.auditLog.count({
       where: {
@@ -815,15 +833,15 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         action: "APPOINTMENT_CHECKOUT_COMPLETED",
         entityId: multiAppointmentId,
       },
-    })).toBe(0);
+    })).toBe(1);
     expect(await prisma.idempotencyRecord.count({
       where: {
         unitId: scenario.unitId,
         action: "APPOINTMENT_CHECKOUT",
-        idempotencyKey: blockedKey,
+        idempotencyKey: multiKey,
         status: "SUCCEEDED",
       },
-    })).toBe(0);
+    })).toBe(1);
 
     const singleScenario = await createScenario();
     const singleAppointmentId = await createAppointment(
@@ -856,6 +874,371 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         status: "SUCCEEDED",
       },
     })).toBe(1);
+  });
+
+  it("conclui checkout Prisma com produto vinculado sem duplicar receita ou estoque no replay", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.commissionRule.deleteMany({
+      where: { professionalId: scenario.professionalId, appliesTo: "PRODUCT" },
+    });
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-27T13:00:00.000Z",
+    );
+
+    const idempotencyKey = uniqueId("checkout-appointment-product");
+    const payload = {
+      changedBy: "db-test",
+      completedAt: "2026-05-27T13:45:00.000Z",
+      paymentMethod: "PIX",
+      expectedTotal: 125,
+      products: [{ productId: scenario.productId, quantity: 1 }],
+    };
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().serviceRevenue.amount).toBe(125);
+    expect(checkout.json().sale.appointmentId).toBe(appointmentId);
+    expect(checkout.json().commissions).toHaveLength(1);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().serviceRevenue.id).toBe(checkout.json().serviceRevenue.id);
+
+    const [serviceRevenues, productRevenues, sales, product, stockMovements] = await Promise.all([
+      prisma.financialEntry.findMany({
+        where: {
+          unitId: scenario.unitId,
+          kind: "INCOME",
+          source: "SERVICE",
+          referenceType: "APPOINTMENT",
+          referenceId: appointmentId,
+        },
+      }),
+      prisma.financialEntry.findMany({
+        where: {
+          unitId: scenario.unitId,
+          kind: "INCOME",
+          source: "PRODUCT",
+        },
+      }),
+      prisma.productSale.findMany({ where: { unitId: scenario.unitId, appointmentId } }),
+      prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } }),
+      prisma.stockMovement.findMany({
+        where: { unitId: scenario.unitId, productId: scenario.productId, referenceType: "PRODUCT_SALE" },
+      }),
+    ]);
+    expect(serviceRevenues).toHaveLength(1);
+    expect(Number(serviceRevenues[0].amount)).toBe(125);
+    expect(productRevenues).toHaveLength(0);
+    expect(sales).toHaveLength(1);
+    expect(product.stockQty).toBe(0);
+    expect(stockMovements).toHaveLength(1);
+  });
+
+  it("conclui checkout Prisma single-service sem criar comissao quando nao ha regra ativa", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.commissionRule.deleteMany({ where: { professionalId: scenario.professionalId } });
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-27T16:00:00.000Z",
+    );
+
+    const idempotencyKey = uniqueId("checkout-single-no-commission");
+    const checkout = await checkoutAppointment(app, appointmentId, idempotencyKey);
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().appointment.status).toBe("COMPLETED");
+    expect(checkout.json().serviceRevenue.amount).toBe(75);
+    expect(checkout.json().commissions).toHaveLength(0);
+
+    const replay = await checkoutAppointment(app, appointmentId, idempotencyKey);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().serviceRevenue.id).toBe(checkout.json().serviceRevenue.id);
+    expect(replay.json().commissions).toHaveLength(0);
+    expect(await prisma.financialEntry.count({
+      where: { unitId: scenario.unitId, referenceId: appointmentId, source: "SERVICE" },
+    })).toBe(1);
+    expect(await prisma.commissionEntry.count({ where: { unitId: scenario.unitId } })).toBe(0);
+  });
+
+  it("conclui checkout Prisma multi-servico sem criar comissao quando nao ha regra ativa", async () => {
+    const app = createApp();
+    const scenario = await createMultiServiceScenario();
+    await prisma.commissionRule.deleteMany({ where: { professionalId: scenario.professionalId } });
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        startsAt: "2026-05-27T17:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id as string;
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${appointmentId}/status`,
+        payload: { status, changedBy: "db-test" },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const idempotencyKey = uniqueId("checkout-multi-no-commission");
+    const payload = {
+      changedBy: "db-test",
+      completedAt: "2026-05-27T17:45:00.000Z",
+      paymentMethod: "PIX",
+      expectedTotal: 50,
+    };
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().serviceRevenue.amount).toBe(50);
+    expect(checkout.json().commissions).toHaveLength(0);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().serviceRevenue.id).toBe(checkout.json().serviceRevenue.id);
+    expect(replay.json().commissions).toHaveLength(0);
+    expect(await prisma.financialEntry.count({
+      where: { unitId: scenario.unitId, referenceId: appointmentId, source: "SERVICE" },
+    })).toBe(1);
+    expect(await prisma.commissionEntry.count({ where: { unitId: scenario.unitId } })).toBe(0);
+  });
+
+  it("conclui checkout Prisma com produto sem criar comissao quando nao ha regra ativa", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.commissionRule.deleteMany({ where: { professionalId: scenario.professionalId } });
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-27T18:00:00.000Z",
+    );
+
+    const idempotencyKey = uniqueId("checkout-product-no-commission");
+    const payload = {
+      changedBy: "db-test",
+      completedAt: "2026-05-27T18:45:00.000Z",
+      paymentMethod: "PIX",
+      expectedTotal: 125,
+      products: [{ productId: scenario.productId, quantity: 1 }],
+    };
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().serviceRevenue.amount).toBe(125);
+    expect(checkout.json().sale.appointmentId).toBe(appointmentId);
+    expect(checkout.json().commissions).toHaveLength(0);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().serviceRevenue.id).toBe(checkout.json().serviceRevenue.id);
+    expect(replay.json().commissions).toHaveLength(0);
+    expect(await prisma.productSale.count({ where: { unitId: scenario.unitId, appointmentId } })).toBe(1);
+    expect(await prisma.stockMovement.count({
+      where: { unitId: scenario.unitId, productId: scenario.productId, referenceType: "PRODUCT_SALE" },
+    })).toBe(1);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(0);
+    expect(await prisma.commissionEntry.count({ where: { unitId: scenario.unitId } })).toBe(0);
+  });
+  it("faz rollback do checkout Prisma sem pagamento, total divergente ou estoque insuficiente", async () => {
+    const app = createApp();
+    const missingPaymentScenario = await createScenario();
+    const missingPaymentAppointment = await createAppointment(
+      app,
+      missingPaymentScenario,
+      "2026-05-28T13:00:00.000Z",
+    );
+    const missingPayment = await app.inject({
+      method: "POST",
+      url: `/appointments/${missingPaymentAppointment}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-missing-payment") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-28T13:45:00.000Z",
+        paymentMethod: "",
+        expectedTotal: 75,
+      },
+    });
+    expect(missingPayment.statusCode).toBe(400);
+    expect(await prisma.appointment.findUniqueOrThrow({ where: { id: missingPaymentAppointment } })).toMatchObject({
+      status: "IN_SERVICE",
+    });
+    expect(await prisma.financialEntry.count({ where: { unitId: missingPaymentScenario.unitId } })).toBe(0);
+    expect(await prisma.commissionEntry.count({ where: { unitId: missingPaymentScenario.unitId } })).toBe(0);
+
+    const divergentScenario = await createScenario();
+    const divergentAppointment = await createAppointment(
+      app,
+      divergentScenario,
+      "2026-05-28T15:00:00.000Z",
+    );
+    const divergent = await app.inject({
+      method: "POST",
+      url: `/appointments/${divergentAppointment}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-divergent-total") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-28T15:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 999,
+      },
+    });
+    expect(divergent.statusCode).toBe(400);
+    expect(await prisma.appointment.findUniqueOrThrow({ where: { id: divergentAppointment } })).toMatchObject({
+      status: "IN_SERVICE",
+    });
+    expect(await prisma.financialEntry.count({ where: { unitId: divergentScenario.unitId } })).toBe(0);
+    expect(await prisma.commissionEntry.count({ where: { unitId: divergentScenario.unitId } })).toBe(0);
+
+    const stockScenario = await createScenario();
+    const stockAppointment = await createAppointment(
+      app,
+      stockScenario,
+      "2026-05-28T17:00:00.000Z",
+    );
+    const insufficientStock = await app.inject({
+      method: "POST",
+      url: `/appointments/${stockAppointment}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-insufficient-stock") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-28T17:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 175,
+        products: [{ productId: stockScenario.productId, quantity: 2 }],
+      },
+    });
+    expect(insufficientStock.statusCode).toBe(400);
+    expect(await prisma.appointment.findUniqueOrThrow({ where: { id: stockAppointment } })).toMatchObject({
+      status: "IN_SERVICE",
+    });
+    expect(await prisma.financialEntry.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
+    expect(await prisma.commissionEntry.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
+    expect(await prisma.productSale.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
+    expect(await prisma.stockMovement.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: stockScenario.productId } })).stockQty).toBe(1);
+  });
+
+  it("estorna atendimento Prisma com produto devolvendo estoque e cancelando comissoes pendentes", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(
+      app,
+      scenario,
+      "2026-05-29T13:00:00.000Z",
+    );
+    const checkout = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-refund-with-product") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-29T13:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 125,
+        products: [{ productId: scenario.productId, quantity: 1 }],
+      },
+    });
+    expect(checkout.statusCode).toBe(200);
+    expect(checkout.json().commissions).toHaveLength(2);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(0);
+
+    const payload = {
+      unitId: scenario.unitId,
+      changedBy: "db-test",
+      reason: "Estorno integral com produto no atendimento",
+      refundedAt: "2026-05-29T14:30:00.000Z",
+    };
+    const idempotencyKey = uniqueId("appointment-refund-with-product");
+    const refund = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(refund.statusCode).toBe(200);
+    expect(refund.json().canceledCommissions).toHaveLength(2);
+    expect(refund.json().stockMovements).toHaveLength(1);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/refund`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().refund.id).toBe(refund.json().refund.id);
+
+    const productSale = await prisma.productSale.findFirstOrThrow({
+      where: { unitId: scenario.unitId, appointmentId },
+    });
+    const [refunds, refundItems, refundExpenses, stockMovements, product, canceledCommissions] = await Promise.all([
+      prisma.refund.findMany({ where: { unitId: scenario.unitId, appointmentId } }),
+      prisma.refundItem.findMany({ where: { refundId: refund.json().refund.id } }),
+      prisma.financialEntry.findMany({
+        where: {
+          unitId: scenario.unitId,
+          kind: "EXPENSE",
+          source: "REFUND",
+          referenceType: "APPOINTMENT_REFUND",
+        },
+      }),
+      prisma.stockMovement.findMany({
+        where: {
+          unitId: scenario.unitId,
+          productId: scenario.productId,
+          movementType: "IN",
+          referenceType: "PRODUCT_REFUND",
+        },
+      }),
+      prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } }),
+      prisma.commissionEntry.findMany({ where: { unitId: scenario.unitId, status: "CANCELED" } }),
+    ]);
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].productSaleId).toBe(productSale.id);
+    expect(refundItems).toHaveLength(1);
+    expect(refundExpenses).toHaveLength(1);
+    expect(stockMovements).toHaveLength(1);
+    expect(product.stockQty).toBe(1);
+    expect(canceledCommissions).toHaveLength(2);
   });
 
   it("valida booking publico multi-servico Prisma com compatibilidade e contrato do backend", async () => {

@@ -71,6 +71,9 @@ describe("validacao frontend do agendamento", () => {
     expect(guardIndex).toBeGreaterThanOrEqual(0);
     expect(requestIndex).toBeGreaterThan(guardIndex);
     expect(appSource).toContain("clientSearch?.focus();");
+    expect(appSource.indexOf("validateSelectedServices(appointmentSelectedServices)", guardIndex)).toBeGreaterThan(guardIndex);
+    expect(appSource).toContain("serviceIds,");
+    expect(appSource).not.toContain("serviceId: serviceId.value");
     expect(appSource).toContain("friendlyApiValidationMessage(fromPayload, fallbackMessage)");
   });
 });

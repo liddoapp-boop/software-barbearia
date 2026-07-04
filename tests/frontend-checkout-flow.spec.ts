@@ -49,6 +49,21 @@ describe("fluxo frontend de checkout do atendimento", () => {
     expect(validateAppointmentCheckoutTarget({ status: "IN_SERVICE" })).toMatchObject({
       ok: false,
     });
+    expect(validateAppointmentCheckoutTarget({
+      id: "appt-multi",
+      status: "IN_SERVICE",
+      serviceItems: [{ serviceId: "svc-corte" }, { serviceId: "svc-barba" }],
+    })).toEqual({ ok: true, message: "" });
+    expect(validateAppointmentCheckoutTarget({
+      id: "appt-rule",
+      status: "IN_SERVICE",
+      ruleLabel: "Corte + Barba",
+    })).toEqual({ ok: true, message: "" });
+    expect(validateAppointmentCheckoutTarget({
+      id: "appt-label",
+      status: "IN_SERVICE",
+      service: "Corte + Barba",
+    })).toEqual({ ok: true, message: "" });
   });
 
   it("calcula produtos, subtotal e total sem confiar no backend do teste", () => {
@@ -59,14 +74,19 @@ describe("fluxo frontend de checkout do atendimento", () => {
     };
 
     const withProduct = buildCheckoutTotals(
-      { servicePrice: 30 },
+      {
+        serviceItems: [
+          { serviceNameSnapshot: "Corte", servicePriceSnapshot: 30 },
+          { serviceNameSnapshot: "Barba", servicePriceSnapshot: 20 },
+        ],
+      },
       [{ productId: "pomada", quantity: 1 }],
       productsById,
     );
     expect(withProduct).toMatchObject({
-      servicePrice: 30,
+      servicePrice: 50,
       productsSubtotal: 25,
-      total: 55,
+      total: 75,
     });
 
     const afterRemove = buildCheckoutTotals({ servicePrice: 30 }, [], productsById);
@@ -76,6 +96,17 @@ describe("fluxo frontend de checkout do atendimento", () => {
     });
   });
 
+  it("monta opcoes de produto do checkout a partir do catalogo carregado, sem filtro fixo por Pomada", () => {
+    const appSource = readFileSync("public/app.js", "utf8");
+    const renderProductsFlow = functionBody(appSource, "renderCheckoutProducts");
+
+    expect(renderProductsFlow).toContain("Object.values(productsById)");
+    expect(renderProductsFlow).toContain("item.stockQty");
+    expect(renderProductsFlow).not.toContain("prd-pomada");
+    expect(renderProductsFlow).not.toContain(".slice(0, 1)");
+    expect(renderProductsFlow).not.toContain("limit=1");
+  });
+
   it("mantem o checkout na Agenda, fecha detalhe antes de abrir e nao navega para Financeiro", () => {
     const appSource = readFileSync("public/app.js", "utf8");
     const openFlow = functionBody(appSource, "openAppointmentCheckout");
@@ -83,6 +114,7 @@ describe("fluxo frontend de checkout do atendimento", () => {
     const closeFlow = functionBody(appSource, "closeCheckoutModal");
 
     expect(openFlow.indexOf("validateAppointmentCheckoutTarget")).toBeGreaterThanOrEqual(0);
+    expect(openFlow).toContain("renderInlineAppointmentActionMessage");
     expect(openFlow.indexOf("closeAppointmentDetailPanel();")).toBeGreaterThanOrEqual(0);
     expect(openFlow.indexOf("closeAppointmentDetailPanel();")).toBeLessThan(
       openFlow.indexOf("openCheckoutModal(appointment"),
@@ -94,6 +126,16 @@ describe("fluxo frontend de checkout do atendimento", () => {
     expect(closeFlow).not.toContain("callJson(");
   });
 
+  it("carrega detalhe fresco antes de concluir pela Agenda e pela Central sem bloqueio multi-servico", () => {
+    const appSource = readFileSync("public/app.js", "utf8");
+    const appointmentsSource = readFileSync("public/modules/agendamentos.js", "utf8");
+    expect(appSource).toContain('ensureAppointmentLoaded(item.id, { force: true })');
+    expect(appSource).not.toContain("isMultiServiceCheckoutBlocked");
+    expect(appSource).not.toContain("Concluir indisponivel");
+    expect(appointmentsSource).not.toContain("Concluir indisponivel");
+    expect(appointmentsSource).not.toContain("appointment-checkout-disabled");
+  });
+
   it("usa o texto financeiro claro e so fecha quando a API confirma COMPLETED", () => {
     const appSource = readFileSync("public/app.js", "utf8");
     const checkoutSource = readFileSync("public/modules/checkout-flow.js", "utf8");
@@ -103,6 +145,8 @@ describe("fluxo frontend de checkout do atendimento", () => {
       'CHECKOUT_FINAL_BUTTON_LABEL = "Confirmar pagamento e concluir"',
     );
     expect(appSource).toContain('select id="checkoutPaymentMethod" class="ds-input" required');
+    expect(appSource).toContain("Servicos realizados");
+    expect(appSource).toContain("Subtotal dos servicos");
     expect(submitFlow).toContain('completedAppointment.id !== appointment.id');
     expect(submitFlow).toContain('completedAppointment.status !== "COMPLETED"');
     expect(submitFlow).toContain("closeCheckoutModal({ returnFocus: false })");

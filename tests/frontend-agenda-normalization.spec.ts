@@ -15,6 +15,23 @@ function loadBrowserModuleFunctions(file: string, names: string[]) {
     renderEntityDrawer: () => "",
     bindEntityDrawers: () => {},
     escapeHtml: (value: unknown) => String(value ?? ""),
+    buildServiceSelectionLabel: (items: Array<Record<string, unknown>>, fallback = "Servico") => {
+      const names = items.map((item) => String(item.name || item.serviceNameSnapshot || "").trim()).filter(Boolean);
+      return names.length ? names.join(" + ") : fallback;
+    },
+    normalizeAppointmentServiceItems: (appointment: Record<string, any>) => {
+      if (Array.isArray(appointment.serviceItems) && appointment.serviceItems.length) {
+        return [...appointment.serviceItems]
+          .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+          .map((item) => ({
+            serviceId: String(item.serviceId || ""),
+            name: String(item.serviceNameSnapshot || item.name || "Servico"),
+            price: Number(item.servicePriceSnapshot || item.price || 0),
+            durationMin: Number(item.serviceDurationMinSnapshot || item.durationMin || 0),
+          }));
+      }
+      return [];
+    },
   };
   vm.runInNewContext(source, context, { filename: file });
   return context.module.exports as Record<string, (...args: any[]) => any>;

@@ -262,6 +262,7 @@ describe("API MVP", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    delete process.env.ENABLE_COMMISSION_TEST_RULES;
   });
 
   it("envia headers minimos de seguranca para reduzir impacto de XSS", async () => {
@@ -1139,6 +1140,86 @@ describe("API MVP", () => {
     });
   });
 
+  it("lista no catalogo de checkout somente os sete produtos canonicos disponiveis da unidade", () => {
+    const store = new InMemoryStore();
+    installCanonicalRealFixtures(store);
+    const pomada = store.products.find((item) => item.id === CANONICAL_PRODUCT_FIXTURE_IDS.pomada);
+    expect(pomada).toBeTruthy();
+    pomada!.stockQty = 9;
+    store.products.push(
+      {
+        id: "fixture-canonico-produto-inativo",
+        businessId: "unit-01",
+        name: "Produto Inativo",
+        category: "Teste",
+        salePrice: 99,
+        costPrice: 1,
+        stockQty: 10,
+        minStockAlert: 0,
+        active: false,
+      } as Product,
+      {
+        id: "fixture-canonico-produto-outra-unidade",
+        businessId: "unit-02",
+        name: "Gel Unidade 02",
+        category: "Finalizacao",
+        salePrice: 10,
+        costPrice: 5.5,
+        stockQty: 30,
+        minStockAlert: 0,
+        active: true,
+      } as Product,
+      {
+        id: "fixture-canonico-produto-zerado",
+        businessId: "unit-01",
+        name: "Produto Zerado",
+        category: "Teste",
+        salePrice: 15,
+        costPrice: 5,
+        stockQty: 0,
+        minStockAlert: 0,
+        active: true,
+      } as Product,
+    );
+
+    const operations = new OperationsService(store);
+    const fixtureProductIds = new Set<string>(Object.values(CANONICAL_PRODUCT_FIXTURE_IDS));
+    const catalog = operations.getCatalog({ unitId: "unit-01" });
+    const checkoutProducts = catalog.products.filter((item) => fixtureProductIds.has(item.id));
+    const names = checkoutProducts.map((item) => item.name).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+    expect(checkoutProducts).toHaveLength(7);
+    expect(names).toEqual([
+      "Bucha Nudread",
+      "Condicionador",
+      "Gel",
+      "Mascara de Hidratacao",
+      "Oleo para Barba",
+      "Pomada",
+      "Shampoo",
+    ]);
+    expect(checkoutProducts.find((item) => item.name === "Pomada")).toMatchObject({ stockQty: 9 });
+    expect(catalog.products.map((item) => item.id)).not.toEqual(
+      expect.arrayContaining([
+        "fixture-canonico-produto-inativo",
+        "fixture-canonico-produto-outra-unidade",
+        "fixture-canonico-produto-zerado",
+      ]),
+    );
+    expect(new Set(checkoutProducts.map((item) => item.name)).size).toBe(checkoutProducts.length);
+
+    const buchaSearch = operations.getInventory({ unitId: "unit-01", search: "Bucha", limit: 80 });
+    expect(buchaSearch.products.map((item) => item.name)).toEqual(["Bucha Nudread"]);
+    const fullInventory = operations.getInventory({ unitId: "unit-01", limit: 80 });
+    expect(fullInventory.products.map((item) => item.name)).toEqual(expect.arrayContaining(names));
+    expect(fullInventory.products.find((item) => item.name === "Produto Zerado")).toMatchObject({
+      quantity: 0,
+      status: "OUT_OF_STOCK",
+    });
+    expect(fullInventory.products.some((item) => item.name === "Produto Inativo")).toBe(false);
+    expect(fullInventory.products.some((item) => item.name === "Gel Unidade 02")).toBe(false);
+  });
+
   it("sugere horarios alternativos ordenados por proximidade", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -1347,7 +1428,8 @@ describe("API MVP", () => {
       url: "/financial/transactions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
     });
     expect(transactions.statusCode).toBe(200);
-    expect(transactions.json().transactions).toHaveLength(2);
+    expect(transactions.json().transactions).toHaveLength(1);
+    expect(transactions.json().transactions[0]).toMatchObject({ source: "SERVICE", amount: 134 });
 
     const commissions = await app.inject({
       method: "GET",
@@ -1390,6 +1472,7 @@ describe("API MVP", () => {
 
   it("mantem venda, lancamento manual e pagamento de comissao idempotentes e rejeita payload divergente", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const salePayload = {
@@ -1826,6 +1909,7 @@ describe("API MVP", () => {
 
   it("cancela comissao de produto pendente em devolucao total sem duplicar no replay", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const sale = await app.inject({
@@ -1908,6 +1992,7 @@ describe("API MVP", () => {
 
   it("cancela comissao de atendimento pendente no estorno e bloqueia pagamento posterior", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const created = await app.inject({
@@ -2028,6 +2113,7 @@ describe("API MVP", () => {
 
   it("bloqueia estorno automatico de atendimento com comissao ja paga", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const created = await app.inject({
@@ -2112,6 +2198,7 @@ describe("API MVP", () => {
 
   it("nao cancela silenciosamente comissao de produto ja paga em devolucao total", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const sale = await app.inject({
@@ -2468,6 +2555,7 @@ describe("API MVP", () => {
 
   it("paga comissao criando despesa financeira reconciliavel e idempotente", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const appointment = await app.inject({
@@ -2592,6 +2680,7 @@ describe("API MVP", () => {
 
   it("registra auditoria persistente para pagamento de comissao e nao duplica em replay", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     process.env.AUTH_ENFORCED = "true";
     const app = createApp();
     const token = await loginAs(app, {
@@ -2889,6 +2978,7 @@ describe("API MVP", () => {
 
   it("bloqueia operacoes criticas sem idempotencyKey antes de qualquer efeito colateral", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
     const requiredMessage = "idempotencyKey é obrigatória para esta operação";
 
@@ -3819,6 +3909,7 @@ describe("API MVP", () => {
 
   it("opera o modulo financeiro completo com transacoes, resumo, comissoes e relatorios", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const created = await app.inject({
@@ -4244,6 +4335,7 @@ describe("API MVP", () => {
 
   it("retorna desempenho por profissional e extrato de comissoes", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     const app = createApp();
 
     const createResponse = await app.inject({
@@ -5552,6 +5644,7 @@ describe("API MVP", () => {
 
   it("refina permissoes financeiras por perfil", async () => {
     process.env.DATA_BACKEND = "memory";
+    process.env.ENABLE_COMMISSION_TEST_RULES = "true";
     process.env.AUTH_ENFORCED = "true";
     const app = createApp();
     const ownerToken = await loginAs(app, {
@@ -5940,7 +6033,7 @@ describe("API MVP", () => {
     ).toBe(true);
   });
 
-  it("bloqueia checkout multi-servico antes de efeitos financeiros e idempotencia de sucesso", async () => {
+  it("conclui checkout multi-servico com receita composta, idempotencia e sem comissao", async () => {
     const store = new InMemoryStore();
     const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
     if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
@@ -5953,44 +6046,30 @@ describe("API MVP", () => {
       startsAt: new Date("2026-07-14T12:00:00.000Z"),
       changedBy: "owner",
     });
-    const before = {
-      status: appointment.status,
-      financialEntries: store.financialEntries.length,
-      commissionEntries: store.commissionEntries.length,
-      stockMovements: store.stockMovements.length,
-      idempotencyRecords: (operations as unknown as { idempotencyRecords: Map<string, unknown> })
-        .idempotencyRecords.size,
-    };
+    operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "CONFIRMED", changedBy: "owner" });
+    operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "IN_SERVICE", changedBy: "owner" });
 
-    let checkoutError: unknown;
-    try {
-      operations.checkoutAppointment({
-        appointmentId: appointment.id,
-        unitId: "unit-01",
-        changedBy: "owner",
-        completedAt: new Date("2026-07-14T12:45:00.000Z"),
-        paymentMethod: "PIX",
-        idempotencyKey: "checkout-multi-service-blocked",
-      });
-    } catch (error) {
-      checkoutError = error;
-    }
-    expect(checkoutError).toMatchObject({
-      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
-      message: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+    const checkout = operations.checkoutAppointment({
+      appointmentId: appointment.id,
+      unitId: "unit-01",
+      changedBy: "owner",
+      completedAt: new Date("2026-07-14T12:45:00.000Z"),
+      paymentMethod: "PIX",
+      expectedTotal: 130,
+      idempotencyKey: "checkout-multi-service-success",
     });
 
     const afterAppointment = store.appointments.find((item) => item.id === appointment.id);
-    expect(afterAppointment?.status).toBe(before.status);
-    expect(store.financialEntries).toHaveLength(before.financialEntries);
-    expect(store.commissionEntries).toHaveLength(before.commissionEntries);
-    expect(store.stockMovements).toHaveLength(before.stockMovements);
+    expect(afterAppointment?.status).toBe("COMPLETED");
+    expect(checkout.appointment).toMatchObject({ id: appointment.id, status: "COMPLETED" });
+    expect(checkout.serviceRevenue).toMatchObject({ referenceId: appointment.id, amount: 130 });
+    expect(checkout.commissions).toHaveLength(0);
     expect(
       (operations as unknown as { idempotencyRecords: Map<string, unknown> }).idempotencyRecords.size,
-    ).toBe(before.idempotencyRecords);
+    ).toBe(1);
   });
 
-  it("retorna 409 e codigo de negocio no checkout HTTP multi-servico", async () => {
+  it("conclui checkout HTTP multi-servico sem comissao", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
     const created = await app.inject({
@@ -6006,22 +6085,33 @@ describe("API MVP", () => {
       },
     });
     expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id;
+    for (const status of ["CONFIRMED", "IN_SERVICE"]) {
+      const statusResponse = await app.inject({
+        method: "PATCH",
+        url: `/appointments/${appointmentId}/status`,
+        payload: { status, changedBy: "owner" },
+      });
+      expect(statusResponse.statusCode).toBe(200);
+    }
 
     const checkout = await app.inject({
       method: "POST",
-      url: `/appointments/${created.json().appointment.id}/checkout`,
-      headers: { "idempotency-key": "checkout-http-multi-service-blocked" },
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": "checkout-http-multi-service-success" },
       payload: {
         changedBy: "owner",
         completedAt: "2026-07-15T12:45:00.000Z",
         paymentMethod: "PIX",
+        expectedTotal: 130,
       },
     });
-    expect(checkout.statusCode).toBe(409);
+    expect(checkout.statusCode).toBe(200);
     expect(checkout.json()).toMatchObject({
-      code: "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE",
-      error: "O checkout de atendimentos com varios servicos ainda nao esta disponivel.",
+      appointment: { id: appointmentId, status: "COMPLETED" },
+      serviceRevenue: { amount: 130 },
     });
+    expect(checkout.json().commissions).toHaveLength(0);
   });
 
   it("retorna contratos gerenciais de financeiro, atendimentos, vendas, estoque e profissionais por periodo", async () => {
@@ -6065,7 +6155,7 @@ describe("API MVP", () => {
       },
     });
     expect(checkout.statusCode).toBe(200);
-    expect(checkout.json().serviceRevenue.amount).toBe(75);
+    expect(checkout.json().serviceRevenue.amount).toBe(134);
 
     const servicePriceChange = await app.inject({
       method: "PATCH",
@@ -6082,14 +6172,14 @@ describe("API MVP", () => {
     const base = "unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z";
     const financial = await app.inject({ method: "GET", url: `/reports/management/financial?${base}` });
     expect(financial.statusCode).toBe(200);
-    expect(financial.json().summary.serviceRevenue).toBe(75);
+    expect(financial.json().summary.serviceRevenue).toBe(134);
     expect(financial.json().breakdown.byOrigin[0].label).toBeTruthy();
 
     const appointments = await app.inject({ method: "GET", url: `/reports/management/appointments?${base}` });
     expect(appointments.statusCode).toBe(200);
     expect(appointments.json().summary.completed).toBe(1);
-    expect(appointments.json().summary.realizedRevenue).toBe(75);
-    expect(appointments.json().appointments[0].price).toBe(75);
+    expect(appointments.json().summary.realizedRevenue).toBe(134);
+    expect(appointments.json().appointments[0].price).toBe(134);
 
     const productSales = await app.inject({ method: "GET", url: `/reports/management/product-sales?${base}` });
     expect(productSales.statusCode).toBe(200);
@@ -6102,7 +6192,7 @@ describe("API MVP", () => {
     const professionals = await app.inject({ method: "GET", url: `/reports/management/professionals?${base}` });
     expect(professionals.statusCode, professionals.body).toBe(200);
     expect(professionals.json().professionals[0].professionalName).toBeTruthy();
-    expect(professionals.json().summary.serviceRevenue).toBe(75);
+    expect(professionals.json().summary.serviceRevenue).toBe(134);
 
     const summary = await app.inject({ method: "GET", url: `/reports/management/summary?${base}` });
     expect(summary.statusCode).toBe(200);

@@ -12,15 +12,16 @@ describe("frontend menu role access", () => {
   it("mantem owner com modulos administrativos", async () => {
     const { getAllowedModulesForRole } = await loadMenuConfig();
     expect(getAllowedModulesForRole("owner")).toEqual(
-      expect.arrayContaining(["financeiro", "auditoria", "configuracoes", "relatorios", "comissoes"]),
+      expect.arrayContaining(["financeiro", "auditoria", "configuracoes", "relatorios"]),
     );
+    expect(getAllowedModulesForRole("owner")).not.toContain("comissoes");
   });
 
   it("limita recepcao a operacao sem modulos sensiveis", async () => {
     const { getAllowedModulesForRole, filterMenuGroupsByRole, MENU_GROUPS } = await loadMenuConfig();
     const allowed = getAllowedModulesForRole("recepcao");
     expect(allowed).toEqual(["agenda", "operacao", "clientes"]);
-    expect(allowed).not.toEqual(expect.arrayContaining(["financeiro", "auditoria", "configuracoes", "relatorios", "comissoes"]));
+    expect(allowed).not.toEqual(expect.arrayContaining(["financeiro", "auditoria", "configuracoes", "relatorios"]));
 
     const visibleModules = filterMenuGroupsByRole(MENU_GROUPS, "recepcao").flatMap((group: MenuGroup) =>
       group.modules.map((module: MenuModule) => module.id),
