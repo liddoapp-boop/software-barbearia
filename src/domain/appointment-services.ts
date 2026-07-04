@@ -8,9 +8,6 @@ import {
 
 export const MIN_APPOINTMENT_SERVICES = 1;
 export const MAX_APPOINTMENT_SERVICES = 6;
-export const MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE = "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE";
-export const MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE =
-  "O checkout de atendimentos com varios servicos ainda nao esta disponivel.";
 
 export type AppointmentDurationResolution = {
   effectiveDurationMin: number;

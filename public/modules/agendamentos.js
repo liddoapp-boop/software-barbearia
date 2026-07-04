@@ -6,6 +6,10 @@ import {
   renderStatusChip,
   renderTechnicalTrace,
 } from "../components/operational-ui.js";
+import {
+  buildServiceSelectionLabel,
+  normalizeAppointmentServiceItems,
+} from "./appointment-service-selection.js";
 
 function asDate(value) {
   const date = new Date(value);
@@ -150,10 +154,10 @@ function quickFlags(item, now, allItems) {
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return ["CONFIRMED", "DETAIL", "WHATSAPP", "CANCELLED"];
+    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", "WHATSAPP", "CANCELLED"].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return ["IN_SERVICE", "DETAIL", "WHATSAPP", "NO_SHOW", "CANCELLED"];
+    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "WHATSAPP", "NO_SHOW", "CANCELLED"].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
     return canCheckout
@@ -176,11 +180,12 @@ function primaryActionForStatus(status, options = {}) {
 
 function actionLabel(action) {
   if (action === "CONFIRMED") return "Confirmar";
-  if (action === "IN_SERVICE") return "Iniciar";
-  if (action === "COMPLETE") return "Checkout";
+  if (action === "IN_SERVICE") return "Iniciar atendimento";
+  if (action === "COMPLETE") return "Concluir";
   if (action === "NO_SHOW") return "Falta";
   if (action === "CANCELLED") return "Cancelar";
   if (action === "DETAIL") return "Detalhes";
+  if (action === "EDIT") return "Editar";
   if (action === "WHATSAPP") return "WhatsApp";
   if (action === "REFUND") return "Estornar atendimento";
   return action;
@@ -195,6 +200,7 @@ function actionClass(action) {
   if (action === "REFUND") return "ux-btn ux-btn-muted";
   if (action === "WHATSAPP") return "ux-btn ux-btn-muted";
   if (action === "DETAIL") return "ux-btn ux-btn-muted";
+  if (action === "EDIT") return "ux-btn ux-btn-muted";
   return "ux-btn ux-btn-primary";
 }
 
@@ -205,25 +211,36 @@ export function normalizeAppointmentsPayload(payload) {
       const startsAt = asDate(item.startsAt);
       const endsAt = asDate(item.endsAt);
       if (!startsAt || !endsAt) return null;
+      const serviceItems = normalizeAppointmentServiceItems(item);
+      const service = buildServiceSelectionLabel(serviceItems, nestedText(item.service, ["name"], "Servico"));
+      const effectiveDuration = asNumber(
+        item.effectiveDurationMinSnapshot ?? item.effectiveDurationMin ?? item.serviceDurationMin,
+        Math.max(15, Math.round((endsAt - startsAt) / 60000)),
+      );
       return {
         id: safeText(item.id),
         unitId: safeText(item.unitId),
         clientId: safeText(item.clientId) || nestedId(item.client),
         professionalId: safeText(item.professionalId) || nestedId(item.professional),
-        serviceId: safeText(item.serviceId) || nestedId(item.service),
+        serviceId: serviceItems[0]?.serviceId || safeText(item.serviceId) || nestedId(item.service),
+        serviceItems,
         startsAt,
         endsAt,
         status: safeText(item.status, "SCHEDULED"),
         client: nestedText(item.client, ["fullName", "name"], "Cliente"),
         clientPhone: safeText(item.clientPhone) || nestedText(item.client, ["phone"], ""),
         professional: nestedText(item.professional, ["name", "fullName"], "Profissional"),
-        service: nestedText(item.service, ["name"], "Servico"),
+        service,
         notes: safeText(item.notes, ""),
         origin: safeText(item.origin, "MANUAL"),
         confirmation: Boolean(item.confirmation),
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
-        servicePrice: asNumber(item.servicePrice, nestedNumber(item.service, ["price"])),
-        serviceDurationMin: asNumber(item.serviceDurationMin, nestedNumber(item.service, ["durationMin", "durationMinutes"])),
+        servicePrice: asNumber(
+          item.totalPriceSnapshot ?? item.totalPrice ?? item.servicePrice,
+          serviceItems.reduce((acc, serviceItem) => acc + asNumber(serviceItem.price), nestedNumber(item.service, ["price"])),
+        ),
+        serviceDurationMin: effectiveDuration,
+        durationRuleLabel: safeText(item.durationRuleLabelSnapshot || item.ruleLabel),
         createdAt: asDate(item.createdAt) || startsAt,
         updatedAt: asDate(item.updatedAt) || startsAt,
         history: Array.isArray(item.history) ? item.history : [],
@@ -321,8 +338,9 @@ export function renderAppointmentsData(elements, items, options = {}) {
   elements.tableBody.innerHTML = items
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
-      const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout });
-      const primaryAction = primaryActionForStatus(item.status, { canCheckout: options.canCheckout });
+      const itemCanCheckout = options.canCheckout !== false;
+      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit });
+      const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
         <tr class="${late ? "appts-row-late" : ""}">
           <td class="appts-td">${formatTime(item.startsAt)}</td>
@@ -347,7 +365,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
               ${actions
                 .map(
                   (action) =>
-                    `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
+                    `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
                 )
                 .join("")}
             </div>
@@ -360,8 +378,9 @@ export function renderAppointmentsData(elements, items, options = {}) {
   elements.mobileList.innerHTML = items
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
-      const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout });
-      const primaryAction = primaryActionForStatus(item.status, { canCheckout: options.canCheckout });
+      const itemCanCheckout = options.canCheckout !== false;
+      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit });
+      const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
         <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
           <div class="appts-mobile-head">
@@ -381,7 +400,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
             ${actions
               .map(
                 (action) =>
-                  `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${actionLabel(action)}</button>`,
+                  `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
               )
               .join("")}
           </div>
@@ -417,9 +436,20 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
   const cancelledCount = fromClient.filter((row) => row.status === "CANCELLED").length;
   const profile = computeClientProfile(item, allItems);
 
-  const actions = actionsForStatus(item.status, { canCheckout: options.canCheckout }).filter(
+  const itemCanCheckout = options.canCheckout !== false;
+  const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit }).filter(
     (action) => action !== "DETAIL" && action !== "WHATSAPP",
   );
+  const servicesDetail = (item.serviceItems?.length ? item.serviceItems : [{
+    name: item.service,
+    price: item.servicePrice,
+    durationMin: item.serviceDurationMin,
+  }]).map((serviceItem) => `
+    <li>
+      <strong>${escapeHtml(serviceItem.name || "Servico")}</strong>
+      <span>${money(asNumber(serviceItem.price))} - ${asNumber(serviceItem.durationMin)} min</span>
+    </li>
+  `).join("");
   const historyEntries = Array.isArray(item.history) && item.history.length
     ? item.history
     : [
@@ -441,10 +471,15 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
         <div><dt>Horario</dt><dd>${formatDateTime(item.startsAt)} - ${formatTime(item.endsAt)}</dd></div>
         <div><dt>Status</dt><dd>${renderStatusChip(item.status)}</dd></div>
         <div><dt>Valor</dt><dd>${money(item.servicePrice)}</dd></div>
+        <div><dt>Duracao efetiva</dt><dd>${item.serviceDurationMin} min</dd></div>
       </dl>
     `,
     details: `
       <div class="op-detail-list">
+        <p><strong>Servicos do atendimento</strong></p>
+        <ol class="appointment-services-detail">${servicesDetail}</ol>
+        <p>Total: <strong>${money(item.servicePrice)}</strong> | Duracao efetiva: <strong>${item.serviceDurationMin} min</strong></p>
+        ${item.durationRuleLabel ? `<p>Regra aplicada: <strong>${escapeHtml(item.durationRuleLabel)}</strong></p>` : ""}
         <p>Perfil: <strong>${profileLabel(profile)}</strong></p>
         <p>Historico do cliente no recorte: ${completedCount} concluidos, ${noShowCount} faltas, ${cancelledCount} cancelados.</p>
         <p>Produtos adicionais: <strong>${item.hasProductSale ? `sim (${item.productItemsSoldCount} item(ns))` : "nao registrados"}</strong></p>
@@ -474,7 +509,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
       ${actions
         .map(
           (action) =>
-            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status, { canCheckout: options.canCheckout }) ? "ux-btn-primary" : actionButtonTone(action)}">${actionLabel(action)}</button>`,
+            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status, { canCheckout: itemCanCheckout }) ? "ux-btn-primary" : actionButtonTone(action)}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
         )
         .join("")}
     `,

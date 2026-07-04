@@ -86,8 +86,11 @@ export function validateSlotLocally(input) {
     };
   }
 
-  const service = input.servicesById?.[input.serviceId];
-  if (!service) {
+  const serviceIds = Array.isArray(input.serviceIds) && input.serviceIds.length
+    ? input.serviceIds.map((item) => safeText(item)).filter(Boolean)
+    : [safeText(input.serviceId)].filter(Boolean);
+  const services = serviceIds.map((serviceId) => input.servicesById?.[serviceId]).filter(Boolean);
+  if (!serviceIds.length || services.length !== serviceIds.length) {
     return {
       ok: false,
       code: "MISSING_SERVICE",
@@ -103,7 +106,11 @@ export function validateSlotLocally(input) {
     };
   }
 
-  const endsAt = new Date(startsAt.getTime() + asNumber(service.durationMin) * 60_000);
+  const durationMin = asNumber(
+    input.effectiveDurationMin,
+    services.reduce((acc, service) => acc + asNumber(service.durationMin), 0),
+  );
+  const endsAt = new Date(startsAt.getTime() + durationMin * 60_000);
   const agenda = Array.isArray(input.agendaItems) ? input.agendaItems : [];
   const conflict = agenda.find((item) => {
     if (item.professionalId !== input.professionalId) return false;

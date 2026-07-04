@@ -32,6 +32,21 @@ import {
   validateSlotLocally,
 } from "./modules/agendamento.js";
 import {
+  APPOINTMENT_SERVICES_MAX,
+  addServiceSelection,
+  buildServiceSelectionLabel,
+  calculateCatalogTotal,
+  clearServiceSelection,
+  getSelectedServiceIds,
+  interpretBackendSummary,
+  isMultiServiceAppointment,
+  isServiceSelected,
+  normalizeAppointmentServiceItems,
+  normalizeSelectedServices,
+  removeServiceSelection,
+  validateSelectedServices,
+} from "./modules/appointment-service-selection.js";
+import {
   SCHEDULE_CLIENT_REQUIRED_MESSAGE,
   friendlyApiValidationMessage,
   validateScheduleClientSelection,
@@ -563,7 +578,6 @@ function renderOperationalChrome() {
           <option value="agenda">Agenda</option>
           <option value="pdv">PDV</option>
           <option value="financeiro">Financeiro</option>
-          <option value="comissoes">Comissões</option>
           <option value="estoque">Estoque</option>
           <option value="configuracoes">Configurações</option>
           <option value="profissionais">Profissionais</option>
@@ -1054,7 +1068,10 @@ const clientId = document.getElementById("clientId");
 const clientSearch = document.getElementById("clientSearch");
 const clientSearchDropdown = document.getElementById("clientSearchDropdown");
 const professionalId = document.getElementById("professionalId");
+const professionalSelectionMount = document.getElementById("professionalSelectionMount");
 const serviceId = document.getElementById("serviceId");
+const serviceSelectionMount = document.getElementById("serviceSelectionMount");
+const appointmentSummaryMount = document.getElementById("appointmentSummaryMount");
 const startsAt = document.getElementById("startsAt");
 const filterProfessional = document.getElementById("filterProfessional");
 const filterStatus = document.getElementById("filterStatus");
@@ -1290,10 +1307,19 @@ let schedulingCatalog = {
   servicesById: {},
   professionalsById: {},
 };
+let appointmentSelectedServices = [];
+let appointmentServiceSearch = "";
+let appointmentServiceSummary = null;
+let appointmentServiceSummaryState = "incomplete";
+let appointmentServiceSummaryMessage = "";
+let appointmentServiceSummaryRequestId = 0;
+let appointmentServiceSummaryController = null;
+let editingAppointmentId = "";
 
 const actionLabel = {
+  EDIT: "Editar",
   CONFIRMED: "Confirmar",
-  IN_SERVICE: "Iniciar",
+  IN_SERVICE: "Iniciar atendimento",
   COMPLETE: "Concluir",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
@@ -1386,12 +1412,17 @@ function canCheckoutAppointment() {
   return state.role === "owner" || state.role === "recepcao";
 }
 
+function canEditAppointment() {
+  return state.role === "owner" || state.role === "recepcao";
+}
+
 function agendaListActionsForStatus(status) {
-  if (status === "SCHEDULED") return ["CONFIRMED", "CANCELLED"];
-  if (status === "CONFIRMED") return ["IN_SERVICE", "NO_SHOW", "CANCELLED"];
+  if (status === "SCHEDULED") return [canEditAppointment() ? "EDIT" : "", "CONFIRMED", "CANCELLED"].filter(Boolean);
+  if (status === "CONFIRMED") return [canEditAppointment() ? "EDIT" : "", "IN_SERVICE", "NO_SHOW", "CANCELLED"].filter(Boolean);
   if (status === "IN_SERVICE") {
     return canCheckoutAppointment() ? ["COMPLETE", "CANCELLED"] : ["CANCELLED"];
   }
+  if (status === "COMPLETED") return ["DETAIL"];
   return [];
 }
 
@@ -2773,12 +2804,13 @@ function fillMultiSelect(select, items, label) {
 }
 
 function setScheduleFeedback(type, message) {
+  const selectedService = appointmentSelectedServices[0] || servicesById[serviceId.value];
   renderScheduleAssist(
     {
       client: clientsById[clientId.value],
       clientSummary: buildClientSummary(clientsById[clientId.value], currentAgenda),
-      selectedService: servicesById[serviceId.value],
-      relatedServices: suggestRelatedServices(servicesById[serviceId.value], allServices),
+      selectedService,
+      relatedServices: suggestRelatedServices(selectedService, allServices),
       professionalsById,
       feedback: { type, message },
     },
@@ -2788,7 +2820,7 @@ function setScheduleFeedback(type, message) {
 
 function refreshScheduleAssist(feedback = null) {
   const selectedClient = clientsById[clientId.value];
-  const selectedService = servicesById[serviceId.value];
+  const selectedService = appointmentSelectedServices[0] || servicesById[serviceId.value];
   const relatedServices = suggestRelatedServices(selectedService, allServices);
   const clientSummary = buildClientSummary(selectedClient, currentAgenda);
 
@@ -3152,13 +3184,287 @@ function clearSaleCart() {
   renderSaleCart();
 }
 
+function serviceDuration(service) {
+  return Number(service?.durationMin ?? service?.durationMinutes ?? service?.duration ?? 0);
+}
+
+function serviceIsActive(service) {
+  return service?.active !== false && service?.isActive !== false;
+}
+
+function serviceAllowsProfessional(service, professionalIdValue) {
+  const enabled = Array.isArray(service?.enabledProfessionalIds) ? service.enabledProfessionalIds : [];
+  if (!enabled.length) return true;
+  return enabled.includes(professionalIdValue);
+}
+
+function compatibleProfessionalsForSelection() {
+  const professionals = Array.isArray(schedulingCatalog.professionals) ? schedulingCatalog.professionals : [];
+  const selected = appointmentSelectedServices;
+  if (!selected.length) return professionals.filter((item) => item?.active !== false);
+  const eligibleFromSummary = Array.isArray(appointmentServiceSummary?.eligibleProfessionalIds)
+    ? appointmentServiceSummary.eligibleProfessionalIds
+    : null;
+  return professionals
+    .filter((item) => item?.active !== false)
+    .filter((professional) => {
+      if (eligibleFromSummary) return eligibleFromSummary.includes(professional.id);
+      return selected.every((service) => serviceAllowsProfessional(service, professional.id));
+    });
+}
+
+function refreshProfessionalOptionsForSelection() {
+  if (!professionalId) return;
+  const compatible = compatibleProfessionalsForSelection();
+  fillSelect(professionalId, compatible, (item) => item.name);
+  if (compatible.length === 1) {
+    const onlyProfessional = compatible[0];
+    professionalId.value = onlyProfessional.id || "";
+    renderProfessionalSelectionState({
+      type: "ready",
+      professional: onlyProfessional,
+      selectedCount: appointmentSelectedServices.length,
+    });
+    return;
+  }
+  professionalId.value = "";
+  if (!compatible.length) {
+    renderProfessionalSelectionState({
+      type: "error",
+      message: appointmentSelectedServices.length
+        ? "Nenhum profissional ativo atende todos os servicos selecionados."
+        : "Nenhum profissional operacional ativo foi encontrado.",
+    });
+    return;
+  }
+  renderProfessionalSelectionState({
+    type: "error",
+    message: "Ha mais de um profissional compativel. Ajuste o cadastro operacional antes de agendar.",
+  });
+}
+
+function renderProfessionalSelectionState(state = {}) {
+  if (!professionalSelectionMount) return;
+  if (state.type === "ready" && state.professional?.id) {
+    professionalSelectionMount.innerHTML = `
+      <div class="professional-auto-card">
+        <span>Profissional</span>
+        <strong>${escapeHtml(state.professional.name || "Profissional")}</strong>
+        <small>${state.selectedCount ? "Compativel com os servicos selecionados." : "Sera confirmado apos selecionar os servicos."}</small>
+      </div>
+    `;
+    return;
+  }
+  professionalSelectionMount.innerHTML = `
+    <div class="professional-auto-card professional-auto-card-error">
+      <span>Profissional</span>
+      <strong>Indisponivel</strong>
+      <small>${escapeHtml(state.message || "Nao foi possivel definir o profissional automaticamente.")}</small>
+    </div>
+  `;
+}
+
+function validateOperationalProfessionalSelection() {
+  const compatible = compatibleProfessionalsForSelection();
+  if (compatible.length !== 1 || !professionalId?.value) {
+    refreshProfessionalOptionsForSelection();
+    return {
+      ok: false,
+      message: compatible.length > 1
+        ? "Ha mais de um profissional compativel. Ajuste o cadastro operacional antes de agendar."
+        : "Nenhum profissional ativo atende todos os servicos selecionados.",
+    };
+  }
+  return { ok: true, professional: compatible[0] };
+}
+
+function renderAppointmentServiceSummary() {
+  if (!appointmentSelectedServices.length) {
+    return `
+      <div class="svc-selected-summary is-empty" aria-live="polite">
+        <span>Nenhum servico selecionado.</span>
+        <small>Selecione na lista ao lado para montar o atendimento.</small>
+      </div>
+    `;
+  }
+  const catalogTotal = calculateCatalogTotal(appointmentSelectedServices);
+  if (appointmentServiceSummaryState === "loading") {
+    return `<div class="svc-selected-summary" aria-live="polite"><span>Calculando resumo...</span></div>`;
+  }
+  if (appointmentServiceSummaryState === "error") {
+    return `<div class="svc-selected-summary svc-selected-summary-error" aria-live="polite"><span>${escapeHtml(appointmentServiceSummaryMessage || "Nao foi possivel calcular o resumo.")}</span></div>`;
+  }
+  const duration = Number(appointmentServiceSummary?.effectiveDurationMin || 0);
+  const ruleLabel = appointmentServiceSummary?.ruleLabel || "";
+  const total = money(Number(appointmentServiceSummary?.totalPrice ?? catalogTotal));
+  return `
+    <div class="svc-selected-summary" aria-live="polite">
+      <div class="svc-summary-title">Resumo</div>
+      <div class="svc-summary-metrics">
+        <span><small>Servicos</small><strong>${appointmentSelectedServices.length}</strong></span>
+        <span><small>Total</small><strong>${total}</strong></span>
+        <span><small>Duracao</small><strong>${duration ? `${duration} min` : "Calculando"}</strong></span>
+      </div>
+      ${ruleLabel ? `<div class="svc-rule-badge">${escapeHtml(ruleLabel)}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderAppointmentSummaryStep() {
+  if (!appointmentSummaryMount) return;
+  appointmentSummaryMount.innerHTML = renderAppointmentServiceSummary();
+}
+
+function renderAppointmentServiceSelection() {
+  if (!serviceSelectionMount) return;
+  const services = (Array.isArray(allServices) ? allServices : []).filter(Boolean);
+  const query = appointmentServiceSearch.trim().toLowerCase();
+  const filtered = services
+    .filter((service) => {
+      const haystack = `${service.name || ""} ${service.category || ""} ${service.description || ""}`.toLowerCase();
+      return !query || haystack.includes(query);
+    })
+    .slice(0, 8);
+  const selectedIds = getSelectedServiceIds(appointmentSelectedServices);
+  if (serviceId) serviceId.value = selectedIds[0] || "";
+  const selectedRows = appointmentSelectedServices.length
+    ? appointmentSelectedServices.map((service, index) => `
+        <li class="svc-selected-item">
+          <span><em>${index + 1}</em>${escapeHtml(service.name || "Servico")}</span>
+          <small>${money(Number(service.price || 0))} - ${serviceDuration(service)} min</small>
+          <button type="button" class="svc-remove-btn" data-service-remove="${escapeHtml(service.id)}" aria-label="Remover ${escapeHtml(service.name || "servico")}">Remover</button>
+        </li>
+      `).join("")
+    : `<div class="svc-selected-empty">Aguardando selecao.</div>`;
+
+  serviceSelectionMount.innerHTML = `
+    <div class="svc-select-tools">
+      <input id="serviceSelectionSearch" type="search" class="sched-input" value="${escapeHtml(appointmentServiceSearch)}" placeholder="Buscar servico..." aria-label="Buscar servico" />
+      <span>${selectedIds.length} selecionados - ${filtered.length} disponiveis</span>
+    </div>
+    <div class="svc-selection-layout">
+      <div class="svc-option-panel">
+        <div class="svc-panel-title">Disponiveis</div>
+        <div class="svc-option-list" role="listbox" aria-label="Servicos disponiveis">
+          ${filtered.map((service) => {
+            const selected = isServiceSelected(appointmentSelectedServices, service.id);
+            const active = serviceIsActive(service);
+            const disabled = !active || (!selected && selectedIds.length >= APPOINTMENT_SERVICES_MAX);
+            const duration = serviceDuration(service);
+            return `
+              <button type="button" class="svc-option ${selected ? "is-selected" : ""}" data-service-toggle="${escapeHtml(service.id)}" aria-pressed="${selected ? "true" : "false"}" ${disabled ? "disabled" : ""}>
+                <span>${escapeHtml(service.name || "Servico")}</span>
+                <small>${money(Number(service.price || 0))} - ${duration} min${active ? "" : " - inativo"}</small>
+                <strong>${selected ? "Selecionado" : "Adicionar"}</strong>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      </div>
+      <div class="svc-selected-box">
+        <div class="svc-selected-head">
+          <strong>Selecionados</strong>
+          ${selectedIds.length ? `<button type="button" class="svc-clear-btn" data-service-clear>Limpar</button>` : ""}
+        </div>
+        ${appointmentSelectedServices.length ? `<ol>${selectedRows}</ol>` : selectedRows}
+      </div>
+    </div>
+  `;
+  renderAppointmentSummaryStep();
+
+  serviceSelectionMount.querySelector("#serviceSelectionSearch")?.addEventListener("input", (event) => {
+    appointmentServiceSearch = event.target.value || "";
+    renderAppointmentServiceSelection();
+  });
+  serviceSelectionMount.querySelectorAll("[data-service-toggle]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const service = servicesById[button.getAttribute("data-service-toggle") || ""];
+      if (!service) return;
+      const result = isServiceSelected(appointmentSelectedServices, service.id)
+        ? { ok: true, selected: removeServiceSelection(appointmentSelectedServices, service.id), message: "" }
+        : addServiceSelection(appointmentSelectedServices, service);
+      appointmentSelectedServices = result.selected;
+      appointmentServiceSummary = null;
+      appointmentServiceSummaryMessage = result.message || "";
+      appointmentServiceSummaryState = appointmentSelectedServices.length ? "loading" : "incomplete";
+      renderAlternativeSlots([], null, alternativeSlots);
+      renderAppointmentServiceSelection();
+      refreshProfessionalOptionsForSelection();
+      if (!result.ok && result.message) setScheduleFeedback("warning", result.message);
+      await refreshAppointmentServicesPreview();
+      await validateScheduleSlot();
+    });
+  });
+  serviceSelectionMount.querySelectorAll("[data-service-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      appointmentSelectedServices = removeServiceSelection(
+        appointmentSelectedServices,
+        button.getAttribute("data-service-remove"),
+      );
+      appointmentServiceSummary = null;
+      appointmentServiceSummaryState = appointmentSelectedServices.length ? "loading" : "incomplete";
+      renderAlternativeSlots([], null, alternativeSlots);
+      renderAppointmentServiceSelection();
+      refreshProfessionalOptionsForSelection();
+      await refreshAppointmentServicesPreview();
+      await validateScheduleSlot();
+    });
+  });
+  serviceSelectionMount.querySelector("[data-service-clear]")?.addEventListener("click", async () => {
+    appointmentSelectedServices = clearServiceSelection();
+    appointmentServiceSummary = null;
+    appointmentServiceSummaryState = "incomplete";
+    renderAlternativeSlots([], null, alternativeSlots);
+    renderAppointmentServiceSelection();
+    refreshProfessionalOptionsForSelection();
+    await validateScheduleSlot();
+  });
+}
+
+async function refreshAppointmentServicesPreview() {
+  const serviceIds = getSelectedServiceIds(appointmentSelectedServices);
+  const requestId = ++appointmentServiceSummaryRequestId;
+  if (!serviceIds.length) {
+    appointmentServiceSummary = null;
+    appointmentServiceSummaryState = "incomplete";
+    appointmentServiceSummaryMessage = "";
+    renderAppointmentServiceSelection();
+    return null;
+  }
+  appointmentServiceSummaryState = "loading";
+  appointmentServiceSummaryMessage = "";
+  renderAppointmentServiceSelection();
+  try {
+    const payload = await callJson(`${API}/appointments/services/preview`, "POST", {
+      unitId,
+      serviceIds,
+    });
+    if (requestId !== appointmentServiceSummaryRequestId) return null;
+    appointmentServiceSummary = interpretBackendSummary(payload, appointmentSelectedServices);
+    appointmentServiceSummary.eligibleProfessionalIds = payload.summary?.eligibleProfessionalIds || [];
+    appointmentServiceSummaryState = "ready";
+    renderAppointmentServiceSelection();
+    refreshProfessionalOptionsForSelection();
+    return appointmentServiceSummary;
+  } catch (error) {
+    if (requestId !== appointmentServiceSummaryRequestId) return null;
+    appointmentServiceSummary = null;
+    appointmentServiceSummaryState = "error";
+    appointmentServiceSummaryMessage = error.message || "Nao foi possivel calcular o resumo dos servicos.";
+    renderAppointmentServiceSelection();
+    refreshProfessionalOptionsForSelection();
+    return null;
+  }
+}
+
 async function loadAlternativeSlots() {
   const startDate = new Date(startsAt.value);
   if (Number.isNaN(startDate.getTime())) {
     renderAlternativeSlots([], null, alternativeSlots);
     return [];
   }
-  if (!professionalId.value || !serviceId.value) {
+  const serviceIds = getSelectedServiceIds(appointmentSelectedServices);
+  if (!professionalId.value || !serviceIds.length) {
     renderAlternativeSlots([], null, alternativeSlots);
     return [];
   }
@@ -3167,7 +3473,7 @@ async function loadAlternativeSlots() {
     const payload = await callJson(`${API}/appointments/suggestions`, "POST", {
       unitId,
       professionalId: professionalId.value,
-      serviceId: serviceId.value,
+      serviceIds,
       startsAt: startDate.toISOString(),
       windowHours: 6,
     });
@@ -3190,13 +3496,23 @@ function handleAlternativeSlotSelect(iso) {
 }
 
 async function validateScheduleSlot() {
+  const serviceValidation = validateSelectedServices(appointmentSelectedServices);
+  const serviceIds = getSelectedServiceIds(appointmentSelectedServices);
   const validation = validateSlotLocally({
     startsAt: startsAt.value,
     professionalId: professionalId.value,
-    serviceId: serviceId.value,
+    serviceIds,
+    serviceId: serviceIds[0],
+    effectiveDurationMin: appointmentServiceSummary?.effectiveDurationMin,
     servicesById: schedulingCatalog.servicesById,
     agendaItems: currentAgenda,
   });
+
+  if (!serviceValidation.ok) {
+    setScheduleFeedback("warning", serviceValidation.message);
+    renderAlternativeSlots([], null, alternativeSlots);
+    return { ok: false, reason: "MISSING_SERVICE" };
+  }
 
   if (validation.ok) {
     setScheduleFeedback("success", "Horario livre no pre-check. Pode confirmar o agendamento.");
@@ -3204,11 +3520,7 @@ async function validateScheduleSlot() {
     return { ok: true };
   }
 
-  if (
-    validation.code === "INVALID_DATE" ||
-    validation.code === "MISSING_SERVICE" ||
-    validation.code === "MISSING_PROFESSIONAL"
-  ) {
+  if (validation.code === "INVALID_DATE" || validation.code === "MISSING_SERVICE" || validation.code === "MISSING_PROFESSIONAL") {
     setScheduleFeedback("warning", validation.message);
     renderAlternativeSlots([], null, alternativeSlots);
     return { ok: false, reason: validation.code };
@@ -3235,8 +3547,13 @@ async function loadCatalog() {
   );
 
   initClientSearch(data.clients);
-  fillSelect(professionalId, data.professionals, (item) => item.name);
-  fillSelect(serviceId, activeServices, (item) => `${item.name} - R$ ${item.price}`);
+  appointmentSelectedServices = normalizeSelectedServices(
+    getSelectedServiceIds(appointmentSelectedServices),
+    normalized.servicesById,
+  );
+  refreshProfessionalOptionsForSelection();
+  renderAppointmentServiceSelection();
+  if (appointmentSelectedServices.length) refreshAppointmentServicesPreview();
   fillSelect(filterService, data.services, (item) => item.name, {
     blankLabel: "Todos servicos",
   });
@@ -3403,33 +3720,32 @@ function ensureCheckoutModal() {
     <div class="ds-modal-panel checkout-modal" style="max-width:660px" role="dialog" aria-modal="true" aria-labelledby="appointmentCheckoutTitle" tabindex="-1">
       <div class="checkout-modal-header ds-modal-head">
         <div>
-          <p class="ux-label">Checkout do atendimento</p>
-          <h3 id="appointmentCheckoutTitle" class="ux-section-label">Finalizar atendimento</h3>
+          <p class="ux-label">Pagamento</p>
+          <h3 id="appointmentCheckoutTitle" class="ux-section-label">Concluir atendimento</h3>
         </div>
         <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
       <form id="appointmentCheckoutForm" class="ds-form-grid">
+        <div class="ds-form-full" id="checkoutSummary"></div>
         <div class="ds-form-full checkout-total-panel">
-          <span>Total do atendimento</span>
+          <span>Total a pagar</span>
           <strong id="checkoutTotalDisplay">R$ 0,00</strong>
         </div>
-        <div class="ds-form-full ds-cell-secondary" id="checkoutSummary"></div>
         <details class="ds-form-full checkout-products-panel">
-          <summary>Produtos adicionais</summary>
+          <summary>Produtos vendidos durante o atendimento</summary>
           <div id="checkoutProductsList"></div>
           <button type="button" id="checkoutAddProduct" class="ux-btn ux-btn-muted">Adicionar produto</button>
           <div class="checkout-products-subtotal ds-cell-secondary">Subtotal dos produtos: <strong id="checkoutProductsSubtotal">R$ 0,00</strong></div>
         </details>
-        <label class="ds-form-label">Metodo de pagamento
+        <label class="ds-form-label ds-form-full">Forma de pagamento
           <select id="checkoutPaymentMethod" class="ds-input" required></select>
         </label>
-        <label class="ds-form-label">Valor total
+        <label class="ds-form-label">Total calculado
           <input id="checkoutTotal" type="text" readonly class="ds-input" />
         </label>
         <label class="ds-form-label ds-form-full">Observacoes
           <textarea id="checkoutNotes" rows="2" maxlength="500" class="ds-input"></textarea>
         </label>
-        <div id="checkoutTechnicalTrace" class="ds-form-full"></div>
         <div id="checkoutFeedback" class="ds-form-full panel-msg-host"></div>
         <div class="ds-form-full catalog-row-actions">
           <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Cancelar</button>
@@ -3493,6 +3809,7 @@ function closeAppointmentDetailPanel() {
   selectedAppointmentId = "";
   renderAppointmentDetail(appointmentsElements.detail, null, currentAppointments, {
     canCheckout: canCheckoutAppointment(),
+    canEdit: canEditAppointment(),
     onAction: handleAppointmentsAction,
   });
   closeScheduleDrawer();
@@ -3508,7 +3825,7 @@ function renderCheckoutProducts() {
   if (!checkoutModalState.products.length) {
     list.innerHTML = `
       <div class="ux-empty-dashed">
-        Nenhum produto adicional neste checkout.
+        Nenhum produto adicionado
       </div>
     `;
     return;
@@ -3587,27 +3904,47 @@ function openCheckoutModal(appointment, options = {}) {
   };
   const summary = modal.querySelector("#checkoutSummary");
   if (summary) {
+    const serviceItems = Array.isArray(appointment.serviceItems) && appointment.serviceItems.length
+      ? appointment.serviceItems
+      : [{
+          name: appointment.service || "Servico",
+          serviceNameSnapshot: appointment.service || "Servico",
+          servicePriceSnapshot: appointment.servicePrice || 0,
+        }];
+    const serviceSubtotal = serviceItems.reduce(
+      (acc, item) => acc + Number(item.servicePriceSnapshot || item.price || 0),
+      0,
+    );
+    const dateLabel = appointment.startsAt instanceof Date
+      ? appointment.startsAt.toLocaleDateString("pt-BR")
+      : "";
+    const timeLabel = appointment.startsAt instanceof Date
+      ? `${appointment.startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} - ${appointment.endsAt?.toLocaleTimeString?.("pt-BR", { hour: "2-digit", minute: "2-digit" }) || ""}`
+      : "";
     summary.innerHTML = `
       <dl class="checkout-summary-grid">
         <div><dt>Cliente</dt><dd>${escapeHtml(appointment.client)}</dd></div>
-        <div><dt>Servico</dt><dd>${escapeHtml(appointment.service)}</dd></div>
+        <div><dt>Data</dt><dd>${escapeHtml(dateLabel)}</dd></div>
+        <div><dt>Horario</dt><dd>${escapeHtml(timeLabel)}</dd></div>
         <div><dt>Profissional</dt><dd>${escapeHtml(appointment.professional)}</dd></div>
-        <div><dt>Valor do servico</dt><dd>${Number(appointment.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd></div>
       </dl>
+      <section class="checkout-services-panel">
+        <h4>Servicos realizados</h4>
+        <div class="checkout-services-list">
+          ${serviceItems.map((item) => `
+            <div class="checkout-service-line">
+              <span>${escapeHtml(item.serviceNameSnapshot || item.name || "Servico")}</span>
+              <strong>${Number(item.servicePriceSnapshot || item.price || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+            </div>
+          `).join("")}
+        </div>
+        <div class="checkout-service-line checkout-service-total">
+          <span>Subtotal dos servicos</span>
+          <strong>${serviceSubtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+        </div>
+        <p class="ds-cell-secondary">Duracao do atendimento: ${Number(appointment.serviceDurationMin || appointment.effectiveDurationMinSnapshot || 0)} min</p>
+      </section>
     `;
-  }
-  const trace = modal.querySelector("#checkoutTechnicalTrace");
-  if (trace) {
-    trace.innerHTML = renderTechnicalTrace(
-      {
-        id: appointment.id,
-        referenceType: "APPOINTMENT",
-        referenceId: appointment.id,
-        auditEntity: "Appointment",
-        auditAction: "CHECKOUT",
-      },
-      { title: "Detalhe tecnico do checkout" },
-    );
   }
   const feedback = modal.querySelector("#checkoutFeedback");
   if (feedback) feedback.innerHTML = "";
@@ -3630,6 +3967,7 @@ function openAppointmentCheckout(appointment, options = {}) {
   const validation = validateAppointmentCheckoutTarget(appointment);
   if (!validation.ok) {
     const message = validation.message || "Nao foi possivel abrir o checkout.";
+    renderInlineAppointmentActionMessage(options.openerElement, "warning", message);
     setScheduleFeedback("warning", message);
     renderAppointmentsFeedback(appointmentsElements, "warning", message);
     return false;
@@ -3638,6 +3976,22 @@ function openAppointmentCheckout(appointment, options = {}) {
   closeAppointmentDetailPanel();
   openCheckoutModal(appointment, { openerElement });
   return true;
+}
+
+function renderInlineAppointmentActionMessage(openerElement, type, message) {
+  if (!openerElement || !message) return;
+  const host =
+    openerElement.closest?.(".al-card") ||
+    openerElement.closest?.(".appts-mobile-card") ||
+    openerElement.closest?.("td") ||
+    null;
+  if (!host) return;
+  host.querySelectorAll?.("[data-inline-appointment-message]").forEach((node) => node.remove());
+  const note = document.createElement("div");
+  note.setAttribute("data-inline-appointment-message", "true");
+  note.className = `appointment-inline-message appointment-inline-message-${type || "warning"}`;
+  note.textContent = message;
+  host.appendChild(note);
 }
 
 async function submitCheckoutModal(event) {
@@ -3671,7 +4025,7 @@ async function submitCheckoutModal(event) {
   try {
     checkoutModalState.submitting = true;
     if (submitBtn) submitBtn.disabled = true;
-    if (submitBtn) submitBtn.textContent = "Registrando pagamento...";
+    if (submitBtn) submitBtn.textContent = "Concluindo...";
     const result = await callJson(`${API}/appointments/${appointment.id}/checkout`, "POST", {
       idempotencyKey: buildOperationIdempotencyKey("appointment-checkout"),
       changedBy: "owner",
@@ -3965,6 +4319,11 @@ async function updateStatus(item, action, options = {}) {
     return;
   }
 
+  if (action === "EDIT") {
+    await openAppointmentEdit(item);
+    return;
+  }
+
   if (action === "REFUND") {
     if (item.status !== "COMPLETED") return;
     openAppointmentRefundModal(item);
@@ -3990,10 +4349,12 @@ async function updateStatus(item, action, options = {}) {
     }
     await callJson(`${API}/appointments/${item.id}/reschedule`, "PATCH", {
       startsAt: newDate.toISOString(),
+      changedBy: getCurrentActorId(),
     });
     setScheduleFeedback("success", "Atendimento remarcado com sucesso.");
   } else if (action === "COMPLETE" || action === "PAYMENT") {
-    openAppointmentCheckout(item, { openerElement: options.openerElement });
+    const loaded = await ensureAppointmentLoaded(item.id, { force: true });
+    openAppointmentCheckout(loaded || item, { openerElement: options.openerElement });
     return;
   } else {
     const needsReason = action === "CANCELLED" || action === "NO_SHOW";
@@ -4038,6 +4399,7 @@ function renderAgendaView() {
     const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
     renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
       canCheckout: canCheckoutAppointment(),
+      canEdit: canEditAppointment(),
       onAction: updateStatus,
       onError: (error) => {
         setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
@@ -4053,6 +4415,7 @@ function renderAgendaView() {
   const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
   renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
     canCheckout: canCheckoutAppointment(),
+    canEdit: canEditAppointment(),
     onAction: updateStatus,
     onError: (error) => {
       setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
@@ -4217,7 +4580,7 @@ function renderAgendaListMode() {
               ${actions.map((action) => {
                 const isDanger = action === "CANCELLED" || action === "NO_SHOW";
                 const isSuccess = action === "COMPLETE";
-                const label = actionLabel[action] || action;
+                const label = action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel[action] || action;
                 const className = isSuccess
                   ? "al-btn al-btn-primary"
                   : isDanger
@@ -4267,10 +4630,10 @@ function renderAgendaListMode() {
   }
 }
 
-async function ensureAppointmentLoaded(appointmentId) {
+async function ensureAppointmentLoaded(appointmentId, options = {}) {
   if (!appointmentId) return null;
   const cached = currentAppointments.find((item) => item.id === appointmentId);
-  if (cached) return cached;
+  if (cached && !options.force) return cached;
   const response = await apiFetch(`${API}/appointments/${appointmentId}`);
   const data = await readResponsePayload(response);
   if (!response.ok) {
@@ -4331,6 +4694,7 @@ function renderAppointmentDetailPanel() {
   const selected = currentAppointments.find((item) => item.id === selectedAppointmentId) || null;
   renderAppointmentDetail(appointmentsElements.detail, selected, currentAppointments, {
     canCheckout: canCheckoutAppointment(),
+    canEdit: canEditAppointment(),
     onAction: handleAppointmentsAction,
   });
 }
@@ -4345,6 +4709,11 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
   if (action === "DETAIL") {
     selectedAppointmentId = item.id;
     renderAppointmentDetailPanel();
+    return;
+  }
+
+  if (action === "EDIT") {
+    await openAppointmentEdit(item);
     return;
   }
 
@@ -4386,7 +4755,8 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
   }
 
   if (action === "COMPLETE") {
-    openAppointmentCheckout(item, { openerElement: options.openerElement });
+    const loaded = await ensureAppointmentLoaded(item.id, { force: true });
+    openAppointmentCheckout(loaded || item, { openerElement: options.openerElement });
     return;
   }
 
@@ -4473,6 +4843,7 @@ function renderAppointmentsView() {
     periodLabel: label,
     filterSummary,
     canCheckout: canCheckoutAppointment(),
+    canEdit: canEditAppointment(),
     onAction: handleAppointmentsAction,
   });
   renderAppointmentDetailPanel();
@@ -4532,7 +4903,11 @@ async function loadAppointmentsFallbackFromAgenda(range) {
     .filter((item) => {
       if (statusFilter && item.status !== statusFilter) return false;
       if (professionalFilter && item.professionalId !== professionalFilter) return false;
-      if (serviceFilter && item.serviceId !== serviceFilter) return false;
+      if (
+        serviceFilter &&
+        item.serviceId !== serviceFilter &&
+        !(Array.isArray(item.serviceItems) && item.serviceItems.some((serviceItem) => serviceItem.serviceId === serviceFilter))
+      ) return false;
       if (clientFilter && item.clientId !== clientFilter) return false;
       if (!searchFilter) return true;
       const clientPhone = String(clientsById[item.clientId]?.phone || "").trim();
@@ -4933,9 +5308,7 @@ function showServicesModal(service = null) {
   servicesDurationMinutes.value = editing ? Number(service.durationMinutes || 0) : "";
   servicesCategory.value = editing ? service.category || "" : "";
   servicesDescription.value = editing ? service.description || "" : "";
-  servicesDefaultCommissionRate.value = editing
-    ? Number(service.defaultCommissionRate || 0)
-    : "";
+  if (servicesDefaultCommissionRate) servicesDefaultCommissionRate.value = "";
   servicesEstimatedCost.value = editing ? Number(service.estimatedCost || 0) : "";
   servicesIsActive.value = editing ? (service.isActive ? "true" : "false") : "true";
   servicesNotes.value = editing ? service.notes || "" : "";
@@ -4970,7 +5343,7 @@ function servicePayloadFromForm() {
     durationMinutes,
     category: String(servicesCategory?.value || "").trim() || undefined,
     description: String(servicesDescription?.value || "").trim() || undefined,
-    defaultCommissionRate: Number(servicesDefaultCommissionRate?.value || 0),
+    defaultCommissionRate: 0,
     estimatedCost: Number(servicesEstimatedCost?.value || 0),
     isActive: servicesIsActive?.value !== "false",
     notes: String(servicesNotes?.value || "").trim() || undefined,
@@ -5036,7 +5409,7 @@ async function handleServiceAction(serviceIdValue, action, options = {}) {
       durationMinutes: Number(service.durationMinutes || 0),
       category: service.category || undefined,
       description: service.description || undefined,
-      defaultCommissionRate: Number(service.defaultCommissionRate || 0),
+      defaultCommissionRate: 0,
       professionalIds: Array.isArray(service.enabledProfessionalIds)
         ? service.enabledProfessionalIds
         : [],
@@ -6124,7 +6497,7 @@ function settingsBusinessBasePayload() {
     allowOutOfHoursAppointments: Boolean(business.allowOutOfHoursAppointments),
     allowOverbooking: Boolean(business.allowOverbooking),
     houseCommissionType: String(business.houseCommissionType || "PERCENTAGE"),
-    houseCommissionValue: Number(business.houseCommissionValue || 40),
+    houseCommissionValue: Number(business.houseCommissionValue || 0),
   };
 }
 
@@ -6454,29 +6827,56 @@ appointmentForm?.addEventListener("submit", async (event) => {
       clientSearch?.focus();
       return;
     }
+    const serviceValidation = validateSelectedServices(appointmentSelectedServices);
+    if (!serviceValidation.ok) {
+      setScheduleFeedback("warning", serviceValidation.message);
+      serviceSelectionMount?.querySelector("#serviceSelectionSearch")?.focus();
+      return;
+    }
+    if (appointmentServiceSummaryState !== "ready") {
+      await refreshAppointmentServicesPreview();
+    }
+    const professionalValidation = validateOperationalProfessionalSelection();
+    if (!professionalValidation.ok) {
+      setScheduleFeedback("error", professionalValidation.message);
+      professionalSelectionMount?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     const precheck = await validateScheduleSlot();
     if (!precheck.ok) return;
     const selectedStartsAt = startsAt.value;
     const startsAtIso = new Date(selectedStartsAt).toISOString();
-    const selectedService = schedulingCatalog.servicesById?.[serviceId.value];
-    const serviceDurationMinutes = Number(selectedService?.durationMin ?? 0);
+    const serviceIds = getSelectedServiceIds(appointmentSelectedServices);
+    const serviceDurationMinutes = Number(appointmentServiceSummary?.effectiveDurationMin ?? 0);
     console.info("[schedule][request]", {
       selectedDateTime: selectedStartsAt,
       startsAt: startsAtIso,
       serviceDurationMinutes,
       professionalId: professionalId.value,
+      serviceIds,
     });
 
-    const createdAppointment = await callJson(`${API}/appointments`, "POST", {
-      unitId,
+    const payload = {
       clientId: clientId.value,
       professionalId: professionalId.value,
-      serviceId: serviceId.value,
+      serviceIds,
       startsAt: startsAtIso,
-    });
-    console.info("[schedule][response]", createdAppointment);
-    setScheduleFeedback("success", "Agendamento criado com sucesso.");
+      changedBy: getCurrentActorId(),
+    };
+    const responsePayload = editingAppointmentId
+      ? await callJson(`${API}/appointments/${editingAppointmentId}`, "PATCH", payload)
+      : await callJson(`${API}/appointments`, "POST", { unitId, ...payload });
+    console.info("[schedule][response]", responsePayload);
+    if (editingAppointmentId) syncLocalAppointmentFromPayload(responsePayload?.appointment);
+    setScheduleFeedback("success", editingAppointmentId ? "Agendamento atualizado com sucesso." : "Agendamento criado com sucesso.");
     renderAlternativeSlots([], null, alternativeSlots);
+    appointmentSelectedServices = [];
+    appointmentServiceSummary = null;
+    appointmentServiceSummaryState = "incomplete";
+    editingAppointmentId = "";
+    renderAppointmentServiceSelection();
+    refreshProfessionalOptionsForSelection();
+    closeScheduleDrawer();
     await loadAll();
   } catch (error) {
     console.warn("[schedule][error]", {
@@ -8305,7 +8705,6 @@ async function downloadBackendReportCsv(reportId) {
     estoque: "stock",
     clientes: "clients",
     profissionais: "professionals",
-    comissoes: "commissions",
     auditoria: "audit",
   };
   const type = typeMap[reportId];
@@ -8645,11 +9044,13 @@ function buildClientDrawerContext(client) {
 
 function openClientScheduling(clientIdValue) {
   navigate("agenda");
+  resetScheduleFormForCreate();
   if (clientId && clientIdValue) {
     clientId.value = clientIdValue;
+    if (clientSearch) clientSearch.value = clientsById[clientIdValue]?.fullName || "";
     refreshScheduleAssist();
   }
-  openScheduleDrawer();
+  openScheduleDrawer({ mode: "create" });
   startsAt?.focus();
 }
 
@@ -8770,7 +9171,8 @@ if (appointmentsDetailClose) {
 if (appointmentsEmptyNew) {
   appointmentsEmptyNew.addEventListener("click", () => {
     navigate("agenda");
-    openScheduleDrawer();
+    resetScheduleFormForCreate();
+    openScheduleDrawer({ mode: "create" });
     clientSearch?.focus();
   });
 }
@@ -8800,7 +9202,8 @@ if (appointmentsEmptyState) {
     if (!target) return;
     if (target.id === "appointmentsEmptyNew") {
       navigate("agenda");
-      openScheduleDrawer();
+      resetScheduleFormForCreate();
+      openScheduleDrawer({ mode: "create" });
       clientSearch?.focus();
       return;
     }
@@ -8844,7 +9247,8 @@ if (mobileFocusSaleBtn) {
 
 if (agendaNewAppointmentBtn) {
   agendaNewAppointmentBtn.addEventListener("click", () => {
-    openScheduleDrawer();
+    resetScheduleFormForCreate();
+    openScheduleDrawer({ mode: "create" });
     clientSearch?.focus();
   });
 }
@@ -8920,9 +9324,71 @@ document.addEventListener("click", (event) => {
 // ============================================================
 // SCHEDULE DRAWER
 // ============================================================
-function openScheduleDrawer() {
+function setScheduleDrawerMode(mode = "create") {
+  const editing = mode === "edit";
+  const title = document.querySelector(".sched-drawer-title");
+  const sub = document.querySelector(".sched-drawer-sub");
+  const submit = appointmentForm?.querySelector('button[type="submit"]');
+  if (title) title.textContent = editing ? "Editar Agendamento" : "Novo Agendamento";
+  if (sub) sub.textContent = editing ? "Revise os campos antes de salvar" : "Preencha os campos para confirmar";
+  if (submit) submit.textContent = editing ? "Salvar Alteracoes" : "Confirmar Agendamento";
+}
+
+function resetScheduleFormForCreate() {
+  editingAppointmentId = "";
+  appointmentSelectedServices = [];
+  appointmentServiceSummary = null;
+  appointmentServiceSummaryState = "incomplete";
+  appointmentServiceSummaryMessage = "";
+  if (clientId) clientId.value = "";
+  if (clientSearch) clientSearch.value = "";
+  if (startsAt) startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
+  renderAlternativeSlots([], null, alternativeSlots);
+  refreshProfessionalOptionsForSelection();
+  renderAppointmentServiceSelection();
+  setScheduleFeedback("", "");
+}
+
+async function openAppointmentEdit(item) {
+  if (!item || !canEditAppointment() || !["SCHEDULED", "CONFIRMED"].includes(item.status)) {
+    renderAppointmentsFeedback(appointmentsElements, "warning", "Este agendamento nao pode ser editado neste estado.");
+    return;
+  }
+  const loaded = item.serviceItems?.length ? item : await ensureAppointmentLoaded(item.id);
+  editingAppointmentId = loaded.id;
+  if (clientId) clientId.value = loaded.clientId || "";
+  if (clientSearch) clientSearch.value = loaded.client || "";
+  const selectedItems = normalizeAppointmentServiceItems(loaded, schedulingCatalog.servicesById);
+  appointmentSelectedServices = normalizeSelectedServices(
+    selectedItems.map((serviceItem) => serviceItem.serviceId),
+    schedulingCatalog.servicesById,
+  );
+  if (!appointmentSelectedServices.length) {
+    appointmentSelectedServices = selectedItems.map((serviceItem) => ({
+      id: serviceItem.serviceId,
+      name: serviceItem.name,
+      price: serviceItem.price,
+      durationMin: serviceItem.durationMin,
+      active: true,
+    }));
+  }
+  if (startsAt) startsAt.value = asDateTimeLocalInputValue(loaded.startsAt);
+  appointmentServiceSummary = null;
+  appointmentServiceSummaryState = appointmentSelectedServices.length ? "loading" : "incomplete";
+  renderAppointmentServiceSelection();
+  await refreshAppointmentServicesPreview();
+  refreshProfessionalOptionsForSelection();
+  if (professionalId) professionalId.value = loaded.professionalId || professionalId.value;
+  renderAlternativeSlots([], null, alternativeSlots);
+  setScheduleDrawerMode("edit");
+  openScheduleDrawer({ mode: "edit" });
+  clientSearch?.focus();
+}
+
+function openScheduleDrawer(options = {}) {
   const drawer = document.getElementById("scheduleDrawer");
   if (!drawer) return;
+  setScheduleDrawerMode(options.mode || (editingAppointmentId ? "edit" : "create"));
   drawer.classList.add("is-open");
   drawer.setAttribute("aria-hidden", "false");
 }

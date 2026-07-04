@@ -47,6 +47,7 @@ export interface Service {
   costEstimate: number;
   notes?: string;
   imageUrl?: string;
+  enabledProfessionalIds?: UUID[];
   active: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -478,6 +479,7 @@ export interface CommissionEntry {
   professionalId: UUID;
   unitId: UUID;
   appointmentId?: UUID;
+  appointmentServiceItemId?: UUID;
   productSaleId?: UUID;
   source: RevenueSource;
   baseAmount: number;
@@ -493,6 +495,7 @@ export interface CommissionEntry {
 export interface ProductSale {
   id: UUID;
   unitId: UUID;
+  appointmentId?: UUID;
   clientId?: UUID;
   professionalId?: UUID;
   items: ProductSaleItem[];

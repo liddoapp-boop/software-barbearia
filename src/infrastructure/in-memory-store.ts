@@ -84,18 +84,20 @@ export class InMemoryStore {
       businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
-      commissionRules: [
-        {
-          id: "rule-pro-01-service",
-          appliesTo: "SERVICE",
-          percentage: 0,
-        },
-        {
-          id: "rule-pro-01-product",
-          appliesTo: "PRODUCT",
-          percentage: 0,
-        },
-      ],
+      commissionRules: process.env.ENABLE_COMMISSION_TEST_RULES === "true"
+        ? [
+            {
+              id: "rule-pro-01-service",
+              appliesTo: "SERVICE",
+              percentage: 0.4,
+            },
+            {
+              id: "rule-pro-01-product",
+              appliesTo: "PRODUCT",
+              percentage: 0.1,
+            },
+          ]
+        : [],
     },
   ];
   businessSettings: BusinessSettings[] = [
@@ -124,7 +126,7 @@ export class InMemoryStore {
       allowOutOfHoursAppointments: false,
       allowOverbooking: false,
       houseCommissionType: "PERCENTAGE",
-      houseCommissionValue: 40,
+      houseCommissionValue: 0,
       createdAt: new Date("2026-04-22T00:00:00.000Z"),
       updatedAt: new Date("2026-04-27T00:00:00.000Z"),
     },
@@ -147,22 +149,11 @@ export class InMemoryStore {
   businessCommissionRules: BusinessCommissionRule[] = [];
   businessTeamMembers: BusinessTeamMember[] = [
     {
-      id: "team-unit-01-owner",
-      unitId: "unit-01",
-      name: "Dono da Barbearia",
-      role: "OWNER",
-      accessProfile: "owner",
-      email: "owner@barbearia.local",
-      isActive: true,
-      createdAt: new Date("2026-04-22T00:00:00.000Z"),
-      updatedAt: new Date("2026-04-27T00:00:00.000Z"),
-    },
-    {
-      id: "team-unit-01-pro-01",
+      id: "team-unit-01-geovane-owner",
       unitId: "unit-01",
       name: "Geovane Borges",
-      role: "PROFESSIONAL",
-      accessProfile: "profissional",
+      role: "OWNER",
+      accessProfile: "owner",
       isActive: true,
       createdAt: new Date("2026-04-22T00:00:00.000Z"),
       updatedAt: new Date("2026-04-27T00:00:00.000Z"),

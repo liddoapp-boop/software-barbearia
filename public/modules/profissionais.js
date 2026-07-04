@@ -79,7 +79,8 @@ function renderKpi(title, value, subtitle = "", tone = "") {
 
 function renderProfessionalCard(item = {}, context = {}) {
   const services = normalizeCatalogServices(context.services, item.professionalId);
-  const pendingCommission = pendingCommissionFor(item.professionalId, context.commissions);
+  const showCommissions = context.showCommissions === true;
+  const pendingCommission = showCommissions ? pendingCommissionFor(item.professionalId, context.commissions) : 0;
   const name = item.name || "Profissional";
   return `
     <article class="team-row">
@@ -91,7 +92,7 @@ function renderProfessionalCard(item = {}, context = {}) {
           <div class="team-chips">
             <span class="team-chip team-chip-green">Ativo</span>
             <span class="team-chip">Pode atender</span>
-            ${pendingCommission ? `<span class="team-chip team-chip-warn">Comissao ${escapeHtml(money(pendingCommission))}</span>` : ""}
+            ${showCommissions && pendingCommission ? `<span class="team-chip team-chip-warn">Comissao ${escapeHtml(money(pendingCommission))}</span>` : ""}
           </div>
         </div>
         <div class="team-metric">
@@ -110,9 +111,6 @@ function renderProfessionalCard(item = {}, context = {}) {
       <div class="team-row-actions">
         <button type="button" data-professional-action="open-agenda" data-professional-id="${escapeHtml(item.professionalId)}" class="team-icon-btn" title="Ver agenda">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
-        </button>
-        <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(item.professionalId)}" class="team-icon-btn" title="Ver comissoes">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
         </button>
         <button type="button" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}" class="team-arrow-btn" title="Ver detalhes">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
@@ -239,10 +237,13 @@ export function renderProfessionalDrawer(elements, professional = {}, context = 
   if (!elements?.drawerHost || !professional?.professionalId) return;
 
   const services = normalizeCatalogServices(context.services, professional.professionalId);
-  const commissions = (Array.isArray(context.commissions) ? context.commissions : []).filter(
-    (item) => (item.professionalId || item.professional?.id) === professional.professionalId,
-  );
-  const pendingCommission = pendingCommissionFor(professional.professionalId, commissions);
+  const showCommissions = context.showCommissions === true;
+  const commissions = showCommissions
+    ? (Array.isArray(context.commissions) ? context.commissions : []).filter(
+        (item) => (item.professionalId || item.professional?.id) === professional.professionalId,
+      )
+    : [];
+  const pendingCommission = showCommissions ? pendingCommissionFor(professional.professionalId, commissions) : 0;
   const paidCommission = commissions
     .filter((item) => String(item.status || "").toUpperCase() === "PAID")
     .reduce((acc, item) => acc + toNumber(item.amount || item.commissionAmount || item.value), 0);
@@ -302,14 +303,16 @@ export function renderProfessionalDrawer(elements, professional = {}, context = 
                 <span>Total agendado</span>
                 <strong>${escapeHtml(String(toNumber(professional.total)))}</strong>
               </div>
+              ${showCommissions ? `
               <div>
                 <span>Comissao pendente</span>
-                <strong style="${pendingCommission ? "color:#f59e0b" : ""}">${escapeHtml(pendingCommission ? money(pendingCommission) : "—")}</strong>
+                <strong style="${pendingCommission ? "color:#f59e0b" : ""}">${escapeHtml(pendingCommission ? money(pendingCommission) : "-")}</strong>
               </div>
               <div>
                 <span>Comissao paga</span>
-                <strong style="${paidCommission ? "color:#22c55e" : ""}">${escapeHtml(paidCommission ? money(paidCommission) : "—")}</strong>
+                <strong style="${paidCommission ? "color:#22c55e" : ""}">${escapeHtml(paidCommission ? money(paidCommission) : "-")}</strong>
               </div>
+              ` : ""}
             </div>
           </section>
 
@@ -332,11 +335,7 @@ export function renderProfessionalDrawer(elements, professional = {}, context = 
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
             Ver agenda
           </button>
-          <button type="button" data-professional-action="open-commissions" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
-            Ver comissoes
-          </button>
-          <button type="button" data-professional-action="edit" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn">
+            <button type="button" data-professional-action="edit" data-professional-id="${escapeHtml(professional.professionalId)}" class="team-footer-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
             Editar
           </button>

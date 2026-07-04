@@ -1,4 +1,4 @@
-﻿import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { BarbershopEngine } from "./barbershop-engine";
 import {
   Appointment,
@@ -56,16 +56,15 @@ import {
   ACTIVE_APPOINTMENT_CONFLICT_STATUSES,
   buildCommissionPaymentExpenseEntry,
   buildProductRefundExpenseEntry,
+  buildServiceRevenueEntry,
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
+  calculateServiceCommission,
   hasAppointmentConflict,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
-  createBusinessRuleError,
-  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
-  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
   normalizeServiceIds,
   resolveEffectiveAppointmentDuration,
   resolveLegacyPrimaryServiceId,
@@ -289,6 +288,7 @@ export class PrismaOperationsService {
     const [services, professionals, clients, products] = await Promise.all([
       this.prisma.service.findMany({
         where: unitId ? { businessId: unitId } : undefined,
+        include: { professionals: { select: { professionalId: true } } },
         orderBy: { name: "asc" },
       }),
       this.prisma.professional.findMany({
@@ -301,7 +301,11 @@ export class PrismaOperationsService {
         orderBy: { fullName: "asc" },
       }),
       this.prisma.product.findMany({
-        where: unitId ? { businessId: unitId } : undefined,
+        where: {
+          active: true,
+          stockQty: { gt: 0 },
+          ...(unitId ? { businessId: unitId } : {}),
+        },
         orderBy: { name: "asc" },
       }),
     ]);
@@ -596,34 +600,16 @@ export class PrismaOperationsService {
     });
     if (existing.length) return existing;
 
-    const professionals = await this.prisma.professional.findMany({
-      where: { active: true, businessId: unitId },
-      orderBy: { name: "asc" },
-    });
     await this.prisma.teamMember.create({
       data: {
         id: crypto.randomUUID(),
         unitId,
-        name: "Dono",
+        name: "Geovane Borges",
         role: "OWNER",
         accessProfile: "owner",
-        email: "owner@barbearia.local",
         isActive: true,
       },
     });
-    if (professionals.length) {
-      await this.prisma.teamMember.createMany({
-        data: professionals.map((item) => ({
-          id: crypto.randomUUID(),
-          unitId,
-          name: item.name,
-          role: "PROFESSIONAL",
-          accessProfile: "profissional",
-          isActive: item.active,
-        })),
-        skipDuplicates: true,
-      });
-    }
     return await this.prisma.teamMember.findMany({
       where: { unitId },
       orderBy: { createdAt: "asc" },
@@ -2640,6 +2626,61 @@ export class PrismaOperationsService {
     return appointment;
   }
 
+  async previewAppointmentServices(input: {
+    unitId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+  }) {
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const [serviceRows, activeCombinationRules, professionals] = await Promise.all([
+      this.prisma.service.findMany({
+        where: { id: { in: serviceIds }, businessId: input.unitId },
+      }),
+      this.prisma.serviceCombinationRule.findMany({
+        where: { unitId: input.unitId, active: true },
+        include: { items: true },
+      }),
+      this.prisma.professional.findMany({
+        where: { businessId: input.unitId, active: true },
+        select: { id: true },
+      }),
+    ]);
+    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
+    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
+    if (orderedServices.some((item) => !item || !item.active)) {
+      throw new Error("Servico nao encontrado ou inativo");
+    }
+    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+      this.mapService(item),
+    );
+    const serviceItems = this.buildAppointmentServiceItems({
+      appointmentId: "appointment-preview",
+      services,
+    });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.mapCombinationRules(activeCombinationRules),
+    });
+    const compatibility = await Promise.all(
+      professionals.map(async (professional) => {
+        for (const serviceId of serviceIds) {
+          if (!(await this.canProfessionalExecuteService(serviceId, professional.id))) return null;
+        }
+        return professional.id;
+      }),
+    );
+    return {
+      serviceIds,
+      serviceItems,
+      totalPriceSnapshot: calculateAppointmentServicesTotal(serviceItems),
+      effectiveDurationMin: duration.effectiveDurationMin,
+      calculationMode: duration.calculationMode,
+      ruleId: duration.matchedRuleId,
+      ruleLabel: duration.matchedRuleLabel,
+      eligibleProfessionalIds: compatibility.filter((id): id is string => Boolean(id)),
+    };
+  }
+
   private async lockAppointmentScheduling(
     tx: Prisma.TransactionClient,
     unitId: string,
@@ -3059,6 +3100,7 @@ export class PrismaOperationsService {
 
   async registerProductSale(input: {
     unitId: string;
+    appointmentId?: string;
     professionalId?: string;
     clientId?: string;
     soldAt: Date;
@@ -3108,6 +3150,7 @@ export class PrismaOperationsService {
     const sale: ProductSale = {
       id: crypto.randomUUID(),
       unitId: input.unitId,
+      appointmentId: input.appointmentId,
       clientId: input.clientId,
       professionalId: input.professionalId,
       soldAt: input.soldAt,
@@ -3149,6 +3192,7 @@ export class PrismaOperationsService {
         data: {
           id: result.sale.id,
           unitId: result.sale.unitId,
+          appointmentId: result.sale.appointmentId,
           clientId: result.sale.clientId,
           professionalId: result.sale.professionalId,
           grossAmount: result.sale.grossAmount,
@@ -3412,12 +3456,6 @@ export class PrismaOperationsService {
     });
     if (!row) throw new Error("Agendamento nao encontrado");
     if (input.unitId && row.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
-    if ((this.mapAppointment(row).serviceItems?.length ?? 0) > 1) {
-      throw createBusinessRuleError(
-        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
-        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
-      );
-    }
 
     const scope = this.buildIdempotencyScope({
       unitId: row.unitId,
@@ -3432,12 +3470,11 @@ export class PrismaOperationsService {
     }
     const operationKey = this.scopedOperationKey(scope);
     const serviceEntryKey = operationKey ? `${operationKey}:service-revenue` : null;
-    const productEntryKey = operationKey ? `${operationKey}:product-revenue` : null;
-    const serviceCommissionKey = operationKey ? `${operationKey}:service-commission` : null;
     const productCommissionKey = operationKey ? `${operationKey}:product-commission` : null;
     const checkoutSaleKey = operationKey ? `${operationKey}:product-sale` : null;
 
     if (row.status === "COMPLETED") throw new Error("Atendimento ja finalizado");
+    if (row.status !== "IN_SERVICE") throw new Error("Atendimento precisa estar em andamento para concluir");
 
     const paymentMethod = String(input.paymentMethod || "").trim();
     if (!paymentMethod) throw new Error("Metodo de pagamento obrigatorio");
@@ -3458,7 +3495,21 @@ export class PrismaOperationsService {
     const notes = String(input.notes || "").trim() || undefined;
 
     const appointment = this.mapAppointment(row);
-    const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
+    const serviceItems = appointment.serviceItems?.length
+      ? appointment.serviceItems
+      : this.buildAppointmentServiceItems({ appointmentId: appointment.id, services: [this.mapService(row.service)] });
+    if (!serviceItems.length) throw new Error("Atendimento sem servico para checkout");
+    const servicesRows = await this.prisma.service.findMany({
+      where: {
+        id: { in: serviceItems.map((item) => item.serviceId) },
+        businessId: appointment.unitId,
+        active: true,
+      },
+    });
+    if (servicesRows.length !== new Set(serviceItems.map((item) => item.serviceId)).size) {
+      throw new Error("Servico do atendimento nao encontrado ou inativo");
+    }
+    const servicesById = new Map(servicesRows.map((item) => [item.id, this.mapService(item)]));
     const professional = this.mapProfessional(row.professional);
     const range = monthRange(completedAt);
     const serviceIncomeAgg = await this.prisma.financialEntry.aggregate({
@@ -3470,16 +3521,37 @@ export class PrismaOperationsService {
       },
       _sum: { amount: true },
     });
-    const serviceResult = this.engine.completeAppointment({
-      appointment,
-      service,
-      professional,
-      monthlyProducedValue: asNumber(serviceIncomeAgg._sum.amount),
-      changedBy: input.changedBy,
-      completedAt,
-    });
-    serviceResult.revenue.paymentMethod = paymentMethod;
-    if (notes) serviceResult.revenue.notes = notes;
+    const serviceSubtotal = Number(calculateAppointmentServicesTotal(serviceItems).toFixed(2));
+    let monthlyProducedValue = asNumber(serviceIncomeAgg._sum.amount);
+    const serviceCommissions = serviceItems
+      .map((item) => {
+        const service = servicesById.get(item.serviceId);
+        if (!service) throw new Error("Servico do atendimento nao encontrado ou inativo");
+        const commission = calculateServiceCommission(
+          professional,
+          {
+            ...service,
+            name: item.serviceNameSnapshot,
+            price: Number(item.servicePriceSnapshot),
+            durationMin: Number(item.serviceDurationMinSnapshot),
+          },
+          Number(item.servicePriceSnapshot),
+          monthlyProducedValue,
+          appointment.unitId,
+          appointment.id,
+          completedAt,
+        );
+        monthlyProducedValue += Number(item.servicePriceSnapshot);
+        if (!commission) return null;
+        return {
+          ...commission,
+          appointmentServiceItemId: item.id,
+          idempotencyKey: operationKey
+            ? `${operationKey}:service-commission:${item.position}:${item.serviceId}`
+            : undefined,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
     let saleResult:
       | ReturnType<BarbershopEngine["registerProductSale"]>
@@ -3499,6 +3571,7 @@ export class PrismaOperationsService {
       const sale: ProductSale = {
         id: crypto.randomUUID(),
         unitId: appointment.unitId,
+        appointmentId: appointment.id,
         clientId: appointment.clientId,
         professionalId: appointment.professionalId,
         soldAt: completedAt,
@@ -3523,11 +3596,59 @@ export class PrismaOperationsService {
       if (notes) saleResult.revenue.notes = notes;
     }
 
+    const stockConsumptionRows = await this.prisma.serviceStockConsumption.findMany({
+      where: {
+        unitId: appointment.unitId,
+        serviceId: { in: serviceItems.map((item) => item.serviceId) },
+      },
+      select: {
+        productId: true,
+        quantityPerService: true,
+        wastePct: true,
+        isCritical: true,
+      },
+    });
+    const serviceStockQtyByProduct = new Map<string, number>();
+    for (const row of stockConsumptionRows) {
+      const quantity = computeEffectiveConsumptionQty({
+        productId: row.productId,
+        quantityPerService: asNumber(row.quantityPerService),
+        wastePct: asNumber(row.wastePct),
+        isCritical: row.isCritical,
+      });
+      if (quantity <= 0) continue;
+      serviceStockQtyByProduct.set(row.productId, (serviceStockQtyByProduct.get(row.productId) ?? 0) + quantity);
+    }
+    const serviceStockMovements = Array.from(serviceStockQtyByProduct.entries()).map(([productId, quantity]) => ({
+      id: crypto.randomUUID(),
+      unitId: appointment.unitId,
+      productId,
+      movementType: "OUT" as const,
+      quantity,
+      occurredAt: completedAt,
+      referenceType: "SERVICE_CONSUMPTION" as const,
+      referenceId: appointment.id,
+    }));
+
+    const productSubtotal = Number((saleResult?.revenue.amount ?? 0).toFixed(2));
+    const checkoutRevenue = buildServiceRevenueEntry({
+      unitId: appointment.unitId,
+      appointmentId: appointment.id,
+      amount: serviceSubtotal + productSubtotal,
+      occurredAt: completedAt,
+      description:
+        serviceItems.length === 1
+          ? `Receita de atendimento: ${serviceItems[0].serviceNameSnapshot}`
+          : `Receita de atendimento: ${serviceItems.length} servicos`,
+    });
+    checkoutRevenue.paymentMethod = paymentMethod;
+    checkoutRevenue.professionalId = appointment.professionalId;
+    checkoutRevenue.customerId = appointment.clientId;
+    if (notes) checkoutRevenue.notes = notes;
+
     if (input.expectedTotal != null) {
       const expectedTotal = Number(input.expectedTotal);
-      const computedTotal = Number(
-        ((serviceResult.revenue.amount ?? 0) + (saleResult?.revenue.amount ?? 0)).toFixed(2),
-      );
+      const computedTotal = Number(checkoutRevenue.amount.toFixed(2));
       if (!Number.isFinite(expectedTotal) || Math.abs(computedTotal - expectedTotal) > 0.01) {
         throw new Error(
           `Total inconsistente no checkout. Esperado=${expectedTotal.toFixed(2)}, calculado=${computedTotal.toFixed(2)}`,
@@ -3572,39 +3693,40 @@ export class PrismaOperationsService {
 
       await tx.financialEntry.create({
         data: {
-          id: serviceResult.revenue.id,
-          unitId: serviceResult.revenue.unitId,
-          kind: serviceResult.revenue.kind,
-          source: serviceResult.revenue.source,
-          category: serviceResult.revenue.category ?? "SERVICO",
+          id: checkoutRevenue.id,
+          unitId: checkoutRevenue.unitId,
+          kind: checkoutRevenue.kind,
+          source: checkoutRevenue.source,
+          category: checkoutRevenue.category ?? "SERVICO",
           paymentMethod,
-          amount: serviceResult.revenue.amount,
-          occurredAt: serviceResult.revenue.occurredAt,
-          referenceType: serviceResult.revenue.referenceType,
-          referenceId: serviceResult.revenue.referenceId,
+          amount: checkoutRevenue.amount,
+          occurredAt: checkoutRevenue.occurredAt,
+          referenceType: checkoutRevenue.referenceType,
+          referenceId: checkoutRevenue.referenceId,
           professionalId: appointment.professionalId,
           customerId: appointment.clientId,
-          description: serviceResult.revenue.description,
-          notes: serviceResult.revenue.notes,
+          description: checkoutRevenue.description,
+          notes: checkoutRevenue.notes,
           idempotencyKey: serviceEntryKey,
         },
       });
 
-      if (serviceResult.commission) {
+      for (const commission of serviceCommissions) {
         await tx.commissionEntry.create({
           data: {
-            id: serviceResult.commission.id,
-            professionalId: serviceResult.commission.professionalId,
-            unitId: serviceResult.commission.unitId,
-            appointmentId: serviceResult.commission.appointmentId,
-            source: serviceResult.commission.source,
-            baseAmount: serviceResult.commission.baseAmount,
-            commissionRate: serviceResult.commission.commissionRate,
-            commissionAmount: serviceResult.commission.commissionAmount,
+            id: commission.id,
+            professionalId: commission.professionalId,
+            unitId: commission.unitId,
+            appointmentId: commission.appointmentId,
+            appointmentServiceItemId: commission.appointmentServiceItemId,
+            source: commission.source,
+            baseAmount: commission.baseAmount,
+            commissionRate: commission.commissionRate,
+            commissionAmount: commission.commissionAmount,
             status: "PENDING",
-            occurredAt: serviceResult.commission.occurredAt,
-            ruleId: serviceResult.commission.ruleId,
-            idempotencyKey: serviceCommissionKey,
+            occurredAt: commission.occurredAt,
+            ruleId: commission.ruleId,
+            idempotencyKey: commission.idempotencyKey,
           },
         });
       }
@@ -3614,6 +3736,7 @@ export class PrismaOperationsService {
           data: {
             id: saleResult.sale.id,
             unitId: saleResult.sale.unitId,
+            appointmentId: appointment.id,
             clientId: saleResult.sale.clientId,
             professionalId: saleResult.sale.professionalId,
             grossAmount: saleResult.sale.grossAmount,
@@ -3628,26 +3751,6 @@ export class PrismaOperationsService {
                 unitCost: item.unitCost,
               })),
             },
-          },
-        });
-
-        await tx.financialEntry.create({
-          data: {
-            id: saleResult.revenue.id,
-            unitId: saleResult.revenue.unitId,
-            kind: saleResult.revenue.kind,
-            source: saleResult.revenue.source,
-            category: saleResult.revenue.category ?? "PRODUTO",
-            paymentMethod,
-            amount: saleResult.revenue.amount,
-            occurredAt: saleResult.revenue.occurredAt,
-            referenceType: saleResult.revenue.referenceType,
-            referenceId: saleResult.revenue.referenceId,
-            professionalId: appointment.professionalId,
-            customerId: appointment.clientId,
-            description: saleResult.revenue.description,
-            notes: saleResult.revenue.notes,
-            idempotencyKey: productEntryKey,
           },
         });
 
@@ -3712,6 +3815,48 @@ export class PrismaOperationsService {
         }
       }
 
+      for (const movement of serviceStockMovements) {
+        const currentProduct = await tx.product.findUnique({
+          where: { id: movement.productId },
+          select: { stockQty: true, name: true, active: true },
+        });
+        if (!currentProduct || !currentProduct.active) {
+          throw new Error("Produto de consumo do servico nao encontrado ou inativo");
+        }
+        if (currentProduct.stockQty < movement.quantity) {
+          throw new Error(
+            `Estoque insuficiente para ${currentProduct.name}. Disponivel=${currentProduct.stockQty}, solicitado=${movement.quantity}`,
+          );
+        }
+        await tx.stockMovement.create({
+          data: {
+            id: movement.id,
+            unitId: movement.unitId,
+            productId: movement.productId,
+            movementType: movement.movementType,
+            quantity: movement.quantity,
+            occurredAt: movement.occurredAt,
+            referenceType: movement.referenceType,
+            referenceId: movement.referenceId,
+          },
+        });
+        const stockUpdate = await tx.product.updateMany({
+          where: {
+            id: movement.productId,
+            businessId: appointment.unitId,
+            stockQty: { gte: movement.quantity },
+          },
+          data: {
+            stockQty: {
+              decrement: movement.quantity,
+            },
+          },
+        });
+        if (stockUpdate.count !== 1) {
+          throw new Error("Estoque insuficiente para consumo do servico");
+        }
+      }
+
       await tx.client.update({
         where: { id: appointment.clientId },
         data: { notes: row.client.notes ?? null },
@@ -3737,12 +3882,23 @@ export class PrismaOperationsService {
       const visits90d = clientCompletedAppointments.filter((item) => item.endsAt >= window90).length;
 
       checkoutResponse = {
-        appointment: serviceResult.appointment,
-        serviceRevenue: serviceResult.revenue,
+        appointment: {
+          ...appointment,
+          status: "COMPLETED",
+          history: [
+            ...(appointment.history ?? []),
+            {
+              changedAt: completedAt,
+              changedBy: input.changedBy,
+              action: "COMPLETED",
+            },
+          ],
+        },
+        serviceRevenue: checkoutRevenue,
         productRevenue: saleResult?.revenue,
         sale: saleResult?.sale,
-        stockMovements: saleResult?.stockMovements ?? [],
-        commissions: [serviceResult.commission, saleResult?.commission].filter(Boolean),
+        stockMovements: [...(saleResult?.stockMovements ?? []), ...serviceStockMovements],
+        commissions: [...serviceCommissions, saleResult?.commission].filter(Boolean),
         clientMetrics: {
           lastVisitAt: clientCompletedAppointments[0]?.endsAt ?? completedAt,
           totalSpent: Number(asNumber(clientTotalSpentAgg._sum.amount).toFixed(2)),
@@ -3764,9 +3920,10 @@ export class PrismaOperationsService {
                   (acc, item) => acc + Number(item.quantity || 0),
                   0,
                 ),
+                serviceStockMovements: serviceStockMovements.length,
                 paymentMethod,
-                totalService: Number(serviceResult.revenue.amount ?? 0),
-                totalProduct: Number(saleResult?.revenue.amount ?? 0),
+                totalService: serviceSubtotal,
+                totalProduct: productSubtotal,
                 clientFrequency90d: visits90d,
               },
             }
@@ -3889,17 +4046,29 @@ export class PrismaOperationsService {
         });
         if (existingRefund) throw new Error("Atendimento ja estornado");
 
-        const appointmentCommissions = await tx.commissionEntry.findMany({
+        const appointmentProductSale = await tx.productSale.findFirst({
           where: {
             unitId: input.unitId,
             appointmentId: appointment.id,
-            source: "SERVICE",
+          },
+          include: { items: true },
+        });
+        const appointmentCommissions = await tx.commissionEntry.findMany({
+          where: {
+            unitId: input.unitId,
+            OR: [
+              { appointmentId: appointment.id, source: "SERVICE" },
+              appointmentProductSale
+                ? { productSaleId: appointmentProductSale.id, source: "PRODUCT" }
+                : { id: "__no_product_sale_commission__" },
+            ],
           },
           select: {
             id: true,
             status: true,
             professionalId: true,
             appointmentId: true,
+            productSaleId: true,
             baseAmount: true,
             commissionRate: true,
             commissionAmount: true,
@@ -3915,6 +4084,7 @@ export class PrismaOperationsService {
           id: crypto.randomUUID(),
           unitId: input.unitId,
           appointmentId: appointment.id,
+          productSaleId: appointmentProductSale?.id,
           totalAmount: Number(asNumber(originalRevenue.amount).toFixed(2)),
           reason,
           refundedAt: input.refundedAt,
@@ -3939,6 +4109,7 @@ export class PrismaOperationsService {
             id: refund.id,
             unitId: refund.unitId,
             appointmentId: refund.appointmentId,
+            productSaleId: refund.productSaleId,
             totalAmount: refund.totalAmount,
             reason: refund.reason,
             refundedAt: refund.refundedAt,
@@ -3974,6 +4145,53 @@ export class PrismaOperationsService {
             reason,
           },
         });
+        const productRefundStockMovements = appointmentProductSale
+          ? buildStockMovementsFromProductRefund({
+              unitId: input.unitId,
+              refundId: refund.id,
+              occurredAt: input.refundedAt,
+              items: appointmentProductSale.items.map((item) => ({
+                productId: item.productId,
+                quantity: item.quantity,
+              })),
+            })
+          : [];
+        if (appointmentProductSale) {
+          for (const item of appointmentProductSale.items) {
+            await tx.refundItem.create({
+              data: {
+                id: crypto.randomUUID(),
+                refundId: refund.id,
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                amount: Number((asNumber(item.unitPrice) * item.quantity).toFixed(2)),
+              },
+            });
+          }
+        }
+        for (const movement of productRefundStockMovements) {
+          await tx.stockMovement.create({
+            data: {
+              id: movement.id,
+              unitId: movement.unitId,
+              productId: movement.productId,
+              movementType: movement.movementType,
+              quantity: movement.quantity,
+              occurredAt: movement.occurredAt,
+              referenceType: movement.referenceType,
+              referenceId: movement.referenceId,
+            },
+          });
+          await tx.product.update({
+            where: { id: movement.productId },
+            data: {
+              stockQty: {
+                increment: movement.quantity,
+              },
+            },
+          });
+        }
         const pendingAppointmentCommissions = appointmentCommissions.filter(
           (commission) => commission.status === "PENDING",
         );
@@ -4008,12 +4226,13 @@ export class PrismaOperationsService {
         response = {
           refund,
           financialEntry,
-          stockMovements: [],
+          stockMovements: productRefundStockMovements,
           canceledCommissions: pendingAppointmentCommissions.map((item) => ({
             id: item.id,
             status: "CANCELED",
             professionalId: item.professionalId,
             appointmentId: item.appointmentId,
+            productSaleId: item.productSaleId,
             source: item.source,
             baseAmount: Number(asNumber(item.baseAmount).toFixed(2)),
             commissionRate:
@@ -6688,6 +6907,7 @@ export class PrismaOperationsService {
         where: {
           unitId: input.unitId,
           occurredAt: { gte: period.start, lte: period.end },
+          status: { not: "CANCELED" },
         },
         _sum: {
           commissionAmount: true,
@@ -6775,24 +6995,30 @@ export class PrismaOperationsService {
             price: true,
           },
         },
+        serviceItems: { orderBy: { position: "asc" } },
       },
-    });
-    const serviceIncomeByAppointment = await this.getAppointmentServiceIncomeMap({
-      unitId: input.unitId,
-      appointmentIds: completed.map((item) => item.id),
     });
 
     const map = new Map<string, { serviceId: string; name: string; quantity: number; revenue: number }>();
     for (const appointment of completed) {
-      const current = map.get(appointment.service.id) ?? {
-        serviceId: appointment.service.id,
-        name: appointment.service.name,
-        quantity: 0,
-        revenue: 0,
-      };
-      current.quantity += 1;
-      current.revenue += serviceIncomeByAppointment.get(appointment.id) ?? asNumber(appointment.service.price);
-      map.set(appointment.service.id, current);
+      const serviceItems = appointment.serviceItems.length
+        ? appointment.serviceItems
+        : [{
+            serviceId: appointment.service.id,
+            serviceNameSnapshot: appointment.service.name,
+            servicePriceSnapshot: appointment.service.price,
+          }];
+      for (const serviceItem of serviceItems) {
+        const current = map.get(serviceItem.serviceId) ?? {
+          serviceId: serviceItem.serviceId,
+          name: serviceItem.serviceNameSnapshot,
+          quantity: 0,
+          revenue: 0,
+        };
+        current.quantity += 1;
+        current.revenue += asNumber(serviceItem.servicePriceSnapshot);
+        map.set(serviceItem.serviceId, current);
+      }
     }
 
     const totalRevenue = Array.from(map.values()).reduce((acc, item) => acc + item.revenue, 0);
@@ -9114,14 +9340,19 @@ export class PrismaOperationsService {
   async suggestAppointmentAlternatives(input: {
     unitId: string;
     professionalId: string;
-    serviceId: string;
+    serviceId?: string;
+    serviceIds?: string[];
     startsAt: Date;
     windowHours?: number;
   }) {
-    const [serviceRow, professionalRow, settings, businessHours, unitRow] = await Promise.all([
-      this.prisma.service.findFirst({
-        where: { id: input.serviceId, businessId: input.unitId },
-        select: { id: true, active: true, durationMin: true },
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const [serviceRows, activeCombinationRules, professionalRow, settings, businessHours, unitRow] = await Promise.all([
+      this.prisma.service.findMany({
+        where: { id: { in: serviceIds }, businessId: input.unitId },
+      }),
+      this.prisma.serviceCombinationRule.findMany({
+        where: { unitId: input.unitId, active: true },
+        include: { items: true },
       }),
       this.prisma.professional.findFirst({
         where: { id: input.professionalId, businessId: input.unitId },
@@ -9132,19 +9363,34 @@ export class PrismaOperationsService {
       this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
     ]);
 
-    if (!serviceRow || !serviceRow.active) {
+    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
+    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
+    if (orderedServices.some((item) => !item || !item.active)) {
       throw new Error("Servico nao encontrado ou inativo");
     }
     if (!professionalRow || !professionalRow.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
-    await this.assertProfessionalCanExecuteService(serviceRow.id, professionalRow.id);
+    for (const serviceId of serviceIds) {
+      await this.assertProfessionalCanExecuteService(serviceId, professionalRow.id);
+    }
+    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+      this.mapService(item),
+    );
+    const serviceItems = this.buildAppointmentServiceItems({
+      appointmentId: "appointment-suggestions-preview",
+      services,
+    });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.mapCombinationRules(activeCombinationRules),
+    });
 
     const windowHours = Math.min(Math.max(input.windowHours ?? 6, 1), 24);
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = (serviceRow.durationMin + bufferAfterMin) * 60_000;
+    const durationMs = (duration.effectiveDurationMin + bufferAfterMin) * 60_000;
     const stepMs = 15 * 60_000;
 
     const overlappingRows = await this.prisma.appointment.findMany({
@@ -9180,7 +9426,7 @@ export class PrismaOperationsService {
           unitId: input.unitId,
           startsAt,
           endsAt,
-          serviceDurationMin: serviceRow.durationMin,
+          serviceDurationMin: duration.effectiveDurationMin,
           bufferAfterMin,
           settings,
           businessHours: businessHours.map((item) => ({
@@ -9397,6 +9643,7 @@ export class PrismaOperationsService {
         where: {
           unitId: input.unitId,
           occurredAt: { gte: month.start, lt: month.end },
+          status: { not: "CANCELED" },
         },
         include: {
           professional: {
@@ -10111,6 +10358,7 @@ export class PrismaOperationsService {
           where: {
             unitId: input.unitId,
             occurredAt: { gte: input.start, lte: input.end },
+            status: { not: "CANCELED" },
           },
           select: {
             professionalId: true,
@@ -10325,6 +10573,7 @@ export class PrismaOperationsService {
     active: boolean;
     createdAt: Date;
     updatedAt: Date;
+    professionals?: Array<{ professionalId: string }>;
   }): Service {
     return {
       id: item.id,
@@ -10337,6 +10586,7 @@ export class PrismaOperationsService {
       defaultCommissionRate: asNumber(item.defaultCommissionRate),
       costEstimate: asNumber(item.costEstimate),
       notes: item.notes ?? undefined,
+      enabledProfessionalIds: item.professionals?.map((row) => row.professionalId) ?? undefined,
       active: item.active,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,

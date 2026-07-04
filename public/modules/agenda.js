@@ -2,6 +2,10 @@ import {
   renderEmptyState,
   renderStatusChip,
 } from "../components/operational-ui.js";
+import {
+  buildServiceSelectionLabel,
+  normalizeAppointmentServiceItems,
+} from "./appointment-service-selection.js";
 
 function asNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -58,9 +62,10 @@ const statusLabel = {
 
 const actionLabel = {
   DETAIL: "Detalhes",
+  EDIT: "Editar",
   CONFIRMED: "Confirmar",
-  IN_SERVICE: "Iniciar",
-  COMPLETE: "Finalizar atendimento",
+  IN_SERVICE: "Iniciar atendimento",
+  COMPLETE: "Concluir",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
@@ -103,10 +108,10 @@ function actionButtonClass(action) {
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return ["CONFIRMED", "DETAIL", "CANCELLED"];
+    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", "CANCELLED"].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return ["IN_SERVICE", "DETAIL", "NO_SHOW", "CANCELLED"];
+    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "NO_SHOW", "CANCELLED"].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
     return canCheckout ? ["COMPLETE", "DETAIL", "CANCELLED"] : ["DETAIL", "CANCELLED"];
@@ -126,21 +131,32 @@ export function normalizeAgendaItems(payload) {
       const startsAt = normalizeDate(item.startsAt);
       const endsAt = normalizeDate(item.endsAt);
       if (!startsAt || !endsAt) return null;
+      const serviceItems = normalizeAppointmentServiceItems(item);
+      const service = buildServiceSelectionLabel(serviceItems, nestedText(item.service, ["name"], "-"));
+      const effectiveDuration = asNumber(
+        item.effectiveDurationMinSnapshot ?? item.effectiveDurationMin ?? item.serviceDurationMin,
+        Math.max(15, Math.round((endsAt - startsAt) / 60000)),
+      );
       return {
         id: safeText(item.id),
         unitId: safeText(item.unitId),
         clientId: safeText(item.clientId) || nestedId(item.client),
         professionalId: safeText(item.professionalId) || nestedId(item.professional),
-        serviceId: safeText(item.serviceId) || nestedId(item.service),
+        serviceId: serviceItems[0]?.serviceId || safeText(item.serviceId) || nestedId(item.service),
+        serviceItems,
         client: nestedText(item.client, ["fullName", "name"], "Cliente"),
         professional: nestedText(item.professional, ["name", "fullName"], "-"),
-        service: nestedText(item.service, ["name"], "-"),
+        service,
         startsAt,
         endsAt,
         status: safeText(item.status, "SCHEDULED"),
         isFitting: Boolean(item.isFitting),
-        servicePrice: asNumber(item.servicePrice, nestedNumber(item.service, ["price"])),
-        serviceDurationMin: asNumber(item.serviceDurationMin, nestedNumber(item.service, ["durationMin", "durationMinutes"])),
+        servicePrice: asNumber(
+          item.totalPriceSnapshot ?? item.totalPrice ?? item.servicePrice,
+          serviceItems.reduce((acc, serviceItem) => acc + asNumber(serviceItem.price), nestedNumber(item.service, ["price"])),
+        ),
+        serviceDurationMin: effectiveDuration,
+        durationRuleLabel: safeText(item.durationRuleLabelSnapshot || item.ruleLabel),
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
         hasProductSale: Boolean(item.hasProductSale),
         productSalesCount: asNumber(item.productSalesCount),
@@ -155,7 +171,11 @@ export function filterAgendaItems(items, filterState) {
   return items.filter((item) => {
     if (filterState.professionalId && item.professionalId !== filterState.professionalId) return false;
     if (filterState.status && item.status !== filterState.status) return false;
-    if (filterState.serviceId && item.serviceId !== filterState.serviceId) return false;
+    if (
+      filterState.serviceId &&
+      item.serviceId !== filterState.serviceId &&
+      !(Array.isArray(item.serviceItems) && item.serviceItems.some((serviceItem) => serviceItem.serviceId === filterState.serviceId))
+    ) return false;
     if (!search) return true;
     const text = `${item.client} ${item.professional} ${item.service}`.toLowerCase();
     return text.includes(search);
@@ -273,7 +293,10 @@ function renderAgendaList(elements, list, handlers) {
         hour: "2-digit",
         minute: "2-digit",
       });
-      const actions = actionsForStatus(item.status, { canCheckout: handlers?.canCheckout });
+      const actions = actionsForStatus(item.status, {
+        canCheckout: handlers?.canCheckout !== false,
+        canEdit: handlers?.canEdit,
+      });
       const clientTag = item.clientTags[0] || "NEW";
       const clientTagLabel =
         clientTag === "VIP"
@@ -306,7 +329,7 @@ function renderAgendaList(elements, list, handlers) {
             ${actions
               .map(
                 (action) =>
-                  `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${actionLabel[action] || action}</button>`,
+                  `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel[action] || action}</button>`,
               )
               .join("")}
           </div>

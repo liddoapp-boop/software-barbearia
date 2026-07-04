@@ -364,7 +364,7 @@ export function renderFinancialData(elements, payload) {
 
     const outgoingParts = [];
     if (operational > 0) outgoingParts.push(`${money(operational)} operacional`);
-    if (paidCommissions > 0) outgoingParts.push(`${money(paidCommissions)} comissoes`);
+    if (paidCommissions > 0 && pendingCommissions > 0) outgoingParts.push(`${money(paidCommissions)} comissoes`);
     if (refunds > 0) outgoingParts.push(`${money(refunds)} estornos`);
     const outgoingSubtitle = outgoingParts.length
       ? outgoingParts.join(" · ")
@@ -372,7 +372,7 @@ export function renderFinancialData(elements, payload) {
 
     const projectedSubtitle = pendingCommissions > 0
       ? `Apos ${money(pendingCommissions)} de comissoes a pagar`
-      : "Sem comissoes pendentes";
+      : "Receitas menos saidas";
 
     const incomingSubtitle = ticketAverage > 0
       ? `Ticket medio ${money(ticketAverage)}`

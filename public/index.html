@@ -185,17 +185,38 @@
                         <input type="hidden" id="clientId" />
                       </div>
                     </label>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
-                      <label class="sched-label">Profissional
-                        <select id="professionalId" required class="sched-select" style="margin-top:6px"></select>
-                      </label>
-                      <label class="sched-label">Servico
-                        <select id="serviceId" required class="sched-select" style="margin-top:6px"></select>
-                      </label>
-                    </div>
+                    <section class="appointment-services-step" aria-labelledby="appointmentServicesTitle">
+                      <div class="appointment-step-head">
+                        <div>
+                          <p id="appointmentServicesTitle" class="appointment-step-title">Servicos</p>
+                          <p class="appointment-step-sub">Escolha um ou mais servicos para este horario.</p>
+                        </div>
+                      </div>
+                      <input type="hidden" id="serviceId" />
+                      <div id="serviceSelectionMount" class="svc-select-shell" aria-live="polite"></div>
+                    </section>
+                    <section class="appointment-professional-step" aria-labelledby="appointmentProfessionalTitle">
+                      <div class="appointment-step-head">
+                        <div>
+                          <p id="appointmentProfessionalTitle" class="appointment-step-title">Profissional</p>
+                          <p class="appointment-step-sub">Definido automaticamente pelos servicos selecionados.</p>
+                        </div>
+                      </div>
+                      <select id="professionalId" required class="sched-select sr-only"></select>
+                      <div id="professionalSelectionMount" class="professional-auto-box" aria-live="polite"></div>
+                    </section>
                     <label class="sched-label" style="display:block;margin-top:14px">Data e Hora
                       <input type="datetime-local" id="startsAt" required class="sched-input" style="margin-top:6px" />
                     </label>
+                    <section class="appointment-summary-step" aria-labelledby="appointmentSummaryTitle">
+                      <div class="appointment-step-head">
+                        <div>
+                          <p id="appointmentSummaryTitle" class="appointment-step-title">Resumo</p>
+                          <p class="appointment-step-sub">Confira quantidade, total e duracao antes de confirmar.</p>
+                        </div>
+                      </div>
+                      <div id="appointmentSummaryMount" aria-live="polite"></div>
+                    </section>
                     <div id="clientInsights" class="sched-info-block" style="margin-top:14px">
                       Selecione um cliente para ver historico resumido e perfil.
                     </div>
@@ -884,10 +905,6 @@
                 <div class="svc-modal-field">
                   <label for="servicesEstimatedCost">Custo estimado (R$)</label>
                   <input id="servicesEstimatedCost" type="number" min="0" step="0.01" placeholder="0,00" class="svc-modal-input" />
-                </div>
-                <div class="svc-modal-field">
-                  <label for="servicesDefaultCommissionRate">Comissao padrao (%)</label>
-                  <input id="servicesDefaultCommissionRate" type="number" min="0" max="100" step="0.1" placeholder="0" class="svc-modal-input" />
                 </div>
               </div>
             </div>

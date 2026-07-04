@@ -24,7 +24,6 @@ const SETTINGS_SECTIONS = [
   { id: "hours", title: "Horários", description: "Funcionamento semanal usado pela agenda." },
   { id: "payments", title: "Pagamentos", description: "Métodos aceitos, status e padrão de recebimento." },
   { id: "team", title: "Equipe", description: "Pessoas, funções e perfis de acesso cadastrados." },
-  { id: "commissions", title: "Comissões", description: "Regra da casa e exceções por profissional ou serviço." },
   { id: "schedule", title: "Agenda", description: "Preferências operacionais de duração, antecedência e encaixes." },
   { id: "operations", title: "Parâmetros", description: "Clientes em risco, inativos, lembretes e sobreposições." },
   { id: "usuario", title: "Usuário", description: "Perfil, aparência e segurança da conta." },
@@ -32,7 +31,7 @@ const SETTINGS_SECTIONS = [
 
 const SETTINGS_GROUPS = [
   { title: "Operação", sections: ["business", "hours", "schedule", "operations"] },
-  { title: "Recebimento", sections: ["payments", "commissions"] },
+  { title: "Recebimento", sections: ["payments"] },
   { title: "Conta e sistema", sections: ["team", "usuario"] },
 ];
 
@@ -207,7 +206,7 @@ function settingsSectionRow({ id, title, description, status = "", facts = [], w
 function renderSettingsNavigator(sectionMap = {}, business = {}) {
   const groups = [
     { title: "Operação", count: 4, sections: ["business", "hours", "schedule", "operations"] },
-    { title: "Recebimento", count: 2, sections: ["payments", "commissions"] },
+    { title: "Recebimento", count: 1, sections: ["payments"] },
     { title: "Time e sistema", count: 3, sections: ["team", "security", "appearance"] },
   ];
   const openDays = sectionMap.hours?.facts?.[0]?.value || "0 dia(s)";

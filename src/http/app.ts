@@ -755,9 +755,24 @@ export function createApp() {
   const suggestionsSchema = z.object({
     unitId: z.string().min(1),
     professionalId: z.string().min(1),
-    serviceId: z.string().min(1),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
     startsAt: z.string().datetime(),
     windowHours: z.number().int().min(1).max(24).optional(),
+  }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico para consultar horarios",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
+  });
+
+  const appointmentServicesPreviewSchema = z.object({
+    unitId: z.string().min(1),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES).optional(),
+  }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico para calcular o resumo",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
   });
 
   const appointmentsListQuerySchema = z.object({
@@ -2564,12 +2579,25 @@ export function createApp() {
     return { appointment };
   });
 
+  app.post("/appointments/services/preview", async (request) => {
+    const body = appointmentServicesPreviewSchema.parse(request.body);
+    if (
+      !("previewAppointmentServices" in operations) ||
+      typeof operations.previewAppointmentServices !== "function"
+    ) {
+      throw new Error("Resumo de servicos do agendamento indisponivel");
+    }
+    const summary = await operations.previewAppointmentServices(body);
+    return { summary };
+  });
+
   app.post("/appointments/suggestions", async (request) => {
     const body = suggestionsSchema.parse(request.body);
     const suggestions = await operations.suggestAppointmentAlternatives({
       unitId: body.unitId,
       professionalId: body.professionalId,
       serviceId: body.serviceId,
+      serviceIds: body.serviceIds,
       startsAt: new Date(body.startsAt),
       windowHours: body.windowHours,
     });
@@ -5089,7 +5117,6 @@ export function createApp() {
       const errorCode = (error as Error & { code?: string }).code;
       const isUniqueConstraint = errorCode === "P2002";
       const isWriteConflict = errorCode === "P2034";
-      const isBusinessConflict = errorCode === "MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE";
       const message = isUniqueConstraint
         ? "Conflito: operacao critica ja processada para esta origem"
         : isWriteConflict
@@ -5097,7 +5124,7 @@ export function createApp() {
         : error.message || "Erro inesperado";
       const normalized = message.toLowerCase();
       const statusCode =
-        isUniqueConstraint || isWriteConflict || isBusinessConflict
+        isUniqueConstraint || isWriteConflict
           ? 409
           : normalized.includes("nao autenticado") ||
         normalized.includes("token invalido") ||
@@ -5119,10 +5146,7 @@ export function createApp() {
             ? 422
             : 400;
 
-      reply.status(statusCode).send({
-        error: message,
-        ...(isBusinessConflict ? { code: errorCode } : {}),
-      });
+      reply.status(statusCode).send({ error: message });
     },
   );
 

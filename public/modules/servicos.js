@@ -234,7 +234,7 @@ export function renderServicesData(elements, payload = {}) {
   if (!services.length) {
     elements.tableWrap.innerHTML = renderEmptyState({
       title: "Nenhum servico encontrado.",
-      description: "Ajuste os filtros ou cadastre um servico para alimentar agenda, checkout e comissoes.",
+      description: "Ajuste os filtros ou cadastre um servico para alimentar agenda e checkout.",
       action: renderPrimaryAction({
         label: "Adicionar primeiro servico",
         attrs: { "data-service-action": "create-empty", "data-service-id": "new" },
@@ -352,7 +352,6 @@ export function renderServiceDetail(elements, payload = null) {
             <div class="team-info-grid">
               <div><span>Preco</span><strong>${escapeHtml(money(service.price))}</strong></div>
               <div><span>Duracao</span><strong>${escapeHtml(String(toNumber(service.durationMinutes)))} min</strong></div>
-              <div><span>Comissao padrao</span><strong>${escapeHtml(pct(service.defaultCommissionRate))}</strong></div>
               <div><span>Custo estimado</span><strong>${escapeHtml(money(service.estimatedCost))}</strong></div>
               <div><span>Margem estimada</span><strong style="color:${marginColor(service)}">${escapeHtml(money(service.estimatedMargin))} (${escapeHtml(pct(service.estimatedMarginPct))})</strong></div>
               <div><span>Ultima venda</span><strong>${escapeHtml(formatDateTime(usage.lastSoldAt || service.lastCompletedAt))}</strong></div>
@@ -458,10 +457,6 @@ export function renderServiceEditPanel(elements, service = {}, professionals = [
                 <label for="svcEditCategory">Categoria</label>
                 <input id="svcEditCategory" type="text" maxlength="120" value="${escapeHtml(service.category || "")}" class="svc-edit-input" />
               </div>
-              <div class="svc-edit-field">
-                <label for="svcEditCommission">Comissao padrao (%)</label>
-                <input id="svcEditCommission" type="number" min="0" max="100" step="0.1" value="${escapeHtml(String(toNumber(service.defaultCommissionRate)))}" class="svc-edit-input" />
-              </div>
             </div>
 
             <div class="svc-edit-row">
@@ -555,7 +550,7 @@ export function renderServiceEditPanel(elements, service = {}, professionals = [
         durationMinutes,
         category: elements.drawerHost.querySelector("#svcEditCategory")?.value.trim() || undefined,
         description: elements.drawerHost.querySelector("#svcEditDescription")?.value.trim() || undefined,
-        defaultCommissionRate: Number(elements.drawerHost.querySelector("#svcEditCommission")?.value || 0),
+        defaultCommissionRate: 0,
         estimatedCost: Number(elements.drawerHost.querySelector("#svcEditCost")?.value || 0),
         isActive: elements.drawerHost.querySelector("#svcEditStatus")?.value === "true",
         notes: elements.drawerHost.querySelector("#svcEditNotes")?.value.trim() || undefined,

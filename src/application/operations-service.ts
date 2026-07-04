@@ -57,16 +57,15 @@ import {
   ACTIVE_APPOINTMENT_CONFLICT_STATUSES,
   buildCommissionPaymentExpenseEntry,
   buildProductRefundExpenseEntry,
+  buildServiceRevenueEntry,
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
+  calculateServiceCommission,
   hasAppointmentConflict,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
-  createBusinessRuleError,
-  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
-  MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
   normalizeServiceIds,
   resolveEffectiveAppointmentDuration,
   resolveLegacyPrimaryServiceId,
@@ -284,9 +283,13 @@ export class OperationsService {
         .map((assignment) => assignment.professionalId),
     );
     return {
-      services: unitId
+      services: (unitId
         ? this.store.services.filter((service) => this.isServiceFromUnit(service, unitId))
-        : this.store.services,
+        : this.store.services
+      ).map((service) => ({
+        ...service,
+        enabledProfessionalIds: this.getServiceProfessionalIds(service.id),
+      })),
       professionals: unitId
         ? this.store.professionals.filter(
             (professional) =>
@@ -296,9 +299,10 @@ export class OperationsService {
       clients: unitId
         ? this.store.clients.filter((client) => ((client as typeof client & { businessId?: string }).businessId ?? unitId) === unitId)
         : this.store.clients,
-      products: unitId
+      products: (unitId
         ? this.store.products.filter((product) => ((product as typeof product & { businessId?: string }).businessId ?? unitId) === unitId)
-        : this.store.products,
+        : this.store.products
+      ).filter((product) => product.active && Number(product.stockQty ?? 0) > 0),
     };
   }
 
@@ -451,7 +455,7 @@ export class OperationsService {
       allowOutOfHoursAppointments: false,
       allowOverbooking: false,
       houseCommissionType: "PERCENTAGE",
-      houseCommissionValue: 40,
+      houseCommissionValue: 0,
       themeMode: "system",
       createdAt: now,
       updatedAt: now,
@@ -495,30 +499,18 @@ export class OperationsService {
     const existing = this.store.businessTeamMembers.filter((item) => item.unitId === unitId);
     if (existing.length) return existing;
     const now = new Date();
-    const owner: BusinessTeamMember = {
+    const geovaneOwner: BusinessTeamMember = {
       id: crypto.randomUUID(),
       unitId,
-      name: "Dono",
+      name: "Geovane Borges",
       role: "OWNER",
       accessProfile: "owner",
       isActive: true,
       createdAt: now,
       updatedAt: now,
     };
-    const professionals: BusinessTeamMember[] = this.store.professionals.map((item) => ({
-      id: crypto.randomUUID(),
-      unitId,
-      name: item.name,
-      role: "PROFESSIONAL",
-      accessProfile: "profissional",
-      email: undefined,
-      phone: undefined,
-      isActive: item.active,
-      createdAt: now,
-      updatedAt: now,
-    }));
-    this.store.businessTeamMembers.push(owner, ...professionals);
-    return [owner, ...professionals];
+    this.store.businessTeamMembers.push(geovaneOwner);
+    return [geovaneOwner];
   }
 
   private mapBusinessSettingsView(settings: BusinessSettings) {
@@ -2096,6 +2088,40 @@ export class OperationsService {
     return appointment;
   }
 
+  previewAppointmentServices(input: {
+    unitId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+  }) {
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const services = this.resolveServicesForAppointment({ unitId: input.unitId, serviceIds });
+    const serviceItems = this.buildAppointmentServiceItems({
+      appointmentId: "appointment-preview",
+      services,
+    });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.store.serviceCombinationRules.filter(
+        (rule) => rule.unitId === input.unitId && rule.active,
+      ),
+    });
+    const eligibleProfessionals = this.store.professionals
+      .filter((professional) => professional.businessId === input.unitId && professional.active)
+      .filter((professional) =>
+        serviceIds.every((serviceId) => this.canProfessionalExecuteService(serviceId, professional.id)),
+      );
+    return {
+      serviceIds,
+      serviceItems,
+      totalPriceSnapshot: calculateAppointmentServicesTotal(serviceItems),
+      effectiveDurationMin: duration.effectiveDurationMin,
+      calculationMode: duration.calculationMode,
+      ruleId: duration.matchedRuleId,
+      ruleLabel: duration.matchedRuleLabel,
+      eligibleProfessionalIds: eligibleProfessionals.map((item) => item.id),
+    };
+  }
+
   reschedule(input: {
     appointmentId: string;
     unitId?: string;
@@ -2249,6 +2275,7 @@ export class OperationsService {
 
   registerProductSale(input: {
     unitId: string;
+    appointmentId?: string;
     professionalId?: string;
     clientId?: string;
     soldAt: Date;
@@ -2273,6 +2300,7 @@ export class OperationsService {
     const sale: ProductSale = {
       id: crypto.randomUUID(),
       unitId: input.unitId,
+      appointmentId: input.appointmentId,
       clientId: input.clientId,
       professionalId: input.professionalId,
       items: input.items.map((item) => {
@@ -2445,12 +2473,6 @@ export class OperationsService {
     const appointment = this.store.appointments.find((item) => item.id === input.appointmentId);
     if (!appointment) throw new Error("Agendamento nao encontrado");
     if (input.unitId && appointment.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
-    if (this.getAppointmentServiceItemCount(appointment) > 1) {
-      throw createBusinessRuleError(
-        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE_MESSAGE,
-        MULTI_SERVICE_CHECKOUT_NOT_AVAILABLE,
-      );
-    }
     const checkoutScope = this.idempotencyScope({
       unitId: appointment.unitId,
       action: "APPOINTMENT_CHECKOUT",
@@ -2470,6 +2492,7 @@ export class OperationsService {
     }>(checkoutScope);
     if (checkoutReplay) return checkoutReplay;
     if (appointment.status === "COMPLETED") throw new Error("Atendimento ja finalizado");
+    if (appointment.status !== "IN_SERVICE") throw new Error("Atendimento precisa estar em andamento para concluir");
 
     const paymentMethod = String(input.paymentMethod || "").trim();
     if (!paymentMethod) throw new Error("Metodo de pagamento obrigatorio");
@@ -2485,14 +2508,51 @@ export class OperationsService {
 
     this.startMemoryIdempotency(checkoutScope);
     try {
-      const serviceResult = this.complete({
-        appointmentId: input.appointmentId,
-        unitId: input.unitId,
-        changedBy: input.changedBy,
-        completedAt: input.completedAt,
-      });
-      serviceResult.revenue.paymentMethod = paymentMethod;
-      if (input.notes) serviceResult.revenue.notes = String(input.notes).trim();
+      const serviceItems = this.getAppointmentServiceItems(appointment);
+      if (!serviceItems.length) throw new Error("Atendimento sem servico para checkout");
+      const professional = this.store.professionals.find((item) => item.id === appointment.professionalId);
+      if (!professional) throw new Error("Profissional nao encontrado");
+      const serviceSubtotal = Number(calculateAppointmentServicesTotal(serviceItems).toFixed(2));
+      const monthlyProducedBase = this.store.financialEntries
+        .filter(
+          (item) =>
+            item.kind === "INCOME" &&
+            item.source === "SERVICE" &&
+            item.occurredAt.getMonth() === input.completedAt.getMonth() &&
+            item.occurredAt.getFullYear() === input.completedAt.getFullYear(),
+        )
+        .reduce((acc, item) => acc + item.amount, 0);
+      let monthlyProducedValue = monthlyProducedBase;
+      const serviceCommissions = serviceItems
+        .map((item) => {
+          const service = this.store.services.find((row) => row.id === item.serviceId && row.active);
+          if (!service) throw new Error("Servico do atendimento nao encontrado ou inativo");
+          const commission = calculateServiceCommission(
+            professional,
+            {
+              ...service,
+              name: item.serviceNameSnapshot,
+              price: Number(item.servicePriceSnapshot),
+              durationMin: Number(item.serviceDurationMinSnapshot),
+            },
+            Number(item.servicePriceSnapshot),
+            monthlyProducedValue,
+            appointment.unitId,
+            appointment.id,
+            input.completedAt,
+          );
+          monthlyProducedValue += Number(item.servicePriceSnapshot);
+          return commission
+            ? {
+                ...commission,
+                appointmentServiceItemId: item.id,
+                idempotencyKey: checkoutScope
+                  ? `${checkoutScope.idempotencyKey}:service-commission:${item.position}:${item.serviceId}`
+                  : undefined,
+              }
+            : null;
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
       const groupedProducts = new Map<string, number>();
       const rawCheckoutProducts = Array.isArray(input.products)
@@ -2512,6 +2572,7 @@ export class OperationsService {
       if (checkoutProducts.length > 0) {
         saleResult = this.registerProductSale({
           unitId: appointment.unitId,
+          appointmentId: appointment.id,
           professionalId: appointment.professionalId,
           clientId: appointment.clientId,
           soldAt: input.completedAt,
@@ -2519,18 +2580,69 @@ export class OperationsService {
         });
         saleResult.revenue.paymentMethod = paymentMethod;
         if (input.notes) saleResult.revenue.notes = String(input.notes).trim();
+        this.store.financialEntries = this.store.financialEntries.filter(
+          (entry) => entry.id !== saleResult?.revenue.id,
+        );
       }
+
+      const productSubtotal = Number((saleResult?.revenue.amount ?? 0).toFixed(2));
+      const serviceRevenue = buildServiceRevenueEntry({
+        unitId: appointment.unitId,
+        appointmentId: appointment.id,
+        amount: serviceSubtotal + productSubtotal,
+        occurredAt: input.completedAt,
+        description:
+          serviceItems.length === 1
+            ? `Receita de atendimento: ${serviceItems[0].serviceNameSnapshot}`
+            : `Receita de atendimento: ${serviceItems.length} servicos`,
+      });
+      serviceRevenue.paymentMethod = paymentMethod;
+      serviceRevenue.professionalId = appointment.professionalId;
+      serviceRevenue.customerId = appointment.clientId;
+      if (input.notes) serviceRevenue.notes = String(input.notes).trim();
 
       if (input.expectedTotal != null) {
         const expectedTotal = Number(input.expectedTotal);
-        const computedTotal = Number(
-          ((serviceResult.revenue.amount ?? 0) + (saleResult?.revenue.amount ?? 0)).toFixed(2),
-        );
+        const computedTotal = Number(serviceRevenue.amount.toFixed(2));
         if (!Number.isFinite(expectedTotal) || Math.abs(computedTotal - expectedTotal) > 0.01) {
           throw new Error(
             `Total inconsistente no checkout. Esperado=${expectedTotal.toFixed(2)}, calculado=${computedTotal.toFixed(2)}`,
           );
         }
+      }
+
+      const completedAppointment = {
+        ...appointment,
+        status: "COMPLETED" as const,
+        history: [
+          ...appointment.history,
+          {
+            changedAt: input.completedAt,
+            changedBy: input.changedBy,
+            action: "COMPLETED" as const,
+          },
+        ],
+      };
+      this.replaceAppointment(completedAppointment);
+      this.store.financialEntries.push(serviceRevenue);
+      this.store.commissionEntries.push(...serviceCommissions);
+      const stockConsumptionItems = serviceItems.flatMap((item) => {
+        const consumption = this.applyServiceStockConsumption({
+          unitId: appointment.unitId,
+          serviceId: item.serviceId,
+          appointmentId: appointment.id,
+          occurredAt: input.completedAt,
+        });
+        return consumption.items;
+      });
+      if (stockConsumptionItems.length > 0) {
+        stockConsumptionItems.forEach((item) => {
+          const movement = this.store.stockMovements.find((row) => row.id === item.movementId);
+          if (!movement) return;
+          const product = this.store.products.find((row) => row.id === movement.productId);
+          if (!product) return;
+          product.stockQty -= movement.quantity;
+        });
       }
 
       const clientAppointments = this.store.appointments
@@ -2553,18 +2665,23 @@ export class OperationsService {
       const frequency90d = clientAppointments.filter((item) => item.endsAt >= window90).length;
 
       const response = {
-        appointment: serviceResult.appointment,
-        serviceRevenue: serviceResult.revenue,
+        appointment: completedAppointment,
+        serviceRevenue,
         productRevenue: saleResult?.revenue,
         sale: saleResult?.sale,
         stockMovements: saleResult?.stockMovements ?? [],
-        commissions: [serviceResult.commission, saleResult?.commission].filter(Boolean),
+        commissions: [...serviceCommissions, saleResult?.commission].filter(Boolean),
         clientMetrics: {
           lastVisitAt: clientAppointments[0]?.endsAt ?? input.completedAt,
           totalSpent: Number(totalSpent.toFixed(2)),
           frequency90d,
         },
-        stockConsumption: serviceResult.stockConsumption,
+        stockConsumption: {
+          applied: stockConsumptionItems.length > 0,
+          movementsCount: stockConsumptionItems.length,
+          items: stockConsumptionItems,
+          warnings: [],
+        },
       };
       this.finishMemoryIdempotency(checkoutScope, response);
       return response;
@@ -2639,22 +2756,45 @@ export class OperationsService {
         commission.appointmentId === appointment.id &&
         commission.source === "SERVICE",
     );
-    if (appointmentCommissions.some((commission) => commission.status === "PAID")) {
+    const appointmentProductSale = this.store.productSales.find(
+      (sale) => sale.unitId === input.unitId && sale.appointmentId === appointment.id,
+    );
+    const productCommissions = appointmentProductSale
+      ? this.store.commissionEntries.filter(
+          (commission) =>
+            commission.unitId === input.unitId &&
+            commission.productSaleId === appointmentProductSale.id &&
+            commission.source === "PRODUCT",
+        )
+      : [];
+    const commissionsToCancel = [...appointmentCommissions, ...productCommissions];
+    if (commissionsToCancel.some((commission) => commission.status === "PAID")) {
       throw new Error("Comissao ja paga exige ajuste manual antes do estorno");
     }
 
+    const refundItems: NonNullable<Refund["items"]> =
+      appointmentProductSale?.items.map((item) => ({
+        id: crypto.randomUUID(),
+        refundId: "",
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        amount: Number((Number(item.unitPrice ?? 0) * Number(item.quantity ?? 0)).toFixed(2)),
+      })) ?? [];
     const refund: Refund = {
       id: crypto.randomUUID(),
       unitId: input.unitId,
       appointmentId: appointment.id,
+      productSaleId: appointmentProductSale?.id,
       totalAmount: Number(Number(originalRevenue.amount ?? 0).toFixed(2)),
       reason,
       refundedAt: input.refundedAt,
       changedBy: input.changedBy,
       idempotencyKey: input.idempotencyKey,
       createdAt: input.refundedAt,
-      items: [],
+      items: refundItems.map((item) => ({ ...item, refundId: "" })),
     };
+    refund.items = refund.items?.map((item) => ({ ...item, refundId: refund.id }));
     const financialEntry = buildServiceRefundExpenseEntry({
       unitId: input.unitId,
       refundId: refund.id,
@@ -2665,10 +2805,23 @@ export class OperationsService {
       occurredAt: input.refundedAt,
       reason,
     });
+    const stockMovements = appointmentProductSale
+      ? buildStockMovementsFromProductRefund({
+          unitId: input.unitId,
+          refundId: refund.id,
+          occurredAt: input.refundedAt,
+          items: refund.items ?? [],
+        })
+      : [];
 
     this.startMemoryIdempotency(scope);
     this.store.refunds.push(refund);
     this.store.financialEntries.push(financialEntry);
+    this.store.stockMovements.push(...stockMovements);
+    for (const movement of stockMovements) {
+      const product = this.store.products.find((item) => item.id === movement.productId);
+      if (product) product.stockQty += movement.quantity;
+    }
     appointment.history.push({
       changedAt: input.refundedAt,
       changedBy: input.changedBy,
@@ -2676,7 +2829,7 @@ export class OperationsService {
       reason,
     });
     const canceledCommissions: CommissionEntry[] = [];
-    for (const commission of appointmentCommissions) {
+    for (const commission of commissionsToCancel) {
       if ((commission.status ?? "PENDING") === "PENDING") {
         commission.status = "CANCELED";
         canceledCommissions.push({ ...commission });
@@ -2686,7 +2839,7 @@ export class OperationsService {
     const response = {
       refund,
       financialEntry,
-      stockMovements: [],
+      stockMovements,
       canceledCommissions,
     };
     this.finishMemoryIdempotency(scope, response);
@@ -4952,27 +5105,23 @@ export class OperationsService {
         item.startsAt >= period.start &&
         item.startsAt <= period.end,
     );
-    const serviceIncomeByAppointment = this.getAppointmentServiceIncomeMap({
-      unitId: input.unitId,
-      appointmentIds: completed.map((item) => item.id),
-    });
-
     const map = new Map<
       string,
       { serviceId: string; name: string; quantity: number; revenue: number }
     >();
     for (const appointment of completed) {
-      const service = this.store.services.find((item) => item.id === appointment.serviceId);
-      if (!service) continue;
-      const current = map.get(service.id) ?? {
-        serviceId: service.id,
-        name: service.name,
-        quantity: 0,
-        revenue: 0,
-      };
-      current.quantity += 1;
-      current.revenue += serviceIncomeByAppointment.get(appointment.id) ?? Number(service.price ?? 0);
-      map.set(service.id, current);
+      for (const serviceItem of this.getAppointmentServiceItems(appointment)) {
+        const service = this.store.services.find((item) => item.id === serviceItem.serviceId);
+        const current = map.get(serviceItem.serviceId) ?? {
+          serviceId: serviceItem.serviceId,
+          name: serviceItem.serviceNameSnapshot || service?.name || "Servico",
+          quantity: 0,
+          revenue: 0,
+        };
+        current.quantity += 1;
+        current.revenue += Number(serviceItem.servicePriceSnapshot || service?.price || 0);
+        map.set(serviceItem.serviceId, current);
+      }
     }
 
     const totalRevenue = Array.from(map.values()).reduce((acc, item) => acc + item.revenue, 0);
@@ -6357,8 +6506,9 @@ export class OperationsService {
       .filter(
         (item) =>
           item.unitId === input.unitId &&
-          item.occurredAt >= input.start &&
-          item.occurredAt <= input.end,
+        item.occurredAt >= input.start &&
+        item.occurredAt <= input.end &&
+        item.status !== "CANCELLED",
       )
       .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
 
@@ -6840,29 +6990,38 @@ export class OperationsService {
   async suggestAppointmentAlternatives(input: {
     unitId: string;
     professionalId: string;
-    serviceId: string;
+    serviceId?: string;
+    serviceIds?: string[];
     startsAt: Date;
     windowHours?: number;
   }) {
-    const service = this.store.services.find(
-      (item) => item.id === input.serviceId && item.businessId === input.unitId && item.active,
-    );
-    if (!service) throw new Error("Servico nao encontrado ou inativo");
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const services = this.resolveServicesForAppointment({ unitId: input.unitId, serviceIds });
 
     const professional = this.store.professionals.find(
       (item) => item.id === input.professionalId && item.businessId === input.unitId && item.active,
     );
     if (!professional) throw new Error("Profissional nao encontrado ou inativo");
-    this.assertProfessionalCanExecuteService(service.id, professional.id);
+    this.assertProfessionalCanExecuteServices(serviceIds, professional.id);
 
     const windowHours = Math.min(Math.max(input.windowHours ?? 6, 1), 24);
     const settings = this.ensureBusinessSettings(input.unitId);
     const businessHours = this.ensureBusinessHours(input.unitId);
     const timezone = this.store.units.find((item) => item.id === input.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+    const serviceItems = this.buildAppointmentServiceItems({
+      appointmentId: "appointment-suggestions-preview",
+      services,
+    });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.store.serviceCombinationRules.filter(
+        (rule) => rule.unitId === input.unitId && rule.active,
+      ),
+    });
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = (service.durationMin + bufferAfterMin) * 60_000;
+    const durationMs = (duration.effectiveDurationMin + bufferAfterMin) * 60_000;
     const stepMs = 15 * 60_000;
 
     const existingAppointments = this.store.appointments.filter(
@@ -6883,7 +7042,7 @@ export class OperationsService {
           unitId: input.unitId,
           startsAt,
           endsAt,
-          serviceDurationMin: service.durationMin,
+          serviceDurationMin: duration.effectiveDurationMin,
           bufferAfterMin,
           settings,
           businessHours,
@@ -7117,7 +7276,7 @@ export class OperationsService {
     const netCashMonth = revenueMonth - expensesMonth;
 
     const totalCommissionsMonth = this.store.commissionEntries
-      .filter((item) => item.occurredAt >= month.start && item.occurredAt <= month.end)
+      .filter((item) => item.occurredAt >= month.start && item.occurredAt <= month.end && item.status !== "CANCELED")
       .reduce((acc, item) => acc + item.commissionAmount, 0);
 
     const commissionsByProfessional = this.store.professionals.map((professional) => {
@@ -7126,7 +7285,8 @@ export class OperationsService {
           (item) =>
             item.professionalId === professional.id &&
             item.occurredAt >= month.start &&
-            item.occurredAt <= month.end,
+            item.occurredAt <= month.end &&
+            item.status !== "CANCELED",
         )
         .reduce((acc, item) => acc + item.commissionAmount, 0);
       const produced = completedMonth.filter(
@@ -7966,7 +8126,8 @@ export class OperationsService {
       (item) =>
         item.unitId === input.unitId &&
         item.occurredAt >= input.start &&
-        item.occurredAt <= input.end,
+        item.occurredAt <= input.end &&
+        item.status !== "CANCELED",
     );
 
     let serviceRevenue = 0;

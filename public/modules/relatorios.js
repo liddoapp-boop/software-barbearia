@@ -42,13 +42,6 @@ const REPORTS = [
     status: "available",
   },
   {
-    id: "comissoes",
-    title: "Comissoes",
-    description: "Pendente, pago no periodo, totais por profissional e impacto financeiro.",
-    question: "Quanto ainda precisa ser pago?",
-    status: "available",
-  },
-  {
     id: "profissionais",
     title: "Profissionais",
     description: "Atendimentos, receita, ticket medio, ocupacao e ranking operacional.",
@@ -70,7 +63,6 @@ const BACKEND_EXPORT_REPORTS = new Set([
   "vendas",
   "estoque",
   "clientes",
-  "comissoes",
   "profissionais",
   "auditoria",
 ]);
@@ -276,7 +268,6 @@ function renderFinancial(payload = {}) {
           { label: "Resultado", value: money(summary.periodResult), hint: "Resultado do periodo" },
           { label: "Receita servicos", value: money(summary.serviceRevenue), hint: "Atendimentos finalizados" },
           { label: "Receita produtos", value: money(summary.productRevenue), hint: "Vendas de produtos" },
-          { label: "Comissoes pagas", value: money(summary.commissionsPaid), hint: "Baixa financeira de comissao" },
           { label: "Estornos/devolucoes", value: money(summary.refunds), hint: "Reversos encontrados" },
           { label: "Lanc. manuais", value: money(summary.manualEntries), hint: "Entradas ou saidas manuais" },
         ])}
@@ -294,12 +285,6 @@ function renderFinancial(payload = {}) {
   const transactions = Array.isArray(payload.data?.financialTransactions?.transactions)
     ? payload.data.financialTransactions.transactions
     : [];
-  const commissions = Array.isArray(payload.data?.financialCommissions?.entries)
-    ? payload.data.financialCommissions.entries
-    : [];
-  const commissionPaid = commissions
-    .filter((item) => item.status === "PAID")
-    .reduce((acc, item) => acc + toNumber(item.commissionAmount), 0);
   const refunds = transactions
     .filter((item) => String(item.referenceType || "").includes("REFUND") || String(item.source || "").toUpperCase() === "REFUND")
     .reduce((acc, item) => acc + toNumber(item.amount), 0);
@@ -318,7 +303,6 @@ function renderFinancial(payload = {}) {
         { label: "Resultado", value: money(summary.estimatedProfit ?? cashFlow.balance), hint: "Resultado estimado" },
         { label: "Receita servicos", value: money(management.serviceRevenue), hint: "Atendimentos finalizados" },
         { label: "Receita produtos", value: money(management.productRevenue), hint: "Vendas de produtos" },
-        { label: "Comissoes pagas", value: money(commissionPaid), hint: "Baixa financeira de comissao" },
         { label: "Estornos/devolucoes", value: money(refunds), hint: "Reversos encontrados" },
         { label: "Lanc. manuais", value: money(manual), hint: "Entradas ou saidas manuais" },
       ])}
@@ -665,7 +649,7 @@ function renderProfessionals(payload = {}) {
       title: item.professionalName || "Profissional",
       subtitle: `Ticket ${money(item.averageTicket)} | Ocupacao estimada ${item.occupancyRate == null ? "nao calculada" : percent(item.occupancyRate)}`,
       value: money(item.totalRevenue),
-      meta: `${toNumber(item.completedAppointments)} atend. | Comissao pendente ${money(item.pendingCommission)}`,
+      meta: `${toNumber(item.completedAppointments)} atend.`,
     }));
     return {
       complete: report.completeness?.status === "complete",
@@ -676,8 +660,6 @@ function renderProfessionals(payload = {}) {
           { label: "Profissionais", value: String(toNumber(summary.professionals)), hint: "No recorte" },
           { label: "Atendimentos concluidos", value: String(toNumber(summary.completedAppointments)), hint: "No periodo" },
           { label: "Receita gerada", value: money(summary.totalRevenue), hint: "Soma operacional" },
-          { label: "Comissao pendente", value: money(summary.pendingCommission), hint: "A pagar" },
-          { label: "Comissao paga", value: money(summary.paidCommission), hint: "Baixada no periodo" },
         ])}
         <details class="reports-detail-panel" open>
           <summary>Ranking operacional</summary>
@@ -695,7 +677,7 @@ function renderProfessionals(payload = {}) {
       title: item.professionalName || item.name || "Profissional",
       subtitle: `Ticket ${money(item.averageTicket || item.ticketAverage || 0)} | Ocupacao estimada ${percent(item.occupancyRate || item.occupancyPct || 0)}`,
       value: money(item.revenue || item.grossRevenue || item.totalRevenue || 0),
-      meta: `${toNumber(item.completedAppointments || item.appointmentsCompleted || item.appointments)} atend. | Comissao pendente ${money(item.pendingCommission || 0)}`,
+      meta: `${toNumber(item.completedAppointments || item.appointmentsCompleted || item.appointments)} atend.`,
     }))
     .sort((a, b) => toNumber(String(b.value).replace(/\D/g, "")) - toNumber(String(a.value).replace(/\D/g, "")));
 
@@ -707,7 +689,6 @@ function renderProfessionals(payload = {}) {
         { label: "Profissionais", value: String(professionals.length), hint: "No recorte" },
         { label: "Atendimentos concluidos", value: String(professionals.reduce((acc, item) => acc + toNumber(item.completedAppointments || item.appointmentsCompleted), 0)), hint: "Quando disponivel" },
         { label: "Receita gerada", value: money(professionals.reduce((acc, item) => acc + toNumber(item.revenue || item.grossRevenue || item.totalRevenue), 0)), hint: "Soma operacional" },
-        { label: "Comissao pendente", value: money(professionals.reduce((acc, item) => acc + toNumber(item.pendingCommission), 0)), hint: "Quando disponivel" },
       ])}
       <details class="reports-detail-panel" open>
         <summary>Ranking operacional</summary>

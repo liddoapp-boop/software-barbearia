@@ -1,5 +1,5 @@
 export const CHECKOUT_FINAL_BUTTON_LABEL = "Confirmar pagamento e concluir";
-export const CHECKOUT_SUCCESS_MESSAGE = "Pagamento registrado e atendimento concluido.";
+export const CHECKOUT_SUCCESS_MESSAGE = "Atendimento concluido com sucesso.";
 
 export function validateAppointmentCheckoutTarget(appointment) {
   if (!appointment || !appointment.id) {
@@ -31,7 +31,10 @@ export function normalizeCheckoutProducts(products = [], productsById = {}) {
 }
 
 export function buildCheckoutTotals(appointment, products = [], productsById = {}) {
-  const servicePrice = Number(appointment?.servicePrice || 0);
+  const serviceItems = Array.isArray(appointment?.serviceItems) ? appointment.serviceItems : [];
+  const servicePrice = serviceItems.length
+    ? serviceItems.reduce((acc, item) => acc + Number(item?.servicePriceSnapshot || item?.price || 0), 0)
+    : Number(appointment?.servicePrice || appointment?.totalPriceSnapshot || 0);
   const productRows = normalizeCheckoutProducts(products, productsById);
   const productsSubtotal = productRows.reduce((acc, item) => acc + item.subtotal, 0);
   return {

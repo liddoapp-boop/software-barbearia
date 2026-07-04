@@ -202,6 +202,7 @@ export function calculateServiceCommission(
   const percentage = resolveEffectivePercentage(rule, monthlyProducedValue);
   const fixedAmount = rule.fixedAmount ?? 0;
   const commissionAmount = roundMoney(servicePrice * percentage + fixedAmount);
+  if (commissionAmount <= 0) return null;
 
   return {
     id: crypto.randomUUID(),
@@ -234,6 +235,7 @@ export function calculateProductCommission(
   const percentage = rule.percentage ?? 0;
   const fixedAmount = rule.fixedAmount ?? 0;
   const commissionAmount = roundMoney(grossAmount * percentage + fixedAmount);
+  if (commissionAmount <= 0) return null;
 
   return {
     id: crypto.randomUUID(),
