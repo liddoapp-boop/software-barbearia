@@ -1367,6 +1367,18 @@ export class PrismaOperationsService {
     });
   }
 
+  private orderServiceRowsByRequestedIds<T extends { id: string; active: boolean }>(
+    serviceRows: T[],
+    serviceIds: string[],
+  ) {
+    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
+    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
+    if (orderedServices.some((item) => !item || !item.active)) {
+      throw new Error("Servico nao encontrado ou inativo");
+    }
+    return orderedServices as T[];
+  }
+
   private mapCombinationRules(
     rules: Array<{
       id: string;
@@ -2454,12 +2466,8 @@ export class PrismaOperationsService {
         include: { items: true },
       }),
     ]);
-    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
-    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
-    if (orderedServices.some((item) => !item || !item.active)) {
-      throw new Error("Servico nao encontrado ou inativo");
-    }
-    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+    const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, serviceIds);
+    const services = orderedServices.map((item) =>
       this.mapService(item),
     );
 
@@ -2645,12 +2653,8 @@ export class PrismaOperationsService {
         select: { id: true },
       }),
     ]);
-    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
-    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
-    if (orderedServices.some((item) => !item || !item.active)) {
-      throw new Error("Servico nao encontrado ou inativo");
-    }
-    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+    const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, serviceIds);
+    const services = orderedServices.map((item) =>
       this.mapService(item),
     );
     const serviceItems = this.buildAppointmentServiceItems({
@@ -9147,12 +9151,8 @@ export class PrismaOperationsService {
             }),
           ]);
 
-          const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
-          const orderedServices = nextServiceIds.map((serviceId) => serviceById.get(serviceId));
-          if (orderedServices.some((item) => !item || !item.active)) {
-            throw new Error("Servico nao encontrado ou inativo");
-          }
-          const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+          const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, nextServiceIds);
+          const services = orderedServices.map((item) =>
             this.mapService(item),
           );
           if (!professionalRow || !professionalRow.active) {
@@ -9363,18 +9363,14 @@ export class PrismaOperationsService {
       this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
     ]);
 
-    const serviceById = new Map(serviceRows.map((item) => [item.id, item]));
-    const orderedServices = serviceIds.map((serviceId) => serviceById.get(serviceId));
-    if (orderedServices.some((item) => !item || !item.active)) {
-      throw new Error("Servico nao encontrado ou inativo");
-    }
+    const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, serviceIds);
     if (!professionalRow || !professionalRow.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
     for (const serviceId of serviceIds) {
       await this.assertProfessionalCanExecuteService(serviceId, professionalRow.id);
     }
-    const services = (orderedServices as NonNullable<(typeof orderedServices)[number]>[]).map((item) =>
+    const services = orderedServices.map((item) =>
       this.mapService(item),
     );
     const serviceItems = this.buildAppointmentServiceItems({

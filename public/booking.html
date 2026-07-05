@@ -320,7 +320,47 @@
       font-size: 11px; color: var(--tx3);
       margin-top: 2px;
     }
-
+    .svc-action {
+      margin-top: 8px;
+      min-height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 100%; border-radius: var(--r-sm);
+      border: 1px solid var(--bd);
+      color: var(--tx2); font-size: 12px; font-weight: 600;
+      background: var(--s3);
+    }
+    .svc-card.selected .svc-action { border-color: var(--sel-bd); color: var(--tx); background: var(--sel-bg); }
+    .svc-selection-panel {
+      width: 100%; max-width: 520px; margin-top: 10px; padding: 12px;
+      border: 1px solid var(--bd); border-radius: var(--r-lg); background: var(--s2);
+    }
+    .svc-selection-title { font-size: 12px; font-weight: 700; color: var(--tx); margin-bottom: 8px; }
+    .svc-selected-list { display: grid; gap: 6px; margin-bottom: 10px; }
+    .svc-selected-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      min-height: 38px; padding: 7px 8px; border: 1px solid var(--bd);
+      border-radius: var(--r-sm); background: var(--s3); font-size: 13px;
+    }
+    .svc-selected-item button {
+      min-width: 34px; min-height: 30px; border: 1px solid var(--bd);
+      border-radius: var(--r-sm); background: var(--s2); color: var(--tx2); cursor: pointer;
+    }
+    .svc-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 0; }
+    .svc-summary-metric { border: 1px solid var(--bd); border-radius: var(--r-sm); padding: 8px; background: var(--s3); min-width: 0; }
+    .svc-summary-metric span { display: block; font-size: 10px; color: var(--tx3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+    .svc-summary-metric strong { display: block; font-size: 13px; color: var(--tx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .svc-rule-note { font-size: 12px; color: var(--tx2); line-height: 1.35; margin: 4px 0 10px; }
+    .svc-selection-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .btn-secondary {
+      margin-top: 8px; width: 100%; min-height: 44px; border-radius: var(--r);
+      border: 1px solid var(--bd); background: var(--s3); color: var(--tx2);
+      font-family: var(--fui); font-weight: 600; cursor: pointer;
+    }
+    .professional-note {
+      width: 100%; max-width: 360px; border: 1px solid var(--bd);
+      border-radius: var(--r); background: var(--s2); padding: 10px 12px;
+      color: var(--tx); font-size: 14px;
+    }
     /* ── Calendar ────────────────────────────────────── */
     .cal-nav {
       display: flex; align-items: center;
@@ -612,6 +652,8 @@
     }
     @media (max-width: 360px) {
       .booking-hours-list { grid-template-columns: 1fr; }
+      .svc-summary-grid { grid-template-columns: 1fr; }
+      .svc-selection-actions { grid-template-columns: 1fr; }
     }
     @media (min-width: 600px) {
       body { max-width: 480px; margin: 0 auto; box-shadow: var(--sh-card); }
@@ -673,15 +715,18 @@
 </div>
 
 <script src="https://unpkg.com/imask@7.6.1/dist/imask.min.js"></script>
+<script src="/modules/booking-service-selection.js"></script>
 <script>
 const API   = '';
 const BOOKING_UNIT_ID = new URLSearchParams(window.location.search).get('unitId') || '';
-const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, PROFESSIONAL:5, CALENDAR:6, CONFIRM:7, DONE:8 };
+const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFIRM:6, DONE:7 };
 
 let step = STEPS.NAME;
 let services = [], slots = {};
-let selectedService = null, selectedProfessional = null, selectedDate = null, selectedSlot = null, selectedSlotProfessional = null;
-let serviceProfessionals = [];
+let selectedServices = [], selectedProfessional = null, selectedDate = null, selectedSlot = null, selectedSlotProfessional = null;
+let servicePreview = { status: 'empty', summary: null, message: '' };
+let servicePreviewRequestId = 0, servicePreviewController = null, slotsRequestSeq = 0;
+let bookingIdempotencyKey = createBookingIdempotencyKey();
 let weekStart = null, phoneMask = null, confirmData = {};
 let publicWorkingHours = null;
 let slotsLoadFailed = false;
@@ -694,6 +739,64 @@ const chat      = document.getElementById('chat');
 const chatInput = document.getElementById('chatInput');
 const btnSend   = document.getElementById('btnSend');
 const liveRgn   = document.getElementById('liveRgn');
+const BookingSelection = window.BookingServiceSelection || (function () {
+  const max = 6;
+  const text = (value, fallback = '') => String(value ?? '').trim() || fallback;
+  const numberValue = (value, fallback = 0) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const normalizeService = (service) => service && service.id ? {
+    ...service,
+    id: text(service.id),
+    name: text(service.name, 'Servico'),
+    price: numberValue(service.price),
+    duration: numberValue(service.duration ?? service.durationMinutes ?? service.durationMin),
+  } : null;
+  const isSelected = (current, serviceId) => current.some((service) => service.id === serviceId);
+  const add = (current, service) => {
+    const normalized = normalizeService(service);
+    if (!normalized) return { ok: false, selected: [...current], message: 'Servico invalido.' };
+    if (isSelected(current, normalized.id)) return { ok: false, selected: [...current], message: 'Este servico ja foi selecionado.' };
+    if (current.length >= max) return { ok: false, selected: [...current], message: `Selecione no maximo ${max} servicos.` };
+    return { ok: true, selected: [...current, normalized], message: '' };
+  };
+  const remove = (current, serviceId) => current.filter((service) => service.id !== serviceId);
+  const clear = () => [];
+  const ids = (current) => current.map((service) => text(service.id)).filter(Boolean);
+  const validate = (current) => ids(current).length ? { ok: true, message: '' } : { ok: false, message: 'Selecione ao menos um servico.' };
+  const label = (current, fallback = 'Servicos') => current.map((service) => text(service.name || service.serviceNameSnapshot)).filter(Boolean).join(' + ') || fallback;
+  const catalogTotal = (current) => Number(current.reduce((sum, service) => sum + numberValue(service.price ?? service.servicePriceSnapshot), 0).toFixed(2));
+  const normalizeItems = (source = {}, fallback = []) => {
+    const raw = Array.isArray(source.serviceItems) ? [...source.serviceItems] : [];
+    if (raw.length) return raw.sort((a, b) => numberValue(a.position) - numberValue(b.position)).map((item, position) => ({
+      serviceId: text(item.serviceId || item.id),
+      name: text(item.serviceNameSnapshot || item.name, 'Servico'),
+      price: numberValue(item.servicePriceSnapshot ?? item.price),
+      duration: numberValue(item.serviceDurationMinSnapshot ?? item.durationMin ?? item.durationMinutes ?? item.duration),
+      position,
+    })).filter((item) => item.serviceId);
+    return fallback.map((service, position) => ({ serviceId: service.id, name: service.name, price: numberValue(service.price), duration: numberValue(service.duration), position }));
+  };
+  const interpretPreview = (payload = {}, fallback = []) => {
+    const source = payload.summary || payload.appointment || payload;
+    const serviceItems = normalizeItems(source, fallback);
+    return {
+      serviceItems,
+      label: label(serviceItems.map((item) => ({ name: item.name })), 'Servicos'),
+      totalPrice: numberValue(source.totalPriceSnapshot ?? source.totalPrice ?? source.price, catalogTotal(fallback)),
+      effectiveDurationMin: numberValue(source.effectiveDurationMinSnapshot ?? source.effectiveDurationMin ?? source.durationMinutes),
+      ruleLabel: text(source.durationRuleLabelSnapshot || source.ruleLabel),
+      calculationMode: text(source.durationCalculationMode || source.calculationMode),
+    };
+  };
+  return { BOOKING_SERVICES_MAX: max, normalizeService, isSelected, add, remove, clear, ids, validate, label, catalogTotal, normalizeItems, interpretPreview };
+})();
+
+function createBookingIdempotencyKey() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `public-booking-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 /* ─ Storage ─ */
 function sanitizeTextValue(value, max = 120) {
@@ -915,12 +1018,16 @@ function disableInput() {
 function resetBookingFlowState() {
   bookingRunId += 1;
   confirmRenderSeq += 1;
-  selectedService = null;
+  selectedServices = [];
   selectedProfessional = null;
   selectedDate = null;
   selectedSlot = null;
   selectedSlotProfessional = null;
-  serviceProfessionals = [];
+  servicePreview = { status: 'empty', summary: null, message: '' };
+  servicePreviewRequestId += 1;
+  slotsRequestSeq += 1;
+  if (servicePreviewController) { try { servicePreviewController.abort(); } catch {} servicePreviewController = null; }
+  bookingIdempotencyKey = createBookingIdempotencyKey();
   weekStart = null;
   slots = {};
   confirmData = {};
@@ -935,7 +1042,7 @@ function isCurrentBookingRun(runId) {
 }
 
 function removeCurrentBookingWidgets() {
-  ['calWidgetWrap', 'confirmWidgetWrap', 'bookingSuccessWrap', 'bookingSuccessMessageWrap'].forEach((id) => {
+  ['serviceWidgetWrap', 'calWidgetWrap', 'confirmWidgetWrap', 'bookingSuccessWrap', 'bookingSuccessMessageWrap'].forEach((id) => {
     const node = document.getElementById(id);
     if (node) node.remove();
   });
@@ -967,7 +1074,7 @@ async function beginNewBooking(fromUserAction = false) {
   disableInput();
   resetBookingFlowState();
   if (fromUserAction) appendBubble('Novo agendamento', true);
-  await say('Escolha o serviço', 300);
+  await say('Escolha os servicos', 300);
   step = STEPS.SERVICE;
   await loadServices();
 }
@@ -1015,7 +1122,7 @@ async function handleSend() {
     appendBubble(email || 'Prefiro não informar', true);
     setClient({ email });
     chatInput.value = '';
-    await say('Escolha o serviço', 400);
+    await say('Escolha os servicos', 400);
     step = STEPS.SERVICE;
     await loadServices();
   }
@@ -1029,7 +1136,7 @@ async function loadServices() {
     const r = await fetch(publicUrl('/public/services'));
     if (r.ok) services = (await r.json())
       .filter(isPublicServiceVisible)
-      .map(s => ({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
+      .map(s => BookingSelection.normalizeService({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
     else throw 0;
   } catch {
     services = [];
@@ -1040,13 +1147,57 @@ async function loadServices() {
 
 const IMG_PH = `<svg class="svc-img-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
 
+function currentPreviewSummary() {
+  return servicePreview.summary || BookingSelection.interpretPreview({}, selectedServices);
+}
+
+function formatDuration(min) {
+  const value = Number(min || 0);
+  return value > 0 ? `${value} min` : 'Calculando';
+}
+
+function renderServiceSummaryHtml() {
+  const validation = BookingSelection.validate(selectedServices);
+  const summary = currentPreviewSummary();
+  const selectedList = selectedServices.length
+    ? selectedServices.map((service) => `
+      <div class="svc-selected-item">
+        <span>${escapeHtml(service.name)}</span>
+        <button type="button" data-remove-service-id="${escapeHtml(service.id)}" aria-label="Remover ${escapeHtml(service.name)}">Remover</button>
+      </div>`).join('')
+    : '<div class="svc-rule-note">Selecione ao menos um servico para consultar duracao e valor.</div>';
+  const statusText = servicePreview.status === 'loading'
+    ? 'Calculando valor e duracao...'
+    : servicePreview.status === 'error'
+      ? 'Nao foi possivel calcular agora. Tente novamente.'
+      : summary.ruleLabel || 'Preco e duracao calculados pelo sistema.';
+  const canContinue = validation.ok && servicePreview.status === 'ready';
+  return `
+    <div class="svc-selection-panel" aria-live="polite">
+      <div class="svc-selection-title">Servicos selecionados</div>
+      <div class="svc-selected-list">${selectedList}</div>
+      <div class="svc-summary-grid">
+        <div class="svc-summary-metric"><span>Quantidade</span><strong>${selectedServices.length}</strong></div>
+        <div class="svc-summary-metric"><span>Total</span><strong>${fmtBRL(summary.totalPrice || BookingSelection.catalogTotal(selectedServices))}</strong></div>
+        <div class="svc-summary-metric"><span>Duracao</span><strong>${formatDuration(summary.effectiveDurationMin)}</strong></div>
+      </div>
+      <div class="svc-rule-note">${escapeHtml(statusText)}</div>
+      <div class="svc-selection-actions">
+        <button class="btn-confirm" id="btnContinueServices" type="button" ${canContinue ? '' : 'disabled'}>Continuar</button>
+        <button class="btn-secondary" id="btnClearServices" type="button" ${selectedServices.length ? '' : 'disabled'}>Limpar</button>
+      </div>
+    </div>`;
+}
+
 function renderServices() {
   const runId = bookingRunId;
+  const previous = document.getElementById('serviceWidgetWrap');
+  if (previous) previous.remove();
   if (!services.length) {
     appendWidget(`
-      <div class="svc-scroll" role="status" aria-live="polite">
+      <div id="serviceWidgetWrap" class="svc-scroll" role="status" aria-live="polite">
         <div class="svc-row">
-          <div class="svc-empty">Não conseguimos carregar os serviços agora. Tente novamente em instantes.</div>
+          <div class="svc-empty">Nao conseguimos carregar os servicos agora. Tente novamente em instantes.</div>
         </div>
       </div>`);
     return;
@@ -1057,9 +1208,10 @@ function renderServices() {
     const safeId = escapeHtml(s.id);
     const safeImageUrl = escapeHtml(s.imageUrl);
     const safeDuration = escapeHtml(s.duration);
-    return `<div class="svc-card" role="button" tabindex="0"
-      aria-label="${safeName}, ${fmtBRL(s.price)}, ${safeDuration} minutos"
-      data-id="${safeId}" style="animation-delay:${i*.04}s">
+    const selected = BookingSelection.isSelected(selectedServices, s.id);
+    return `<button class="svc-card${selected ? ' selected' : ''}" type="button"
+      aria-label="${safeName}, ${fmtBRL(s.price)}, ${safeDuration} minutos, ${selected ? 'selecionado' : 'selecionar'}"
+      aria-pressed="${selected}" data-service-id="${safeId}" style="animation-delay:${i*.04}s">
       <div class="svc-img">
         ${hasImg ? `<img src="${safeImageUrl}" alt="${safeName}" loading="lazy" onerror="this.parentNode.innerHTML='${IMG_PH.replace(/"/g,"'")}'">` : IMG_PH}
       </div>
@@ -1067,151 +1219,174 @@ function renderServices() {
         <div class="svc-name">${safeName}</div>
         <div class="svc-price">${fmtBRL(s.price)}</div>
         <div class="svc-dur">${safeDuration} min</div>
+        <span class="svc-action">${selected ? 'Remover' : 'Selecionar'}</span>
       </div>
-    </div>`;
+    </button>`;
   }).join('');
 
   const w = appendWidget(`
-    <div class="svc-scroll" role="group" aria-label="Serviços disponíveis">
-      <div class="svc-row">${cards}</div>
+    <div id="serviceWidgetWrap" style="width:100%">
+      <div class="svc-scroll" role="group" aria-label="Servicos disponiveis">
+        <div class="svc-row">${cards}</div>
+      </div>
+      ${renderServiceSummaryHtml()}
+      <div class="professional-note">Atendimento com Geovane Borges</div>
     </div>`);
 
-  w.querySelectorAll('.svc-card').forEach(c => {
-    c.addEventListener('click', () => onPickService(c.dataset.id, runId));
-    c.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); onPickService(c.dataset.id, runId); } });
+  w.querySelectorAll('[data-service-id]').forEach(c => {
+    c.addEventListener('click', () => onPickService(c.dataset.serviceId, runId));
   });
+  w.querySelectorAll('[data-remove-service-id]').forEach((button) => {
+    button.addEventListener('click', () => onRemoveService(button.dataset.removeServiceId, runId));
+  });
+  const clearButton = w.querySelector('#btnClearServices');
+  if (clearButton) clearButton.addEventListener('click', () => onClearServices(runId));
+  const continueButton = w.querySelector('#btnContinueServices');
+  if (continueButton) continueButton.addEventListener('click', () => continueToCalendar(runId));
+}
+
+function clearSelectedTimeAndCalendar() {
+  selectedDate = null;
+  selectedSlot = null;
+  selectedSlotProfessional = null;
+  slots = {};
+  slotsRequestSeq += 1;
+  const cal = document.getElementById('calWidgetWrap');
+  if (cal) cal.remove();
+  const confirm = document.getElementById('confirmWidgetWrap');
+  if (confirm) confirm.remove();
+}
+
+async function refreshServicePreview(runId = bookingRunId) {
+  const serviceIds = BookingSelection.ids(selectedServices);
+  servicePreviewRequestId += 1;
+  const requestId = servicePreviewRequestId;
+  if (servicePreviewController) { try { servicePreviewController.abort(); } catch {} }
+  if (!serviceIds.length) {
+    servicePreview = { status: 'empty', summary: null, message: '' };
+    renderServices();
+    return;
+  }
+  servicePreview = { status: 'loading', summary: null, message: '' };
+  renderServices();
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  servicePreviewController = controller;
+  try {
+    const r = await fetch(publicUrl('/public/services/preview'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unitId: BOOKING_UNIT_ID || undefined, serviceIds }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!r.ok) throw new Error('preview unavailable');
+    const data = await r.json();
+    if (!canMutateBookingFlow(runId) || requestId !== servicePreviewRequestId) return;
+    servicePreview = { status: 'ready', summary: BookingSelection.interpretPreview(data, selectedServices), message: '' };
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (!canMutateBookingFlow(runId) || requestId !== servicePreviewRequestId) return;
+    servicePreview = { status: 'error', summary: null, message: 'preview unavailable' };
+  } finally {
+    if (requestId === servicePreviewRequestId) renderServices();
+  }
 }
 
 async function onPickService(id, runId = bookingRunId) {
   if (!canMutateBookingFlow(runId)) return;
   const svc = services.find(s => String(s.id) === String(id));
   if (!svc) return;
-  selectedService = svc;
+  const next = BookingSelection.isSelected(selectedServices, svc.id)
+    ? BookingSelection.remove(selectedServices, svc.id)
+    : BookingSelection.add(selectedServices, svc).selected;
+  selectedServices = next;
   selectedProfessional = null;
-  selectedDate = null;
-  selectedSlot = null;
-  selectedSlotProfessional = null;
   confirmData = {};
   bookingSubmitting = false;
-  document.querySelectorAll('.svc-card').forEach(c => c.classList.toggle('selected', c.dataset.id === String(id)));
-  await say(`Serviço escolhido: <strong>${escapeHtml(svc.name)}</strong>`, 400);
-  step = STEPS.PROFESSIONAL;
-  await loadProfessionals(runId);
-}
-
-/* ═══ Professionals ═══════════════════════════════════════ */
-async function loadProfessionals(runId = bookingRunId) {
-  if (!canMutateBookingFlow(runId)) return;
-  disableInput();
-  serviceProfessionals = [];
-  showTyping();
-  try {
-    const r = await fetch(publicUrl(`/public/services/${encodeURIComponent(selectedService.id)}/professionals`));
-    if (r.ok) {
-      const data = await r.json();
-      serviceProfessionals = Array.isArray(data.professionals) ? data.professionals : [];
-    }
-  } catch {}
-  hideTyping();
-  if (!canMutateBookingFlow(runId)) return;
-  if (serviceProfessionals.length === 0) {
-    selectedProfessional = null;
-    selectedDate = null;
-    selectedSlot = null;
-    selectedSlotProfessional = null;
-    bookingSubmitting = false;
-    step = STEPS.SERVICE;
-    await say('Este serviço não tem profissional disponível no momento. Escolha outro serviço ou tente novamente em instantes.', 300);
-    return;
-  }
-  if (serviceProfessionals.length === 1) {
-    const professional = serviceProfessionals[0];
-    selectedProfessional = {
-      id: professional.id || '',
-      name: professional.displayName || professional.name || 'Profissional',
-    };
-    selectedDate = null;
-    selectedSlot = null;
-    selectedSlotProfessional = null;
-    bookingSubmitting = false;
-    await say(`Profissional: <strong>${escapeHtml(selectedProfessional.name)}</strong>`, 300);
-    await say('Escolha uma data', 300);
+  clearSelectedTimeAndCalendar();
+  await refreshServicePreview(runId);
+  if ((step === STEPS.CALENDAR || step === STEPS.CONFIRM) && selectedServices.length) {
+    await say('Servicos atualizados. Escolha uma data.', 200);
     step = STEPS.CALENDAR;
-    await loadCalendar();
+    await loadCalendar(runId);
+  }
+}
+
+async function onRemoveService(id, runId = bookingRunId) {
+  if (!canMutateBookingFlow(runId)) return;
+  selectedServices = BookingSelection.remove(selectedServices, id);
+  confirmData = {};
+  bookingSubmitting = false;
+  clearSelectedTimeAndCalendar();
+  await refreshServicePreview(runId);
+}
+
+async function onClearServices(runId = bookingRunId) {
+  if (!canMutateBookingFlow(runId)) return;
+  selectedServices = BookingSelection.clear();
+  confirmData = {};
+  bookingSubmitting = false;
+  clearSelectedTimeAndCalendar();
+  await refreshServicePreview(runId);
+}
+
+
+async function continueToCalendar(runId = bookingRunId) {
+  if (!canMutateBookingFlow(runId)) return;
+  const validation = BookingSelection.validate(selectedServices);
+  if (!validation.ok) {
+    await say(escapeHtml(validation.message), 250);
     return;
   }
-  await say('Escolha o profissional', 300);
-  renderProfessionals(runId);
-}
-
-function renderProfessionals(runId = bookingRunId) {
-  if (!canMutateBookingFlow(runId)) return;
-  const options = [
-    { id: '', name: 'Sem preferência', hint: 'Atribuição automática' },
-    ...serviceProfessionals.map((item) => ({ id: item.id, name: item.displayName || item.name, hint: 'Profissional escolhido' })),
-  ];
-  const cards = options.map((item, i) => `
-    <button class="svc-card" type="button" data-professional-id="${escapeHtml(item.id)}" style="animation-delay:${i*.04}s">
-      <div class="svc-img">${IMG_PH}</div>
-      <div class="svc-body">
-        <div class="svc-name">${escapeHtml(item.name)}</div>
-        <div class="svc-dur">${escapeHtml(item.hint)}</div>
-      </div>
-    </button>`).join('');
-  const w = appendWidget(`
-    <div class="svc-scroll" role="group" aria-label="Profissionais disponíveis">
-      <div class="svc-row">${cards}</div>
-    </div>`);
-  w.querySelectorAll('[data-professional-id]').forEach((button) => {
-    button.addEventListener('click', () => onPickProfessional(button.dataset.professionalId || '', runId));
-  });
-}
-
-async function onPickProfessional(id, runId = bookingRunId) {
-  if (!canMutateBookingFlow(runId)) return;
-  const professional = id
-    ? serviceProfessionals.find((item) => String(item.id) === String(id))
-    : { id: '', name: 'Sem preferência', displayName: 'Sem preferência' };
-  if (!professional) return;
-  selectedProfessional = {
-    id: professional.id || '',
-    name: professional.displayName || professional.name || 'Sem preferência',
-  };
-  selectedDate = null;
-  selectedSlot = null;
-  selectedSlotProfessional = null;
-  bookingSubmitting = false;
-  appendBubble(selectedProfessional.name, true);
-  await say('Escolha uma data', 300);
+  if (servicePreview.status !== 'ready') {
+    await say('Aguarde o calculo de valor e duracao antes de continuar.', 250);
+    return;
+  }
+  appendBubble(BookingSelection.label(selectedServices), true);
+  await say('Atendimento com <strong>Geovane Borges</strong>', 250);
+  await say('Escolha uma data', 250);
   step = STEPS.CALENDAR;
-  await loadCalendar();
+  await loadCalendar(runId);
 }
 
-/* ═══ Calendar ════════════════════════════════════════════ */
-async function fetchSlotsForWeek(ws) {
+/* Calendar */
+async function fetchSlotsForWeek(ws, runId = bookingRunId) {
   if (bookingCompleted) return;
+  const serviceIds = BookingSelection.ids(selectedServices);
+  if (!serviceIds.length) return;
   const key = toKey(ws);
+  const requestSeq = ++slotsRequestSeq;
+  const serviceKey = serviceIds.join('|');
   try {
-    const professionalQuery = selectedProfessional?.id ? `&professionalId=${encodeURIComponent(selectedProfessional.id)}` : '';
-    const r = await fetch(publicUrl(`/public/slots?serviceId=${selectedService.id}&weekStart=${key}${professionalQuery}`));
+    const query = `serviceIds=${serviceIds.map(encodeURIComponent).join(',')}&weekStart=${encodeURIComponent(key)}`;
+    const r = await fetch(publicUrl(`/public/slots?${query}`));
     if (!r.ok) throw new Error('slots unavailable');
-    Object.assign(slots, await r.json());
+    const data = await r.json();
+    if (!canMutateBookingFlow(runId) || requestSeq !== slotsRequestSeq || serviceKey !== BookingSelection.ids(selectedServices).join('|')) return;
+    slots = { ...slots, ...data };
     slotsLoadFailed = false;
   } catch {
-    slotsLoadFailed = true;
+    if (requestSeq === slotsRequestSeq) slotsLoadFailed = true;
   }
 }
 
-async function loadCalendar() {
+async function loadCalendar(runId = bookingRunId) {
   if (bookingCompleted) return;
+  const validation = BookingSelection.validate(selectedServices);
+  if (!validation.ok) {
+    await say(escapeHtml(validation.message), 250);
+    return;
+  }
   disableInput();
   const today = new Date(); today.setHours(0,0,0,0);
   weekStart = new Date(today);
   slots = {};
   slotsLoadFailed = false;
+  selectedDate = null;
+  selectedSlot = null;
+  selectedSlotProfessional = null;
   showTyping();
   await Promise.all([
-    fetchSlotsForWeek(weekStart),
+    fetchSlotsForWeek(weekStart, runId),
     fetchPublicWorkingHours(),
   ]);
   hideTyping();
@@ -1234,7 +1409,7 @@ function renderCalendar() {
 
   const today = new Date(); today.setHours(0,0,0,0);
   const dates = weekDates(weekStart);
-  const DAYS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const DAYS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sab'];
 
   const hdrs = DAYS.map(d => `<div class="cal-hdr">${d}</div>`).join('');
   const cells = dates.map(date => {
@@ -1265,15 +1440,15 @@ function renderCalendar() {
         <button class="cal-nav-btn" id="calPrev" aria-label="Semana anterior">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <span class="cal-lbl">${ls} – ${le}</span>
-        <button class="cal-nav-btn" id="calNext" aria-label="Próxima semana">
+        <span class="cal-lbl">${ls} - ${le}</span>
+        <button class="cal-nav-btn" id="calNext" aria-label="Proxima semana">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
         </button>
       </div>
       <div class="cal-grid" role="group" aria-label="Escolha uma data">${hdrs}${cells}</div>
       ${renderWorkingHoursBlock()}
       <div class="slots-wrap" id="slotsWrap" aria-live="polite">
-        <div class="slots-grid" id="slotsGrid">${slotsLoadFailed ? '<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Não conseguimos carregar os horários agora. Tente novamente em instantes.</p>' : ''}</div>
+        <div class="slots-grid" id="slotsGrid">${slotsLoadFailed ? '<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Nao conseguimos carregar os horarios agora. Tente novamente em instantes.</p>' : ''}</div>
       </div>
     </div>`);
 
@@ -1282,15 +1457,15 @@ function renderCalendar() {
     const t = new Date(); t.setHours(0,0,0,0);
     const p = new Date(weekStart); p.setDate(p.getDate()-7);
     if (p < t) return;
-    weekStart = p; selectedDate = null; selectedSlot = null;
-    if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
+    weekStart = p; selectedDate = null; selectedSlot = null; selectedSlotProfessional = null;
+    await fetchSlotsForWeek(weekStart, runId);
     renderCalendar();
   });
   document.getElementById('calNext').addEventListener('click', async () => {
     if (!canMutateBookingFlow(runId)) return;
     const n = new Date(weekStart); n.setDate(n.getDate()+7);
-    weekStart = n; selectedDate = null; selectedSlot = null;
-    if (!Object.keys(slots).some(k => k >= toKey(weekStart))) await fetchSlotsForWeek(weekStart);
+    weekStart = n; selectedDate = null; selectedSlot = null; selectedSlotProfessional = null;
+    await fetchSlotsForWeek(weekStart, runId);
     renderCalendar();
   });
   w.querySelectorAll('.cal-day:not(.unavail)').forEach(b => b.addEventListener('click', () => onPickDay(b.dataset.key, runId)));
@@ -1312,8 +1487,8 @@ function onPickDay(key, runId = bookingRunId) {
   const taken = (slots[key]||[]).filter(s => s.available === false);
   if (avail.length === 0 && taken.length === 0) {
     const message = slotsLoadFailed
-      ? 'Não conseguimos carregar os horários agora. Tente novamente em instantes.'
-      : 'Não há horários disponíveis para esta data.';
+      ? 'Nao conseguimos carregar os horarios agora. Tente novamente em instantes.'
+      : 'Nao ha horarios disponiveis para esta data.';
     grid.innerHTML = `<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">${message}</p>`;
   } else {
     const all = [...avail,...taken].sort((a,b) => a.time.localeCompare(b.time));
@@ -1330,9 +1505,7 @@ async function onPickSlot(time, runId = bookingRunId) {
   if (!canMutateBookingFlow(runId)) return;
   selectedSlot = time;
   const slot = (slots[selectedDate] || []).find((item) => item.time === time);
-  selectedSlotProfessional = slot?.professionalId
-    ? { id: slot.professionalId, name: slot.professionalName || 'Profissional' }
-    : null;
+  selectedSlotProfessional = slot?.professionalName ? { name: slot.professionalName } : null;
   bookingSubmitting = false;
   document.querySelectorAll('.slot-btn').forEach(b => {
     const s = b.dataset.time === time;
@@ -1343,7 +1516,7 @@ async function onPickSlot(time, runId = bookingRunId) {
   await showConfirm(runId);
 }
 
-/* ═══ Confirm ══════════════════════════════════════════════ */
+/* Confirm */
 async function showConfirm(runId = bookingRunId) {
   if (!canMutateBookingFlow(runId)) return;
   step = STEPS.CONFIRM;
@@ -1354,101 +1527,118 @@ async function showConfirm(runId = bookingRunId) {
   const email = sanitizeEmailValue(client.email);
   const dateObj = new Date(selectedDate + 'T12:00:00');
   const dateStr = dateObj.toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
+  const summary = currentPreviewSummary();
   confirmData = {
     clientName: sanitizeTextValue(client.name, 120), phone: normalizePhoneDigits(client.phone), email: isValidEmail(email) ? email : '',
-    serviceId: selectedService.id, serviceName: selectedService.name,
-    professionalId: selectedProfessional?.id || '',
-    professionalName: selectedProfessional?.id
-      ? selectedProfessional.name
-      : 'Sem preferência',
-    resolvedProfessionalName: selectedSlotProfessional?.name || '',
-    price: selectedService.price, duration: selectedService.duration,
+    serviceIds: BookingSelection.ids(selectedServices), serviceName: summary.label || BookingSelection.label(selectedServices),
+    serviceItems: summary.serviceItems,
+    professionalName: 'Geovane Borges',
+    resolvedProfessionalName: selectedSlotProfessional?.name || 'Geovane Borges',
+    price: summary.totalPrice, duration: summary.effectiveDurationMin,
+    ruleLabel: summary.ruleLabel,
     date: selectedDate, time: selectedSlot, dateStr,
   };
-  await say('Confirme seu agendamento:', 400);
+  await say('Revise seu agendamento', 300);
   if (!canMutateBookingFlow(runId) || renderSeq !== confirmRenderSeq) return;
+  const servicesText = confirmData.serviceItems?.length
+    ? confirmData.serviceItems.map((item) => item.name).join(' + ')
+    : confirmData.serviceName;
   const w = appendWidget(`
     <div class="confirm-card" id="confirmWidgetWrap">
-      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(confirmData.serviceName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Cliente</span><span class="cfr-val">${escapeHtml(confirmData.clientName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Telefone</span><span class="cfr-val">${escapeHtml(fmtPhone(confirmData.phone))}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Servicos</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(confirmData.professionalName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(dateStr)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horario</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duracao</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Total previsto</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
       <button class="btn-confirm" id="btnConfirm" aria-label="Confirmar agendamento">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
         Confirmar agendamento
       </button>
+      <button class="btn-secondary" id="btnBackBooking" type="button">Voltar e alterar</button>
     </div>`);
   w.querySelector('#btnConfirm').addEventListener('click', () => submitBooking(runId));
+  w.querySelector('#btnBackBooking').addEventListener('click', () => {
+    const node = document.getElementById('confirmWidgetWrap');
+    if (node) node.remove();
+    step = STEPS.CALENDAR;
+  });
 }
 
-/* ═══ Submit ═══════════════════════════════════════════════ */
+/* Submit */
 async function submitBooking(runId = bookingRunId) {
   if (!canMutateBookingFlow(runId)) return;
   if (bookingSubmitting || bookingCompleted) return;
   if (!confirmData?.date || !confirmData?.time || !selectedSlot) return;
   bookingSubmitting = true;
   const btn = document.querySelector('#confirmWidgetWrap #btnConfirm');
-  if (btn) { btn.disabled = true; btn.textContent = 'Confirmando…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirmando...'; }
   try {
     const submittedData = { ...confirmData };
     const iso = new Date(`${confirmData.date}T${confirmData.time}:00.000-03:00`).toISOString();
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json', 'idempotency-key': bookingIdempotencyKey };
     const payload = {
       unitId: BOOKING_UNIT_ID || undefined,
       clientName: sanitizeTextValue(submittedData.clientName, 120),
       clientPhone: normalizePhoneDigits(submittedData.phone),
-      serviceId: submittedData.serviceId,
+      serviceIds: submittedData.serviceIds,
       startsAt: iso,
+      idempotencyKey: bookingIdempotencyKey,
     };
     const email = sanitizeEmailValue(submittedData.email);
     if (email && !isValidEmail(email)) {
-      const err = new Error('Informe um e-mail válido ou deixe o campo em branco.');
+      const err = new Error('Informe um e-mail valido ou deixe o campo em branco.');
       err.status = 400;
       throw err;
     }
     if (email) payload.clientEmail = email;
-    if (confirmData.professionalId) payload.professionalId = confirmData.professionalId;
     const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
       body: JSON.stringify(payload),
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      const err = new Error('Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.');
+      const err = new Error('Nao conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.');
       err.status = r.status;
       err.backendError = data?.error || '';
       throw err;
     }
     const created = await r.json().catch(() => ({}));
-    const assignedProfessionalName = created?.professionalName || submittedData.resolvedProfessionalName || submittedData.professionalName;
-    saveAppt({ id:Date.now(), service:submittedData.serviceName, professional:assignedProfessionalName, date:submittedData.dateStr, time:submittedData.time, price:fmtBRL(submittedData.price), status:'pending', createdAt:new Date().toISOString() });
-    step = STEPS.DONE;
-    lockCompletedBookingUI();
-    renderBookingSuccess({
-      serviceName: submittedData.serviceName,
+    const assignedProfessionalName = created?.professionalName || submittedData.resolvedProfessionalName || 'Geovane Borges';
+    const finalSummary = {
+      serviceName: created?.serviceName || submittedData.serviceName,
+      serviceItems: submittedData.serviceItems,
       professionalName: assignedProfessionalName,
       dateStr: submittedData.dateStr,
       time: submittedData.time,
-      duration: submittedData.duration,
-      price: submittedData.price,
+      duration: created?.effectiveDurationMin || submittedData.duration,
+      price: created?.totalPrice || submittedData.price,
       appointmentId: created?.id || '',
-    });
+    };
+    saveAppt({ id:Date.now(), service:finalSummary.serviceName, professional:assignedProfessionalName, date:submittedData.dateStr, time:submittedData.time, price:fmtBRL(finalSummary.price), status:'pending', createdAt:new Date().toISOString() });
+    step = STEPS.DONE;
+    lockCompletedBookingUI();
+    renderBookingSuccess(finalSummary);
   } catch (error) {
     bookingSubmitting = false;
     const backendError = String(error?.backendError || error?.message || '').toLowerCase();
     const message = error?.status === 409
-      ? 'Esse horário acabou de ficar indisponível. Escolha outro horário na agenda acima.'
+      ? 'Esse horario acabou de ser reservado. Escolha outro horario.'
       : error?.status === 400 && backendError.includes('e-mail')
-        ? 'Informe um e-mail válido ou deixe o campo em branco.'
-        : 'Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
+        ? 'Informe um e-mail valido ou deixe o campo em branco.'
+        : 'Nao conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar novamente`; }
-    await say(escapeHtml(message), 400);
-    if (error?.status === 409 && selectedService && weekStart) {
+    await say(escapeHtml(message), 300);
+    if (error?.status === 409 && selectedServices.length && weekStart) {
+      bookingIdempotencyKey = createBookingIdempotencyKey();
+      const conflictDate = selectedDate;
+      selectedSlot = null;
       slots = {};
-      await fetchSlotsForWeek(weekStart);
+      await fetchSlotsForWeek(weekStart, runId);
       renderCalendar();
+      if (conflictDate) onPickDay(conflictDate, runId);
     }
   }
 }
@@ -1459,26 +1649,28 @@ function renderBookingSuccess(summary) {
   const oldSuccessMessage = document.getElementById('bookingSuccessMessageWrap');
   if (oldSuccessMessage) oldSuccessMessage.remove();
   const successMessage = appendBubble(
-    `<strong>Agendamento confirmado!</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} · ${escapeHtml(summary.dateStr)} às ${escapeHtml(summary.time)}.</span>`,
+    `<strong>Agendamento confirmado com sucesso.</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} - ${escapeHtml(summary.dateStr)} as ${escapeHtml(summary.time)}.</span>`,
   );
   successMessage.id = 'bookingSuccessMessageWrap';
+  const servicesText = summary.serviceItems?.length
+    ? summary.serviceItems.map((item) => item.name).join(' + ')
+    : summary.serviceName;
   const success = appendWidget(`
     <div class="confirm-card" id="bookingSuccessWrap" aria-live="polite">
-      <div class="cfr-row"><span class="cfr-lbl">Serviço</span><span class="cfr-val">${escapeHtml(summary.serviceName)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Servicos</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(summary.professionalName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(summary.dateStr)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(summary.time)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(summary.duration)} min</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Valor</span><span class="cfr-price">${fmtBRL(summary.price)}</span></div>
-      <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer outro agendamento">
-        Novo agendamento
+      <div class="cfr-row"><span class="cfr-lbl">Horario</span><span class="cfr-val">${escapeHtml(summary.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duracao</span><span class="cfr-val">${escapeHtml(summary.duration)} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Total previsto</span><span class="cfr-price">${fmtBRL(summary.price)}</span></div>
+      <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer novo agendamento">
+        Fazer novo agendamento
       </button>
     </div>`);
   success.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
 }
 
-/* ─ Input events ─ */
-chatInput.addEventListener('input', () => { btnSend.disabled = step !== STEPS.EMAIL && chatInput.value.trim().length === 0; });
+/* Input events */chatInput.addEventListener('input', () => { btnSend.disabled = step !== STEPS.EMAIL && chatInput.value.trim().length === 0; });
 chatInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey && !btnSend.disabled) { e.preventDefault(); handleSend(); } });
 btnSend.addEventListener('click', handleSend);
 
@@ -1528,7 +1720,7 @@ function showVerifyCard(c) {
 
   w.querySelector('#btnVOk').addEventListener('click', async () => {
     appendBubble('Está correto', true);
-    await say('Escolha o serviço', 400);
+    await say('Escolha os servicos', 400);
     step = STEPS.SERVICE;
     await loadServices();
   });

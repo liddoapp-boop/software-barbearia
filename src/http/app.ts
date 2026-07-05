@@ -4708,6 +4708,35 @@ export function createApp() {
       }));
   });
 
+  app.post("/public/services/preview", async (request, reply) => {
+    const body = z.object({
+      unitId: z.string().min(1).optional(),
+      serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES),
+    }).parse(request.body);
+    const unitId = publicUnitId(body.unitId);
+    const serviceIds = normalizePublicServiceIds({ serviceIds: body.serviceIds });
+    const contract = await resolvePublicServicesContract(unitId, serviceIds);
+    if (!contract) {
+      reply.status(404).send({ error: "Servico nao encontrado" });
+      return;
+    }
+    return {
+      serviceIds,
+      services: contract.services.map((service) => ({
+        id: service.id,
+        name: service.name,
+        price: Number(service.price),
+        durationMinutes: service.durationMin,
+      })),
+      serviceItems: contract.serviceItems,
+      totalPrice: contract.totalPriceSnapshot,
+      totalPriceSnapshot: contract.totalPriceSnapshot,
+      effectiveDurationMin: contract.effectiveDurationMin,
+      calculationMode: contract.duration.calculationMode,
+      ruleId: contract.duration.matchedRuleId,
+      ruleLabel: contract.duration.matchedRuleLabel,
+    };
+  });
   app.get("/public/services/:serviceId/professionals", async (request, reply) => {
     const params = z.object({ serviceId: z.string().min(1) }).parse(request.params);
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
@@ -4902,6 +4931,59 @@ export function createApp() {
     return result;
   });
 
+  const publicBookingIdempotencyRecords = new Map<string, { payloadHash: string; responseJson: unknown }>();
+  const publicBookingAction = "PUBLIC_BOOKING_CREATE";
+
+  const getPublicBookingReplay = async (unitId: string, idempotencyKey: string, payloadHash: string) => {
+    if (backend === "prisma") {
+      const existing = await prisma.idempotencyRecord.findUnique({
+        where: { unitId_action_idempotencyKey: { unitId, action: publicBookingAction, idempotencyKey } },
+      });
+      if (!existing) return null;
+      if (existing.payloadHash !== payloadHash) {
+        throw new Error("Conflito: idempotencyKey reutilizada com payload diferente");
+      }
+      return existing.responseJson ?? null;
+    }
+    const existing = publicBookingIdempotencyRecords.get(`${unitId}:${publicBookingAction}:${idempotencyKey}`);
+    if (!existing) return null;
+    if (existing.payloadHash !== payloadHash) {
+      throw new Error("Conflito: idempotencyKey reutilizada com payload diferente");
+    }
+    return existing.responseJson;
+  };
+
+  const storePublicBookingReplay = async (
+    unitId: string,
+    idempotencyKey: string,
+    payloadHash: string,
+    responseJson: unknown,
+  ) => {
+    if (backend === "prisma") {
+      await prisma.idempotencyRecord.upsert({
+        where: { unitId_action_idempotencyKey: { unitId, action: publicBookingAction, idempotencyKey } },
+        create: {
+          id: crypto.randomUUID(),
+          unitId,
+          action: publicBookingAction,
+          idempotencyKey,
+          payloadHash,
+          status: "SUCCEEDED",
+          responseJson: responseJson as any,
+        },
+        update: {
+          payloadHash,
+          status: "SUCCEEDED",
+          responseJson: responseJson as any,
+        },
+      });
+      return;
+    }
+    publicBookingIdempotencyRecords.set(`${unitId}:${publicBookingAction}:${idempotencyKey}`, {
+      payloadHash,
+      responseJson: JSON.parse(JSON.stringify(responseJson)),
+    });
+  };
   const publicBookingSchema = z.object({
     clientName: z.string().min(2).max(120),
     clientPhone: z.string().min(8).max(20),
@@ -4917,10 +4999,13 @@ export function createApp() {
     ),
     startsAt: z.string().datetime(),
     unitId: z.string().min(1).optional(),
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
   }).refine((value) => value.serviceId != null || value.serviceIds != null, {
     message: "Informe ao menos um servico para o agendamento",
   }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
     message: "Informe serviceId ou serviceIds, nao ambos",
+  }).refine((value) => value.professionalId == null, {
+    message: "professionalId nao e aceito no booking publico",
   });
 
   app.post("/public/booking", async (request, reply) => {
@@ -4938,6 +5023,23 @@ export function createApp() {
     }
     const body = parsedBody.data;
     const unitId = publicUnitId(body.unitId);
+    const publicBookingIdempotencyKey = getIdempotencyKey(request, body.idempotencyKey);
+    const publicBookingPayloadHash = publicBookingIdempotencyKey
+      ? getIdempotencyPayloadHash({ route: "/public/booking", unitId, body: { ...body, unitId } })
+      : "";
+    if (publicBookingIdempotencyKey) {
+      let replay: unknown;
+      try {
+        replay = await getPublicBookingReplay(unitId, publicBookingIdempotencyKey, publicBookingPayloadHash);
+      } catch (error) {
+        reply.status(409).send({ error: "idempotencyKey reutilizada com payload diferente" });
+        return;
+      }
+      if (replay) {
+        reply.status(201).send(replay);
+        return;
+      }
+    }
     const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
 
     const phone = body.clientPhone.replace(/\D/g, "");
@@ -5008,6 +5110,7 @@ export function createApp() {
         serviceId: body.serviceId,
         serviceIds: body.serviceIds,
         startsAt,
+        bufferAfterMin: 0,
         notes: `Agendamento online - ${body.clientName}`,
         changedBy: "public",
       });
@@ -5029,6 +5132,7 @@ export function createApp() {
         serviceId: body.serviceId,
         serviceIds: body.serviceIds,
         startsAt,
+        bufferAfterMin: 0,
         notes: `Agendamento online - ${body.clientName}`,
         changedBy: "public",
       });
@@ -5086,15 +5190,25 @@ export function createApp() {
       }
     });
 
-    reply.status(201).send({
+    const responsePayload = {
       id: appointment.id,
-      message: "Agendamento confirmado! Voce receberá uma confirmação no WhatsApp.",
-      startsAt: appointment.startsAt,
-      endsAt: appointment.endsAt,
+      message: "Agendamento confirmado com sucesso.",
+      startsAt: appointment.startsAt.toISOString(),
+      endsAt: appointment.endsAt.toISOString(),
+      serviceIds,
+      serviceName: contract.services.map((item) => item.name).join(" + "),
+      serviceNames: contract.services.map((item) => item.name),
+      totalPrice: contract.totalPriceSnapshot,
+      effectiveDurationMin: contract.effectiveDurationMin,
+      ruleLabel: contract.duration.matchedRuleLabel,
       professionalId: profId,
       professionalName: profName,
       workingHours,
-    });
+    };
+    if (publicBookingIdempotencyKey) {
+      await storePublicBookingReplay(unitId, publicBookingIdempotencyKey, publicBookingPayloadHash, responsePayload);
+    }
+    reply.status(201).send(responsePayload);
   });
 
   // ─── Rotas de gerenciamento WhatsApp (admin) ─────────────────────────────
