@@ -5145,61 +5145,50 @@ describe("API MVP", () => {
     expect(normalizedPublicText).not.toContain("db");
   });
 
-  it("grava no booking publico o profissional escolhido explicitamente", async () => {
+  it("rejeita professionalId arbitrario no booking publico e resolve Geovane no backend", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
     const rafael = await createProfessional(app, "Rafael Andrade");
     await setBarbaProfessionals(app, ["pro-01", rafael.id]);
 
-    const geovaneBooking = await app.inject({
+    const rejected = await app.inject({
       method: "POST",
       url: "/public/booking?unitId=unit-01",
       payload: {
         unitId: "unit-01",
-        clientName: "Cliente Profissional Geovane",
+        clientName: "Cliente Profissional Arbitrario",
         clientPhone: "(11) 90000-2101",
         serviceId: "svc-barba",
-        professionalId: "pro-01",
+        professionalId: rafael.id,
         startsAt: "2026-06-05T19:00:00.000Z",
       },
     });
-    expect(geovaneBooking.statusCode).toBe(201);
-    expect(geovaneBooking.json().professionalId).toBe("pro-01");
-    expect(geovaneBooking.json().professionalName).toBe("Geovane Borges");
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toBe("Nao foi possivel concluir o agendamento. Verifique os dados e tente novamente.");
 
-    const geovaneDetail = await app.inject({
-      method: "GET",
-      url: `/appointments/${geovaneBooking.json().id}`,
-    });
-    expect(geovaneDetail.statusCode).toBe(200);
-    expect(geovaneDetail.json().appointment.professionalId).toBe("pro-01");
-    expect(geovaneDetail.json().appointment.professional).toBe("Geovane Borges");
-
-    const rafaelBooking = await app.inject({
+    const booking = await app.inject({
       method: "POST",
       url: "/public/booking?unitId=unit-01",
       payload: {
         unitId: "unit-01",
-        clientName: "Cliente Profissional Rafael",
+        clientName: "Cliente Profissional Automatico",
         clientPhone: "(11) 90000-2102",
         serviceId: "svc-barba",
-        professionalId: rafael.id,
         startsAt: "2026-06-05T20:00:00.000Z",
       },
     });
-    expect(rafaelBooking.statusCode).toBe(201);
-    expect(rafaelBooking.json().professionalId).toBe(rafael.id);
-    expect(rafaelBooking.json().professionalName).toBe("Rafael Andrade");
+    expect(booking.statusCode).toBe(201);
+    expect(booking.json().professionalId).toBe("pro-01");
+    expect(booking.json().professionalName).toBe("Geovane Borges");
 
-    const rafaelDetail = await app.inject({
+    const detail = await app.inject({
       method: "GET",
-      url: `/appointments/${rafaelBooking.json().id}`,
+      url: `/appointments/${booking.json().id}`,
     });
-    expect(rafaelDetail.statusCode).toBe(200);
-    expect(rafaelDetail.json().appointment.professionalId).toBe(rafael.id);
-    expect(rafaelDetail.json().appointment.professional).toBe("Rafael Andrade");
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().appointment.professionalId).toBe("pro-01");
+    expect(detail.json().appointment.professional).toBe("Geovane Borges");
   });
-
   it("lista somente dados publicos seguros dos profissionais elegiveis por servico", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
@@ -5248,7 +5237,7 @@ describe("API MVP", () => {
     expect(apiSource).toContain("!hasPublicDataTestMarker(item.name)");
   });
 
-  it("rejeita profissional publico nao vinculado ao servico", async () => {
+  it("rejeita professionalId publico mesmo quando nao vinculado ao servico", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
     const unlinked = await createProfessional(app, "Profissional Sem Vinculo");
@@ -5266,8 +5255,8 @@ describe("API MVP", () => {
       },
     });
 
-    expect(booking.statusCode).toBe(409);
-    expect(booking.json().error).toContain("Profissional indisponivel");
+    expect(booking.statusCode).toBe(400);
+    expect(booking.json().error).toBe("Nao foi possivel concluir o agendamento. Verifique os dados e tente novamente.");
   });
 
   it("mantem atribuicao deterministica sem preferencia no booking publico", async () => {
@@ -5374,7 +5363,6 @@ describe("API MVP", () => {
         clientName: "Cliente Auditoria Publica",
         clientPhone: "(11) 90000-2106",
         serviceId: "svc-barba",
-        professionalId: "pro-01",
         startsAt: "2026-06-05T21:00:00.000Z",
       },
     });
@@ -5427,10 +5415,11 @@ describe("API MVP", () => {
 
     expect(publicSectionStart).toBeGreaterThanOrEqual(0);
     expect(publicBookingSource).not.toContain("serviceProfessional.findFirst");
-    expect(publicBookingSource).toContain('app.get("/public/services/:serviceId/professionals"');
-    expect(publicBookingSource).toContain("professionalId");
-    expect(uiSource).toContain("STEPS.PROFESSIONAL");
-    expect(uiSource).toContain("payload.professionalId = confirmData.professionalId");
+    expect(publicBookingSource).toContain('app.post("/public/services/preview"');
+    expect(publicBookingSource).toContain("professionalId nao e aceito no booking publico");
+    expect(uiSource).not.toContain("STEPS.PROFESSIONAL");
+    expect(uiSource).not.toContain("payload.professionalId");
+    expect(uiSource).toContain("serviceIds: submittedData.serviceIds");
     expect(uiSource).toContain("normalizeClientRecord");
     expect(uiSource).toContain("isSuspiciousStoredText");
     expect(uiSource).toContain("autocompleteMap");

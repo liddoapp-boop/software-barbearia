@@ -260,6 +260,41 @@ function createFetchMock(requests: FetchRequest[], options: BookingHarnessOption
     if (url.pathname === "/public/services") {
       return jsonResponse(services, options.servicesStatus ?? 200);
     }
+    if (url.pathname === "/public/services/preview") {
+      const requestedServiceIds = Array.isArray(body?.serviceIds) ? body.serviceIds.map(String) : ["svc-barba"];
+      const serviceById = new Map(
+        services.map((service) => [
+          String(service.id),
+          {
+            id: String(service.id),
+            name: String(service.name ?? "Servico"),
+            price: Number(service.price ?? 0),
+            durationMinutes: Number(service.durationMinutes ?? service.durationMin ?? service.duration ?? 0),
+          },
+        ]),
+      );
+      const serviceItems = requestedServiceIds
+        .map((serviceId, position) => {
+          const service = serviceById.get(serviceId);
+          if (!service) return null;
+          return {
+            serviceId,
+            position,
+            serviceNameSnapshot: service.name,
+            servicePriceSnapshot: service.price,
+            serviceDurationMinSnapshot: service.durationMinutes,
+          };
+        })
+        .filter(Boolean);
+      return jsonResponse({
+        serviceIds: requestedServiceIds,
+        serviceItems,
+        totalPrice: serviceItems.reduce((sum: number, item: any) => sum + Number(item.servicePriceSnapshot), 0),
+        totalPriceSnapshot: serviceItems.reduce((sum: number, item: any) => sum + Number(item.servicePriceSnapshot), 0),
+        effectiveDurationMin: requestedServiceIds.length > 1 ? 45 : Number(serviceItems[0]?.serviceDurationMinSnapshot ?? 35),
+        ruleLabel: requestedServiceIds.length > 1 ? "Corte + Barba - 45 min" : "",
+      });
+    }
     if (url.pathname === "/public/services/svc-barba/professionals") {
       return jsonResponse({
         service: { id: "svc-barba", name: "Barba Terapia" },
@@ -332,11 +367,11 @@ async function createBookingHarness(initialStorage: Record<string, string> = {},
       handleSend,
       beginNewBooking,
       onPickService,
-      onPickProfessional,
+      continueToCalendar,
       onPickDay,
       onPickSlot,
       submitBooking,
-      getState: () => ({ step, bookingSubmitting, bookingCompleted, selectedProfessional, selectedSlot, confirmData })
+      getState: () => ({ step, bookingSubmitting, bookingCompleted, selectedServices, selectedProfessional, selectedSlot, confirmData })
     };
     window.__bookingReady = init();`,
   );
@@ -353,7 +388,7 @@ async function createBookingHarness(initialStorage: Record<string, string> = {},
         handleSend(): Promise<void>;
         beginNewBooking(fromUserAction?: boolean): Promise<void>;
         onPickService(id: string): Promise<void>;
-        onPickProfessional(id: string): Promise<void>;
+        continueToCalendar(): Promise<void>;
         onPickDay(key: string): void;
         onPickSlot(time: string): Promise<void>;
         submitBooking(): Promise<void>;
@@ -373,6 +408,7 @@ async function completeBookingUntilConfirm() {
   });
   await harness.api.beginNewBooking();
   await harness.api.onPickService("svc-barba");
+  await harness.api.continueToCalendar();
   harness.api.onPickDay("2026-06-01");
   await harness.api.onPickSlot("10:00");
   return harness;
@@ -397,7 +433,6 @@ describe("booking publico - trava pos-sucesso", () => {
 
     const guardedHandlers = [
       "async function onPickService",
-      "async function onPickProfessional",
       "function onPickDay",
       "async function onPickSlot",
       "async function showConfirm",
@@ -421,12 +456,12 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(html).toContain('id="bookingSuccessWrap"');
     expect(html).toContain("oldSuccess.remove()");
     expect(html).toContain("oldSuccessMessage.remove()");
-    expect(html).toContain("renderBookingSuccess({");
-    expect(html).toContain("serviceName: submittedData.serviceName");
+    expect(html).toContain("renderBookingSuccess(finalSummary)");
+    expect(html).toContain("serviceName: created?.serviceName || submittedData.serviceName");
     expect(html).toContain("professionalName: assignedProfessionalName");
     expect(html).toContain("dateStr: submittedData.dateStr");
     expect(html).toContain("time: submittedData.time");
-    expect(html).toContain("Novo agendamento");
+    expect(html).toContain("Fazer novo agendamento");
   });
 
   it("bloqueia double tap no confirmar e libera somente em falha", () => {
@@ -439,6 +474,56 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(html).toContain("lockCompletedBookingUI();");
     expect(html).toContain("bookingSubmitting = false;");
     expect(html).toContain("btn.disabled = false");
+  });
+
+  it.each([
+    {
+      selected: ["svc-corte", "svc-barba"],
+      expected: ["svc-corte", "svc-barba"],
+    },
+    {
+      selected: ["svc-barba", "svc-corte"],
+      expected: ["svc-barba", "svc-corte"],
+    },
+  ])("envia serviceIds na ordem selecionada: $expected", async ({ selected, expected }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+    const harness = await createBookingHarness({
+      liddo_client: JSON.stringify({
+        name: "Cliente Mobile",
+        phone: "11999999999",
+        email: "",
+      }),
+    }, {
+      services: [
+        { id: "svc-corte", name: "Corte", price: 30, durationMinutes: 30, imageUrl: "" },
+        { id: "svc-barba", name: "Barba", price: 20, durationMinutes: 30, imageUrl: "" },
+      ],
+    });
+
+    await harness.api.beginNewBooking();
+    for (const serviceId of selected) {
+      await harness.api.onPickService(serviceId);
+    }
+    expect(harness.api.getState().selectedServices).toMatchObject(
+      expected.map((id) => ({ id })),
+    );
+
+    await harness.api.continueToCalendar();
+    harness.api.onPickDay("2026-06-01");
+    await harness.api.onPickSlot("10:00");
+    expect(harness.api.getState().confirmData).toMatchObject({ serviceIds: expected });
+
+    await harness.api.submitBooking();
+    await harness.api.submitBooking();
+    const posts = harness.requests.filter((request) => request.method === "POST" && request.path === "/public/booking");
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({
+      serviceIds: expected,
+      idempotencyKey: expect.any(String),
+    });
+    expect(posts[0].body).not.toHaveProperty("serviceId");
+    expect(posts[0].body).not.toHaveProperty("professionalId");
   });
 
   it("novo agendamento limpa sucesso anterior e reinicia conscientemente", () => {
@@ -457,14 +542,16 @@ describe("booking publico - trava pos-sucesso", () => {
     const api = readFileSync("src/http/app.ts", "utf8");
 
     expect(html).toContain("isPublicServiceVisible");
-    expect(html).toContain("payload.professionalId = confirmData.professionalId");
+    expect(html).toContain("serviceIds: submittedData.serviceIds");
+    expect(html).not.toContain("payload.professionalId");
     expect(html).toContain("if (email) payload.clientEmail = email");
     expect(html).toContain("isValidEmail(email)");
     expect(api).toContain("professionalName");
+    expect(api).toContain("/public/services/preview");
     expect(api).toContain("APPOINTMENT_CREATED");
   });
 
-  it("seleciona automaticamente o unico profissional publico e segue para horarios", async () => {
+  it("mostra Geovane como informacao e nao consulta/seletor de profissional", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
     const harness = await createBookingHarness();
@@ -473,62 +560,31 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.onPickService("svc-barba");
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(harness.requests.some((request) => request.path === "/public/services/svc-barba/professionals")).toBe(true);
+    expect(harness.requests.some((request) => request.path.includes("/professionals"))).toBe(false);
     expect(harness.api.getState()).toMatchObject({
-      selectedProfessional: { id: "pro-01", name: "Geovane Borges" },
+      selectedProfessional: null,
+      selectedServices: [{ id: "svc-barba", name: "Barba Terapia" }],
     });
-    expect(text).toContain("Profissional: Geovane Borges");
-    expect(text).not.toContain("Sem preferência");
+    expect(text).toContain("Atendimento com Geovane Borges");
     expect(harness.document.querySelector("[data-professional-id]")).toBeNull();
-    expect(harness.document.getElementById("calWidgetWrap")).not.toBeNull();
-    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(true);
+    expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
+    expect(harness.requests.some((request) => request.path === "/public/services/preview")).toBe(true);
   });
 
-  it("mantem escolha explicita quando ha mais de um profissional publico", async () => {
+  it("continua para horarios com serviceIds depois do preview", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
-    const harness = await createBookingHarness({}, {
-      professionals: [
-        { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
-        { id: "pro-02", name: "Rafael Andrade", displayName: "Rafael Andrade" },
-      ],
-    });
+    const harness = await createBookingHarness();
 
     await harness.api.beginNewBooking();
     await harness.api.onPickService("svc-barba");
+    await harness.api.continueToCalendar();
 
-    const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Escolha o profissional");
-    expect(text).toContain("Sem preferência");
-    expect(text).toContain("Geovane Borges");
-    expect(text).toContain("Rafael Andrade");
-    expect(harness.api.getState()).toMatchObject({ selectedProfessional: null });
-    expect(harness.document.querySelectorAll("[data-professional-id]")).toHaveLength(3);
-    expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
-    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(false);
-
-    await harness.api.onPickProfessional("pro-02");
-    expect(harness.api.getState()).toMatchObject({
-      selectedProfessional: { id: "pro-02", name: "Rafael Andrade" },
-    });
     expect(harness.document.getElementById("calWidgetWrap")).not.toBeNull();
+    const slotsRequest = harness.requests.find((request) => request.path === "/public/slots");
+    expect(slotsRequest).toBeTruthy();
+    expect(harness.requests.some((request) => request.path.includes("/professionals"))).toBe(false);
   });
-
-  it("mostra mensagem amigavel quando nao ha profissional publico e nao cria booking", async () => {
-    const harness = await createBookingHarness({}, { professionals: [] });
-
-    await harness.api.beginNewBooking();
-    await harness.api.onPickService("svc-barba");
-
-    const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Este serviço não tem profissional disponível no momento.");
-    expect(harness.api.getState()).toMatchObject({ selectedProfessional: null });
-    expect(harness.document.querySelector("[data-professional-id]")).toBeNull();
-    expect(harness.document.getElementById("calWidgetWrap")).toBeNull();
-    expect(harness.requests.some((request) => request.path === "/public/slots")).toBe(false);
-    expect(harness.requests.some((request) => request.method === "POST" && request.path === "/public/booking")).toBe(false);
-  });
-
   it("nao contamina o formulario ativo com dados suspeitos do localStorage", async () => {
     const harness = await createBookingHarness({
       liddo_client: JSON.stringify({
@@ -597,7 +653,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.beginNewBooking();
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Não conseguimos carregar os serviços agora");
+    expect(text).toContain("Nao conseguimos carregar os servicos agora");
     expect(text).not.toContain("Corte Clássico");
     expect(text).not.toContain("Barba Completa");
     expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);
@@ -625,10 +681,13 @@ describe("booking publico - trava pos-sucesso", () => {
       unitId: "unit-01",
       clientName: "Cliente Mobile",
       clientPhone: "11999999999",
-      serviceId: "svc-barba",
+      serviceIds: ["svc-barba"],
       startsAt: "2026-06-01T13:00:00.000Z",
     });
     expect(postsAfterDoubleTap[0].body).not.toHaveProperty("clientEmail");
+    expect(postsAfterDoubleTap[0].body).not.toHaveProperty("serviceId");
+    expect(postsAfterDoubleTap[0].body).not.toHaveProperty("professionalId");
+    expect(postsAfterDoubleTap[0].body).toHaveProperty("idempotencyKey");
 
     expect(harness.api.getState()).toMatchObject({
       bookingCompleted: true,
@@ -654,8 +713,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.submitBooking();
     expect(harness.requests.filter((request) => request.method === "POST" && request.path === "/public/booking")).toHaveLength(1);
 
-    harness.document.getElementById("btnRestartBooking")?.click();
-    await Promise.resolve();
+    await harness.api.beginNewBooking(true);
 
     expect(harness.api.getState()).toMatchObject({
       bookingCompleted: false,

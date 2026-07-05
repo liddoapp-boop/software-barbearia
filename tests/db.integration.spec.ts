@@ -1265,6 +1265,12 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(legacyRow.serviceItems).toHaveLength(1);
     expect(Number(legacyRow.totalPriceSnapshot)).toBe(30);
 
+    await prisma.businessSettings.update({
+      where: { unitId: scenario.unitId },
+      data: { bufferBetweenAppointmentsMinutes: 10 },
+    });
+
+    const multiIdempotencyKey = uniqueId("public-booking-multi");
     const multi = await app.inject({
       method: "POST",
       url: "/public/booking",
@@ -1273,7 +1279,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         clientName: "Cliente Publico Dois",
         clientPhone: "11900000002",
         serviceIds: [scenario.corteId, scenario.barbaId],
-        professionalId: scenario.professionalId,
+        idempotencyKey: multiIdempotencyKey,
         startsAt: "2026-05-27T10:00:00.000Z",
         totalPriceSnapshot: 1,
         effectiveDurationMinSnapshot: 1,
@@ -1289,14 +1295,92 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(multiRow.effectiveDurationMinSnapshot).toBe(45);
     expect(multiRow.durationCalculationMode).toBe("COMBINATION_RULE");
     expect(multiRow.endsAt.toISOString()).toBe("2026-05-27T10:45:00.000Z");
+    const countAfterMulti = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const replay = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Dois",
+        clientPhone: "11900000002",
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        idempotencyKey: multiIdempotencyKey,
+        startsAt: "2026-05-27T10:00:00.000Z",
+      },
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json().id).toBe(multi.json().id);
+    expect(replay.json().serviceIds).toEqual([scenario.corteId, scenario.barbaId]);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(countAfterMulti);
 
-    const bothContracts = await app.inject({
+    const reversedIdempotencyKey = uniqueId("public-booking-reversed");
+    const reversed = await app.inject({
       method: "POST",
       url: "/public/booking",
       payload: {
         unitId: scenario.unitId,
         clientName: "Cliente Publico Tres",
         clientPhone: "11900000003",
+        serviceIds: [scenario.barbaId, scenario.corteId],
+        idempotencyKey: reversedIdempotencyKey,
+        startsAt: "2026-05-27T11:00:00.000Z",
+      },
+    });
+    expect(reversed.statusCode).toBe(201);
+    expect(reversed.json().serviceIds).toEqual([scenario.barbaId, scenario.corteId]);
+    const reversedPublicRow = await prisma.appointment.findUniqueOrThrow({
+      where: { id: reversed.json().id },
+      include: { serviceItems: { orderBy: { position: "asc" } } },
+    });
+    expect(reversedPublicRow.serviceItems.map((item) => item.serviceId)).toEqual([
+      scenario.barbaId,
+      scenario.corteId,
+    ]);
+    expect(reversedPublicRow.serviceItems.map((item) => item.position)).toEqual([0, 1]);
+    expect(Number(reversedPublicRow.totalPriceSnapshot)).toBe(50);
+    expect(reversedPublicRow.effectiveDurationMinSnapshot).toBe(45);
+    expect(reversedPublicRow.durationCalculationMode).toBe("COMBINATION_RULE");
+    expect(reversedPublicRow.endsAt.toISOString()).toBe("2026-05-27T11:45:00.000Z");
+    const countAfterReversed = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const reversedReplay = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Tres",
+        clientPhone: "11900000003",
+        serviceIds: [scenario.barbaId, scenario.corteId],
+        idempotencyKey: reversedIdempotencyKey,
+        startsAt: "2026-05-27T11:00:00.000Z",
+      },
+    });
+    expect(reversedReplay.statusCode).toBe(201);
+    expect(reversedReplay.json().id).toBe(reversed.json().id);
+    expect(reversedReplay.json().serviceIds).toEqual([scenario.barbaId, scenario.corteId]);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(countAfterReversed);
+
+    const divergentReplay = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Dois",
+        clientPhone: "11900000002",
+        serviceIds: [scenario.corteId, scenario.barbaId],
+        idempotencyKey: multiIdempotencyKey,
+        startsAt: "2026-05-27T11:00:00.000Z",
+      },
+    });
+    expect(divergentReplay.statusCode).toBe(409);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(countAfterReversed);
+
+    const bothContracts = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Quatro",
+        clientPhone: "11900000004",
         serviceId: scenario.corteId,
         serviceIds: [scenario.corteId, scenario.barbaId],
         startsAt: "2026-05-27T12:00:00.000Z",
@@ -1310,14 +1394,14 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       url: "/public/booking",
       payload: {
         unitId: scenario.unitId,
-        clientName: "Cliente Publico Quatro",
-        clientPhone: "11900000004",
+        clientName: "Cliente Publico Cinco",
+        clientPhone: "11900000005",
         serviceIds: [scenario.corteId, scenario.barbaId],
         professionalId: scenario.partialProfessionalId,
         startsAt: "2026-05-27T12:00:00.000Z",
       },
     });
-    expect(incompatible.statusCode).toBe(409);
+    expect(incompatible.statusCode).toBe(400);
     expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(incompatibleBefore);
 
     const conflictBefore = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
@@ -1329,7 +1413,6 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         clientName: "Cliente Publico Cinco",
         clientPhone: "11900000005",
         serviceId: scenario.hidratacaoId,
-        professionalId: scenario.professionalId,
         startsAt: "2026-05-27T10:30:00.000Z",
       },
     });
