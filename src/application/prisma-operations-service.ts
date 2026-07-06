@@ -61,6 +61,10 @@ import {
   buildStockMovementsFromProductRefund,
   calculateServiceCommission,
   hasAppointmentConflict,
+  assertAppointmentCanBeRescheduled,
+  assertAppointmentTransitionAllowed,
+  assertAppointmentCanBeUpdated,
+  assertNoShowToleranceElapsed,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import {
@@ -287,7 +291,10 @@ export class PrismaOperationsService {
     const unitId = input?.unitId;
     const [services, professionals, clients, products] = await Promise.all([
       this.prisma.service.findMany({
-        where: unitId ? { businessId: unitId } : undefined,
+        where: {
+          active: true,
+          ...(unitId ? { businessId: unitId } : {}),
+        },
         include: { professionals: { select: { professionalId: true } } },
         orderBy: { name: "asc" },
       }),
@@ -473,6 +480,7 @@ export class PrismaOperationsService {
         unitId,
         businessName: unit?.name ?? "Minha empresa",
         segment: "barbearia",
+        bufferBetweenAppointmentsMinutes: 0,
       },
     });
   }
@@ -483,13 +491,20 @@ export class PrismaOperationsService {
       orderBy: { dayOfWeek: "asc" },
     });
     if (existing.length) return existing;
-    const defaults = [
+    const defaults: Array<{
+      dayOfWeek: number;
+      opensAt?: string;
+      closesAt?: string;
+      breakStart?: string;
+      breakEnd?: string;
+      isClosed: boolean;
+    }> = [
       { dayOfWeek: 0, isClosed: true },
-      { dayOfWeek: 1, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 2, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 3, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 4, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 5, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+      { dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", isClosed: false },
       { dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", isClosed: false },
     ];
     await this.prisma.businessHour.createMany({
@@ -499,8 +514,8 @@ export class PrismaOperationsService {
         dayOfWeek: item.dayOfWeek,
         opensAt: item.opensAt ?? null,
         closesAt: item.closesAt ?? null,
-        breakStart: item.breakStart ?? null,
-        breakEnd: item.breakEnd ?? null,
+        breakStart: "breakStart" in item ? item.breakStart ?? null : null,
+        breakEnd: "breakEnd" in item ? item.breakEnd ?? null : null,
         isClosed: item.isClosed,
       })),
       skipDuplicates: true,
@@ -531,6 +546,7 @@ export class PrismaOperationsService {
         unitId,
         businessName: unit?.name ?? "Minha empresa",
         segment: "barbearia",
+        bufferBetweenAppointmentsMinutes: 0,
       },
     });
   }
@@ -544,13 +560,20 @@ export class PrismaOperationsService {
       orderBy: { dayOfWeek: "asc" },
     });
     if (existing.length) return existing;
-    const defaults = [
+    const defaults: Array<{
+      dayOfWeek: number;
+      opensAt?: string;
+      closesAt?: string;
+      breakStart?: string;
+      breakEnd?: string;
+      isClosed: boolean;
+    }> = [
       { dayOfWeek: 0, isClosed: true },
-      { dayOfWeek: 1, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 2, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 3, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 4, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
-      { dayOfWeek: 5, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false },
+      { dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+      { dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", isClosed: false },
       { dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", isClosed: false },
     ];
     await tx.businessHour.createMany({
@@ -560,8 +583,8 @@ export class PrismaOperationsService {
         dayOfWeek: item.dayOfWeek,
         opensAt: item.opensAt ?? null,
         closesAt: item.closesAt ?? null,
-        breakStart: item.breakStart ?? null,
-        breakEnd: item.breakEnd ?? null,
+        breakStart: "breakStart" in item ? item.breakStart ?? null : null,
+        breakEnd: "breakEnd" in item ? item.breakEnd ?? null : null,
         isClosed: item.isClosed,
       })),
       skipDuplicates: true,
@@ -2497,10 +2520,9 @@ export class PrismaOperationsService {
     });
     const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
     const primaryServiceItem = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
-    const expectedEnd = new Date(
-      input.startsAt.getTime() +
-        (duration.effectiveDurationMin + bufferAfterMin) * 60_000,
-    );
+    const expectedEnd = new Date(input.startsAt.getTime() + duration.effectiveDurationMin * 60_000);
+    const busyEnd = new Date(expectedEnd.getTime() + bufferAfterMin * 60_000);
+    const conflictWindowStart = new Date(input.startsAt.getTime() - bufferAfterMin * 60_000);
 
     validateAppointmentSchedulingWindow({
       unitId: input.unitId,
@@ -2533,8 +2555,8 @@ export class PrismaOperationsService {
             unitId: input.unitId,
             OR: [{ professionalId: input.professionalId }, { clientId: input.clientId }],
             status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
-            startsAt: { lt: expectedEnd },
-            endsAt: { gt: input.startsAt },
+            startsAt: { lt: busyEnd },
+            endsAt: { gt: conflictWindowStart },
           },
           include: { history: { orderBy: { changedAt: "asc" } } },
         });
@@ -2545,6 +2567,7 @@ export class PrismaOperationsService {
           professionalId: input.professionalId,
           startsAt: input.startsAt,
           endsAt: expectedEnd,
+          bufferAfterMin,
           existingAppointments: existingRows.map((item) => this.mapAppointment(item)),
         });
         if (hasConflict && !settings.allowOverbooking) {
@@ -2709,8 +2732,12 @@ export class PrismaOperationsService {
     unitId?: string;
     startsAt: Date;
     changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
   }) {
     let updated: Appointment | undefined;
+    let scope: IdempotencyScope | null = null;
 
     try {
       await this.prisma.$transaction(
@@ -2727,10 +2754,36 @@ export class PrismaOperationsService {
           if (input.unitId && row.unitId !== input.unitId) {
             throw new Error("Unidade nao autorizada");
           }
+          const before = this.mapAppointment(row);
+          assertAppointmentCanBeRescheduled(before.status);
+          scope = this.buildIdempotencyScope({
+            unitId: row.unitId,
+            action: "APPOINTMENT_RESCHEDULE",
+            idempotencyKey: input.idempotencyKey,
+            payloadHash: input.idempotencyPayloadHash,
+            payload: input,
+          });
+          if (scope) {
+            const replay = await this.getReplayResult<Appointment>(scope);
+            if (replay) {
+              updated = replay;
+              return;
+            }
+            await tx.idempotencyRecord.create({
+              data: {
+                id: crypto.randomUUID(),
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+                payloadHash: scope.payloadHash,
+                status: "IN_PROGRESS",
+              },
+            });
+          }
 
           await this.lockAppointmentScheduling(tx, row.unitId, row.professionalId, row.clientId);
 
-          const appointment = this.mapAppointment(row);
+          const appointment = before;
           const service = this.buildEffectiveAppointmentService(appointment, this.mapService(row.service));
           const effectiveDurationMin = appointment.effectiveDurationMinSnapshot ?? service.durationMin;
           const [settings, businessHours, unitRow] = await Promise.all([
@@ -2740,15 +2793,17 @@ export class PrismaOperationsService {
           ]);
 
           const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-          const newEnd = new Date(input.startsAt.getTime() + (effectiveDurationMin + bufferAfterMin) * 60_000);
+          const newEnd = new Date(input.startsAt.getTime() + effectiveDurationMin * 60_000);
+          const newBusyEnd = new Date(newEnd.getTime() + bufferAfterMin * 60_000);
+          const conflictWindowStart = new Date(input.startsAt.getTime() - bufferAfterMin * 60_000);
           const overlappingRows = await tx.appointment.findMany({
             where: {
               unitId: appointment.unitId,
               id: { not: appointment.id },
               OR: [{ professionalId: appointment.professionalId }, { clientId: appointment.clientId }],
               status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
-              startsAt: { lt: newEnd },
-              endsAt: { gt: input.startsAt },
+              startsAt: { lt: newBusyEnd },
+              endsAt: { gt: conflictWindowStart },
             },
             include: { history: { orderBy: { changedAt: "asc" } } },
           });
@@ -2791,10 +2846,52 @@ export class PrismaOperationsService {
               },
             },
           });
+          await this.recordCriticalAudit(
+            tx,
+            input.audit
+              ? {
+                  ...input.audit,
+                  unitId: updated.unitId,
+                  action: "APPOINTMENT_RESCHEDULED",
+                  entity: "appointment",
+                  entityId: updated.id,
+                  before: {
+                    status: before.status,
+                    startsAt: before.startsAt.toISOString(),
+                    endsAt: before.endsAt.toISOString(),
+                  },
+                  after: {
+                    status: updated.status,
+                    startsAt: updated.startsAt.toISOString(),
+                    endsAt: updated.endsAt.toISOString(),
+                  },
+                }
+              : undefined,
+          );
+          if (scope) {
+            await tx.idempotencyRecord.update({
+              where: {
+                unitId_action_idempotencyKey: {
+                  unitId: scope.unitId,
+                  action: scope.action,
+                  idempotencyKey: scope.idempotencyKey!,
+                },
+              },
+              data: {
+                status: "SUCCEEDED",
+                responseJson: toJsonValue(updated) as Prisma.InputJsonValue,
+                resolution: updated.id,
+              },
+            });
+          }
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        const replay = await this.replayAfterUniqueConflict<Appointment>(error, scope);
+        if (replay) return replay;
+      }
       if (this.isPrismaTransactionConflict(error)) {
         throw new Error("Conflito de horario detectado para o profissional");
       }
@@ -2837,44 +2934,276 @@ export class PrismaOperationsService {
     status: AppointmentStatus;
     changedBy: string;
     reason?: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
   }) {
-    const row = await this.prisma.appointment.findUnique({
-      where: { id: input.appointmentId },
-      include: { history: { orderBy: { changedAt: "asc" } } },
-    });
-    if (!row) throw new Error("Agendamento nao encontrado");
-    if (input.unitId && row.unitId !== input.unitId) {
-      throw new Error("Unidade nao autorizada");
-    }
+    let updated: Appointment | undefined;
+    let scope: IdempotencyScope | null = null;
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          const row = await tx.appointment.findUnique({
+            where: { id: input.appointmentId },
+            include: { history: { orderBy: { changedAt: "asc" } } },
+          });
+          if (!row) throw new Error("Agendamento nao encontrado");
+          if (input.unitId && row.unitId !== input.unitId) {
+            throw new Error("Unidade nao autorizada");
+          }
+          const appointment = this.mapAppointment(row);
+          if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
+            throw new Error("Use checkout para finalizar atendimento com financeiro");
+          }
+          if (input.status === "NO_SHOW") {
+            assertNoShowToleranceElapsed(appointment.startsAt);
+          }
 
-    const appointment = this.mapAppointment(row);
-    if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
-      throw new Error("Use checkout para finalizar atendimento com financeiro");
-    }
-    const updated = this.engine.changeAppointmentStatus(
-      appointment,
-      input.status,
-      input.changedBy,
-      input.reason,
-    );
+          scope = this.buildIdempotencyScope({
+            unitId: appointment.unitId,
+            action: "APPOINTMENT_STATUS_TRANSITION",
+            idempotencyKey: input.idempotencyKey,
+            payloadHash: input.idempotencyPayloadHash,
+            payload: input,
+          });
+          if (scope) {
+            const replay = await this.getReplayResult<Appointment>(scope);
+            if (replay) {
+              updated = replay;
+              return;
+            }
+            await tx.idempotencyRecord.create({
+              data: {
+                id: crypto.randomUUID(),
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+                payloadHash: scope.payloadHash,
+                status: "IN_PROGRESS",
+              },
+            });
+          }
 
-    const action = updated.history[updated.history.length - 1]?.action ?? "CREATED";
-    await this.prisma.appointment.update({
-      where: { id: updated.id },
-      data: {
-        status: updated.status,
-        history: {
-          create: {
-            id: crypto.randomUUID(),
-            changedAt: new Date(),
-            changedBy: input.changedBy,
-            action,
-            reason: input.reason,
-          },
+          updated = this.engine.changeAppointmentStatus(
+            appointment,
+            input.status,
+            input.changedBy,
+            input.reason,
+          );
+
+          const action = updated.history[updated.history.length - 1]?.action ?? "CREATED";
+          await tx.appointment.update({
+            where: { id: updated.id },
+            data: {
+              status: updated.status,
+              history: {
+                create: {
+                  id: crypto.randomUUID(),
+                  changedAt: new Date(),
+                  changedBy: input.changedBy,
+                  action,
+                  reason: input.reason,
+                },
+              },
+            },
+          });
+          const auditAction =
+            updated.status === "CONFIRMED"
+              ? "APPOINTMENT_CONFIRMED"
+              : updated.status === "IN_SERVICE"
+                ? "APPOINTMENT_STARTED"
+                : updated.status === "CANCELLED"
+                  ? "APPOINTMENT_CANCELLED"
+                  : updated.status === "NO_SHOW"
+                    ? "APPOINTMENT_NO_SHOW"
+                    : "APPOINTMENT_STATUS_UPDATED";
+          await this.recordCriticalAudit(
+            tx,
+            input.audit
+              ? {
+                  ...input.audit,
+                  unitId: updated.unitId,
+                  action: auditAction,
+                  entity: "appointment",
+                  entityId: updated.id,
+                  before: {
+                    status: appointment.status,
+                    startsAt: appointment.startsAt.toISOString(),
+                    endsAt: appointment.endsAt.toISOString(),
+                  },
+                  after: {
+                    status: updated.status,
+                    reason: input.reason ?? null,
+                  },
+                  metadata: {
+                    startsAt: appointment.startsAt.toISOString(),
+                    endsAt: appointment.endsAt.toISOString(),
+                    previousStatus: appointment.status,
+                    nextStatus: updated.status,
+                  },
+                }
+              : undefined,
+          );
+          if (scope) {
+            await tx.idempotencyRecord.update({
+              where: {
+                unitId_action_idempotencyKey: {
+                  unitId: scope.unitId,
+                  action: scope.action,
+                  idempotencyKey: scope.idempotencyKey!,
+                },
+              },
+              data: {
+                status: "SUCCEEDED",
+                responseJson: toJsonValue(updated) as Prisma.InputJsonValue,
+                resolution: updated.id,
+              },
+            });
+          }
         },
-      },
-    });
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        const replay = await this.replayAfterUniqueConflict<Appointment>(error, scope);
+        if (replay) return replay;
+      }
+      throw error;
+    }
+    if (!updated) throw new Error("Nao foi possivel atualizar status do agendamento");
+    return updated;
+  }
 
+  async recordAppointmentDelay(input: {
+    appointmentId: string;
+    unitId?: string;
+    minutesLate: number;
+    changedBy: string;
+    reason?: string;
+    recordedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
+  }) {
+    const minutesLate = Math.max(0, Math.trunc(input.minutesLate));
+    if (minutesLate <= 0) throw new Error("Minutos de atraso devem ser maiores que zero");
+    const delayReason = input.reason?.trim()
+      ? `${minutesLate} minutos de atraso - ${input.reason.trim()}`
+      : `${minutesLate} minutos de atraso`;
+
+    let updated: Appointment | undefined;
+    let scope: IdempotencyScope | null = null;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const row = await tx.appointment.findUnique({
+          where: { id: input.appointmentId },
+          include: { history: { orderBy: { changedAt: "asc" } } },
+        });
+        if (!row) throw new Error("Agendamento nao encontrado");
+        if (input.unitId && row.unitId !== input.unitId) {
+          throw new Error("Unidade nao autorizada");
+        }
+        const appointment = this.mapAppointment(row);
+        scope = this.buildIdempotencyScope({
+          unitId: appointment.unitId,
+          action: "APPOINTMENT_DELAY_RECORDED",
+          idempotencyKey: input.idempotencyKey,
+          payloadHash: input.idempotencyPayloadHash,
+          payload: input,
+        });
+        if (scope) {
+          const replay = await this.getReplayResult<Appointment>(scope);
+          if (replay) {
+            updated = replay;
+            return;
+          }
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+
+        const changedAt = input.recordedAt ?? new Date();
+        await tx.appointmentHistory.create({
+          data: {
+            id: crypto.randomUUID(),
+            appointmentId: appointment.id,
+            changedAt,
+            changedBy: input.changedBy,
+            action: "DELAY_RECORDED",
+            reason: delayReason,
+          },
+        });
+        updated = {
+          ...appointment,
+          history: [
+            ...appointment.history,
+            {
+              changedAt,
+              changedBy: input.changedBy,
+              action: "DELAY_RECORDED",
+              reason: delayReason,
+            },
+          ],
+        };
+        await this.recordCriticalAudit(
+          tx,
+          input.audit
+            ? {
+                ...input.audit,
+                unitId: appointment.unitId,
+                action: "APPOINTMENT_DELAY_RECORDED",
+                entity: "appointment",
+                entityId: appointment.id,
+                before: {
+                  status: appointment.status,
+                  startsAt: appointment.startsAt.toISOString(),
+                  endsAt: appointment.endsAt.toISOString(),
+                },
+                after: {
+                  status: appointment.status,
+                  startsAt: appointment.startsAt.toISOString(),
+                  endsAt: appointment.endsAt.toISOString(),
+                },
+                metadata: {
+                  minutesLate,
+                  reason: input.reason?.trim() || null,
+                  recordedAt: changedAt.toISOString(),
+                },
+              }
+            : undefined,
+        );
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(updated) as Prisma.InputJsonValue,
+              resolution: appointment.id,
+            },
+          });
+        }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        const replay = await this.replayAfterUniqueConflict<Appointment>(error, scope);
+        if (replay) return replay;
+      }
+      throw error;
+    }
+    if (!updated) throw new Error("Nao foi possivel registrar atraso");
     return updated;
   }
 
@@ -9095,9 +9424,33 @@ export class PrismaOperationsService {
     notes?: string;
     isFitting?: boolean;
     confirmation?: boolean;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
     changedBy: string;
   }) {
     let updatedBase: { id: string; status: AppointmentStatus } | undefined;
+    let confirmationScope: IdempotencyScope | null = null;
+    if (input.confirmation === true) {
+      const currentForScope = await this.prisma.appointment.findUnique({
+        where: { id: input.appointmentId },
+        select: { id: true, unitId: true },
+      });
+      if (!currentForScope) throw new Error("Agendamento nao encontrado");
+      if (input.unitId && currentForScope.unitId !== input.unitId) {
+        throw new Error("Unidade nao autorizada");
+      }
+      confirmationScope = this.buildIdempotencyScope({
+        unitId: currentForScope.unitId,
+        action: "APPOINTMENT_STATUS_TRANSITION",
+        idempotencyKey: input.idempotencyKey,
+        payloadHash: input.idempotencyPayloadHash,
+        payload: input,
+      });
+      if (confirmationScope) {
+        const replay = await this.getReplayResult<Appointment>(confirmationScope);
+        if (replay) return replay;
+      }
+    }
     try {
       updatedBase = await this.prisma.$transaction(
         async (tx) => {
@@ -9113,6 +9466,25 @@ export class PrismaOperationsService {
           if (input.unitId && current.unitId !== input.unitId) {
             throw new Error("Unidade nao autorizada");
           }
+          if (input.confirmation === true) {
+            assertAppointmentTransitionAllowed(current.status, "CONFIRMED");
+          }
+          if (confirmationScope) {
+            await tx.idempotencyRecord.create({
+              data: {
+                id: crypto.randomUUID(),
+                unitId: confirmationScope.unitId,
+                action: confirmationScope.action,
+                idempotencyKey: confirmationScope.idempotencyKey!,
+                payloadHash: confirmationScope.payloadHash,
+                status: "IN_PROGRESS",
+              },
+            });
+          }
+          assertAppointmentCanBeUpdated(current.status, {
+            hasTimeChange: input.startsAt !== undefined,
+            hasServiceChange: input.serviceIds !== undefined || input.serviceId !== undefined,
+          });
 
           const nextClientId = input.clientId ?? current.clientId;
           const nextProfessionalId = input.professionalId ?? current.professionalId;
@@ -9180,7 +9552,9 @@ export class PrismaOperationsService {
           const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId(nextServiceItems);
           const primaryServiceItem = nextServiceItems.find((item) => item.serviceId === legacyPrimaryServiceId)!;
           const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-          const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
+          const nextEndsAt = new Date(nextStartsAt.getTime() + duration.effectiveDurationMin * 60_000);
+          const nextBusyEnd = new Date(nextEndsAt.getTime() + bufferAfterMin * 60_000);
+          const conflictWindowStart = new Date(nextStartsAt.getTime() - bufferAfterMin * 60_000);
           validateAppointmentSchedulingWindow({
             unitId: current.unitId,
             startsAt: nextStartsAt,
@@ -9206,8 +9580,8 @@ export class PrismaOperationsService {
               id: { not: current.id },
               OR: [{ professionalId: nextProfessionalId }, { clientId: nextClientId }],
               status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
-              startsAt: { lt: nextEndsAt },
-              endsAt: { gt: nextStartsAt },
+              startsAt: { lt: nextBusyEnd },
+              endsAt: { gt: conflictWindowStart },
             },
             select: {
               id: true,
@@ -9229,6 +9603,7 @@ export class PrismaOperationsService {
             professionalId: nextProfessionalId,
             startsAt: nextStartsAt,
             endsAt: nextEndsAt,
+            bufferAfterMin,
             ignoreAppointmentId: current.id,
             existingAppointments: overlappingRows.map((item) => this.mapAppointment(item)),
           });
@@ -9305,6 +9680,10 @@ export class PrismaOperationsService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
+      if (confirmationScope && this.isUniqueConstraintError(error)) {
+        const replay = await this.getReplayResult<Appointment>(confirmationScope);
+        if (replay) return replay;
+      }
       if (this.isPrismaTransactionConflict(error)) {
         throw new Error("Conflito de horario detectado para o profissional");
       }
@@ -9334,7 +9713,24 @@ export class PrismaOperationsService {
       },
     });
     if (!finalRow) throw new Error("Agendamento nao encontrado");
-    return this.buildAppointmentView(finalRow);
+    const result = this.buildAppointmentView(finalRow);
+    if (confirmationScope) {
+      await this.prisma.idempotencyRecord.update({
+        where: {
+          unitId_action_idempotencyKey: {
+            unitId: confirmationScope.unitId,
+            action: confirmationScope.action,
+            idempotencyKey: confirmationScope.idempotencyKey!,
+          },
+        },
+        data: {
+          status: "SUCCEEDED",
+          responseJson: toJsonValue(result) as Prisma.InputJsonValue,
+          resolution: result.id,
+        },
+      });
+    }
+    return result;
   }
 
   async suggestAppointmentAlternatives(input: {
@@ -9386,7 +9782,8 @@ export class PrismaOperationsService {
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = (duration.effectiveDurationMin + bufferAfterMin) * 60_000;
+    const durationMs = duration.effectiveDurationMin * 60_000;
+    const busyDurationMs = durationMs + bufferAfterMin * 60_000;
     const stepMs = 15 * 60_000;
 
     const overlappingRows = await this.prisma.appointment.findMany({
@@ -9394,8 +9791,8 @@ export class PrismaOperationsService {
         unitId: input.unitId,
         professionalId: input.professionalId,
         status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
-        startsAt: { lt: new Date(windowEnd.getTime() + durationMs) },
-        endsAt: { gt: windowStart },
+        startsAt: { lt: new Date(windowEnd.getTime() + busyDurationMs) },
+        endsAt: { gt: new Date(windowStart.getTime() - bufferAfterMin * 60_000) },
       },
       select: {
         id: true,
@@ -9445,6 +9842,7 @@ export class PrismaOperationsService {
         professionalId: input.professionalId,
         startsAt,
         endsAt,
+        bufferAfterMin,
         existingAppointments,
       });
       if (conflict) continue;

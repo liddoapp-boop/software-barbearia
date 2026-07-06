@@ -178,7 +178,7 @@ model BusinessSettings {
   themeMode                        String   @default("system")
   defaultAppointmentDuration       Int      @default(45)
   minimumAdvanceMinutes            Int      @default(30)
-  bufferBetweenAppointmentsMinutes Int      @default(10)
+  bufferBetweenAppointmentsMinutes Int      @default(0)
   reminderLeadMinutes              Int      @default(60)
   sendAppointmentReminders         Boolean  @default(true)
   inactiveCustomerDays             Int      @default(60)

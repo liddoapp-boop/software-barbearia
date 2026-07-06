@@ -168,6 +168,8 @@ const API = "";
 let unitId = "unit-01";
 const STORAGE_ACTIVE_MODULE = "sb.activeModule";
 const STORAGE_AUTH_SESSION = "sb.authSession";
+const STORAGE_AGENDA_VIEW = "sb.agendaView";
+const API_REQUEST_TIMEOUT_MS = 15000;
 
 function renderOperationalChrome() {
   const dashboardHeaderMount = document.getElementById("dashboardHeaderMount");
@@ -1238,11 +1240,39 @@ const cartElements = {
 
 let currentAgenda = [];
 let currentAppointments = [];
-let currentView = "cards";
+function normalizeAgendaViewPreference(value) {
+  return value === "list" ? "list" : "cards";
+}
+
+function restoreAgendaViewPreference() {
+  try {
+    return normalizeAgendaViewPreference(localStorage.getItem(STORAGE_AGENDA_VIEW));
+  } catch {
+    return "cards";
+  }
+}
+
+function persistAgendaViewPreference(value) {
+  currentView = normalizeAgendaViewPreference(value);
+  try {
+    localStorage.setItem(STORAGE_AGENDA_VIEW, currentView);
+  } catch {
+    // Prefer preserving the in-memory choice when storage is unavailable.
+  }
+  if (viewListBtn && viewGridBtn) {
+    viewListBtn.classList.toggle("is-active", currentView === "list");
+    viewGridBtn.classList.toggle("is-active", currentView !== "list");
+  }
+}
+
+let currentView = restoreAgendaViewPreference();
 let selectedAppointmentId = "";
 let wcWeekStart = null;
 let wcItems = [];
 let wcLoaded = false;
+let wcLoadRunId = 0;
+let wcDensityRenderFrame = 0;
+let agendaInitialPeriodPrepared = false;
 let alFocusedAppointmentId = "";
 let currentWorkingHours = null;
 let productsById = {};
@@ -1295,6 +1325,13 @@ let checkoutModalState = {
   submitting: false,
   openerElement: null,
 };
+let appointmentDelayState = {
+  appointment: null,
+  submitting: false,
+  openerElement: null,
+  source: "appointments",
+  idempotencyKey: "",
+};
 let checkoutPaymentMethods = [];
 let appointmentRefundState = {
   appointment: null,
@@ -1324,11 +1361,36 @@ const actionLabel = {
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
+  DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
 };
 
 const SLOT_BLOCKING_STATUSES = new Set(["SCHEDULED", "CONFIRMED", "IN_SERVICE", "BLOCKED"]);
+function normalizeAgendaStatus(value) {
+  const normalized = String(value || "SCHEDULED").trim().toUpperCase();
+  return normalized || "SCHEDULED";
+}
+
+function getAppointmentDelayInfo(item = {}) {
+  const entries = Array.isArray(item.history) ? item.history : [];
+  const delayEntries = entries
+    .filter((entry) => {
+      const action = String(entry?.action || entry?.label || entry?.status || entry?.type || "").trim().toUpperCase();
+      const reason = String(entry?.reason || "").trim();
+      return action === "DELAY_RECORDED" || /minutos? de atraso/i.test(reason);
+    })
+    .map((entry) => {
+      const reason = String(entry?.reason || "").trim();
+      const minutesMatch = reason.match(/(\d+)\s*min/i);
+      return {
+        minutes: minutesMatch ? Number(minutesMatch[1]) : null,
+        reason,
+      };
+    });
+  return delayEntries.at(-1) || null;
+}
+
 const SETTINGS_DAY_LABELS = [
   "Domingo",
   "Segunda",
@@ -1340,13 +1402,13 @@ const SETTINGS_DAY_LABELS = [
 ];
 const SETTINGS_HOURS_PRESETS = {
   barber_default: [
-    { dayOfWeek: 0, opensAt: "09:00", closesAt: "12:00", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 1, opensAt: "14:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 2, opensAt: "14:00", closesAt: "18:00", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 3, opensAt: "11:30", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 4, opensAt: "11:30", closesAt: "19:30", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 5, opensAt: "13:30", closesAt: "21:00", breakStart: "", breakEnd: "", isClosed: false },
-    { dayOfWeek: 6, opensAt: "07:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 0, opensAt: "", closesAt: "", breakStart: "", breakEnd: "", isClosed: true },
+    { dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", breakStart: "", breakEnd: "", isClosed: false },
+    { dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", breakStart: "", breakEnd: "", isClosed: false },
   ],
   commercial_day: [
     { dayOfWeek: 0, opensAt: "", closesAt: "", breakStart: "", breakEnd: "", isClosed: true },
@@ -1417,10 +1479,11 @@ function canEditAppointment() {
 }
 
 function agendaListActionsForStatus(status) {
-  if (status === "SCHEDULED") return [canEditAppointment() ? "EDIT" : "", "CONFIRMED", "CANCELLED"].filter(Boolean);
-  if (status === "CONFIRMED") return [canEditAppointment() ? "EDIT" : "", "IN_SERVICE", "NO_SHOW", "CANCELLED"].filter(Boolean);
+  status = normalizeAgendaStatus(status);
+  if (status === "SCHEDULED") return [canEditAppointment() ? "EDIT" : "", "CONFIRMED", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
+  if (status === "CONFIRMED") return [canEditAppointment() ? "EDIT" : "", "IN_SERVICE", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
   if (status === "IN_SERVICE") {
-    return canCheckoutAppointment() ? ["COMPLETE", "CANCELLED"] : ["CANCELLED"];
+    return canCheckoutAppointment() ? ["COMPLETE", "DELAY"] : ["DELAY"];
   }
   if (status === "COMPLETED") return ["DETAIL"];
   return [];
@@ -1433,6 +1496,17 @@ function syncWeekCalendarToActivePeriod() {
   if (!wcWeekStart || wcWeekStart.getTime() !== nextWeekStart.getTime()) {
     wcWeekStart = nextWeekStart;
     wcLoaded = false;
+  }
+}
+
+function ensureAgendaInitialPeriod() {
+  if (agendaInitialPeriodPrepared) return;
+  agendaInitialPeriodPrepared = true;
+  if (filterPeriod && !String(filterPeriod.value || "").trim()) {
+    filterPeriod.value = "week";
+  }
+  if (filterPeriod && filterPeriod.value === "today") {
+    filterPeriod.value = "week";
   }
 }
 
@@ -1606,18 +1680,54 @@ async function ensureAuthSession() {
 
 async function apiFetch(url, options = {}) {
   await ensureAuthSession();
+  const {
+    timeoutMs = API_REQUEST_TIMEOUT_MS,
+    signal: externalSignal,
+    ...fetchOptions
+  } = options;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let timeoutId = null;
+  let timedOut = false;
+  const abortFromExternalSignal = () => {
+    if (controller) controller.abort(externalSignal?.reason);
+  };
+  if (controller && externalSignal) {
+    if (externalSignal.aborted) {
+      abortFromExternalSignal();
+    } else {
+      externalSignal.addEventListener("abort", abortFromExternalSignal, { once: true });
+    }
+  }
+  if (controller && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
 
   const execute = () =>
     window.fetch(url, {
-      ...options,
-      headers: buildAuthHeaders(options.headers),
+      ...fetchOptions,
+      headers: buildAuthHeaders(fetchOptions.headers),
+      signal: controller?.signal || externalSignal,
     });
 
-  let response = await execute();
-  if (response.status === 401) {
-    redirectToLogin();
+  try {
+    let response = await execute();
+    if (response.status === 401) {
+      redirectToLogin();
+    }
+    return response;
+  } catch (error) {
+    if (timedOut) throw new Error("Tempo limite excedido. Verifique a conexao e tente novamente.");
+    if (error?.name === "AbortError") throw new Error("Requisicao cancelada. Tente novamente.");
+    throw new Error(error?.message || "Falha de rede. Verifique a conexao e tente novamente.");
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+    if (externalSignal && controller) {
+      externalSignal.removeEventListener("abort", abortFromExternalSignal);
+    }
   }
-  return response;
 }
 
 function restoreActiveModule() {
@@ -2576,7 +2686,7 @@ function renderProductThumb(product = {}, className = "pdv-product-thumb") {
 }
 
 function isSlotBlockingStatus(status) {
-  return SLOT_BLOCKING_STATUSES.has(String(status || "").trim());
+  return SLOT_BLOCKING_STATUSES.has(normalizeAgendaStatus(status));
 }
 
 function parseTimeToMinutes(value) {
@@ -3534,17 +3644,20 @@ async function validateScheduleSlot() {
 async function loadCatalog() {
   const response = await apiFetch(`${API}/catalog?unitId=${encodeURIComponent(unitId)}`);
   const data = await response.json();
+  const operationalServices = (Array.isArray(data.services) ? data.services : []).filter(
+    (item) => serviceIsActive(item),
+  );
 
-  const normalized = normalizeCatalogForScheduling(data);
+  const normalized = normalizeCatalogForScheduling({
+    ...data,
+    services: operationalServices,
+  });
   productsById = Object.fromEntries(data.products.map((p) => [p.id, p]));
   clientsById = normalized.clientsById;
   servicesById = normalized.servicesById;
   professionalsById = normalized.professionalsById;
   allServices = normalized.services;
   schedulingCatalog = normalized;
-  const activeServices = (Array.isArray(data.services) ? data.services : []).filter(
-    (item) => item.active !== false,
-  );
 
   initClientSearch(data.clients);
   appointmentSelectedServices = normalizeSelectedServices(
@@ -3554,7 +3667,7 @@ async function loadCatalog() {
   refreshProfessionalOptionsForSelection();
   renderAppointmentServiceSelection();
   if (appointmentSelectedServices.length) refreshAppointmentServicesPreview();
-  fillSelect(filterService, data.services, (item) => item.name, {
+  fillSelect(filterService, operationalServices, (item) => item.name, {
     blankLabel: "Todos servicos",
   });
 
@@ -3594,7 +3707,7 @@ async function loadCatalog() {
   fillSelect(alFilterProfessional, data.professionals, (item) => item.name, {
     blankLabel: "Todos os profissionais",
   });
-  fillSelect(appointmentsFilterService, data.services, (item) => item.name, {
+  fillSelect(appointmentsFilterService, operationalServices, (item) => item.name, {
     blankLabel: "Todos os servicos",
   });
   fillSelect(appointmentsFilterClient, data.clients, (item) => {
@@ -3994,6 +4107,187 @@ function renderInlineAppointmentActionMessage(openerElement, type, message) {
   host.appendChild(note);
 }
 
+function closeAppointmentDelayModal(options = {}) {
+  const modal = document.getElementById("appointmentDelayModal");
+  if (!modal || appointmentDelayState.submitting) return false;
+  const openerElement = appointmentDelayState.openerElement;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  appointmentDelayState = {
+    appointment: null,
+    submitting: false,
+    openerElement: null,
+    source: "appointments",
+    idempotencyKey: "",
+  };
+  if (options.returnFocus !== false && openerElement && typeof openerElement.focus === "function") {
+    openerElement.focus();
+  }
+  return true;
+}
+
+function ensureAppointmentDelayModal() {
+  let modal = document.getElementById("appointmentDelayModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "appointmentDelayModal";
+  modal.className = "ds-modal-backdrop hidden";
+  modal.innerHTML = `
+    <div class="ds-modal-panel" style="max-width:480px" role="dialog" aria-modal="true" aria-labelledby="appointmentDelayTitle" tabindex="-1">
+      <div class="ds-modal-head">
+        <div>
+          <p class="ux-label">Agenda</p>
+          <h3 id="appointmentDelayTitle">Registrar atraso</h3>
+        </div>
+        <button type="button" class="ux-btn ux-btn-muted" data-appointment-delay-close>Fechar</button>
+      </div>
+      <form id="appointmentDelayForm" class="ds-form-grid" novalidate>
+        <div id="appointmentDelaySummary" class="ds-form-full ux-kpi ds-cell-secondary"></div>
+        <label class="ds-form-label">Minutos de atraso *
+          <input id="appointmentDelayMinutes" class="ds-input" type="number" min="1" step="1" required inputmode="numeric" />
+        </label>
+        <label class="ds-form-label ds-form-full">Motivo opcional
+          <textarea id="appointmentDelayReason" class="ds-input" maxlength="250" rows="3"></textarea>
+        </label>
+        <div id="appointmentDelayFeedback" class="ds-form-full panel-msg-host"></div>
+        <div class="ds-form-full catalog-row-actions">
+          <button type="button" class="ux-btn ux-btn-muted" data-appointment-delay-close>Cancelar</button>
+          <button type="submit" id="appointmentDelaySubmitBtn" class="ux-btn ux-btn-primary">Registrar atraso</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelectorAll("[data-appointment-delay-close]").forEach((button) => {
+    button.addEventListener("click", () => closeAppointmentDelayModal({ returnFocus: true }));
+  });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAppointmentDelayModal({ returnFocus: true });
+  });
+  modal.querySelector("#appointmentDelayForm")?.addEventListener("submit", submitAppointmentDelayModal);
+  return modal;
+}
+
+function openAppointmentDelayModal(appointment, options = {}) {
+  closeAppointmentDetailPanel();
+  const modal = ensureAppointmentDelayModal();
+  appointmentDelayState = {
+    appointment,
+    submitting: false,
+    openerElement: options.openerElement || document.activeElement || null,
+    source: options.source || "appointments",
+    idempotencyKey: buildOperationIdempotencyKey("appointment-delay"),
+  };
+  const minutesInput = modal.querySelector("#appointmentDelayMinutes");
+  const reasonInput = modal.querySelector("#appointmentDelayReason");
+  const feedback = modal.querySelector("#appointmentDelayFeedback");
+  const submitBtn = modal.querySelector("#appointmentDelaySubmitBtn");
+  const summary = modal.querySelector("#appointmentDelaySummary");
+  const estimatedMinutes = appointment?.startsAt instanceof Date
+    ? Math.max(1, Math.round((Date.now() - appointment.startsAt.getTime()) / 60000))
+    : "";
+  if (summary) {
+    const startLabel = appointment?.startsAt instanceof Date
+      ? appointment.startsAt.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "horario nao informado";
+    summary.textContent = `${appointment?.client || "Cliente"} | ${appointment?.service || "Servico"} | ${startLabel}`;
+  }
+  if (minutesInput) {
+    minutesInput.value = estimatedMinutes ? String(estimatedMinutes) : "";
+    minutesInput.disabled = false;
+  }
+  if (reasonInput) {
+    reasonInput.value = "";
+    reasonInput.disabled = false;
+  }
+  if (feedback) feedback.innerHTML = "";
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Registrar atraso";
+  }
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  setTimeout(() => {
+    const target = minutesInput || modal.querySelector(".ds-modal-panel");
+    if (target && typeof target.focus === "function") target.focus();
+  }, 0);
+}
+
+async function submitAppointmentDelayModal(event) {
+  event.preventDefault();
+  if (appointmentDelayState.submitting) return;
+  const modal = ensureAppointmentDelayModal();
+  const appointment = appointmentDelayState.appointment;
+  const feedback = modal.querySelector("#appointmentDelayFeedback");
+  const submitBtn = modal.querySelector("#appointmentDelaySubmitBtn");
+  const minutesInput = modal.querySelector("#appointmentDelayMinutes");
+  const reasonInput = modal.querySelector("#appointmentDelayReason");
+  const minutesLate = Number(String(minutesInput?.value || "").trim());
+  if (!appointment?.id) return;
+  if (!Number.isInteger(minutesLate) || minutesLate <= 0) {
+    if (feedback) {
+      feedback.innerHTML = '<p class="panel-msg panel-msg-error">Informe os minutos de atraso com um numero inteiro positivo.</p>';
+    }
+    if (minutesInput && typeof minutesInput.focus === "function") minutesInput.focus();
+    return;
+  }
+
+  appointmentDelayState.submitting = true;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Registrando...";
+  }
+  if (minutesInput) minutesInput.disabled = true;
+  if (reasonInput) reasonInput.disabled = true;
+  if (feedback) feedback.innerHTML = '<p class="panel-msg">Registrando atraso...</p>';
+
+  let success = false;
+  try {
+    const reason = String(reasonInput?.value || "").trim();
+    const beforeStartsAt = appointment.startsAt instanceof Date ? appointment.startsAt.getTime() : null;
+    const beforeEndsAt = appointment.endsAt instanceof Date ? appointment.endsAt.getTime() : null;
+    const beforeStatus = appointment.status;
+    const source = appointmentDelayState.source;
+    const result = await callJson(`${API}/appointments/${appointment.id}/delay`, "POST", {
+      idempotencyKey: appointmentDelayState.idempotencyKey,
+      minutesLate,
+      changedBy: getCurrentActorId(),
+      reason: reason || undefined,
+    });
+    const updated = result?.appointment;
+    const updatedStartsAt = updated?.startsAt ? new Date(updated.startsAt).getTime() : beforeStartsAt;
+    const updatedEndsAt = updated?.endsAt ? new Date(updated.endsAt).getTime() : beforeEndsAt;
+    if (
+      (beforeStartsAt != null && updatedStartsAt !== beforeStartsAt) ||
+      (beforeEndsAt != null && updatedEndsAt !== beforeEndsAt) ||
+      (updated?.status && updated.status !== beforeStatus)
+    ) {
+      throw new Error("Registro de atraso alterou horario ou status. Atualize a agenda e revise o atendimento.");
+    }
+    success = true;
+    appointmentDelayState.submitting = false;
+    closeAppointmentDelayModal({ returnFocus: false });
+    const message = `Atraso de ${minutesLate} min registrado.`;
+    setScheduleFeedback("success", message);
+    if (source !== "agenda") renderAppointmentsFeedback(appointmentsElements, "success", message);
+    await loadAll();
+  } catch (error) {
+    if (feedback) {
+      feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error?.message || "Nao foi possivel registrar atraso.")}</p>`;
+    }
+  } finally {
+    appointmentDelayState.submitting = false;
+    if (!success && submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Registrar atraso";
+    }
+    if (!success) {
+      if (minutesInput) minutesInput.disabled = false;
+      if (reasonInput) reasonInput.disabled = false;
+    }
+  }
+}
+
 async function submitCheckoutModal(event) {
   event.preventDefault();
   const modal = ensureCheckoutModal();
@@ -4348,6 +4642,7 @@ async function updateStatus(item, action, options = {}) {
       return;
     }
     await callJson(`${API}/appointments/${item.id}/reschedule`, "PATCH", {
+      idempotencyKey: buildOperationIdempotencyKey("appointment-reschedule"),
       startsAt: newDate.toISOString(),
       changedBy: getCurrentActorId(),
     });
@@ -4356,10 +4651,14 @@ async function updateStatus(item, action, options = {}) {
     const loaded = await ensureAppointmentLoaded(item.id, { force: true });
     openAppointmentCheckout(loaded || item, { openerElement: options.openerElement });
     return;
+  } else if (action === "DELAY") {
+    openAppointmentDelayModal(item, { openerElement: options.openerElement, source: "agenda" });
+    return;
   } else {
     const needsReason = action === "CANCELLED" || action === "NO_SHOW";
     const reason = needsReason ? "Atualizado no painel operacional" : undefined;
     const response = await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
+      idempotencyKey: buildOperationIdempotencyKey("appointment-status"),
       status: action,
       reason: reason || undefined,
       changedBy: "owner",
@@ -4396,8 +4695,8 @@ function renderAgendaView() {
     if (agendaCardsMode) agendaCardsMode.classList.remove("hidden");
     if (agendaCalendarMode) agendaCalendarMode.classList.add("hidden");
     if (agendaListMode && state.activeModule === "agenda") agendaListMode.classList.remove("hidden");
-    const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
-    renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
+    const visibleItems = getAgendaListFilteredItems();
+    renderAgendaData(agendaElements, visibleItems, visibleItems, "list", {
       canCheckout: canCheckoutAppointment(),
       canEdit: canEditAppointment(),
       onAction: updateStatus,
@@ -4405,7 +4704,7 @@ function renderAgendaView() {
         setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
       },
     });
-    renderAgendaListMode();
+    renderAgendaListMode(visibleItems);
     return;
   }
 
@@ -4413,7 +4712,7 @@ function renderAgendaView() {
   if (agendaCalendarMode) agendaCalendarMode.classList.remove("hidden");
   if (agendaListMode) agendaListMode.classList.add("hidden");
   const visibleItems = filterAgendaItems(currentAgenda, getAgendaFilterState());
-  renderAgendaData(agendaElements, currentAgenda, visibleItems, "list", {
+  renderAgendaData(agendaElements, visibleItems, visibleItems, "list", {
     canCheckout: canCheckoutAppointment(),
     canEdit: canEditAppointment(),
     onAction: updateStatus,
@@ -4421,7 +4720,9 @@ function renderAgendaView() {
       setScheduleFeedback("error", error?.message || "Falha ao atualizar agendamento.");
     },
   });
-  if (!wcLoaded) {
+  if (!wcLoaded && syncWeekCalendarItemsFromAgenda()) {
+    renderWeekCalendar();
+  } else if (!wcLoaded) {
     if (!wcWeekStart) wcWeekStart = getWeekMonday();
     loadWeekCalendar();
   } else {
@@ -4430,9 +4731,9 @@ function renderAgendaView() {
 }
 
 function getAgendaListSourceItems() {
-  const base = wcLoaded && Array.isArray(wcItems) && wcItems.length
-    ? wcItems
-    : (Array.isArray(currentAgenda) ? currentAgenda : []);
+  const base = Array.isArray(currentAgenda) && currentAgenda.length
+    ? currentAgenda
+    : (wcLoaded && Array.isArray(wcItems) ? wcItems : []);
   const normalizeDateValue = (value) => {
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
     const parsed = new Date(value);
@@ -4447,7 +4748,7 @@ function getAgendaListSourceItems() {
       ...item,
       startsAt,
       endsAt,
-      status: String(item.status || "SCHEDULED").trim(),
+      status: normalizeAgendaStatus(item.status),
     };
   };
   const normalizedBase = base.map(normalizeItem).filter(Boolean);
@@ -4457,6 +4758,31 @@ function getAgendaListSourceItems() {
     const detailed = byId.get(item.id);
     return normalizeItem(detailed ? { ...item, ...detailed } : item);
   }).filter(Boolean);
+}
+
+function isSameLocalDay(a, b) {
+  return a instanceof Date && b instanceof Date
+    && a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function isItemInsideWeek(item, weekStart) {
+  if (!item?.startsAt || !(weekStart instanceof Date)) return false;
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return item.startsAt >= weekStart && item.startsAt < weekEnd;
+}
+
+function syncWeekCalendarItemsFromAgenda() {
+  if (!wcWeekStart || String(filterPeriod?.value || "").trim() !== "week") return false;
+  const agendaRange = rangeFromPeriod("week");
+  if (!isSameLocalDay(agendaRange.start, wcWeekStart)) return false;
+  wcItems = Array.isArray(currentAgenda)
+    ? currentAgenda.filter((item) => isItemInsideWeek(item, wcWeekStart))
+    : [];
+  wcLoaded = true;
+  return true;
 }
 
 function getAgendaWorkingHoursSummaryHtml() {
@@ -4475,20 +4801,18 @@ function getAgendaWorkingHoursSummaryHtml() {
   `;
 }
 
-function renderAgendaListMode() {
-  if (!agendaListContent) return;
-
+function getAgendaListFilteredItems() {
   const statusFilter = String(alFilterStatus?.value || "").trim();
   const professionalFilter = String(alFilterProfessional?.value || "").trim();
   const searchFilter = String(alFilterSearch?.value || "").trim().toLowerCase();
-  const now = new Date();
 
   const source = getAgendaListSourceItems();
-  const filtered = source
+  return source
     .filter((item) => {
-      const useOperationalOnly = !statusFilter || statusFilter === "__OPERATIONAL__";
+      const itemStatus = normalizeAgendaStatus(item.status);
+      const useOperationalOnly = statusFilter === "__OPERATIONAL__";
       if (useOperationalOnly && !isSlotBlockingStatus(item.status)) return false;
-      if (!useOperationalOnly && item.status !== statusFilter) return false;
+      if (!useOperationalOnly && statusFilter && itemStatus !== normalizeAgendaStatus(statusFilter)) return false;
       if (professionalFilter && item.professionalId !== professionalFilter) return false;
       if (searchFilter) {
         const blob = `${item.client || ""} ${item.clientPhone || ""} ${item.service || ""}`.toLowerCase();
@@ -4497,6 +4821,13 @@ function renderAgendaListMode() {
       return true;
     })
     .sort((a, b) => a.startsAt - b.startsAt);
+}
+
+function renderAgendaListMode(filteredItems) {
+  if (!agendaListContent) return;
+
+  const now = new Date();
+  const filtered = Array.isArray(filteredItems) ? filteredItems : getAgendaListFilteredItems();
 
   if (!filtered.length) {
     agendaListContent.innerHTML = `
@@ -4559,7 +4890,10 @@ function renderAgendaListMode() {
       const serviceLabel = item.service || "Servico";
       const professionalLabel = item.professional || "Profissional";
       const priceLabel = money(item.servicePrice || item.price || 0);
-      const actions = agendaListActionsForStatus(item.status);
+      const delayInfo = getAppointmentDelayInfo(item);
+      const actions = agendaListActionsForStatus(item.status).filter(
+        (action) => action !== "NO_SHOW" || now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000,
+      );
       return `
         <article class="al-card ${isLate ? "is-late" : ""}" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar[item.status] || "#26251e"};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
           <div class="al-card-time">
@@ -4573,6 +4907,7 @@ function renderAgendaListMode() {
             </div>
             <div class="al-card-sub">${serviceLabel} · ${professionalLabel}</div>
             <div class="al-card-sub al-card-muted">${clientPhone} · ${dateTime}</div>
+            ${delayInfo?.minutes ? `<div class="al-card-sub al-card-muted">Atraso: ${delayInfo.minutes} min</div>` : ""}
           </div>
           <div class="al-card-right">
             <span class="al-chip">${statusLabelMap[item.status] || item.status}</span>
@@ -4741,7 +5076,8 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
 
   if (action === "RESCHEDULE") {
     const nextSlot = new Date(item.startsAt.getTime() + 30 * 60 * 1000);
-    await callJson(`${API}/appointments/${item.id}`, "PATCH", {
+    await callJson(`${API}/appointments/${item.id}/reschedule`, "PATCH", {
+      idempotencyKey: buildOperationIdempotencyKey("appointment-reschedule"),
       startsAt: nextSlot.toISOString(),
       changedBy: "owner",
     });
@@ -4757,6 +5093,12 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
   if (action === "COMPLETE") {
     const loaded = await ensureAppointmentLoaded(item.id, { force: true });
     openAppointmentCheckout(loaded || item, { openerElement: options.openerElement });
+    return;
+  }
+
+  if (action === "DELAY") {
+    closeAppointmentDetailPanel();
+    openAppointmentDelayModal(item, { openerElement: options.openerElement, source: "appointments" });
     return;
   }
 
@@ -4779,6 +5121,7 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
   if (!nextStatus) return;
 
   const response = await callJson(`${API}/appointments/${item.id}/status`, "PATCH", {
+    idempotencyKey: buildOperationIdempotencyKey("appointment-status"),
     status: nextStatus,
     reason:
       nextStatus === "CANCELLED" || nextStatus === "NO_SHOW"
@@ -4850,6 +5193,7 @@ function renderAppointmentsView() {
 }
 
 async function loadAgendaByPeriod() {
+  ensureAgendaInitialPeriod();
   const period = filterPeriod.value || "today";
   if (period === "today") {
     const response = await apiFetch(
@@ -6488,7 +6832,7 @@ function settingsBusinessBasePayload() {
     themeMode: String(business.themeMode || "system"),
     defaultAppointmentDuration: Number(business.defaultAppointmentDuration || 45),
     minimumAdvanceMinutes: Number(business.minimumAdvanceMinutes || 30),
-    bufferBetweenAppointmentsMinutes: Number(business.bufferBetweenAppointmentsMinutes || 10),
+    bufferBetweenAppointmentsMinutes: Number(business.bufferBetweenAppointmentsMinutes ?? 0),
     reminderLeadMinutes: Number(business.reminderLeadMinutes || 60),
     sendAppointmentReminders: Boolean(business.sendAppointmentReminders),
     inactiveCustomerDays: Number(business.inactiveCustomerDays || 60),
@@ -8648,9 +8992,9 @@ if (appointmentsFilterProfessional) appointmentsFilterProfessional.addEventListe
 if (appointmentsFilterService) appointmentsFilterService.addEventListener("change", loadAll);
 if (appointmentsFilterClient) appointmentsFilterClient.addEventListener("change", loadAll);
 if (appointmentsFilterSearch) appointmentsFilterSearch.addEventListener("input", debouncedLoadAll);
-if (alFilterStatus) alFilterStatus.addEventListener("change", renderAgendaListMode);
-if (alFilterProfessional) alFilterProfessional.addEventListener("change", renderAgendaListMode);
-if (alFilterSearch) alFilterSearch.addEventListener("input", renderAgendaListMode);
+if (alFilterStatus) alFilterStatus.addEventListener("change", renderAgendaView);
+if (alFilterProfessional) alFilterProfessional.addEventListener("change", renderAgendaView);
+if (alFilterSearch) alFilterSearch.addEventListener("input", renderAgendaView);
 if (financialPeriod) financialPeriod.addEventListener("change", loadAll);
 if (financialSearch) financialSearch.addEventListener("input", debouncedLoadAll);
 if (financialTypeFilter) financialTypeFilter.addEventListener("change", loadAll);
@@ -9225,18 +9569,15 @@ if (appointmentsEmptyState) {
 }
 
 viewListBtn.addEventListener("click", () => {
-  currentView = "list";
-  viewListBtn.classList.add("is-active");
-  viewGridBtn.classList.remove("is-active");
+  persistAgendaViewPreference("list");
   renderAgendaView();
 });
 
 viewGridBtn.addEventListener("click", () => {
-  currentView = "cards";
-  viewGridBtn.classList.add("is-active");
-  viewListBtn.classList.remove("is-active");
+  persistAgendaViewPreference("cards");
   renderAgendaView();
 });
+persistAgendaViewPreference(currentView);
 
 if (mobileFocusSaleBtn) {
   mobileFocusSaleBtn.addEventListener("click", () => {
@@ -9294,6 +9635,7 @@ window.addEventListener("resize", () => {
 
   renderShell();
   applySectionVisibility();
+  scheduleWeekCalendarDensityRefresh();
 });
 
 async function init() {
@@ -9450,10 +9792,46 @@ function animateWeekCalendarTransition(container, direction = 0) {
   });
 }
 
+function getWeekCalendarDensity(container, hours) {
+  const timeLabelHeight = 20;
+  const trackPad = timeLabelHeight / 2;
+  const minHourHeight = state.viewport === "mobile" ? 48 : 46;
+  const maxHourHeight = 58;
+  const viewportHeight = Number(window.innerHeight || 900);
+  const bottomGap = state.viewport === "mobile" ? 18 : 16;
+  const fallbackHeaderHeight = state.viewport === "mobile" ? 42 : 38;
+  const containerTop = Number(container?.getBoundingClientRect?.().top ?? 0);
+  const bodyRect = container?.querySelector?.(".wc-body-scroll")?.getBoundingClientRect?.();
+  const headerRect = container?.querySelector?.(".wc-header-row")?.getBoundingClientRect?.();
+  const bodyTop = Number(
+    bodyRect?.top
+      ?? (headerRect ? headerRect.top + headerRect.height : containerTop + fallbackHeaderHeight),
+  );
+  const availableGridHeight = Math.max(360, Math.floor(viewportHeight - bodyTop - bottomGap));
+  const trackHeight = Math.max(0, availableGridHeight - trackPad * 2);
+  const hourHeight = Math.max(
+    minHourHeight,
+    Math.min(maxHourHeight, Math.floor(trackHeight / Math.max(1, hours))),
+  );
+  return { hourHeight, timeLabelHeight, trackPad, minHourHeight, maxHourHeight, bodyTop, availableGridHeight };
+}
+
+function scheduleWeekCalendarDensityRefresh() {
+  if (currentView === "list" || state.activeModule !== "agenda") return;
+  if (wcDensityRenderFrame) return;
+  const requestFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 80));
+  wcDensityRenderFrame = requestFrame(() => {
+    wcDensityRenderFrame = 0;
+    if (currentView !== "list" && state.activeModule === "agenda" && wcLoaded) renderWeekCalendar();
+  });
+}
+
 async function loadWeekCalendar(options = {}) {
   const container = document.getElementById("weekCalContainer");
   if (!container) return;
+  const runId = ++wcLoadRunId;
   const direction = Number(options.direction || 0);
+  const requestWeekStart = new Date(wcWeekStart || getWeekMonday());
   const hasRenderedCalendar = Boolean(container.querySelector(".wc-header-row"));
   if (hasRenderedCalendar) {
     container.classList.add("wc-is-loading");
@@ -9466,18 +9844,21 @@ async function loadWeekCalendar(options = {}) {
   }
   updateWcWeekLabel();
   try {
-    const end = new Date(wcWeekStart);
+    const end = new Date(requestWeekStart);
     end.setDate(end.getDate() + 7);
     const response = await apiFetch(
-      `${API}/agenda/range?unitId=${unitId}&start=${encodeURIComponent(wcWeekStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+      `${API}/agenda/range?unitId=${unitId}&start=${encodeURIComponent(requestWeekStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
     );
     const data = await readResponsePayload(response);
     if (!response.ok) throw new Error("Erro ao carregar agenda semanal");
+    if (runId !== wcLoadRunId || !wcWeekStart || wcWeekStart.getTime() !== requestWeekStart.getTime()) return;
     updateWorkingHoursFromPayload(data?.workingHours || data);
     wcItems = normalizeAgendaItems(data);
   } catch {
+    if (runId !== wcLoadRunId || !wcWeekStart || wcWeekStart.getTime() !== requestWeekStart.getTime()) return;
     wcItems = [];
   }
+  if (runId !== wcLoadRunId || !wcWeekStart || wcWeekStart.getTime() !== requestWeekStart.getTime()) return;
   wcLoaded = true;
   container.classList.remove("wc-is-loading");
   renderWeekCalendar({ direction });
@@ -9515,11 +9896,14 @@ function renderWeekCalendar(options = {}) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const { startHour: HOUR_START, endHour: HOUR_END } = getWeekCalendarBounds();
   const HOURS = HOUR_END - HOUR_START;
-  const availableHeight = Math.max(420, Math.floor(window.innerHeight - container.getBoundingClientRect().top - 24));
-  const minHourHeight = state.viewport === "mobile" ? 48 : 44;
-  const maxHourHeight = state.viewport === "mobile" ? 58 : 62;
-  const HOUR_H = Math.max(minHourHeight, Math.min(maxHourHeight, Math.floor(availableHeight / HOURS)));
-  const TOTAL_H = HOURS * HOUR_H;
+  const density = getWeekCalendarDensity(container, HOURS);
+  const HOUR_H = density.hourHeight;
+  const TIME_LABEL_H = density.timeLabelHeight;
+  const TRACK_PAD = density.trackPad;
+  const SCALE_START_MIN = HOUR_START * 60;
+  const SCALE_END_MIN = HOUR_END * 60;
+  const minuteToY = (minutes) => TRACK_PAD + ((minutes - SCALE_START_MIN) / 60) * HOUR_H;
+  const TOTAL_H = HOURS * HOUR_H + TRACK_PAD * 2;
   const DAY_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom"];
 
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -9534,8 +9918,9 @@ function renderWeekCalendar(options = {}) {
     </div>`;
   }).join("");
 
-  const timeLabels = Array.from({ length: HOURS }, (_, i) =>
-    `<div class="wc-time-slot" style="height:${HOUR_H}px">${String(HOUR_START + i).padStart(2, "0")}h</div>`
+  const hourMarks = Array.from({ length: HOURS + 1 }, (_, i) => HOUR_START + i);
+  const timeLabels = hourMarks.map((hour) =>
+    `<div class="wc-time-slot" style="position:absolute;top:${minuteToY(hour * 60)}px;height:${TIME_LABEL_H}px;transform:translateY(-50%);">${String(hour).padStart(2, "0")}h</div>`
   ).join("");
 
   const _isDark = !document.body.classList.contains("theme-light");
@@ -9575,17 +9960,20 @@ function renderWeekCalendar(options = {}) {
     );
     const laid = assignWcColumns(dayItems);
 
-    const gridLines = Array.from({ length: HOURS }, (_, i) => `
-      <div class="wc-hline" style="top:${i * HOUR_H}px"></div>
-      <div class="wc-hline wc-hline-half" style="top:${i * HOUR_H + HOUR_H / 2}px"></div>
+    const hourLines = hourMarks.map((hour) => `
+      <div class="wc-hline" style="top:${minuteToY(hour * 60)}px"></div>
     `).join("");
+    const halfHourLines = Array.from({ length: HOURS }, (_, i) => `
+      <div class="wc-hline wc-hline-half" style="top:${minuteToY((HOUR_START + i) * 60 + 30)}px"></div>
+    `).join("");
+    const gridLines = `${hourLines}${halfHourLines}`;
 
     let nowLine = "";
     if (isToday) {
       const now = new Date();
-      const mins = (now.getHours() - HOUR_START) * 60 + now.getMinutes();
-      if (mins >= 0 && mins <= HOURS * 60) {
-        nowLine = `<div class="wc-now-line" style="top:${(mins / 60) * HOUR_H}px"></div>`;
+      const mins = now.getHours() * 60 + now.getMinutes();
+      if (mins >= SCALE_START_MIN && mins <= SCALE_END_MIN) {
+        nowLine = `<div class="wc-now-line" style="top:${minuteToY(mins)}px"></div>`;
       }
     }
 
@@ -9593,22 +9981,22 @@ function renderWeekCalendar(options = {}) {
     let dayClosedMask = "";
     if (dayClosed) {
       dayClosedMask = `<div class="wc-day-closed-mask"><span>Fechado</span></div>`;
-    } else {
-      const topMins = dayStartMins - HOUR_START * 60;
-      const heightMins = dayEndMins - dayStartMins;
-      const top = Math.max(0, (topMins / 60) * HOUR_H);
-      const height = Math.max(0, Math.min((heightMins / 60) * HOUR_H, TOTAL_H - top));
+    } else if (dayStartMins != null && dayEndMins != null) {
+      const top = Math.max(TRACK_PAD, minuteToY(Math.max(dayStartMins, SCALE_START_MIN)));
+      const bottom = Math.min(minuteToY(Math.min(dayEndMins, SCALE_END_MIN)), minuteToY(SCALE_END_MIN));
+      const height = Math.max(0, bottom - top);
       if (height > 0) {
         openWindow = `<div class="wc-open-window" style="top:${top}px;height:${height}px"></div>`;
       }
     }
 
     const appts = laid.map((item) => {
-      const startMins = (item.startsAt.getHours() - HOUR_START) * 60 + item.startsAt.getMinutes();
-      if (startMins < 0 || startMins > HOURS * 60) return "";
+      const startMins = item.startsAt.getHours() * 60 + item.startsAt.getMinutes();
+      if (startMins < SCALE_START_MIN || startMins > SCALE_END_MIN) return "";
       const dur = item.serviceDurationMin || Math.round((item.endsAt - item.startsAt) / 60000) || 30;
-      const top = (startMins / 60) * HOUR_H;
-      const ht = Math.max((dur / 60) * HOUR_H, 44);
+      const top = minuteToY(startMins);
+      const slotHeight = (dur / 60) * HOUR_H;
+      const ht = Math.max(0, Math.min(slotHeight, TOTAL_H - top));
       const col = item._col || 0;
       const total = item._totalCols || 1;
       const lp = (col / total) * 100;
@@ -9620,12 +10008,12 @@ function renderWeekCalendar(options = {}) {
       const priceLabel = Number(item.servicePrice || 0) > 0
         ? Number(item.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
         : "";
+      const delayInfo = getAppointmentDelayInfo(item);
       return `<div class="wc-appt" data-wc-appt-id="${item.id}"
         style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
         title="${timeStr} — ${item.client} — ${item.service}${priceLabel ? ` — ${priceLabel}` : ""}">
         <span class="wc-appt-name">${timeStr} · ${firstName}</span>
-        <span class="wc-appt-svc">${item.service}</span>
-        ${priceLabel ? `<span class="wc-appt-time">${priceLabel}</span>` : ""}
+        ${delayInfo?.minutes ? `<span class="wc-appt-time">+${delayInfo.minutes} min</span>` : ""}
       </div>`;
     }).join("");
 
@@ -9640,8 +10028,8 @@ function renderWeekCalendar(options = {}) {
       ${headerHtml}
     </div>
     <div class="wc-body-scroll">
-      <div class="wc-body-inner">
-        <div class="wc-times-col">${timeLabels}</div>
+      <div class="wc-body-inner" style="height:${TOTAL_H}px">
+        <div class="wc-times-col" style="position:relative;height:${TOTAL_H}px">${timeLabels}</div>
         ${dayCols}
       </div>
     </div>`;
@@ -9653,9 +10041,6 @@ function renderWeekCalendar(options = {}) {
       const appointmentId = el.getAttribute("data-wc-appt-id") || "";
       if (!appointmentId) return;
       alFocusedAppointmentId = appointmentId;
-      currentView = "list";
-      viewGridBtn.classList.remove("is-active");
-      viewListBtn.classList.add("is-active");
       renderAgendaView();
       await openAgendaAppointmentDetail(appointmentId);
     });

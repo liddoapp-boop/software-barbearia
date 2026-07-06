@@ -1,13 +1,37 @@
-import { existsSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const chromePath = "/root/.cache/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell";
-const chromeAvailable = existsSync(chromePath);
+function resolveChromePath() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    process.env.CHROME_BIN,
+    process.env.BROWSER_PATH,
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "/root/.cache/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-linux64/chrome-headless-shell",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  ].filter((item): item is string => Boolean(item));
+  return candidates.find((candidate) => existsSync(candidate)) ?? "";
+}
+
+const chromePath = resolveChromePath();
+const chromeAvailable = Boolean(chromePath);
 const testIfChrome = chromeAvailable ? it : it.skip;
+const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
+const appCommand = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : npxBin;
+const appArgs = process.platform === "win32" ? ["/d", "/s", "/c", `${npxBin} tsx src/server.ts`] : ["tsx", "src/server.ts"];
 const appPort = 3338;
 const cdpPort = 9358;
 const baseUrl = `http://127.0.0.1:${appPort}`;
@@ -18,6 +42,18 @@ let chromeUserDataDir = "";
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function killProcessTree(processRef: ChildProcess | undefined) {
+  if (!processRef?.pid || processRef.killed) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(processRef.pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
+  processRef.kill("SIGTERM");
 }
 
 async function waitForOk(url: string, attempts = 90) {
@@ -173,13 +209,30 @@ async function measureModule(cdp: Cdp, authSession: any, activeModule: string, o
   const result = await cdp.send("Runtime.evaluate", {
     returnByValue: true,
     expression: `
-      (() => ({
-        viewport: window.innerWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        bodyScrollWidth: document.body.scrollWidth,
-        activeModule: localStorage.getItem("sb.activeModule"),
-        menuOpen: document.querySelector("#appShell")?.classList.contains("mobile-sidebar-open") || false,
-      }))()
+      (() => {
+        window.scrollTo(0, 0);
+        const beforeScrollY = window.scrollY;
+        window.scrollTo(0, document.documentElement.scrollHeight);
+        const afterScrollY = window.scrollY;
+        const htmlStyle = getComputedStyle(document.documentElement);
+        const bodyStyle = getComputedStyle(document.body);
+        const appContentStyle = getComputedStyle(document.querySelector("#appContent"));
+        return {
+          viewport: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          scrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          scrollHeight: document.documentElement.scrollHeight,
+          bodyScrollHeight: document.body.scrollHeight,
+          beforeScrollY,
+          afterScrollY,
+          htmlOverflowY: htmlStyle.overflowY,
+          bodyOverflowY: bodyStyle.overflowY,
+          appContentOverflowY: appContentStyle.overflowY,
+          activeModule: localStorage.getItem("sb.activeModule"),
+          menuOpen: document.querySelector("#appShell")?.classList.contains("mobile-sidebar-open") || false,
+        };
+      })()
     `,
   }, sessionId);
 
@@ -285,10 +338,31 @@ async function measureAgendaViewToggle(cdp: Cdp, authSession: any) {
 }
 
 describe("frontend mobile overflow", () => {
+  it("mantem contrato estrutural de scroll vertical da pagina no mobile", () => {
+    const css = readFileSync(path.join(process.cwd(), "public/styles/layout.css"), "utf8");
+    const contractStart = css.indexOf("Mobile document scroll contract");
+    expect(contractStart).toBeGreaterThan(-1);
+    const contract = css.slice(contractStart);
+
+    expect(contract).toMatch(/html,\s*body\s*\{[\s\S]*height:\s*auto\s*!important;[\s\S]*overflow-y:\s*auto\s*!important;/);
+    expect(contract).toMatch(/body\s*\{[\s\S]*min-height:\s*100vh\s*!important;[\s\S]*min-height:\s*100dvh\s*!important;/);
+    expect(contract).toMatch(/#appShell,[\s\S]*#appShell\.settings-mode[\s\S]*height:\s*auto\s*!important;[\s\S]*overflow-y:\s*visible\s*!important;/);
+    expect(contract).toMatch(/#appMain,[\s\S]*#appContent,[\s\S]*height:\s*auto\s*!important;[\s\S]*overflow-y:\s*visible\s*!important;/);
+    expect(contract).toMatch(/#appContent,[\s\S]*#appShell\.settings-mode #appContent\s*\{[\s\S]*flex:\s*0 0 auto\s*!important;/);
+    expect(contract).toMatch(/#agendaSection \.wc-body-scroll\s*\{[\s\S]*max-height:\s*none\s*!important;[\s\S]*overflow-y:\s*visible\s*!important;/);
+    expect(contract).toMatch(/html:has\(body #appShell\.mobile-sidebar-open\),[\s\S]*body:has\(#appShell\.mobile-sidebar-open\)\s*\{[\s\S]*overflow-y:\s*hidden\s*!important;/);
+
+    expect(css).toMatch(/#agendaSection \.wc-outer\s*\{[\s\S]*overflow-x:\s*auto\s*!important;[\s\S]*overflow-y:\s*visible\s*!important;/);
+    const financeiroBlocks = Array.from(css.matchAll(/#financeiroSection[^{]*\{([^}]*)\}/g));
+    expect(
+      financeiroBlocks.some((match) => /overflow-y:\s*(?:hidden|auto|scroll)\s*!important;/.test(match[1])),
+    ).toBe(false);
+  });
+
   beforeAll(async () => {
     if (!chromeAvailable) return;
 
-    appProcess = spawn("npx", ["tsx", "src/server.ts"], {
+    appProcess = spawn(appCommand, appArgs, {
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -298,6 +372,7 @@ describe("frontend mobile overflow", () => {
       },
       stdio: "ignore",
       detached: false,
+      windowsHide: true,
     });
     await waitForOk(`${baseUrl}/health`);
 
@@ -312,10 +387,13 @@ describe("frontend mobile overflow", () => {
     await waitForJson(`http://127.0.0.1:${cdpPort}/json/version`);
   }, 30_000);
 
-  afterAll(() => {
-    if (chromeProcess && !chromeProcess.killed) chromeProcess.kill("SIGTERM");
-    if (appProcess && !appProcess.killed) appProcess.kill("SIGTERM");
-    if (chromeUserDataDir) rmSync(chromeUserDataDir, { recursive: true, force: true });
+  afterAll(async () => {
+    killProcessTree(chromeProcess);
+    killProcessTree(appProcess);
+    await delay(500);
+    if (chromeUserDataDir) {
+      rmSync(chromeUserDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
   });
 
   testIfChrome("nao cria scroll horizontal geral no painel interno mobile", async () => {
@@ -337,6 +415,14 @@ describe("frontend mobile overflow", () => {
     for (const check of checks) {
       expect(check.scrollWidth, `${check.activeModule} scrollWidth`).toBeLessThanOrEqual(check.viewport + 2);
       expect(check.bodyScrollWidth, `${check.activeModule} bodyScrollWidth`).toBeLessThanOrEqual(check.viewport + 2);
+    }
+    for (const check of checks.filter((item) => !item.menuOpen && ["agenda", "financeiro"].includes(item.activeModule))) {
+      expect(check.htmlOverflowY, `${check.activeModule} html overflow-y`).not.toBe("hidden");
+      expect(check.bodyOverflowY, `${check.activeModule} body overflow-y`).not.toBe("hidden");
+      expect(check.appContentOverflowY, `${check.activeModule} appContent overflow-y`).not.toMatch(/auto|scroll/);
+      expect(check.scrollHeight, `${check.activeModule} document scrollHeight`).toBeGreaterThan(check.viewportHeight);
+      expect(check.bodyScrollHeight, `${check.activeModule} body scrollHeight`).toBeGreaterThan(check.viewportHeight);
+      expect(check.afterScrollY, `${check.activeModule} window scrollY`).toBeGreaterThan(check.beforeScrollY);
     }
     expect(checks.at(-1)?.menuOpen).toBe(true);
   }, 45_000);

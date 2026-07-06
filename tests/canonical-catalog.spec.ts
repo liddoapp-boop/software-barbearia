@@ -13,8 +13,16 @@ describe("provisionamento de canonicos reais", () => {
       "canon-svc-hidratacao",
       "canon-svc-luzes",
       "canon-svc-pigmentacao",
+      "canon-svc-corte-barba",
     ]);
-    expect(CANONICAL_REAL_SERVICES.map((item) => item.name)).not.toContain("Corte + Barba");
+    expect(CANONICAL_REAL_SERVICES.find((item) => item.id === "canon-svc-corte-barba")).toMatchObject({
+      name: "Corte + Barba",
+      price: 50,
+      durationMin: 45,
+    });
+    for (const service of CANONICAL_REAL_SERVICES) {
+      expect(`${service.description} ${service.notes}`.toLowerCase()).not.toMatch(/teste|demo|tg|db/);
+    }
 
     expect(CANONICAL_REAL_PRODUCTS.map((item) => item.id)).toEqual([
       "canon-prd-gel",
@@ -46,7 +54,7 @@ describe("provisionamento de canonicos reais", () => {
     });
 
     expect(plan.errors).toHaveLength(0);
-    expect(plan.servicesToCreate).toHaveLength(5);
+    expect(plan.servicesToCreate).toHaveLength(6);
     expect(plan.productsToCreate).toHaveLength(7);
     expect(plan.servicesToCreate.map((item) => item.id)).not.toContain("svc-corte");
     expect(plan.productsToCreate.map((item) => item.id)).not.toContain("prd-pomada");
@@ -60,12 +68,13 @@ describe("provisionamento de canonicos reais", () => {
 
     expect(plan.errors).toHaveLength(0);
     expect(plan.servicesToCreate).toHaveLength(0);
+    expect(plan.servicesToUpdate).toHaveLength(0);
     expect(plan.productsToCreate).toHaveLength(0);
-    expect(plan.matchingServiceIds).toHaveLength(5);
+    expect(plan.matchingServiceIds).toHaveLength(6);
     expect(plan.matchingProductIds).toHaveLength(7);
   });
 
-  it("bloqueia canonico existente divergente em vez de sobrescrever", () => {
+  it("planeja atualizar servico canonico divergente preservando o mesmo id", () => {
     const [corte, ...otherServices] = CANONICAL_REAL_SERVICES;
     const [gel, ...otherProducts] = CANONICAL_REAL_PRODUCTS;
     const plan = buildCanonicalProvisionPlan({
@@ -74,12 +83,8 @@ describe("provisionamento de canonicos reais", () => {
     });
 
     expect(plan.servicesToCreate).toHaveLength(0);
+    expect(plan.servicesToUpdate).toEqual([{ id: corte.id, data: corte }]);
     expect(plan.productsToCreate).toHaveLength(0);
-    expect(plan.errors).toEqual(
-      expect.arrayContaining([
-        "canon-svc-corte.price esperado=30 encontrado=75",
-        "canon-prd-gel.stockQty esperado=30 encontrado=999",
-      ]),
-    );
+    expect(plan.errors).toEqual(["canon-prd-gel.stockQty esperado=30 encontrado=999"]);
   });
 });

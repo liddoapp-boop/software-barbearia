@@ -190,13 +190,13 @@ const isPublicOperationalProfessional = (item: { id?: unknown; name?: unknown })
 const DEFAULT_WORKING_HOURS = {
   timezone: "America/Sao_Paulo",
   weekly: [
-    { day: 1, label: "Segunda", start: "14:00", end: "20:00" },
-    { day: 2, label: "Terca", start: "14:00", end: "18:00" },
-    { day: 3, label: "Quarta", start: "11:30", end: "20:00" },
-    { day: 4, label: "Quinta", start: "11:30", end: "19:30" },
-    { day: 5, label: "Sexta", start: "13:30", end: "21:00" },
-    { day: 6, label: "Sabado", start: "07:00", end: "20:00" },
-    { day: 0, label: "Domingo", start: "09:00", end: "12:00" },
+    { day: 1, label: "Segunda", start: "08:00", end: "20:00" },
+    { day: 2, label: "Terca", start: "08:00", end: "20:00" },
+    { day: 3, label: "Quarta", start: "08:00", end: "20:00" },
+    { day: 4, label: "Quinta", start: "08:00", end: "20:00" },
+    { day: 5, label: "Sexta", start: "08:00", end: "20:00" },
+    { day: 6, label: "Sabado", start: "08:00", end: "14:00" },
+    { day: 0, label: "Domingo", start: "", end: "", isClosed: true },
   ],
 } as const;
 
@@ -271,7 +271,10 @@ async function resolveWorkingHoursForUnit(unitId: string, operations: any) {
   }
   return {
     timezone: DEFAULT_WORKING_HOURS.timezone,
-    weekly: DEFAULT_WORKING_HOURS.weekly.map((item) => ({ ...item, isClosed: false })),
+    weekly: DEFAULT_WORKING_HOURS.weekly.map((item) => ({
+      ...item,
+      isClosed: "isClosed" in item ? item.isClosed : false,
+    })),
   };
 }
 
@@ -750,6 +753,7 @@ export function createApp() {
   const rescheduleSchema = z.object({
     startsAt: z.string().datetime(),
     changedBy: z.string().min(1),
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
   });
 
   const suggestionsSchema = z.object({
@@ -805,6 +809,7 @@ export function createApp() {
       notes: z.string().max(500).optional(),
       isFitting: z.boolean().optional(),
       confirmation: z.boolean().optional(),
+      idempotencyKey: z.string().trim().min(1).max(160).optional(),
       changedBy: z.string().min(1),
     })
     .refine(
@@ -840,6 +845,15 @@ export function createApp() {
     ] as [AppointmentStatus, ...AppointmentStatus[]]),
     changedBy: z.string().min(1),
     reason: z.string().max(250).optional(),
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+  });
+
+  const delaySchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    minutesLate: z.number().int().min(1).max(24 * 60),
+    changedBy: z.string().min(1),
+    reason: z.string().max(250).optional(),
+    recordedAt: z.string().datetime().optional(),
   });
 
   const completeSchema = z.object({
@@ -2693,6 +2707,8 @@ export function createApp() {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = appointmentPatchSchema.parse(request.body);
     const req = request as RequestWithAuth;
+    const confirmationIdempotencyKey =
+      body.confirmation === true ? requireIdempotencyKey(request, body.idempotencyKey) : undefined;
     if (
       !("updateAppointment" in operations) ||
       typeof operations.updateAppointment !== "function"
@@ -2710,6 +2726,10 @@ export function createApp() {
       notes: body.notes,
       isFitting: body.isFitting,
       confirmation: body.confirmation,
+      idempotencyKey: confirmationIdempotencyKey,
+      idempotencyPayloadHash: confirmationIdempotencyKey
+        ? getIdempotencyPayloadHash({ route: "/appointments/:id", params, body })
+        : undefined,
       changedBy: body.changedBy,
     });
     await recordAudit(request, {
@@ -2732,14 +2752,18 @@ export function createApp() {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = rescheduleSchema.parse(request.body);
     const req = request as RequestWithAuth;
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
 
     const appointment = await operations.reschedule({
       appointmentId: params.id,
       unitId: req.auth?.activeUnitId,
       startsAt: new Date(body.startsAt),
       changedBy: body.changedBy,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/:id/reschedule", params, body }),
+      audit: transactionalAuditContext(request),
     });
-    await recordAudit(request, {
+    if (backend !== "prisma") await recordAudit(request, {
       unitId: appointment.unitId,
       action: "APPOINTMENT_RESCHEDULED",
       entity: "appointment",
@@ -2756,6 +2780,10 @@ export function createApp() {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = statusSchema.parse(request.body);
     const req = request as RequestWithAuth;
+    if (body.status === "NO_SHOW" && req.auth?.role !== "owner") {
+      throw new Error("Apenas owner pode marcar falta");
+    }
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
 
     const appointment = await operations.updateStatus({
       appointmentId: params.id,
@@ -2763,10 +2791,23 @@ export function createApp() {
       status: body.status,
       changedBy: body.changedBy,
       reason: body.reason,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/:id/status", params, body }),
+      audit: transactionalAuditContext(request),
     });
-    await recordAudit(request, {
+    const auditAction =
+      appointment.status === "CONFIRMED"
+        ? "APPOINTMENT_CONFIRMED"
+        : appointment.status === "IN_SERVICE"
+          ? "APPOINTMENT_STARTED"
+          : appointment.status === "CANCELLED"
+            ? "APPOINTMENT_CANCELLED"
+            : appointment.status === "NO_SHOW"
+              ? "APPOINTMENT_NO_SHOW"
+              : "APPOINTMENT_STATUS_UPDATED";
+    if (backend !== "prisma") await recordAudit(request, {
       unitId: appointment.unitId,
-      action: "APPOINTMENT_STATUS_UPDATED",
+      action: auditAction,
       entity: "appointment",
       entityId: appointment.id,
       after: {
@@ -2775,6 +2816,42 @@ export function createApp() {
       },
     });
     return { appointment };
+  });
+
+  app.post("/appointments/:id/delay", async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = delaySchema.parse(request.body);
+    const req = request as RequestWithAuth;
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    if (
+      !("recordAppointmentDelay" in operations) ||
+      typeof operations.recordAppointmentDelay !== "function"
+    ) {
+      throw new Error("Registro de atraso indisponivel");
+    }
+    const appointment = await operations.recordAppointmentDelay({
+      appointmentId: params.id,
+      unitId: req.auth?.activeUnitId,
+      minutesLate: body.minutesLate,
+      changedBy: body.changedBy,
+      reason: body.reason,
+      recordedAt: body.recordedAt ? new Date(body.recordedAt) : undefined,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/:id/delay", params, body }),
+      audit: transactionalAuditContext(request),
+    });
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_DELAY_RECORDED",
+      entity: "appointment",
+      entityId: appointment.id,
+      after: {
+        status: appointment.status,
+        minutesLate: body.minutesLate,
+        reason: body.reason ?? null,
+      },
+    });
+    return { appointment, message: "Atraso registrado." };
   });
 
   app.post("/appointments/:id/complete", async (request, reply) => {
@@ -4529,15 +4606,19 @@ export function createApp() {
     professionalIds: string[],
     start: Date,
     end: Date,
+    bufferAfterMin = 0,
   ): Promise<PublicBusySlot[]> => {
     if (!professionalIds.length) return [];
+    const bufferMs = Math.max(0, Math.trunc(bufferAfterMin)) * 60_000;
+    const queryStart = new Date(start.getTime() - bufferMs);
+    const queryEnd = new Date(end.getTime() + bufferMs);
     if (backend === "prisma") {
       return await prisma.appointment.findMany({
         where: {
           unitId,
           professionalId: { in: professionalIds },
-          startsAt: { lt: end },
-          endsAt: { gt: start },
+          startsAt: { lt: queryEnd },
+          endsAt: { gt: queryStart },
           status: { in: activeAppointmentStatuses },
         },
         select: { professionalId: true, startsAt: true, endsAt: true },
@@ -4549,8 +4630,8 @@ export function createApp() {
           item.unitId === unitId &&
           professionalIds.includes(item.professionalId) &&
           activeAppointmentStatuses.includes(item.status) &&
-          item.startsAt < end &&
-          item.endsAt > start,
+          item.startsAt < queryEnd &&
+          item.endsAt > queryStart,
       )
       .map((item) => ({
         professionalId: item.professionalId,
@@ -4564,13 +4645,30 @@ export function createApp() {
     startsAt: Date,
     endsAt: Date,
     busySlots: PublicBusySlot[],
+    bufferAfterMin = 0,
   ) =>
-    !busySlots.some(
-      (item) =>
+    !busySlots.some((item) => {
+      const bufferMs = Math.max(0, Math.trunc(bufferAfterMin)) * 60_000;
+      return (
         item.professionalId === professionalId &&
-        startsAt < item.endsAt &&
-        endsAt > item.startsAt,
-    );
+        startsAt < new Date(item.endsAt.getTime() + bufferMs) &&
+        new Date(endsAt.getTime() + bufferMs) > item.startsAt
+      );
+    });
+
+  const resolvePublicBufferAfterMin = async (unitId: string) => {
+    if (backend === "prisma") {
+      const settings = await prisma.businessSettings.findUnique({
+        where: { unitId },
+        select: { bufferBetweenAppointmentsMinutes: true },
+      });
+      return Math.max(0, Math.trunc(settings?.bufferBetweenAppointmentsMinutes ?? 0));
+    }
+    const settings = await operations.getBusinessSettings({ unitId });
+    const business = ((settings as { business?: { bufferBetweenAppointmentsMinutes?: number } })?.business
+      ?? settings) as { bufferBetweenAppointmentsMinutes?: number };
+    return Math.max(0, Math.trunc(Number(business?.bufferBetweenAppointmentsMinutes ?? 0)));
+  };
 
   const resolvePublicServicesContract = async (unitId: string, serviceIds: string[]) => {
     const services = await getPublicServicesForBooking(unitId, serviceIds);
@@ -4637,6 +4735,7 @@ export function createApp() {
     serviceIds: string[];
     startsAt: Date;
     endsAt: Date;
+    bufferAfterMin: number;
     professionalId?: string;
   }) => {
     const eligible = await getPublicEligibleProfessionalsForServices(
@@ -4657,10 +4756,11 @@ export function createApp() {
       eligible.map((item) => item.id),
       input.startsAt,
       input.endsAt,
+      input.bufferAfterMin,
     );
     const professional =
       eligible.find((item) =>
-        isProfessionalAvailableFromBusySlots(item.id, input.startsAt, input.endsAt, busySlots),
+        isProfessionalAvailableFromBusySlots(item.id, input.startsAt, input.endsAt, busySlots, input.bufferAfterMin),
       ) ?? null;
     return {
       professional,
@@ -4841,6 +4941,7 @@ export function createApp() {
     }
     const eligibleProfessionalIds = eligibleProfessionals.map((item) => item.id);
     const durationMin = contract.effectiveDurationMin;
+    const bufferAfterMin = await resolvePublicBufferAfterMin(unitId);
 
     // Horários de funcionamento por dia da semana
     let businessHours: Array<{
@@ -4860,6 +4961,7 @@ export function createApp() {
       eligibleProfessionalIds,
       weekStartDate,
       weekEnd,
+      bufferAfterMin,
     );
 
     const now = new Date();
@@ -4897,7 +4999,7 @@ export function createApp() {
         professionalName?: string;
       }[] = [];
       let slotMin = openH * 60 + openM;
-      const endMin = closeH * 60 + closeM - durationMin;
+      const endMin = closeH * 60 + closeM - durationMin - bufferAfterMin;
 
       while (slotMin <= endMin) {
         const h = Math.floor(slotMin / 60).toString().padStart(2, "0");
@@ -4909,7 +5011,7 @@ export function createApp() {
         const isPast = slotDate.getTime() - now.getTime() < minAdvanceMs;
         const slotEnd = new Date(slotDate.getTime() + durationMin * 60_000);
         const professional = eligibleProfessionals.find((item) =>
-          isProfessionalAvailableFromBusySlots(item.id, slotDate, slotEnd, busySlots),
+          isProfessionalAvailableFromBusySlots(item.id, slotDate, slotEnd, busySlots, bufferAfterMin),
         );
 
         slots.push({
@@ -5061,6 +5163,7 @@ export function createApp() {
       return;
     }
     const primaryService = contract.services[0];
+    const bufferAfterMin = await resolvePublicBufferAfterMin(unitId);
 
     endsAt = new Date(startsAt.getTime() + contract.effectiveDurationMin * 60_000);
     if (!isWithinWorkingHours(startsAt, endsAt, workingHours)) {
@@ -5077,6 +5180,7 @@ export function createApp() {
       serviceIds,
       startsAt,
       endsAt,
+      bufferAfterMin,
       professionalId: body.professionalId,
     });
     if (!resolvedProfessional.professional) {
@@ -5110,7 +5214,6 @@ export function createApp() {
         serviceId: body.serviceId,
         serviceIds: body.serviceIds,
         startsAt,
-        bufferAfterMin: 0,
         notes: `Agendamento online - ${body.clientName}`,
         changedBy: "public",
       });
@@ -5132,7 +5235,6 @@ export function createApp() {
         serviceId: body.serviceId,
         serviceIds: body.serviceIds,
         startsAt,
-        bufferAfterMin: 0,
         notes: `Agendamento online - ${body.clientName}`,
         changedBy: "public",
       });

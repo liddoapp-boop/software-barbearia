@@ -129,6 +129,27 @@ function formatDateTime(date) {
   });
 }
 
+function getAppointmentDelayInfo(item = {}) {
+  const entries = Array.isArray(item.history) ? item.history : [];
+  const delayEntries = entries
+    .filter((entry) => {
+      const action = safeText(entry.action || entry.label || entry.status || entry.type, "").toUpperCase();
+      const reason = safeText(entry.reason, "");
+      return action === "DELAY_RECORDED" || /minutos? de atraso/i.test(reason);
+    })
+    .map((entry) => {
+      const reason = safeText(entry.reason, "");
+      const minutesMatch = reason.match(/(\d+)\s*min/i);
+      return {
+        minutes: minutesMatch ? Number(minutesMatch[1]) : null,
+        reason,
+        changedAt: asDate(entry.changedAt || entry.at || entry.createdAt || entry.timestamp || entry.date),
+        changedBy: safeText(entry.changedBy || entry.actor || entry.actorId, ""),
+      };
+    });
+  return delayEntries.at(-1) || null;
+}
+
 function quickFlags(item, now, allItems) {
   const flags = [];
   const late =
@@ -151,20 +172,51 @@ function quickFlags(item, now, allItems) {
   return { flags, late, profile };
 }
 
+function formatHistoryEntry(entry = {}) {
+  const label = safeText(entry.label || entry.action || entry.status || entry.type, "Movimento");
+  const at = asDate(entry.changedAt || entry.at || entry.createdAt || entry.timestamp || entry.date);
+  const actor = safeText(entry.changedBy || entry.actor || entry.actorId, "");
+  const reason = safeText(entry.reason, "");
+  const isDelay = label === "DELAY_RECORDED" || /minutos? de atraso/i.test(reason);
+  const minutesMatch = isDelay
+    ? reason.match(/(\d+)\s*min/i)
+    : null;
+  const visibleReason = isDelay
+    ? reason.replace(/^\s*\d+\s*minutos?\s+de\s+atraso\s*-?\s*/i, "").trim()
+    : reason;
+  const details = [
+    minutesMatch ? `${minutesMatch[1]} min` : "",
+    actor ? `por ${actor}` : "",
+    visibleReason ? visibleReason : "",
+  ].filter(Boolean).join(" | ");
+  return {
+    label: isDelay ? "Atraso registrado" : label,
+    meta: `${at ? formatDateTime(at) : "Sem data registrada"}${details ? ` | ${details}` : ""}`,
+  };
+}
+
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", "WHATSAPP", "CANCELLED"].filter(Boolean);
+    return [
+      options.canEdit ? "EDIT" : "",
+      "CONFIRMED",
+      "DETAIL",
+      "WHATSAPP",
+      options.canNoShow ? "NO_SHOW" : "",
+      "DELAY",
+      "CANCELLED",
+    ].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "WHATSAPP", "NO_SHOW", "CANCELLED"].filter(Boolean);
+    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "WHATSAPP", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
     return canCheckout
-      ? ["COMPLETE", "DETAIL", "WHATSAPP", "CANCELLED"]
-      : ["DETAIL", "WHATSAPP", "CANCELLED"];
+      ? ["COMPLETE", "DETAIL", "WHATSAPP", "DELAY"]
+      : ["DETAIL", "WHATSAPP", "DELAY"];
   }
-  if (status === "COMPLETED") return ["REFUND", "DETAIL", "WHATSAPP"];
+  if (status === "COMPLETED") return ["DETAIL", "WHATSAPP"];
   return ["DETAIL", "WHATSAPP"];
 }
 
@@ -183,6 +235,7 @@ function actionLabel(action) {
   if (action === "IN_SERVICE") return "Iniciar atendimento";
   if (action === "COMPLETE") return "Concluir";
   if (action === "NO_SHOW") return "Falta";
+  if (action === "DELAY") return "Registrar atraso";
   if (action === "CANCELLED") return "Cancelar";
   if (action === "DETAIL") return "Detalhes";
   if (action === "EDIT") return "Editar";
@@ -197,6 +250,7 @@ function actionClass(action) {
   if (action === "COMPLETE") return "ux-btn ux-btn-success";
   if (action === "CANCELLED") return "ux-btn ux-btn-danger";
   if (action === "NO_SHOW") return "ux-btn ux-btn-danger";
+  if (action === "DELAY") return "ux-btn ux-btn-muted";
   if (action === "REFUND") return "ux-btn ux-btn-muted";
   if (action === "WHATSAPP") return "ux-btn ux-btn-muted";
   if (action === "DETAIL") return "ux-btn ux-btn-muted";
@@ -339,7 +393,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
       const itemCanCheckout = options.canCheckout !== false;
-      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit });
+      const canNoShow = now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000;
+      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit, canNoShow });
       const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
         <tr class="${late ? "appts-row-late" : ""}">
@@ -379,7 +434,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
     .map((item) => {
       const { flags, late, profile } = quickFlags(item, now, items);
       const itemCanCheckout = options.canCheckout !== false;
-      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit });
+      const canNoShow = now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000;
+      const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit, canNoShow });
       const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
         <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
@@ -435,9 +491,11 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
   const noShowCount = fromClient.filter((row) => row.status === "NO_SHOW").length;
   const cancelledCount = fromClient.filter((row) => row.status === "CANCELLED").length;
   const profile = computeClientProfile(item, allItems);
+  const delayInfo = getAppointmentDelayInfo(item);
 
   const itemCanCheckout = options.canCheckout !== false;
-  const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit }).filter(
+  const canNoShow = Date.now() >= item.startsAt.getTime() + 15 * 60 * 1000;
+  const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit, canNoShow }).filter(
     (action) => action !== "DETAIL" && action !== "WHATSAPP",
   );
   const servicesDetail = (item.serviceItems?.length ? item.serviceItems : [{
@@ -472,6 +530,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
         <div><dt>Status</dt><dd>${renderStatusChip(item.status)}</dd></div>
         <div><dt>Valor</dt><dd>${money(item.servicePrice)}</dd></div>
         <div><dt>Duracao efetiva</dt><dd>${item.serviceDurationMin} min</dd></div>
+        ${delayInfo?.minutes ? `<div><dt>Atraso</dt><dd>Atraso: ${delayInfo.minutes} min</dd></div>` : ""}
       </dl>
     `,
     details: `
@@ -491,9 +550,8 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
       <ol class="op-history-list">
         ${historyEntries
           .map((entry) => {
-            const label = safeText(entry.label || entry.action || entry.status || entry.type, "Movimento");
-            const at = asDate(entry.at || entry.createdAt || entry.timestamp || entry.date);
-            return `<li><strong>${escapeHtml(label)}</strong><span>${at ? formatDateTime(at) : "Sem data registrada"}</span></li>`;
+            const formatted = formatHistoryEntry(entry);
+            return `<li><strong>${escapeHtml(formatted.label)}</strong><span>${escapeHtml(formatted.meta)}</span></li>`;
           })
           .join("")}
       </ol>
@@ -529,6 +587,7 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
 
 function actionButtonTone(action) {
   if (action === "CANCELLED" || action === "NO_SHOW" || action === "REFUND") return "ux-btn-danger";
+  if (action === "DELAY") return "ux-btn-muted";
   if (action === "COMPLETE") return "ux-btn-success";
   if (action === "CONFIRMED" || action === "IN_SERVICE") return "ux-btn-primary";
   return "ux-btn-muted";

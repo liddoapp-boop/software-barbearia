@@ -51,6 +51,10 @@ export type ExistingCanonicalProduct = Partial<CanonicalProductRecord> & {
 
 export type CanonicalProvisionPlan = {
   servicesToCreate: CanonicalServiceRecord[];
+  servicesToUpdate: Array<{
+    id: string;
+    data: CanonicalServiceRecord;
+  }>;
   productsToCreate: CanonicalProductRecord[];
   serviceCombinationRulesToCreate: CanonicalServiceCombinationRuleRecord[];
   matchingServiceIds: string[];
@@ -60,14 +64,15 @@ export type CanonicalProvisionPlan = {
 };
 
 const UNIT_ID = "unit-01";
-const CANONICAL_NOTES = "canonico-real-sprint-227-2-230-1";
+const CANONICAL_SERVICE_DESCRIPTION = "Servico operacional canonico validado para agenda.";
+const CANONICAL_NOTES = "catalogo-operacional-canonico";
 
 export const CANONICAL_REAL_SERVICES: CanonicalServiceRecord[] = [
   {
     id: "canon-svc-corte",
     businessId: UNIT_ID,
     name: "Corte",
-    description: "Servico canonico real validado para provisionamento local/teste.",
+    description: CANONICAL_SERVICE_DESCRIPTION,
     category: "CORTE",
     price: 30,
     durationMin: 30,
@@ -80,7 +85,7 @@ export const CANONICAL_REAL_SERVICES: CanonicalServiceRecord[] = [
     id: "canon-svc-barba",
     businessId: UNIT_ID,
     name: "Barba",
-    description: "Servico canonico real validado para provisionamento local/teste.",
+    description: CANONICAL_SERVICE_DESCRIPTION,
     category: "BARBA",
     price: 20,
     durationMin: 30,
@@ -92,8 +97,8 @@ export const CANONICAL_REAL_SERVICES: CanonicalServiceRecord[] = [
   {
     id: "canon-svc-hidratacao",
     businessId: UNIT_ID,
-    name: "Hidratacao",
-    description: "Servico canonico real validado para provisionamento local/teste.",
+    name: "Hidratação",
+    description: CANONICAL_SERVICE_DESCRIPTION,
     category: "TRATAMENTO",
     price: 20,
     durationMin: 30,
@@ -106,7 +111,7 @@ export const CANONICAL_REAL_SERVICES: CanonicalServiceRecord[] = [
     id: "canon-svc-luzes",
     businessId: UNIT_ID,
     name: "Luzes",
-    description: "Servico canonico real validado para provisionamento local/teste.",
+    description: CANONICAL_SERVICE_DESCRIPTION,
     category: "TECNICO",
     price: 50,
     durationMin: 60,
@@ -118,11 +123,24 @@ export const CANONICAL_REAL_SERVICES: CanonicalServiceRecord[] = [
   {
     id: "canon-svc-pigmentacao",
     businessId: UNIT_ID,
-    name: "Pigmentacao",
-    description: "Servico canonico real validado para provisionamento local/teste.",
+    name: "Pigmentação",
+    description: CANONICAL_SERVICE_DESCRIPTION,
     category: "TECNICO",
     price: 45,
     durationMin: 60,
+    defaultCommissionRate: 0,
+    costEstimate: 0,
+    notes: CANONICAL_NOTES,
+    active: true,
+  },
+  {
+    id: "canon-svc-corte-barba",
+    businessId: UNIT_ID,
+    name: "Corte + Barba",
+    description: CANONICAL_SERVICE_DESCRIPTION,
+    category: "COMBO",
+    price: 50,
+    durationMin: 45,
     defaultCommissionRate: 0,
     costEstimate: 0,
     notes: CANONICAL_NOTES,
@@ -305,6 +323,7 @@ export function buildCanonicalProvisionPlan(input: {
   const rulesById = new Map((input.existingServiceCombinationRules ?? []).map((item) => [item.id, item]));
   const plan: CanonicalProvisionPlan = {
     servicesToCreate: [],
+    servicesToUpdate: [],
     productsToCreate: [],
     serviceCombinationRulesToCreate: [],
     matchingServiceIds: [],
@@ -320,7 +339,7 @@ export function buildCanonicalProvisionPlan(input: {
       continue;
     }
     const divergences = findDivergences(service, existing, SERVICE_FIELDS);
-    if (divergences.length) plan.errors.push(...divergences);
+    if (divergences.length) plan.servicesToUpdate.push({ id: service.id, data: service });
     else plan.matchingServiceIds.push(service.id);
   }
 

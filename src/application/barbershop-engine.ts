@@ -5,7 +5,7 @@ import {
   calculateProductCommission,
   calculateProductSaleGrossAmount,
   calculateServiceCommission,
-  canTransitionAppointmentStatus,
+  assertAppointmentTransitionAllowed,
   hasAppointmentConflict,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
@@ -84,9 +84,7 @@ export class BarbershopEngine {
       items: [serviceItem],
       activeRules: input.activeCombinationRules,
     });
-    const endsAt = new Date(
-      input.startsAt.getTime() + (duration.effectiveDurationMin + bufferMin) * 60_000,
-    );
+    const endsAt = new Date(input.startsAt.getTime() + duration.effectiveDurationMin * 60_000);
 
     if (input.schedulingSettings && input.businessHours) {
       validateAppointmentSchedulingWindow({
@@ -108,6 +106,7 @@ export class BarbershopEngine {
       professionalId: input.professionalId,
       startsAt: input.startsAt,
       endsAt,
+      bufferAfterMin: bufferMin,
       existingAppointments,
     });
     if (conflict && !input.schedulingSettings?.allowOverbooking) {
@@ -170,7 +169,7 @@ export class BarbershopEngine {
     },
   ): Appointment {
     const bufferMin = options?.bufferAfterMin ?? 0;
-    const endsAt = new Date(startsAt.getTime() + (serviceDurationMin + bufferMin) * 60_000);
+    const endsAt = new Date(startsAt.getTime() + serviceDurationMin * 60_000);
     if (options?.schedulingSettings && options.businessHours) {
       validateAppointmentSchedulingWindow({
         unitId: appointment.unitId,
@@ -190,6 +189,7 @@ export class BarbershopEngine {
       professionalId: appointment.professionalId,
       startsAt,
       endsAt,
+      bufferAfterMin: bufferMin,
       ignoreAppointmentId: appointment.id,
       existingAppointments,
     });
@@ -219,11 +219,7 @@ export class BarbershopEngine {
     changedBy: string,
     reason?: string,
   ): Appointment {
-    if (!canTransitionAppointmentStatus(appointment.status, nextStatus)) {
-      throw new Error(
-        `Transicao invalida: ${appointment.status} -> ${nextStatus}`,
-      );
-    }
+    assertAppointmentTransitionAllowed(appointment.status, nextStatus);
 
     const actionMap: Record<Appointment["status"], AppointmentHistoryItem["action"]> =
       {

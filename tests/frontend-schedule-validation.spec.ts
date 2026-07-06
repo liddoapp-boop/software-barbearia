@@ -76,4 +76,20 @@ describe("validacao frontend do agendamento", () => {
     expect(appSource).not.toContain("serviceId: serviceId.value");
     expect(appSource).toContain("friendlyApiValidationMessage(fromPayload, fallbackMessage)");
   });
+
+  it("usa apenas servicos ativos no catalogo operacional do agendamento", () => {
+    const appSource = readFileSync("public/app.js", "utf8");
+    const catalogIndex = appSource.indexOf("async function loadCatalog()");
+    const normalizedIndex = appSource.indexOf("const normalized = normalizeCatalogForScheduling({", catalogIndex);
+    const allServicesIndex = appSource.indexOf("allServices = normalized.services;", normalizedIndex);
+
+    expect(catalogIndex).toBeGreaterThanOrEqual(0);
+    expect(appSource.indexOf("const operationalServices =", catalogIndex)).toBeGreaterThan(catalogIndex);
+    expect(appSource.indexOf("(item) => serviceIsActive(item)", catalogIndex)).toBeGreaterThan(catalogIndex);
+    expect(normalizedIndex).toBeGreaterThan(catalogIndex);
+    expect(appSource.indexOf("services: operationalServices", normalizedIndex)).toBeGreaterThan(normalizedIndex);
+    expect(allServicesIndex).toBeGreaterThan(normalizedIndex);
+    expect(appSource.indexOf("fillSelect(filterService, operationalServices", allServicesIndex)).toBeGreaterThan(allServicesIndex);
+    expect(appSource.indexOf("fillSelect(appointmentsFilterService, operationalServices", allServicesIndex)).toBeGreaterThan(allServicesIndex);
+  });
 });

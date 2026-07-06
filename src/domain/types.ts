@@ -276,6 +276,7 @@ export interface AppointmentHistoryItem {
     | "COMPLETED"
     | "NO_SHOW"
     | "BLOCKED"
+    | "DELAY_RECORDED"
     | "REFUNDED";
   reason?: string;
 }

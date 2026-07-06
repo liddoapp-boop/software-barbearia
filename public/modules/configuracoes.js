@@ -432,7 +432,7 @@ function renderHoursForm(hours = []) {
     {
       id: "barber_default",
       title: "Grade do barbeiro",
-      description: "Seg 14:00-20:00, Ter 14:00-18:00, Qua 11:30-20:00, Qui 11:30-19:30, Sex 13:30-21:00, Sab 07:00-20:00, Dom 09:00-12:00.",
+      description: "Seg a Sex 08:00-20:00, Sab 08:00-14:00 e Domingo fechado.",
     },
     {
       id: "commercial_day",
@@ -732,7 +732,7 @@ function renderScheduleForm(business = {}) {
         </label>
         <label class="cfg-field">
           <span>Buffer entre atendimentos (min)</span>
-          <input class="cfg-input" type="number" name="bufferBetweenAppointmentsMinutes" min="0" step="1" value="${escapeHtml(toNumber(business.bufferBetweenAppointmentsMinutes, 10).toString())}" />
+          <input class="cfg-input" type="number" name="bufferBetweenAppointmentsMinutes" min="0" step="1" value="${escapeHtml(toNumber(business.bufferBetweenAppointmentsMinutes, 0).toString())}" />
         </label>
       </div>
       <div class="cfg-checks">
@@ -917,7 +917,7 @@ function sectionContent(section, payload = {}, context = {}) {
       title: "Preferencias de agenda",
       subtitle: "Duracao, antecedencia e regras de encaixe.",
       status: "ACTIVE",
-      summary: `<dl class="op-summary-grid">${field("Duracao padrao", `${toNumber(business.defaultAppointmentDuration, 45)} min`)}${field("Antecedencia minima", `${toNumber(business.minimumAdvanceMinutes, 30)} min`)}${field("Tempo entre atendimentos", `${toNumber(business.bufferBetweenAppointmentsMinutes, 10)} min`)}${field("Encaixes", business.allowWalkIns ? "Permitidos" : "Desativados")}</dl>`,
+      summary: `<dl class="op-summary-grid">${field("Duracao padrao", `${toNumber(business.defaultAppointmentDuration, 45)} min`)}${field("Antecedencia minima", `${toNumber(business.minimumAdvanceMinutes, 30)} min`)}${field("Tempo entre atendimentos", `${toNumber(business.bufferBetweenAppointmentsMinutes, 0)} min`)}${field("Encaixes", business.allowWalkIns ? "Permitidos" : "Desativados")}</dl>`,
       details: renderScheduleForm(business),
       technicalTrace: renderBusinessTrace(business),
     },

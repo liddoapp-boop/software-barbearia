@@ -13,6 +13,19 @@ import {
   StockMovement,
   UUID,
 } from "./types";
+export {
+  APPOINTMENT_STATUSES,
+  APPOINTMENT_STATUS_TRANSITIONS,
+  TERMINAL_APPOINTMENT_STATUSES,
+  assertAppointmentCanBeRescheduled,
+  assertAppointmentCanBeUpdated,
+  assertAppointmentTransitionAllowed,
+  assertNoShowToleranceElapsed,
+  canTransitionAppointmentStatus,
+  describeAppointmentTransitionError,
+  isNoShowEligible,
+  isTerminalAppointmentStatus,
+} from "./appointment-state-machine";
 
 export interface AppointmentConflictInput {
   businessId?: UUID;
@@ -20,6 +33,7 @@ export interface AppointmentConflictInput {
   professionalId: UUID;
   startsAt: Date;
   endsAt: Date;
+  bufferAfterMin?: number;
   ignoreAppointmentId?: UUID;
   existingAppointments: Appointment[];
 }
@@ -31,6 +45,8 @@ export const ACTIVE_APPOINTMENT_CONFLICT_STATUSES: AppointmentStatus[] = [
 ];
 
 export function hasAppointmentConflict(input: AppointmentConflictInput): boolean {
+  const bufferMs = Math.max(0, Math.trunc(input.bufferAfterMin ?? 0)) * 60_000;
+  const candidateBusyEnd = new Date(input.endsAt.getTime() + bufferMs);
   return input.existingAppointments.some((appointment) => {
     if (input.businessId && appointment.unitId !== input.businessId) return false;
     const sameProfessional = appointment.professionalId === input.professionalId;
@@ -39,8 +55,9 @@ export function hasAppointmentConflict(input: AppointmentConflictInput): boolean
     if (appointment.id === input.ignoreAppointmentId) return false;
     if (!ACTIVE_APPOINTMENT_CONFLICT_STATUSES.includes(appointment.status)) return false;
 
-    const overlapsStart = input.startsAt < appointment.endsAt;
-    const overlapsEnd = input.endsAt > appointment.startsAt;
+    const appointmentBusyEnd = new Date(appointment.endsAt.getTime() + bufferMs);
+    const overlapsStart = input.startsAt < appointmentBusyEnd;
+    const overlapsEnd = candidateBusyEnd > appointment.startsAt;
     return overlapsStart && overlapsEnd;
   });
 }
@@ -123,11 +140,12 @@ export function validateAppointmentSchedulingWindow(input: AppointmentScheduling
     throw new Error("Horario final do agendamento deve ser posterior ao inicio");
   }
 
-  const expectedDurationMs = (input.serviceDurationMin + input.bufferAfterMin) * 60_000;
+  const expectedDurationMs = input.serviceDurationMin * 60_000;
   const actualDurationMs = input.endsAt.getTime() - input.startsAt.getTime();
   if (actualDurationMs < expectedDurationMs) {
-    throw new Error("Duracao do agendamento nao respeita servico e buffer configurado");
+    throw new Error("Duracao do agendamento nao respeita os servicos configurados");
   }
+  const operationalEndsAt = new Date(input.startsAt.getTime() + (input.serviceDurationMin + input.bufferAfterMin) * 60_000);
 
   const now = input.now ?? new Date();
   if (input.startsAt.getTime() < now.getTime()) {
@@ -143,7 +161,7 @@ export function validateAppointmentSchedulingWindow(input: AppointmentScheduling
 
   const timezone = input.timezone || "America/Sao_Paulo";
   const startLocal = getLocalDateTimeParts(input.startsAt, timezone);
-  const endLocal = getLocalDateTimeParts(input.endsAt, timezone);
+  const endLocal = getLocalDateTimeParts(operationalEndsAt, timezone);
   if (startLocal.dateKey !== endLocal.dateKey) {
     throw new Error("Agendamento nao pode atravessar dias de funcionamento");
   }
@@ -164,23 +182,6 @@ export function validateAppointmentSchedulingWindow(input: AppointmentScheduling
   if (breakStart != null && breakEnd != null && startLocal.minutes < breakEnd && endLocal.minutes > breakStart) {
     throw new Error("Horario indisponivel durante intervalo da unidade");
   }
-}
-
-export function canTransitionAppointmentStatus(
-  from: AppointmentStatus,
-  to: AppointmentStatus,
-): boolean {
-  const transitions: Record<AppointmentStatus, AppointmentStatus[]> = {
-    SCHEDULED: ["CONFIRMED", "CANCELLED", "NO_SHOW", "BLOCKED"],
-    CONFIRMED: ["IN_SERVICE", "CANCELLED", "NO_SHOW"],
-    IN_SERVICE: ["COMPLETED", "CANCELLED"],
-    COMPLETED: [],
-    CANCELLED: [],
-    NO_SHOW: [],
-    BLOCKED: ["SCHEDULED", "CANCELLED"],
-  };
-
-  return transitions[from].includes(to);
 }
 
 export function calculateServiceCommission(

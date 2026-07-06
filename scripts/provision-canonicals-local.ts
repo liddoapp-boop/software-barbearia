@@ -19,6 +19,15 @@ type Options = {
 
 const prisma = new PrismaClient();
 const CANONICAL_UNIT_ID = "unit-01";
+const CANONICAL_BUSINESS_HOURS = [
+  { dayOfWeek: 0, opensAt: null, closesAt: null, breakStart: null, breakEnd: null, isClosed: true },
+  { dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", breakStart: null, breakEnd: null, isClosed: false },
+  { dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", breakStart: null, breakEnd: null, isClosed: false },
+  { dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", breakStart: null, breakEnd: null, isClosed: false },
+  { dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", breakStart: null, breakEnd: null, isClosed: false },
+  { dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", breakStart: null, breakEnd: null, isClosed: false },
+  { dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", breakStart: null, breakEnd: null, isClosed: false },
+] as const;
 
 type ExistingProductRow = {
   id: string;
@@ -248,6 +257,7 @@ function printPlan(
   console.log(`mode=${options.mode}`);
   console.log(`target=${options.target}`);
   console.log(`services_to_create=${plan.servicesToCreate.length}`);
+  console.log(`services_to_update=${plan.servicesToUpdate.length}`);
   console.log(`products_to_create=${productPlan.productsToCreate.length}`);
   console.log(`products_to_update=${productPlan.productsToUpdate.length}`);
   console.log(`service_combination_rules_to_create=${plan.serviceCombinationRulesToCreate.length}`);
@@ -257,6 +267,9 @@ function printPlan(
   console.log(`errors=${plan.errors.length + productPlan.errors.length}`);
   if (plan.servicesToCreate.length) {
     console.log(`service_ids_to_create=${plan.servicesToCreate.map((item) => item.id).join(",")}`);
+  }
+  if (plan.servicesToUpdate.length) {
+    console.log(`service_ids_to_update=${plan.servicesToUpdate.map((item) => item.id).join(",")}`);
   }
   if (productPlan.productsToCreate.length) {
     console.log(`product_ids_to_create=${productPlan.productsToCreate.map((item) => item.id).join(",")}`);
@@ -309,6 +322,24 @@ async function applyPlan(
       });
     }
 
+    for (const service of plan.servicesToUpdate) {
+      await tx.service.update({
+        where: { id: service.id },
+        data: {
+          businessId: service.data.businessId,
+          name: service.data.name,
+          description: service.data.description,
+          category: service.data.category,
+          price: new Prisma.Decimal(service.data.price),
+          durationMin: service.data.durationMin,
+          defaultCommissionRate: new Prisma.Decimal(service.data.defaultCommissionRate),
+          costEstimate: new Prisma.Decimal(service.data.costEstimate),
+          notes: service.data.notes,
+          active: service.data.active,
+        },
+      });
+    }
+
     for (const product of productPlan.productsToUpdate) {
       await tx.product.update({
         where: { id: product.id },
@@ -344,7 +375,135 @@ async function applyPlan(
         },
       });
     }
+
+    await tx.service.updateMany({
+      where: {
+        businessId: CANONICAL_UNIT_ID,
+        active: true,
+        id: { notIn: canonicalServiceIds() },
+      },
+      data: { active: false },
+    });
+
+    const activeProfessionals = await tx.professional.findMany({
+      where: { businessId: CANONICAL_UNIT_ID, active: true },
+      select: { id: true },
+    });
+    for (const serviceId of canonicalServiceIds()) {
+      for (const professional of activeProfessionals) {
+        await tx.serviceProfessional.upsert({
+          where: {
+            serviceId_professionalId: {
+              serviceId,
+              professionalId: professional.id,
+            },
+          },
+          update: {},
+          create: {
+            id: `svc-pro-${serviceId}-${professional.id}`,
+            serviceId,
+            professionalId: professional.id,
+          },
+        });
+      }
+    }
+
+    for (const hour of CANONICAL_BUSINESS_HOURS) {
+      const existing = await tx.businessHour.findFirst({
+        where: { unitId: CANONICAL_UNIT_ID, dayOfWeek: hour.dayOfWeek },
+        select: { id: true },
+      });
+      const data = {
+        opensAt: hour.opensAt,
+        closesAt: hour.closesAt,
+        breakStart: hour.breakStart,
+        breakEnd: hour.breakEnd,
+        isClosed: hour.isClosed,
+      };
+      if (existing) {
+        await tx.businessHour.update({ where: { id: existing.id }, data });
+      } else {
+        await tx.businessHour.create({
+          data: {
+            id: `bh-${CANONICAL_UNIT_ID}-${hour.dayOfWeek}`,
+            unitId: CANONICAL_UNIT_ID,
+            dayOfWeek: hour.dayOfWeek,
+            ...data,
+          },
+        });
+      }
+    }
+
+    await tx.businessSettings.upsert({
+      where: { unitId: CANONICAL_UNIT_ID },
+      update: { bufferBetweenAppointmentsMinutes: 0 },
+      create: {
+        id: `settings-${CANONICAL_UNIT_ID}`,
+        unitId: CANONICAL_UNIT_ID,
+        businessName: "Barbearia Premium - Unidade Centro",
+        segment: "barbearia",
+        bufferBetweenAppointmentsMinutes: 0,
+      },
+    });
   });
+}
+
+async function assertOperationalContract() {
+  const [activeServices, hours, settings] = await Promise.all([
+    prisma.service.findMany({
+      where: { businessId: CANONICAL_UNIT_ID, active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, price: true, durationMin: true },
+    }),
+    prisma.businessHour.findMany({
+      where: { unitId: CANONICAL_UNIT_ID },
+      orderBy: { dayOfWeek: "asc" },
+      select: {
+        dayOfWeek: true,
+        opensAt: true,
+        closesAt: true,
+        breakStart: true,
+        breakEnd: true,
+        isClosed: true,
+      },
+    }),
+    prisma.businessSettings.findUnique({
+      where: { unitId: CANONICAL_UNIT_ID },
+      select: { bufferBetweenAppointmentsMinutes: true },
+    }),
+  ]);
+  const activeServiceIds = activeServices.map((item) => item.id).sort();
+  const expectedServiceIds = canonicalServiceIds().sort();
+  if (JSON.stringify(activeServiceIds) !== JSON.stringify(expectedServiceIds)) {
+    throw new Error(`Catalogo ativo divergente: ${activeServiceIds.join(",")}`);
+  }
+  for (const expected of CANONICAL_REAL_SERVICES) {
+    const service = activeServices.find((item) => item.id === expected.id);
+    if (
+      !service ||
+      service.name !== expected.name ||
+      Number(service.price) !== expected.price ||
+      service.durationMin !== expected.durationMin
+    ) {
+      throw new Error(`Servico operacional divergente: ${expected.id}`);
+    }
+  }
+  for (const expected of CANONICAL_BUSINESS_HOURS) {
+    const hour = hours.find((item) => item.dayOfWeek === expected.dayOfWeek);
+    if (
+      !hour ||
+      hour.opensAt !== expected.opensAt ||
+      hour.closesAt !== expected.closesAt ||
+      hour.breakStart !== expected.breakStart ||
+      hour.breakEnd !== expected.breakEnd ||
+      hour.isClosed !== expected.isClosed
+    ) {
+      throw new Error(`BusinessHour divergente: dayOfWeek=${expected.dayOfWeek}`);
+    }
+  }
+  if (!settings || settings.bufferBetweenAppointmentsMinutes !== 0) {
+    throw new Error("BusinessSettings divergente: bufferBetweenAppointmentsMinutes");
+  }
 }
 
 async function main() {
@@ -388,12 +547,14 @@ async function main() {
     afterPlan.errors.length ||
     afterProductPlan.errors.length ||
     afterPlan.servicesToCreate.length ||
+    afterPlan.servicesToUpdate.length ||
     afterProductPlan.productsToCreate.length ||
     afterProductPlan.productsToUpdate.length ||
     afterPlan.serviceCombinationRulesToCreate.length
   ) {
     throw new Error("Validacao pos-apply falhou");
   }
+  await assertOperationalContract();
 
   console.log("apply_result=ok");
 }

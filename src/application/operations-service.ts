@@ -62,6 +62,10 @@ import {
   buildStockMovementsFromProductRefund,
   calculateServiceCommission,
   hasAppointmentConflict,
+  assertAppointmentCanBeRescheduled,
+  assertAppointmentTransitionAllowed,
+  assertAppointmentCanBeUpdated,
+  assertNoShowToleranceElapsed,
   validateAppointmentSchedulingWindow,
 } from "../domain/rules";
 import {
@@ -286,7 +290,8 @@ export class OperationsService {
       services: (unitId
         ? this.store.services.filter((service) => this.isServiceFromUnit(service, unitId))
         : this.store.services
-      ).map((service) => ({
+      ).filter((service) => service.active)
+        .map((service) => ({
         ...service,
         enabledProfessionalIds: this.getServiceProfessionalIds(service.id),
       })),
@@ -446,7 +451,7 @@ export class OperationsService {
       segment: "barbearia",
       defaultAppointmentDuration: 45,
       minimumAdvanceMinutes: 30,
-      bufferBetweenAppointmentsMinutes: 10,
+      bufferBetweenAppointmentsMinutes: 0,
       reminderLeadMinutes: 60,
       sendAppointmentReminders: true,
       inactiveCustomerDays: 60,
@@ -470,11 +475,11 @@ export class OperationsService {
     const now = new Date();
     const defaults: BusinessHour[] = [
       { id: crypto.randomUUID(), unitId, dayOfWeek: 0, isClosed: true, createdAt: now, updatedAt: now },
-      { id: crypto.randomUUID(), unitId, dayOfWeek: 1, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false, createdAt: now, updatedAt: now },
-      { id: crypto.randomUUID(), unitId, dayOfWeek: 2, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false, createdAt: now, updatedAt: now },
-      { id: crypto.randomUUID(), unitId, dayOfWeek: 3, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false, createdAt: now, updatedAt: now },
-      { id: crypto.randomUUID(), unitId, dayOfWeek: 4, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false, createdAt: now, updatedAt: now },
-      { id: crypto.randomUUID(), unitId, dayOfWeek: 5, opensAt: "08:00", closesAt: "18:00", breakStart: "12:00", breakEnd: "13:00", isClosed: false, createdAt: now, updatedAt: now },
+      { id: crypto.randomUUID(), unitId, dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", isClosed: false, createdAt: now, updatedAt: now },
+      { id: crypto.randomUUID(), unitId, dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", isClosed: false, createdAt: now, updatedAt: now },
+      { id: crypto.randomUUID(), unitId, dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", isClosed: false, createdAt: now, updatedAt: now },
+      { id: crypto.randomUUID(), unitId, dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", isClosed: false, createdAt: now, updatedAt: now },
+      { id: crypto.randomUUID(), unitId, dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", isClosed: false, createdAt: now, updatedAt: now },
       { id: crypto.randomUUID(), unitId, dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", isClosed: false, createdAt: now, updatedAt: now },
     ];
     this.store.businessHours.push(...defaults);
@@ -2023,9 +2028,8 @@ export class OperationsService {
     });
     const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
     const primaryServiceItem = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
-    const expectedEnd = new Date(
-      input.startsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000,
-    );
+    const expectedEnd = new Date(input.startsAt.getTime() + duration.effectiveDurationMin * 60_000);
+    const busyEnd = new Date(expectedEnd.getTime() + bufferAfterMin * 60_000);
     validateAppointmentSchedulingWindow({
       unitId: input.unitId,
       startsAt: input.startsAt,
@@ -2046,9 +2050,10 @@ export class OperationsService {
         (item) =>
           item.unitId === input.unitId &&
           (item.professionalId === professional.id || item.clientId === client.id) &&
-          item.startsAt < expectedEnd &&
-          item.endsAt > input.startsAt,
+          item.startsAt < busyEnd &&
+          item.endsAt > new Date(input.startsAt.getTime() - bufferAfterMin * 60_000),
       ),
+      bufferAfterMin,
     });
     if (conflict && !settings.allowOverbooking) {
       throw new Error("Conflito de horario detectado para o profissional");
@@ -2127,6 +2132,9 @@ export class OperationsService {
     unitId?: string;
     startsAt: Date;
     changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: unknown;
   }) {
     const appointment = this.store.appointments.find(
       (item) => item.id === input.appointmentId,
@@ -2135,6 +2143,17 @@ export class OperationsService {
     if (input.unitId && appointment.unitId !== input.unitId) {
       throw new Error("Unidade nao autorizada");
     }
+    assertAppointmentCanBeRescheduled(appointment.status);
+
+    const scope = this.idempotencyScope({
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_RESCHEDULE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<Appointment>(scope);
+    if (replay) return replay;
 
     const service = this.store.services.find((item) => item.id === appointment.serviceId);
     if (!service) throw new Error("Servico do agendamento nao encontrado");
@@ -2144,31 +2163,39 @@ export class OperationsService {
     const businessHours = this.ensureBusinessHours(appointment.unitId);
     const timezone = this.store.units.find((item) => item.id === appointment.unitId)?.timezone;
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
-    const newEnd = new Date(input.startsAt.getTime() + (effectiveDurationMin + bufferAfterMin) * 60_000);
+    const newEnd = new Date(input.startsAt.getTime() + effectiveDurationMin * 60_000);
+    const newBusyEnd = new Date(newEnd.getTime() + bufferAfterMin * 60_000);
 
-    const updated = this.engine.rescheduleAppointment(
-      appointment,
-      input.startsAt,
-      effectiveDurationMin,
-      this.store.appointments.filter(
-        (item) =>
-          item.unitId === appointment.unitId &&
-          (item.professionalId === appointment.professionalId || item.clientId === appointment.clientId) &&
-          item.id !== appointment.id &&
-          item.startsAt < newEnd &&
-          item.endsAt > input.startsAt,
-      ),
-      input.changedBy,
-      {
-        bufferAfterMin,
-        schedulingSettings: settings,
-        businessHours,
-        timezone,
-      },
-    );
+    this.startMemoryIdempotency(scope);
+    try {
+      const updated = this.engine.rescheduleAppointment(
+        appointment,
+        input.startsAt,
+        effectiveDurationMin,
+        this.store.appointments.filter(
+          (item) =>
+            item.unitId === appointment.unitId &&
+            (item.professionalId === appointment.professionalId || item.clientId === appointment.clientId) &&
+            item.id !== appointment.id &&
+            item.startsAt < newBusyEnd &&
+            item.endsAt > new Date(input.startsAt.getTime() - bufferAfterMin * 60_000),
+        ),
+        input.changedBy,
+        {
+          bufferAfterMin,
+          schedulingSettings: settings,
+          businessHours,
+          timezone,
+        },
+      );
 
-    this.replaceAppointment(updated);
-    return updated;
+      this.replaceAppointment(updated);
+      this.finishMemoryIdempotency(scope, updated);
+      return updated;
+    } catch (error) {
+      this.clearMemoryIdempotency(scope);
+      throw error;
+    }
   }
 
   updateStatus(input: {
@@ -2177,6 +2204,9 @@ export class OperationsService {
     status: AppointmentStatus;
     changedBy: string;
     reason?: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: unknown;
   }) {
     const appointment = this.store.appointments.find(
       (item) => item.id === input.appointmentId,
@@ -2188,16 +2218,91 @@ export class OperationsService {
     if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
       throw new Error("Use checkout para finalizar atendimento com financeiro");
     }
+    if (input.status === "NO_SHOW") {
+      assertNoShowToleranceElapsed(appointment.startsAt);
+    }
 
-    const updated = this.engine.changeAppointmentStatus(
-      appointment,
-      input.status,
-      input.changedBy,
-      input.reason,
-    );
+    const scope = this.idempotencyScope({
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_STATUS_TRANSITION",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<Appointment>(scope);
+    if (replay) return replay;
 
-    this.replaceAppointment(updated);
-    return updated;
+    this.startMemoryIdempotency(scope);
+    try {
+      const updated = this.engine.changeAppointmentStatus(
+        appointment,
+        input.status,
+        input.changedBy,
+        input.reason,
+      );
+
+      this.replaceAppointment(updated);
+      this.finishMemoryIdempotency(scope, updated);
+      return updated;
+    } catch (error) {
+      this.clearMemoryIdempotency(scope);
+      throw error;
+    }
+  }
+
+  recordAppointmentDelay(input: {
+    appointmentId: string;
+    unitId?: string;
+    minutesLate: number;
+    changedBy: string;
+    reason?: string;
+    recordedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: unknown;
+  }) {
+    const appointment = this.store.appointments.find((item) => item.id === input.appointmentId);
+    if (!appointment) throw new Error("Agendamento nao encontrado");
+    if (input.unitId && appointment.unitId !== input.unitId) {
+      throw new Error("Unidade nao autorizada");
+    }
+    const minutesLate = Math.max(0, Math.trunc(input.minutesLate));
+    if (minutesLate <= 0) throw new Error("Minutos de atraso devem ser maiores que zero");
+    const delayReason = input.reason?.trim()
+      ? `${minutesLate} minutos de atraso - ${input.reason.trim()}`
+      : `${minutesLate} minutos de atraso`;
+
+    const scope = this.idempotencyScope({
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_DELAY_RECORDED",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<Appointment>(scope);
+    if (replay) return replay;
+
+    this.startMemoryIdempotency(scope);
+    try {
+      const updated: Appointment = {
+        ...appointment,
+        history: [
+          ...appointment.history,
+          {
+            changedAt: input.recordedAt ?? new Date(),
+            changedBy: input.changedBy,
+            action: "DELAY_RECORDED",
+            reason: delayReason,
+          },
+        ],
+      };
+      this.replaceAppointment(updated);
+      this.finishMemoryIdempotency(scope, updated);
+      return updated;
+    } catch (error) {
+      this.clearMemoryIdempotency(scope);
+      throw error;
+    }
   }
 
   complete(input: {
@@ -6845,6 +6950,8 @@ export class OperationsService {
     notes?: string;
     isFitting?: boolean;
     confirmation?: boolean;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
     changedBy: string;
   }) {
     const appointment = this.store.appointments.find((item) => item.id === input.appointmentId);
@@ -6852,6 +6959,25 @@ export class OperationsService {
     if (input.unitId && appointment.unitId !== input.unitId) {
       throw new Error("Unidade nao autorizada");
     }
+    const confirmationScope =
+      input.confirmation === true
+        ? this.idempotencyScope({
+            unitId: appointment.unitId,
+            action: "APPOINTMENT_STATUS_TRANSITION",
+            idempotencyKey: input.idempotencyKey,
+            payloadHash: input.idempotencyPayloadHash,
+            payload: input,
+          })
+        : null;
+    const confirmationReplay = this.replayMemoryIdempotency<Appointment>(confirmationScope);
+    if (confirmationReplay) return confirmationReplay;
+    if (input.confirmation === true) {
+      assertAppointmentTransitionAllowed(appointment.status, "CONFIRMED");
+    }
+    assertAppointmentCanBeUpdated(appointment.status, {
+      hasTimeChange: input.startsAt !== undefined,
+      hasServiceChange: input.serviceIds !== undefined || input.serviceId !== undefined,
+    });
 
     const nextClientId = input.clientId ?? appointment.clientId;
     const nextProfessionalId = input.professionalId ?? appointment.professionalId;
@@ -6898,7 +7024,7 @@ export class OperationsService {
     const totalPriceSnapshot = calculateAppointmentServicesTotal(nextServiceItems);
     const legacyPrimaryServiceId = resolveLegacyPrimaryServiceId(nextServiceItems);
     const primaryServiceItem = nextServiceItems.find((item) => item.serviceId === legacyPrimaryServiceId)!;
-    const nextEndsAt = new Date(nextStartsAt.getTime() + (duration.effectiveDurationMin + bufferAfterMin) * 60_000);
+    const nextEndsAt = new Date(nextStartsAt.getTime() + duration.effectiveDurationMin * 60_000);
     validateAppointmentSchedulingWindow({
       unitId: appointment.unitId,
       startsAt: nextStartsAt,
@@ -6915,6 +7041,7 @@ export class OperationsService {
       professionalId: nextProfessional.id,
       startsAt: nextStartsAt,
       endsAt: nextEndsAt,
+      bufferAfterMin,
       ignoreAppointmentId: appointment.id,
       existingAppointments: this.store.appointments,
     });
@@ -6922,6 +7049,7 @@ export class OperationsService {
       throw new Error("Conflito de horario detectado para o profissional");
     }
 
+    if (confirmationScope) this.startMemoryIdempotency(confirmationScope);
     let updated: Appointment = {
       ...appointment,
       clientId: nextClient.id,
@@ -6984,7 +7112,9 @@ export class OperationsService {
       (item) => item.appointmentId !== updated.id,
     );
     this.store.appointmentServiceItems.push(...(updated.serviceItems ?? []));
-    return this.buildAppointmentView(updated);
+    const result = this.buildAppointmentView(updated);
+    if (confirmationScope) this.finishMemoryIdempotency(confirmationScope, result);
+    return result;
   }
 
   async suggestAppointmentAlternatives(input: {
@@ -7021,7 +7151,8 @@ export class OperationsService {
     });
     const windowStart = new Date(input.startsAt.getTime() - 2 * 60 * 60 * 1000);
     const windowEnd = new Date(input.startsAt.getTime() + windowHours * 60 * 60 * 1000);
-    const durationMs = (duration.effectiveDurationMin + bufferAfterMin) * 60_000;
+    const durationMs = duration.effectiveDurationMin * 60_000;
+    const busyDurationMs = durationMs + bufferAfterMin * 60_000;
     const stepMs = 15 * 60_000;
 
     const existingAppointments = this.store.appointments.filter(
@@ -7029,8 +7160,8 @@ export class OperationsService {
         item.unitId === input.unitId &&
         item.professionalId === professional.id &&
         ACTIVE_APPOINTMENT_CONFLICT_STATUSES.includes(item.status) &&
-        item.startsAt < new Date(windowEnd.getTime() + durationMs) &&
-        item.endsAt > windowStart,
+        item.startsAt < new Date(windowEnd.getTime() + busyDurationMs) &&
+        item.endsAt > new Date(windowStart.getTime() - bufferAfterMin * 60_000),
     );
 
     const suggestions: Array<{ startsAt: string; endsAt: string; reason: string }> = [];
@@ -7057,6 +7188,7 @@ export class OperationsService {
         professionalId: professional.id,
         startsAt,
         endsAt,
+        bufferAfterMin,
         existingAppointments,
       });
       if (conflict) continue;

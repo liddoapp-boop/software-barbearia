@@ -336,6 +336,7 @@ async function createAppointment(app: FastifyInstance, scenario: DbScenario, sta
   const confirmed = await app.inject({
     method: "PATCH",
     url: `/appointments/${appointmentId}/status`,
+    headers: { "idempotency-key": "status-db-001" },
     payload: { status: "CONFIRMED", changedBy: "db-test" },
   });
   expect(confirmed.statusCode).toBe(200);
@@ -343,6 +344,7 @@ async function createAppointment(app: FastifyInstance, scenario: DbScenario, sta
   const inService = await app.inject({
     method: "PATCH",
     url: `/appointments/${appointmentId}/status`,
+    headers: { "idempotency-key": "status-db-002" },
     payload: { status: "IN_SERVICE", changedBy: "db-test" },
   });
   expect(inService.statusCode).toBe(200);
@@ -732,6 +734,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     const rescheduled = await app.inject({
       method: "PATCH",
       url: `/appointments/${appointmentId}/reschedule`,
+      headers: { "idempotency-key": "reschedule-db-001" },
       payload: {
         startsAt: "2026-05-25T16:00:00.000Z",
         changedBy: "db-test",
@@ -780,6 +783,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       const response = await app.inject({
         method: "PATCH",
         url: `/appointments/${multiAppointmentId}/status`,
+        headers: { "idempotency-key": `${status.toLowerCase()}-status-db-003` },
         payload: { status, changedBy: "db-test" },
       });
       expect(response.statusCode).toBe(200);
@@ -874,6 +878,80 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         status: "SUCCEEDED",
       },
     })).toBe(1);
+  });
+
+  it("registra atraso com replay idempotente sem duplicar historico nem alterar horario/status", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: {
+        unitId: scenario.unitId,
+        clientId: scenario.clientId,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startsAt: "2026-05-10T13:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const before = created.json().appointment;
+    const idempotencyKey = uniqueId("delay-db-replay");
+    const payload = {
+      minutesLate: 17,
+      changedBy: "db-test",
+      reason: "Cliente avisou",
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/appointments/${before.id}/delay`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    const replay = await app.inject({
+      method: "POST",
+      url: `/appointments/${before.id}/delay`,
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(first.json().appointment.status).toBe(before.status);
+    expect(first.json().appointment.startsAt).toBe(before.startsAt);
+    expect(first.json().appointment.endsAt).toBe(before.endsAt);
+    const history = await prisma.appointmentHistory.findMany({
+      where: { appointmentId: before.id, action: "DELAY_RECORDED" },
+      orderBy: { changedAt: "asc" },
+    });
+    expect(history).toHaveLength(1);
+    expect(history[0].reason).toContain("17 minutos de atraso");
+    expect(history[0].changedBy).toBe("db-test");
+    expect(await prisma.auditLog.count({
+      where: { unitId: scenario.unitId, action: "APPOINTMENT_DELAY_RECORDED", entityId: before.id },
+    })).toBe(1);
+    expect(await prisma.idempotencyRecord.count({
+      where: { unitId: scenario.unitId, action: "APPOINTMENT_DELAY_RECORDED", idempotencyKey },
+    })).toBe(1);
+    const idempotencyRecord = await prisma.idempotencyRecord.findUnique({
+      where: {
+        unitId_action_idempotencyKey: {
+          unitId: scenario.unitId,
+          action: "APPOINTMENT_DELAY_RECORDED",
+          idempotencyKey,
+        },
+      },
+    });
+    expect(idempotencyRecord?.status).toBe("SUCCEEDED");
+    expect(idempotencyRecord?.resolution).toBe(before.id);
+    expect(idempotencyRecord?.responseJson).toMatchObject({
+      id: before.id,
+      status: before.status,
+      startsAt: before.startsAt,
+      endsAt: before.endsAt,
+    });
   });
 
   it("conclui checkout Prisma com produto vinculado sem duplicar receita ou estoque no replay", async () => {
@@ -996,6 +1074,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       const response = await app.inject({
         method: "PATCH",
         url: `/appointments/${appointmentId}/status`,
+        headers: { "idempotency-key": `${status.toLowerCase()}-status-db-004` },
         payload: { status, changedBy: "db-test" },
       });
       expect(response.statusCode).toBe(200);
@@ -1295,6 +1374,20 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(multiRow.effectiveDurationMinSnapshot).toBe(45);
     expect(multiRow.durationCalculationMode).toBe("COMBINATION_RULE");
     expect(multiRow.endsAt.toISOString()).toBe("2026-05-27T10:45:00.000Z");
+    const publicBufferConflictBefore = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
+    const publicBufferConflict = await app.inject({
+      method: "POST",
+      url: "/public/booking",
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Publico Buffer",
+        clientPhone: "11900000020",
+        serviceId: scenario.hidratacaoId,
+        startsAt: "2026-05-27T10:50:00.000Z",
+      },
+    });
+    expect(publicBufferConflict.statusCode).toBe(409);
+    expect(await prisma.appointment.count({ where: { unitId: scenario.unitId } })).toBe(publicBufferConflictBefore);
     const countAfterMulti = await prisma.appointment.count({ where: { unitId: scenario.unitId } });
     const replay = await app.inject({
       method: "POST",
@@ -1771,7 +1864,10 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       const response = await app.inject({
         method: "PATCH",
         url: `/appointments/${ownerAppointmentId}/status`,
-        headers: ownerHeaders,
+        headers: {
+          ...ownerHeaders,
+          "idempotency-key": uniqueId(`checkout-rbac-${status.toLowerCase()}`),
+        },
         payload: { status },
       });
       expect(response.statusCode).toBe(200);
@@ -1828,7 +1924,10 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     const confirmed = await app.inject({
       method: "PATCH",
       url: `/appointments/${appointmentId}/status`,
-      headers: ownerHeaders,
+      headers: {
+        ...ownerHeaders,
+        "idempotency-key": uniqueId("checkout-rbac-denied-confirm"),
+      },
       payload: { status: "CONFIRMED" },
     });
     expect(confirmed.statusCode).toBe(200);
@@ -1836,7 +1935,10 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     const inService = await app.inject({
       method: "PATCH",
       url: `/appointments/${appointmentId}/status`,
-      headers: ownerHeaders,
+      headers: {
+        ...ownerHeaders,
+        "idempotency-key": uniqueId("checkout-rbac-denied-start"),
+      },
       payload: { status: "IN_SERVICE" },
     });
     expect(inService.statusCode).toBe(200);
@@ -1844,7 +1946,10 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     const professionalCompleteByStatus = await app.inject({
       method: "PATCH",
       url: `/appointments/${appointmentId}/status`,
-      headers: professionalHeaders,
+      headers: {
+        ...professionalHeaders,
+        "idempotency-key": uniqueId("checkout-rbac-professional-complete"),
+      },
       payload: { status: "COMPLETED" },
     });
     expect(professionalCompleteByStatus.statusCode).toBe(400);
@@ -2556,11 +2661,13 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       app.inject({
         method: "PATCH",
         url: `/appointments/${first.json().appointment.id}/reschedule`,
+        headers: { "idempotency-key": "reschedule-db-002" },
         payload: { startsAt, changedBy: "db-reschedule-concurrency-test" },
       }),
       app.inject({
         method: "PATCH",
         url: `/appointments/${second.json().appointment.id}/reschedule`,
+        headers: { "idempotency-key": "reschedule-db-003" },
         payload: { startsAt, changedBy: "db-reschedule-concurrency-test" },
       }),
     ]);

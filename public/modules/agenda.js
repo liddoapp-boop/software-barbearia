@@ -49,6 +49,30 @@ function normalizeDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function normalizeAgendaStatus(value) {
+  const normalized = safeText(value, "SCHEDULED").toUpperCase();
+  return normalized || "SCHEDULED";
+}
+
+function getAppointmentDelayInfo(item = {}) {
+  const entries = Array.isArray(item.history) ? item.history : [];
+  const delayEntries = entries
+    .filter((entry) => {
+      const action = safeText(entry.action || entry.label || entry.status || entry.type, "").toUpperCase();
+      const reason = safeText(entry.reason, "");
+      return action === "DELAY_RECORDED" || /minutos? de atraso/i.test(reason);
+    })
+    .map((entry) => {
+      const reason = safeText(entry.reason, "");
+      const minutesMatch = reason.match(/(\d+)\s*min/i);
+      return {
+        minutes: minutesMatch ? Number(minutesMatch[1]) : null,
+        reason,
+      };
+    });
+  return delayEntries.at(-1) || null;
+}
+
 const statusLabel = {
   SCHEDULED: "Agendado",
   CONFIRMED: "Confirmado",
@@ -69,6 +93,7 @@ const actionLabel = {
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
+  DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
   REFUND: "Estornar atendimento",
@@ -93,6 +118,9 @@ function actionButtonClass(action) {
   if (action === "NO_SHOW") {
     return "ux-btn ux-btn-danger";
   }
+  if (action === "DELAY") {
+    return "ux-btn ux-btn-muted";
+  }
   if (action === "SELL") {
     return "ux-btn ux-btn-muted";
   }
@@ -108,15 +136,15 @@ function actionButtonClass(action) {
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", "CANCELLED"].filter(Boolean);
+    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "NO_SHOW", "CANCELLED"].filter(Boolean);
+    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
-    return canCheckout ? ["COMPLETE", "DETAIL", "CANCELLED"] : ["DETAIL", "CANCELLED"];
+    return canCheckout ? ["COMPLETE", "DETAIL", "DELAY"] : ["DETAIL", "DELAY"];
   }
-  if (status === "COMPLETED") return ["DETAIL", "REFUND"];
+  if (status === "COMPLETED") return ["DETAIL"];
   return ["DETAIL"];
 }
 
@@ -149,7 +177,7 @@ export function normalizeAgendaItems(payload) {
         service,
         startsAt,
         endsAt,
-        status: safeText(item.status, "SCHEDULED"),
+        status: normalizeAgendaStatus(item.status),
         isFitting: Boolean(item.isFitting),
         servicePrice: asNumber(
           item.totalPriceSnapshot ?? item.totalPrice ?? item.servicePrice,
@@ -157,6 +185,7 @@ export function normalizeAgendaItems(payload) {
         ),
         serviceDurationMin: effectiveDuration,
         durationRuleLabel: safeText(item.durationRuleLabelSnapshot || item.ruleLabel),
+        history: Array.isArray(item.history) ? item.history : [],
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
         hasProductSale: Boolean(item.hasProductSale),
         productSalesCount: asNumber(item.productSalesCount),
@@ -168,9 +197,10 @@ export function normalizeAgendaItems(payload) {
 
 export function filterAgendaItems(items, filterState) {
   const search = safeText(filterState.search).toLowerCase();
+  const statusFilter = safeText(filterState.status).toUpperCase();
   return items.filter((item) => {
     if (filterState.professionalId && item.professionalId !== filterState.professionalId) return false;
-    if (filterState.status && item.status !== filterState.status) return false;
+    if (statusFilter && normalizeAgendaStatus(item.status) !== statusFilter) return false;
     if (
       filterState.serviceId &&
       item.serviceId !== filterState.serviceId &&
@@ -279,6 +309,7 @@ function renderQueue(elements, items) {
 }
 
 function renderAgendaList(elements, list, handlers) {
+  const now = new Date();
   if (!list.length) {
     elements.list.innerHTML = renderEmptyState({
       title: "Nenhum agendamento no filtro atual.",
@@ -296,8 +327,10 @@ function renderAgendaList(elements, list, handlers) {
       const actions = actionsForStatus(item.status, {
         canCheckout: handlers?.canCheckout !== false,
         canEdit: handlers?.canEdit,
+        canNoShow: now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000,
       });
       const clientTag = item.clientTags[0] || "NEW";
+      const delayInfo = getAppointmentDelayInfo(item);
       const clientTagLabel =
         clientTag === "VIP"
           ? "VIP"
@@ -315,6 +348,7 @@ function renderAgendaList(elements, list, handlers) {
             ${renderStatusChip(item.status)}
           </div>
           <div class="ux-hint">${item.service} - ${item.professional}</div>
+          ${delayInfo?.minutes ? `<div class="ux-badge ux-badge-warning">Atraso: ${delayInfo.minutes} min</div>` : ""}
           <div class="agenda-card-facts">
             <div><span>Valor</span> <strong>R$ ${item.servicePrice.toFixed(2)}</strong></div>
             <div><span>Sinal</span> <strong class="${late ? "ds-kpi-tone-warning" : ""}">${late ? "Atrasado" : item.isFitting ? "Encaixe" : "No prazo"}</strong></div>

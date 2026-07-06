@@ -117,7 +117,7 @@ export class InMemoryStore {
       themeMode: "system",
       defaultAppointmentDuration: 45,
       minimumAdvanceMinutes: 30,
-      bufferBetweenAppointmentsMinutes: 10,
+      bufferBetweenAppointmentsMinutes: 0,
       reminderLeadMinutes: 60,
       sendAppointmentReminders: true,
       inactiveCustomerDays: 60,
