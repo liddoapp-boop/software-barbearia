@@ -35,6 +35,9 @@ function loadAppAgendaHarness() {
     "getWorkingHoursForDay",
     "getWeekCalendarBounds",
     "isSlotBlockingStatus",
+    "isAgendaBlockItem",
+    "agendaBlockTitle",
+    "agendaEventTimeRange",
     "isSameLocalDay",
     "isItemInsideWeek",
     "syncWeekCalendarItemsFromAgenda",
@@ -114,6 +117,8 @@ function loadAppAgendaHarness() {
     let alFocusedAppointmentId = "";
     function renderAgendaView() {}
     async function openAgendaAppointmentDetail() {}
+    function openAgendaOperationalDetail() {}
+    function findAgendaEventById() { return null; }
     function animateWeekCalendarTransition() {}
     ${names.map((name) => extractFunction(source, name)).join("\n")}
     module.exports = {
@@ -297,7 +302,7 @@ describe("agenda semanal e carregamento inicial", () => {
     expect(source).toContain("top:${minuteToY(hour * 60)}px");
     expect(source).toContain("top:${minuteToY((HOUR_START + i) * 60 + 30)}px");
     expect(source).toContain("nowLine = `<div class=\"wc-now-line\" style=\"top:${minuteToY(mins)}px\"></div>`");
-    expect(source).toContain("const top = minuteToY(startMins)");
+    expect(source).toContain("minuteToY(startMins)");
     expect(source).toContain("style=\"top:${top}px;height:${ht}px");
     expect(source).toContain("height:${TOTAL_H}px");
   });
@@ -391,6 +396,61 @@ describe("agenda semanal e carregamento inicial", () => {
     expect(html).toMatch(/wc-time-slot" style="position:absolute;top:\d+px;height:20px;transform:translateY\(-50%\);">20h/);
     expect(html).toMatch(/wc-hline" style="top:\d+px/);
     expect(html).toMatch(/data-wc-appt-id="appt-1730"[\s\S]*style="top:\d+px;height:\d+px/);
+  });
+
+  it("bloqueio de 16h as 17h aparece na terca-feira usando a mesma escala dos appointments", () => {
+    const app = loadAppAgendaHarness();
+    app.setViewportMetrics({ innerHeight: 900, containerTop: 250, bodyTop: 290 });
+    app.updateWorkingHoursFromPayload({
+      timezone: "America/Sao_Paulo",
+      weekly: Array.from({ length: 7 }, (_item, day) => ({ day, start: "08:00", end: "20:00", isClosed: false })),
+    });
+    app.setWcItems([
+      {
+        id: "block-1600",
+        blockId: "block-1600",
+        agendaKind: "block-time",
+        status: "BLOCKED",
+        startsAt: new Date("2026-07-07T16:00:00"),
+        endsAt: new Date("2026-07-07T17:00:00"),
+        serviceDurationMin: 60,
+        reason: "teste",
+      },
+    ]);
+    app.renderWeekCalendar();
+    const block = extractAppointmentBox(app.container.innerHTML, "block-1600");
+    const bodyHeight = extractNumericStyle(app.container.innerHTML, "wc-body-inner", "height");
+    const hourHeight = (bodyHeight - 20) / 12;
+
+    expect(app.container.innerHTML).toContain("wc-appt-operational");
+    expect(app.container.innerHTML).toContain("16:00-17:00 - Horario bloqueado");
+    expect(block.top).toBe(10 + 8 * hourHeight);
+    expect(block.height).toBe(hourHeight);
+  });
+
+  it("bloqueio de dia inteiro aparece no topo da coluna sem cartao de cliente falso", () => {
+    const app = loadAppAgendaHarness();
+    app.updateWorkingHoursFromPayload({
+      timezone: "America/Sao_Paulo",
+      weekly: Array.from({ length: 7 }, (_item, day) => ({ day, start: "08:00", end: "20:00", isClosed: false })),
+    });
+    app.setWcItems([
+      {
+        id: "block-day",
+        blockId: "block-day",
+        agendaKind: "block-day",
+        status: "BLOCKED",
+        isFullDay: true,
+        startsAt: new Date("2026-07-07T00:00:00"),
+        endsAt: new Date("2026-07-08T00:00:00"),
+        reason: "folga",
+      },
+    ]);
+    app.renderWeekCalendar();
+
+    expect(app.container.innerHTML).toContain("wc-appt-full-day");
+    expect(app.container.innerHTML).toContain("Dia bloqueado");
+    expect(app.container.innerHTML).not.toContain("Cliente</span>");
   });
 
   it("cartao de 30 minutos nao recebe altura minima maior que o slot", () => {
@@ -554,6 +614,16 @@ describe("agenda semanal e carregamento inicial", () => {
     expect(app.getAgendaListFilteredItems().map((item: any) => item.id)).toEqual(["fresh"]);
   });
 
+  it("Lista operacional mantem bloqueios ativos e nao filtra bloqueio global por profissional", () => {
+    const app = loadAppAgendaHarness();
+    app.setAgenda([
+      { id: "block-global", blockId: "block-global", agendaKind: "block-day", status: "BLOCKED", startsAt: new Date("2026-07-07T00:00:00"), endsAt: new Date("2026-07-08T00:00:00"), professionalId: "", reason: "feriado" },
+      { id: "cancelled", status: "CANCELLED", startsAt: "2026-07-07T12:00:00.000Z", endsAt: "2026-07-07T12:30:00.000Z", professionalId: "pro" },
+    ]);
+    app.setListFilters({ status: "__OPERATIONAL__", professionalId: "pro-01" });
+    expect(app.getAgendaListFilteredItems().map((item: any) => item.id)).toEqual(["block-global"]);
+  });
+
   it("contador e lista usam a mesma colecao filtrada no modo Lista", () => {
     const source = readFileSync("public/app.js", "utf8");
     expect(source).toContain("const visibleItems = getAgendaListFilteredItems();");
@@ -590,6 +660,6 @@ describe("agenda semanal e carregamento inicial", () => {
     );
     expect(weekClickFlow).not.toContain('currentView = "list"');
     expect(weekClickFlow).not.toContain("persistAgendaViewPreference(\"list\")");
-    expect(weekClickFlow).toContain("await openAgendaAppointmentDetail(appointmentId)");
+    expect(weekClickFlow).toContain("await openAgendaAppointmentDetail(eventId)");
   });
 });

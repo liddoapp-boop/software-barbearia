@@ -1119,6 +1119,27 @@ describe("API MVP", () => {
       }),
     ).toThrow("Use checkout para finalizar atendimento com financeiro");
 
+    vi.setSystemTime(new Date("2026-07-11T14:00:00.000Z"));
+    const walkIn = operations.createWalkInAppointment({
+      unitId: "unit-01",
+      clientName: "Cliente Barba Hidratacao",
+      clientPhone: "11977776666",
+      professionalId: "pro-01",
+      serviceIds: [
+        CANONICAL_SERVICE_FIXTURE_IDS.barba,
+        CANONICAL_SERVICE_FIXTURE_IDS.hidratacao,
+      ],
+      startedAt: new Date("2026-07-12T14:00:00.000Z"),
+      changedBy: "owner",
+    });
+    expect(walkIn).toMatchObject({
+      startsAt: new Date("2026-07-11T14:00:00.000Z"),
+      endsAt: new Date("2026-07-11T15:00:00.000Z"),
+      status: "IN_SERVICE",
+      totalPriceSnapshot: 40,
+      effectiveDurationMinSnapshot: 60,
+    });
+
     const inventory = operations.getInventory({ unitId: "unit-01", status: "ALL", limit: 20 });
     for (const product of CANONICAL_REAL_PRODUCT_FIXTURES) {
       const row = inventory.products.find((item) => item.id === product.id);
@@ -3559,11 +3580,14 @@ describe("API MVP", () => {
     const movementResponse = await app.inject({
       method: "POST",
       url: "/stock/movements/manual",
+      headers: { "idempotency-key": "stock-manual-legacy-api" },
       payload: {
         unitId: "unit-01",
         productId: "prd-pomada",
         movementType: "IN",
         quantity: 3,
+        reason: "Reposicao rapida",
+        responsible: "owner",
         changedBy: "owner",
       },
     });
@@ -3572,6 +3596,23 @@ describe("API MVP", () => {
     const body = movementResponse.json();
     expect(body.movement.movementType).toBe("IN");
     expect(body.product.stockQty).toBeGreaterThanOrEqual(18);
+
+    const replayResponse = await app.inject({
+      method: "POST",
+      url: "/stock/movements/manual",
+      headers: { "idempotency-key": "stock-manual-legacy-api" },
+      payload: {
+        unitId: "unit-01",
+        productId: "prd-pomada",
+        movementType: "IN",
+        quantity: 3,
+        reason: "Reposicao rapida",
+        responsible: "owner",
+        changedBy: "owner",
+      },
+    });
+    expect(replayResponse.statusCode).toBe(200);
+    expect(replayResponse.json().movement.id).toBe(body.movement.id);
   });
 
   it("lista, cria e atualiza produtos no modulo de inventory", async () => {
@@ -5138,6 +5179,28 @@ describe("API MVP", () => {
     expect(secondBooking.statusCode).toBe(201);
     expect(secondBooking.json().id).toBeTruthy();
     expect(secondBooking.json().id).not.toBe(booking.json().id);
+    process.env.AUTH_ENFORCED = "false";
+  });
+
+  it("mantem booking publico protegido contra horario no passado", async () => {
+    process.env.DATA_BACKEND = "memory";
+    process.env.AUTH_ENFORCED = "true";
+    const app = createApp();
+
+    const booking = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Publico Passado",
+        clientPhone: "(11) 96666-5555",
+        serviceId: "svc-corte",
+        startsAt: "2026-03-31T13:00:00.000Z",
+      },
+    });
+
+    expect(booking.statusCode).toBe(409);
+    expect(booking.json().error).toMatch(/passado|antecedencia/i);
     process.env.AUTH_ENFORCED = "false";
   });
 

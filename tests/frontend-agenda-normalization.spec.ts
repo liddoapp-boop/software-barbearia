@@ -172,4 +172,105 @@ describe("normalizacao frontend da agenda", () => {
     expect(html).not.toContain('data-action="COMPLETE"');
     expect(html).not.toContain("Finalizar atendimento");
   });
+
+  it("normaliza blockEvents ativos sem converter em appointment falso", () => {
+    const { normalizeAgendaItems, filterAgendaItems } = loadBrowserModuleFunctions("public/modules/agenda.js", [
+      "normalizeAgendaItems",
+      "filterAgendaItems",
+    ]);
+    const items = normalizeAgendaItems({
+      appointments: [],
+      blockEvents: [
+        {
+          id: "block-1600",
+          unitId: "unit-01",
+          professionalId: "pro-01",
+          startsAt: "2026-07-07T19:00:00.000Z",
+          endsAt: "2026-07-07T20:00:00.000Z",
+          status: "BLOCKED",
+          label: "Horario bloqueado",
+          reason: "teste",
+          isFullDay: false,
+        },
+      ],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "block:block-1600",
+      blockId: "block-1600",
+      agendaKind: "block-time",
+      clientId: "",
+      serviceId: "",
+      servicePrice: 0,
+      service: "Horario bloqueado",
+      reason: "teste",
+      status: "BLOCKED",
+    });
+    expect(filterAgendaItems(items, { serviceId: "svc-01", search: "teste" }).map((item: any) => item.id)).toEqual([
+      "block:block-1600",
+    ]);
+  });
+
+  it("ignora blocks cancelados e nao infla contadores de atendimentos", () => {
+    const { normalizeAgendaItems, renderAgendaData } = loadBrowserModuleFunctions("public/modules/agenda.js", [
+      "normalizeAgendaItems",
+      "renderAgendaData",
+    ]);
+    const items = normalizeAgendaItems({
+      appointments: [
+        {
+          id: "appt-01",
+          unitId: "unit-01",
+          client: { id: "cli-01", fullName: "Cliente Um" },
+          professional: { id: "pro-01", name: "Profissional" },
+          service: { id: "svc-01", name: "Corte", price: 30 },
+          startsAt: "2026-07-07T18:00:00.000Z",
+          endsAt: "2026-07-07T18:30:00.000Z",
+          status: "SCHEDULED",
+        },
+      ],
+      blocks: [
+        {
+          id: "active-block",
+          unitId: "unit-01",
+          startsAt: "2026-07-07T19:00:00.000Z",
+          endsAt: "2026-07-07T20:00:00.000Z",
+          status: "ACTIVE",
+          reason: "teste",
+        },
+        {
+          id: "cancelled-block",
+          unitId: "unit-01",
+          startsAt: "2026-07-07T20:00:00.000Z",
+          endsAt: "2026-07-07T21:00:00.000Z",
+          status: "CANCELLED",
+          reason: "cancelado",
+        },
+      ],
+    });
+    const fakeElement = () => ({
+      innerHTML: "",
+      querySelectorAll: () => [],
+      querySelector: () => null,
+    });
+    const elements = {
+      metricsGrid: fakeElement(),
+      queue: fakeElement(),
+      list: fakeElement(),
+    };
+
+    renderAgendaData(elements, items, items, "list", {
+      canCheckout: true,
+      onAction: () => {},
+    });
+
+    expect(items.map((item: any) => item.id)).toEqual(["appt-01", "block:active-block"]);
+    expect(elements.metricsGrid.innerHTML).toContain("<div class=\"ux-value-sm\">1</div>");
+    expect(elements.list.innerHTML).toContain("Horario bloqueado");
+    expect(elements.list.innerHTML).toContain("teste");
+    expect(elements.list.innerHTML).not.toContain("cancelado");
+    expect(elements.list.innerHTML).not.toContain("Iniciar atendimento");
+    expect(elements.list.innerHTML).not.toContain("Checkout");
+  });
 });

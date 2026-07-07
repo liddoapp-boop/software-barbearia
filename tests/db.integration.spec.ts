@@ -133,7 +133,7 @@ async function createScenario(): Promise<DbScenario> {
     data: {
       id: professionalId,
       businessId: unitId,
-      name: "Profissional DB",
+      name: `Profissional DB ${suffix.slice(0, 8)}`,
       commissionRules: {
         create: [
           {
@@ -459,6 +459,177 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       position: 0,
       serviceNameSnapshot: "Corte DB",
       serviceDurationMinSnapshot: 45,
+    });
+  });
+
+  it("cria walk-in Prisma com cliente novo dentro da mesma transacao", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const phone = `1197${crypto.randomInt(1000000, 9999999)}`;
+    const idempotencyKey = `walkin-db-${crypto.randomUUID()}`;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/appointments/walk-in",
+      headers: { "idempotency-key": idempotencyKey },
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Walkin DB",
+        clientPhone: phone,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startedAt: "2026-05-16T14:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const appointment = response.json().appointment;
+    expect(appointment).toMatchObject({
+      status: "IN_SERVICE",
+      serviceId: scenario.serviceId,
+      startsAt: "2026-05-01T00:00:00.000Z",
+      endsAt: "2026-05-01T00:45:00.000Z",
+      totalPriceSnapshot: 75,
+      effectiveDurationMinSnapshot: 45,
+    });
+
+    const persistedClient = await prisma.client.findUniqueOrThrow({
+      where: { id: appointment.clientId },
+    });
+    expect(persistedClient).toMatchObject({
+      businessId: scenario.unitId,
+      fullName: "Cliente Walkin DB",
+      phone,
+    });
+
+    const persistedAppointment = await prisma.appointment.findUniqueOrThrow({
+      where: { id: appointment.id },
+      include: { history: { orderBy: { changedAt: "asc" } }, serviceItems: true },
+    });
+    expect(persistedAppointment.status).toBe("IN_SERVICE");
+    expect(persistedAppointment.startsAt.toISOString()).toBe("2026-05-01T00:00:00.000Z");
+    expect(persistedAppointment.endsAt.toISOString()).toBe("2026-05-01T00:45:00.000Z");
+    expect(persistedAppointment.history.map((item) => item.action)).toEqual(["CREATED", "CHECKED_IN"]);
+    expect(persistedAppointment.history.map((item) => item.changedAt.toISOString())).toEqual([
+      "2026-05-01T00:00:00.000Z",
+      "2026-05-01T00:00:00.000Z",
+    ]);
+    expect(persistedAppointment.serviceItems).toHaveLength(1);
+    await expect(prisma.financialEntry.count({ where: { unitId: scenario.unitId, referenceId: appointment.id } })).resolves.toBe(0);
+    await expect(prisma.commissionEntry.count({ where: { unitId: scenario.unitId, appointmentId: appointment.id } })).resolves.toBe(0);
+
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        unitId: scenario.unitId,
+        action: "WALK_IN_APPOINTMENT_CREATED",
+        entity: "appointment",
+        entityId: appointment.id,
+      },
+    });
+    expect(audit.afterJson).toMatchObject({
+      origin: "Atendimento sem agendamento",
+      status: "IN_SERVICE",
+      startsAt: "2026-05-01T00:00:00.000Z",
+      endsAt: "2026-05-01T00:45:00.000Z",
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/appointments/walk-in",
+      headers: { "idempotency-key": idempotencyKey },
+      payload: {
+        unitId: scenario.unitId,
+        clientName: "Cliente Walkin DB",
+        clientPhone: phone,
+        professionalId: scenario.professionalId,
+        serviceId: scenario.serviceId,
+        startedAt: "2026-05-16T14:00:00.000Z",
+        changedBy: "db-test",
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().appointment.id).toBe(appointment.id);
+    expect(replay.json().appointment.startsAt).toBe("2026-05-01T00:00:00.000Z");
+    await expect(prisma.client.count({ where: { businessId: scenario.unitId, phone } })).resolves.toBe(1);
+    await expect(prisma.appointment.count({ where: { unitId: scenario.unitId, clientId: appointment.clientId } })).resolves.toBe(1);
+  });
+
+  it("confirma walk-in Prisma fora do expediente sem persistir a tentativa inicial", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.businessHour.updateMany({
+      where: { unitId: scenario.unitId },
+      data: { opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    });
+    const phone = `1198${crypto.randomInt(1000000, 9999999)}`;
+    const idempotencyKey = `walkin-db-out-hours-${crypto.randomUUID()}`;
+    const payload = {
+      unitId: scenario.unitId,
+      clientName: "Cliente Walkin DB Fora Expediente",
+      clientPhone: phone,
+      professionalId: scenario.professionalId,
+      serviceId: scenario.serviceId,
+      startedAt: "2026-05-16T14:00:00.000Z",
+      changedBy: "db-test",
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/appointments/walk-in",
+      headers: { "idempotency-key": idempotencyKey },
+      payload,
+    });
+    expect(first.statusCode).toBe(409);
+    expect(first.json()).toMatchObject({
+      code: "WALK_IN_OUTSIDE_BUSINESS_HOURS",
+      requiresConfirmation: true,
+      currentLocalTime: "21:00",
+      businessHours: { opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    });
+    await expect(prisma.client.count({ where: { businessId: scenario.unitId, phone } })).resolves.toBe(0);
+    await expect(prisma.appointment.count({ where: { unitId: scenario.unitId } })).resolves.toBe(0);
+
+    const confirmed = await app.inject({
+      method: "POST",
+      url: "/appointments/walk-in",
+      headers: { "idempotency-key": idempotencyKey },
+      payload: { ...payload, confirmOutOfHours: true },
+    });
+    expect(confirmed.statusCode).toBe(200);
+    const appointment = confirmed.json().appointment;
+    expect(appointment).toMatchObject({
+      status: "IN_SERVICE",
+      startsAt: "2026-05-01T00:00:00.000Z",
+      endsAt: "2026-05-01T00:45:00.000Z",
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/appointments/walk-in",
+      headers: { "idempotency-key": idempotencyKey },
+      payload: { ...payload, confirmOutOfHours: true },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().appointment.id).toBe(appointment.id);
+    await expect(prisma.client.count({ where: { businessId: scenario.unitId, phone } })).resolves.toBe(1);
+    await expect(prisma.appointment.count({ where: { unitId: scenario.unitId } })).resolves.toBe(1);
+    await expect(prisma.financialEntry.count({ where: { unitId: scenario.unitId, referenceId: appointment.id } })).resolves.toBe(0);
+    await expect(prisma.commissionEntry.count({ where: { unitId: scenario.unitId, appointmentId: appointment.id } })).resolves.toBe(0);
+
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        unitId: scenario.unitId,
+        action: "WALK_IN_APPOINTMENT_CREATED",
+        entity: "appointment",
+        entityId: appointment.id,
+      },
+    });
+    expect(audit.afterJson).toMatchObject({
+      outsideBusinessHours: true,
+      confirmOutOfHours: true,
+      currentLocalTime: "21:00",
+      businessHours: { opensAt: "08:00", closesAt: "20:00", isClosed: false },
     });
   });
 
@@ -1234,6 +1405,53 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(await prisma.productSale.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
     expect(await prisma.stockMovement.count({ where: { unitId: stockScenario.unitId } })).toBe(0);
     expect((await prisma.product.findUniqueOrThrow({ where: { id: stockScenario.productId } })).stockQty).toBe(1);
+  });
+
+  it("quita checkout Prisma aberto com pagamento complementar sem criar segundo checkout", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const appointmentId = await createAppointment(app, scenario, "2026-05-24T13:00:00.000Z");
+
+    const partial = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-partial-open") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-24T13:45:00.000Z",
+        paymentMethod: "PIX",
+        payments: [{ method: "PIX", amount: 20, responsible: "db-test" }],
+      },
+    });
+    expect(partial.statusCode).toBe(200);
+    expect(partial.json().appointment.status).toBe("IN_SERVICE");
+    expect(partial.json().checkout).toMatchObject({ status: "OPEN", paidAmount: 20 });
+    expect(partial.json().serviceRevenue).toBeUndefined();
+
+    const complement = await app.inject({
+      method: "POST",
+      url: `/appointments/${appointmentId}/checkout`,
+      headers: { "idempotency-key": uniqueId("checkout-partial-complement") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-24T13:50:00.000Z",
+        paymentMethod: "PIX",
+        payments: [{ method: "PIX", amount: 55, responsible: "db-test" }],
+      },
+    });
+    expect(complement.statusCode).toBe(200);
+    expect(complement.json().appointment.status).toBe("COMPLETED");
+    expect(complement.json().checkout.id).toBe(partial.json().checkout.id);
+    expect(complement.json().checkout).toMatchObject({ status: "PAID", paidAmount: 75 });
+    expect(complement.json().payments).toHaveLength(2);
+    expect(complement.json().serviceRevenue.amount).toBe(75);
+
+    await expect(prisma.appointmentCheckout.count({ where: { appointmentId } })).resolves.toBe(1);
+    await expect(
+      prisma.financialEntry.count({
+        where: { unitId: scenario.unitId, referenceType: "APPOINTMENT", referenceId: appointmentId },
+      }),
+    ).resolves.toBe(1);
   });
 
   it("estorna atendimento Prisma com produto devolvendo estoque e cancelando comissoes pendentes", async () => {

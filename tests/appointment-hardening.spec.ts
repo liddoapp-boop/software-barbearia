@@ -121,6 +121,33 @@ describe("blindagem de agendamentos", () => {
     expect(response.json().error).toMatch(/expediente|horario/i);
   });
 
+  it("mantem booking publico bloqueado fora do expediente mesmo com fluxo walk-in liberado por confirmacao", async () => {
+    const app = createApp();
+    await app.inject({
+      method: "PATCH",
+      url: "/settings/business-hours",
+      payload: {
+        unitId: "unit-01",
+        hours: [{ dayOfWeek: 5, opensAt: "08:00", closesAt: "17:00", isClosed: false }],
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/public/booking?unitId=unit-01",
+      payload: {
+        unitId: "unit-01",
+        clientName: "Cliente Publico Fora Expediente",
+        clientPhone: "(11) 94444-3333",
+        serviceId: "svc-corte",
+        startsAt: "2026-06-05T21:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatch(/fora do expediente|horario/i);
+  });
+
   it("bloqueia criacao em dia fechado", async () => {
     const app = createApp();
     await app.inject({
@@ -191,6 +218,30 @@ describe("blindagem de agendamentos", () => {
     });
     expect(tooSoon.statusCode).toBe(409);
     expect(tooSoon.json().error).toMatch(/antecedencia/i);
+  });
+
+  it("bloqueia remarcacao para o passado", async () => {
+    const app = createApp();
+    await setUnit01WideWednesdayHours(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: appointmentPayload({ startsAt: "2026-04-22T16:00:00.000Z" }),
+    });
+    expect(created.statusCode).toBe(200);
+
+    const rescheduled = await app.inject({
+      method: "PATCH",
+      url: `/appointments/${created.json().appointment.id}/reschedule`,
+      headers: { "idempotency-key": "reschedule-past-still-blocked" },
+      payload: {
+        startsAt: "2026-04-22T11:59:00.000Z",
+        changedBy: "appointment-hardening-test",
+      },
+    });
+    expect(rescheduled.statusCode).toBe(409);
+    expect(rescheduled.json().error).toMatch(/passado|antecedencia/i);
   });
 
   it("respeita buffer configurado na criacao e na remarcacao", async () => {
