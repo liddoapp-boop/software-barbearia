@@ -313,6 +313,6 @@ Confirmacoes de encerramento:
 
 ## 28. Decisao final
 
-Decisao esperada apos commit, push e verificacao final:
+Commit, push e verificacao final concluidos em `main` com `HEAD == origin/main` e worktree limpo.
 
 APROVADO E PUBLICADO - MACRO 233 ENCERRADA
