@@ -1,5 +1,7 @@
 import {
   Appointment,
+  AppointmentBlock,
+  AppointmentCheckout,
   AppointmentServiceItem,
   AuditEvent,
   BusinessCommissionRule,
@@ -14,6 +16,8 @@ import {
   ClientPackage,
   ClientSubscription,
   CommissionEntry,
+  CheckoutPayment,
+  DailyClosing,
   FinancialEntry,
   IntegrationWebhookLog,
   LoyaltyLedgerEntry,
@@ -32,6 +36,7 @@ import {
   ServiceProfessionalAssignment,
   ServiceStockConsumptionProfile,
   StockMovement,
+  StockInventoryCount,
   SubscriptionPlan,
   UUID,
 } from "../domain/types";
@@ -199,6 +204,9 @@ export class InMemoryStore {
     },
   ];
   appointments: Appointment[] = [];
+  appointmentBlocks: AppointmentBlock[] = [];
+  appointmentCheckouts: AppointmentCheckout[] = [];
+  checkoutPayments: CheckoutPayment[] = [];
   appointmentServiceItems: AppointmentServiceItem[] = [];
   serviceCombinationRules: ServiceCombinationRule[] = [
     {
@@ -233,6 +241,8 @@ export class InMemoryStore {
   productSales: ProductSale[] = [];
   refunds: Refund[] = [];
   stockMovements: StockMovement[] = [];
+  inventoryCounts: StockInventoryCount[] = [];
+  dailyClosings: DailyClosing[] = [];
   auditEvents: AuditEvent[] = [];
   serviceStockConsumptionProfiles: ServiceStockConsumptionProfile[] = [
     {

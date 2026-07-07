@@ -990,6 +990,9 @@ const agendaFiltersPanel = document.getElementById("agendaFiltersPanel");
 const mobileOperationActions = document.getElementById("mobileOperationActions");
 const mobileFocusSaleBtn = document.getElementById("mobileFocusSaleBtn");
 const agendaNewAppointmentBtn = document.getElementById("agendaNewAppointmentBtn");
+const agendaMoreOptionsWrap = document.getElementById("agendaMoreOptionsWrap");
+const agendaMoreOptionsBtn = document.getElementById("agendaMoreOptionsBtn");
+const agendaMoreOptionsMenu = document.getElementById("agendaMoreOptionsMenu");
 const agendaSchedulePanel = document.getElementById("agendaSchedulePanel");
 const appointmentsHeaderDate = document.getElementById("appointmentsHeaderDate");
 const appointmentsPeriodSummary = document.getElementById("appointmentsPeriodSummary");
@@ -1332,6 +1335,35 @@ let appointmentDelayState = {
   source: "appointments",
   idempotencyKey: "",
 };
+let ownerFlowState = {
+  type: "",
+  selectedServices: [],
+  serviceSummary: null,
+  serviceSummaryState: "idle",
+  serviceSummaryMessage: "",
+  submitting: false,
+  riskRequired: false,
+  riskMessage: "",
+  conflictItems: [],
+  outOfHoursRequired: false,
+  outOfHoursMessage: "",
+  openerElement: null,
+  scrollY: 0,
+  idempotencyKey: "",
+};
+let inServiceServicesState = {
+  appointment: null,
+  selectedServices: [],
+  serviceSummary: null,
+  serviceSummaryState: "idle",
+  serviceSummaryMessage: "",
+  submitting: false,
+  riskRequired: false,
+  riskMessage: "",
+  openerElement: null,
+  scrollY: 0,
+  idempotencyKey: "",
+};
 let checkoutPaymentMethods = [];
 let appointmentRefundState = {
   appointment: null,
@@ -1357,7 +1389,8 @@ const actionLabel = {
   EDIT: "Editar",
   CONFIRMED: "Confirmar",
   IN_SERVICE: "Iniciar atendimento",
-  COMPLETE: "Concluir",
+  COMPLETE: "Ir para checkout",
+  SERVICES: "Alterar servicos",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
@@ -1478,12 +1511,23 @@ function canEditAppointment() {
   return state.role === "owner" || state.role === "recepcao";
 }
 
+function canUseOwnerAgendaFlows() {
+  return state.role === "owner";
+}
+
+function syncAgendaOwnerActionsVisibility() {
+  if (!agendaMoreOptionsWrap) return;
+  const visible = canUseOwnerAgendaFlows();
+  agendaMoreOptionsWrap.classList.toggle("hidden", !visible);
+  if (!visible) closeAgendaMoreOptionsMenu();
+}
+
 function agendaListActionsForStatus(status) {
   status = normalizeAgendaStatus(status);
   if (status === "SCHEDULED") return [canEditAppointment() ? "EDIT" : "", "CONFIRMED", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
   if (status === "CONFIRMED") return [canEditAppointment() ? "EDIT" : "", "IN_SERVICE", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
   if (status === "IN_SERVICE") {
-    return canCheckoutAppointment() ? ["COMPLETE", "DELAY"] : ["DELAY"];
+    return canCheckoutAppointment() ? ["COMPLETE", "SERVICES", "DELAY"] : ["SERVICES", "DELAY"];
   }
   if (status === "COMPLETED") return ["DETAIL"];
   return [];
@@ -1817,6 +1861,7 @@ function renderShell() {
 
   bindShellEvents();
   syncAgendaFilterPanel();
+  syncAgendaOwnerActionsVisibility();
 }
 
 function setMobileSidebarOpen(open) {
@@ -2687,6 +2732,25 @@ function renderProductThumb(product = {}, className = "pdv-product-thumb") {
 
 function isSlotBlockingStatus(status) {
   return SLOT_BLOCKING_STATUSES.has(normalizeAgendaStatus(status));
+}
+
+function isAgendaBlockItem(item = {}) {
+  return item?.agendaKind === "block-time" || item?.agendaKind === "block-day";
+}
+
+function agendaBlockTitle(item = {}) {
+  if (item?.agendaKind === "block-day" || item?.isFullDay) return "Dia bloqueado";
+  return "Horario bloqueado";
+}
+
+function agendaEventTimeRange(item = {}) {
+  const startsAt = item.startsAt instanceof Date ? item.startsAt : new Date(item.startsAt);
+  const endsAt = item.endsAt instanceof Date ? item.endsAt : new Date(item.endsAt);
+  if (Number.isNaN(startsAt.getTime())) return "";
+  const startText = startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(endsAt.getTime())) return startText;
+  const endText = endsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${startText}-${endText}`;
 }
 
 function parseTimeToMinutes(value) {
@@ -3770,6 +3834,7 @@ async function callJson(url, method, body) {
   if (!response.ok) {
     const error = new Error(extractApiErrorMessage(response, data, "Erro de operacao"));
     error.status = response.status;
+    if (data && typeof data === "object") Object.assign(error, data);
     throw error;
   }
   return data || {};
@@ -3820,6 +3885,730 @@ function extractApiErrorMessage(response, payload, fallbackMessage) {
     return friendlyApiValidationMessage(fromPayload, fallbackMessage);
   }
   return fallbackMessage;
+}
+
+function closeAgendaMoreOptionsMenu() {
+  agendaMoreOptionsMenu?.classList.add("hidden");
+  if (agendaMoreOptionsBtn) agendaMoreOptionsBtn.setAttribute("aria-expanded", "false");
+}
+
+function openAgendaMoreOptionsMenu() {
+  if (!canUseOwnerAgendaFlows()) return;
+  agendaMoreOptionsMenu?.classList.remove("hidden");
+  if (agendaMoreOptionsBtn) agendaMoreOptionsBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeFloatingLayers(options = {}) {
+  closeAgendaMoreOptionsMenu();
+  closeScheduleDrawer();
+  if (options.keepAppointmentDetail !== true) closeAppointmentDetailPanel();
+  closeCheckoutModal({ returnFocus: false });
+  closeAppointmentDelayModal({ returnFocus: false });
+  document.getElementById("appointmentRefundModal")?.classList.add("hidden");
+  document.getElementById("appointmentRefundModal")?.classList.remove("flex");
+  document.getElementById("productRefundModal")?.classList.add("hidden");
+  document.getElementById("productRefundModal")?.classList.remove("flex");
+  if (options.keepOwnerFlow !== true) closeOwnerFlowModal({ returnFocus: false, restoreScroll: false });
+  if (options.keepServiceChange !== true) closeInServiceServicesModal({ returnFocus: false, restoreScroll: false });
+}
+
+function ownerFlowTitle(type) {
+  if (type === "walk-in") return "Atendimento sem agendamento";
+  if (type === "block-time") return "Bloquear horario";
+  if (type === "block-day") return "Bloquear dia";
+  if (type === "fitting") return "Criar encaixe";
+  return "Agenda";
+}
+
+function ownerFlowSubmitLabel(type, state = ownerFlowState) {
+  if (type === "walk-in" && state?.outOfHoursRequired) return "Registrar mesmo assim";
+  if (type === "walk-in") return "Confirmar atendimento";
+  if (type === "block-time") return "Bloquear horario";
+  if (type === "block-day") return "Bloquear dia";
+  if (type === "fitting") return "Criar encaixe";
+  return "Confirmar";
+}
+
+function selectedServicesTotal(selected = []) {
+  return selected.reduce((acc, service) => acc + Number(service?.price || 0), 0);
+}
+
+function selectedServicesDuration(selected = []) {
+  return selected.reduce((acc, service) => acc + serviceDuration(service), 0);
+}
+
+function flowServiceSummaryText(stateLike) {
+  const selected = stateLike.selectedServices || [];
+  if (!selected.length) return "Selecione ao menos um servico.";
+  if (stateLike.serviceSummaryState === "loading") return "Calculando preco e duracao...";
+  if (stateLike.serviceSummaryState === "error") {
+    return stateLike.serviceSummaryMessage || "Nao foi possivel calcular o resumo.";
+  }
+  const total = Number(stateLike.serviceSummary?.totalPrice ?? selectedServicesTotal(selected));
+  const duration = Number(stateLike.serviceSummary?.effectiveDurationMin || selectedServicesDuration(selected));
+  const rule = stateLike.serviceSummary?.ruleLabel ? ` | ${stateLike.serviceSummary.ruleLabel}` : "";
+  return `${selected.length} servico(s) | ${money(total)} | ${duration} min${rule}`;
+}
+
+function normalizeServiceSelectionFromIds(serviceIds = []) {
+  return normalizeSelectedServices(serviceIds, schedulingCatalog.servicesById || servicesById || {});
+}
+
+function findClientByPhone(phoneValue) {
+  const digits = normalizePhoneDigits(phoneValue);
+  if (!digits) return null;
+  return Object.values(clientsById || {}).find((client) => normalizePhoneDigits(client?.phone || "") === digits) || null;
+}
+
+function formatConflictRange(item = {}) {
+  const starts = item.startsAt ? new Date(item.startsAt) : null;
+  const ends = item.endsAt ? new Date(item.endsAt) : null;
+  if (!starts || Number.isNaN(starts.getTime())) return "horario em conflito";
+  const endLabel = ends && !Number.isNaN(ends.getTime())
+    ? ` ate ${ends.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+    : "";
+  return `${starts.toLocaleDateString("pt-BR")} ${starts.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}${endLabel}`;
+}
+
+function humanConflictMessage(errorOrPayload, fallback = "Existe conflito para este horario.") {
+  const conflicts = Array.isArray(errorOrPayload?.conflicts) ? errorOrPayload.conflicts : [];
+  if (conflicts.length) {
+    return `Conflito encontrado: ${conflicts.map(formatConflictRange).join("; ")}. Confirme o risco para continuar.`;
+  }
+  const raw = String(errorOrPayload?.message || errorOrPayload?.error || errorOrPayload || "").trim();
+  if (/conflit|ocupad|bloque/i.test(raw)) {
+    const isoRanges = Array.from(raw.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g)).map((match) => match[0]);
+    if (isoRanges.length >= 2) {
+      return `Conflito encontrado entre ${formatConflictRange({ startsAt: isoRanges[0], endsAt: isoRanges[1] })}.`;
+    }
+    return "Ja existe atendimento ou bloqueio nesse periodo. Ajuste o horario ou confirme o risco quando permitido.";
+  }
+  return raw || fallback;
+}
+
+function appointmentConflictsInRange({ startsAt, endsAt, professionalId }) {
+  const start = startsAt instanceof Date ? startsAt : new Date(startsAt);
+  const end = endsAt instanceof Date ? endsAt : new Date(endsAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  const activeStatuses = new Set(["SCHEDULED", "CONFIRMED", "IN_SERVICE"]);
+  return (currentAgenda || [])
+    .filter((item) => activeStatuses.has(normalizeAgendaStatus(item.status)))
+    .filter((item) => !professionalId || item.professionalId === professionalId)
+    .filter((item) => start < item.endsAt && end > item.startsAt);
+}
+
+function dayBoundsFromInput(dateValue) {
+  if (!dateValue) return null;
+  const start = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+async function refreshFlowServicesPreview(stateLike, renderFn) {
+  const serviceIds = getSelectedServiceIds(stateLike.selectedServices);
+  if (!serviceIds.length) {
+    stateLike.serviceSummary = null;
+    stateLike.serviceSummaryState = "idle";
+    stateLike.serviceSummaryMessage = "";
+    renderFn();
+    return null;
+  }
+  stateLike.serviceSummaryState = "loading";
+  stateLike.serviceSummaryMessage = "";
+  renderFn();
+  try {
+    const payload = await callJson(`${API}/appointments/services/preview`, "POST", {
+      unitId,
+      serviceIds,
+    });
+    stateLike.serviceSummary = interpretBackendSummary(payload, stateLike.selectedServices);
+    stateLike.serviceSummary.eligibleProfessionalIds = payload.summary?.eligibleProfessionalIds || [];
+    stateLike.serviceSummaryState = "ready";
+    renderFn();
+    return stateLike.serviceSummary;
+  } catch (error) {
+    stateLike.serviceSummary = null;
+    stateLike.serviceSummaryState = "error";
+    stateLike.serviceSummaryMessage = error?.message || "Nao foi possivel calcular preco e duracao.";
+    renderFn();
+    return null;
+  }
+}
+
+function servicePickerHtml(selected = [], prefix = "ownerFlow") {
+  const selectedIds = new Set(getSelectedServiceIds(selected));
+  const services = (Array.isArray(allServices) ? allServices : []).filter(serviceIsActive);
+  if (!services.length) {
+    return `<div class="owner-flow-summary">Nenhum servico ativo encontrado no catalogo.</div>`;
+  }
+  return `
+    <div class="owner-flow-service-list" data-service-picker="${prefix}">
+      ${services.map((service) => `
+        <label class="owner-flow-service-option">
+          <input type="checkbox" value="${escapeHtml(service.id)}" data-flow-service="${escapeHtml(service.id)}" ${selectedIds.has(service.id) ? "checked" : ""} />
+          <span>
+            <strong>${escapeHtml(service.name || "Servico")}</strong>
+            <small>${money(Number(service.price || 0))} - ${serviceDuration(service)} min</small>
+          </span>
+        </label>
+      `).join("")}
+    </div>
+  `;
+}
+
+function compatibleProfessionalsForFlow(selectedServices = [], flowState = ownerFlowState) {
+  const professionals = Array.isArray(schedulingCatalog.professionals) ? schedulingCatalog.professionals : [];
+  const eligibleFromSummary = Array.isArray(flowState?.serviceSummary?.eligibleProfessionalIds)
+    ? flowState.serviceSummary.eligibleProfessionalIds
+    : null;
+  return professionals
+    .filter((item) => item?.active !== false)
+    .filter((professional) => {
+      if (eligibleFromSummary) return eligibleFromSummary.includes(professional.id);
+      return selectedServices.every((service) => serviceAllowsProfessional(service, professional.id));
+    });
+}
+
+function professionalSelectHtml(selectedServices = [], selectedValue = "") {
+  const professionals = compatibleProfessionalsForFlow(selectedServices);
+  if (!professionals.length) {
+    return `<option value="">Nenhum profissional compativel</option>`;
+  }
+  return `<option value="">Selecione</option>${professionals
+    .map((professional) => `<option value="${escapeHtml(professional.id)}" ${professional.id === selectedValue ? "selected" : ""}>${escapeHtml(professional.name || "Profissional")}</option>`)
+    .join("")}`;
+}
+
+function professionalFieldHtmlForFlow(selectedServices = [], selectedValue = "", required = true) {
+  const professionals = compatibleProfessionalsForFlow(selectedServices);
+  if (!professionals.length) {
+    return `
+      <div class="ds-form-full professional-auto-card professional-auto-card-error">
+        <span>Profissional</span>
+        <strong>Indisponivel</strong>
+        <small>Nenhum profissional ativo atende todos os servicos selecionados.</small>
+      </div>
+    `;
+  }
+  if (professionals.length === 1) {
+    const professional = professionals[0];
+    return `
+      <input id="ownerFlowProfessional" type="hidden" value="${escapeHtml(professional.id)}" />
+      <div class="ds-form-full professional-auto-card">
+        <span>Profissional</span>
+        <strong>${escapeHtml(professional.name || "Profissional")}</strong>
+        <small>Compativel com os servicos selecionados.</small>
+      </div>
+    `;
+  }
+  return `
+    <label class="ds-form-label ds-form-full">Profissional${required ? " *" : ""}
+      <select id="ownerFlowProfessional" ${required ? "required" : ""} class="ds-input">${professionalSelectHtml(selectedServices, selectedValue)}</select>
+    </label>
+  `;
+}
+
+function ensureOwnerFlowModal() {
+  let modal = document.getElementById("ownerAgendaFlowModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "ownerAgendaFlowModal";
+  modal.className = "ds-modal-backdrop hidden";
+  modal.innerHTML = `
+    <div class="ds-modal-panel owner-flow-modal" style="max-width:720px" role="dialog" aria-modal="true" aria-labelledby="ownerAgendaFlowTitle" tabindex="-1">
+      <div class="ds-modal-head">
+        <div>
+          <p class="ux-label">Agenda</p>
+          <h3 id="ownerAgendaFlowTitle" class="ux-section-label">Agenda</h3>
+        </div>
+        <button type="button" class="ux-btn ux-btn-muted" data-owner-flow-close>Fechar</button>
+      </div>
+      <form id="ownerAgendaFlowForm" class="ds-form-grid" novalidate></form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelectorAll("[data-owner-flow-close]").forEach((button) => {
+    button.addEventListener("click", () => closeOwnerFlowModal({ returnFocus: true }));
+  });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeOwnerFlowModal({ returnFocus: true });
+  });
+  modal.querySelector("#ownerAgendaFlowForm")?.addEventListener("submit", submitOwnerFlowForm);
+  return modal;
+}
+
+function closeOwnerFlowModal(options = {}) {
+  const modal = document.getElementById("ownerAgendaFlowModal");
+  if (!modal || ownerFlowState.submitting) return false;
+  const openerElement = ownerFlowState.openerElement;
+  const scrollY = ownerFlowState.scrollY;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  ownerFlowState = {
+    type: "",
+    selectedServices: [],
+    serviceSummary: null,
+    serviceSummaryState: "idle",
+    serviceSummaryMessage: "",
+    submitting: false,
+    riskRequired: false,
+    riskMessage: "",
+    conflictItems: [],
+    outOfHoursRequired: false,
+    outOfHoursMessage: "",
+    openerElement: null,
+    scrollY: 0,
+    idempotencyKey: "",
+  };
+  if (options.restoreScroll !== false && Number.isFinite(scrollY)) window.scrollTo({ top: scrollY });
+  if (options.returnFocus !== false && openerElement && openerElement.isConnected && typeof openerElement.focus === "function") {
+    openerElement.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function ownerFlowFeedbackHtml() {
+  const outOfHours = ownerFlowState.outOfHoursRequired
+    ? `<div class="owner-flow-summary owner-flow-risk">${escapeHtml(ownerFlowState.outOfHoursMessage || "A barbearia esta fora do expediente de hoje. Deseja registrar este atendimento mesmo assim?")}</div>`
+    : "";
+  const risk = ownerFlowState.riskRequired
+    ? `<div class="owner-flow-summary owner-flow-risk">${escapeHtml(ownerFlowState.riskMessage || "Conflito encontrado. Confirme o risco para continuar.")}</div>
+       <label class="ds-form-label ds-form-full"><input id="ownerFlowConfirmRisk" type="checkbox" /> Confirmo o risco e quero continuar</label>`
+    : "";
+  return `
+    <div id="ownerFlowFeedback" class="ds-form-full panel-msg-host"></div>
+    ${outOfHours}
+    ${risk}
+  `;
+}
+
+function renderOwnerFlowForm() {
+  const modal = ensureOwnerFlowModal();
+  const form = modal.querySelector("#ownerAgendaFlowForm");
+  const title = modal.querySelector("#ownerAgendaFlowTitle");
+  if (!form || !title) return;
+  const type = ownerFlowState.type;
+  title.textContent = ownerFlowTitle(type);
+
+  if (type === "block-time" || type === "block-day") {
+    const today = asDateInputValue(new Date());
+    const blockDate = form.querySelector("#ownerFlowDate")?.value || today;
+    const startTime = form.querySelector("#ownerFlowStartTime")?.value || "09:00";
+    const endTime = form.querySelector("#ownerFlowEndTime")?.value || "10:00";
+    const professionalValue = form.querySelector("#ownerFlowProfessional")?.value || "";
+    const reason = form.querySelector("#ownerFlowReason")?.value || "";
+    form.innerHTML = `
+      <label class="ds-form-label">Data *
+        <input id="ownerFlowDate" type="date" required class="ds-input" value="${escapeHtml(blockDate)}" />
+      </label>
+      ${type === "block-time" ? `
+        <label class="ds-form-label">Inicio *
+          <input id="ownerFlowStartTime" type="time" required class="ds-input" value="${escapeHtml(startTime)}" />
+        </label>
+        <label class="ds-form-label">Fim *
+          <input id="ownerFlowEndTime" type="time" required class="ds-input" value="${escapeHtml(endTime)}" />
+        </label>
+        ${professionalFieldHtmlForFlow([], professionalValue, true)}
+      ` : ""}
+      <label class="ds-form-label ds-form-full">Motivo *
+        <textarea id="ownerFlowReason" required maxlength="240" rows="3" class="ds-input">${escapeHtml(reason)}</textarea>
+      </label>
+      <div class="owner-flow-summary ds-form-full">A disponibilidade sera validada ao confirmar o bloqueio.</div>
+      ${ownerFlowFeedbackHtml()}
+      <div class="ds-form-full catalog-row-actions">
+        <button type="button" class="ux-btn ux-btn-muted" data-owner-flow-close>Cancelar</button>
+        <button type="submit" id="ownerFlowSubmitBtn" class="ux-btn ux-btn-primary">${ownerFlowSubmitLabel(type)}</button>
+      </div>
+    `;
+    form.querySelectorAll("#ownerFlowDate, #ownerFlowStartTime, #ownerFlowEndTime, #ownerFlowProfessional").forEach((input) => {
+      input.addEventListener("change", renderOwnerFlowForm);
+    });
+  } else {
+    const existingPhone = form.querySelector("#ownerFlowClientPhone")?.value || "";
+    const existingName = form.querySelector("#ownerFlowClientName")?.value || "";
+    const startsAtValue = form.querySelector("#ownerFlowStartsAt")?.value || asDateTimeLocalInputValue(new Date());
+    const professionalValue = form.querySelector("#ownerFlowProfessional")?.value || "";
+    const foundClient = findClientByPhone(existingPhone);
+    form.innerHTML = `
+      <label class="ds-form-label">Telefone *
+        <input id="ownerFlowClientPhone" type="tel" required maxlength="20" class="ds-input" value="${escapeHtml(existingPhone)}" placeholder="(11)99999-9999" />
+        <span class="owner-flow-client-hint">${foundClient ? `Cliente encontrado: ${escapeHtml(foundClient.fullName || "Cliente")}` : "O cliente sera reutilizado pelo telefone ou criado se nao existir."}</span>
+      </label>
+      <label class="ds-form-label">Cliente
+        <input id="ownerFlowClientName" type="text" maxlength="120" class="ds-input" value="${escapeHtml(existingName || foundClient?.fullName || "")}" placeholder="Nome para novo cliente" />
+      </label>
+      ${type === "fitting" ? `
+        <label class="ds-form-label ds-form-full">Data e horario *
+          <input id="ownerFlowStartsAt" type="datetime-local" required class="ds-input" value="${escapeHtml(startsAtValue)}" />
+        </label>
+      ` : ""}
+      <label class="ds-form-label ds-form-full">Servicos *
+        ${servicePickerHtml(ownerFlowState.selectedServices, "ownerFlow")}
+      </label>
+      ${professionalFieldHtmlForFlow(ownerFlowState.selectedServices, professionalValue, true)}
+      <div class="owner-flow-summary ds-form-full">${escapeHtml(flowServiceSummaryText(ownerFlowState))}</div>
+      ${ownerFlowFeedbackHtml()}
+      <div class="ds-form-full catalog-row-actions">
+        <button type="button" class="ux-btn ux-btn-muted" data-owner-flow-close>Cancelar</button>
+        <button type="submit" id="ownerFlowSubmitBtn" class="ux-btn ux-btn-primary">${ownerFlowSubmitLabel(type)}</button>
+      </div>
+    `;
+    form.querySelector("#ownerFlowClientPhone")?.addEventListener("input", (event) => {
+      event.target.value = formatClientPhoneInput(event.target.value);
+    });
+    form.querySelector("#ownerFlowClientPhone")?.addEventListener("change", (event) => {
+      const found = findClientByPhone(event.target.value);
+      const nameInput = form.querySelector("#ownerFlowClientName");
+      if (found && nameInput && !String(nameInput.value || "").trim()) nameInput.value = found.fullName || "";
+      renderOwnerFlowForm();
+    });
+    form.querySelectorAll("[data-flow-service]").forEach((input) => {
+      input.addEventListener("change", async () => {
+        const ids = Array.from(form.querySelectorAll("[data-flow-service]:checked")).map((item) => item.value);
+        ownerFlowState.selectedServices = normalizeServiceSelectionFromIds(ids);
+        ownerFlowState.riskRequired = false;
+        ownerFlowState.riskMessage = "";
+        ownerFlowState.outOfHoursRequired = false;
+        ownerFlowState.outOfHoursMessage = "";
+        await refreshFlowServicesPreview(ownerFlowState, renderOwnerFlowForm);
+      });
+    });
+  }
+  form.querySelectorAll("[data-owner-flow-close]").forEach((button) => {
+    button.addEventListener("click", () => closeOwnerFlowModal({ returnFocus: true }));
+  });
+}
+
+function openOwnerFlow(type, options = {}) {
+  if (!canUseOwnerAgendaFlows()) return;
+  closeFloatingLayers({ keepOwnerFlow: true });
+  ownerFlowState = {
+    type,
+    selectedServices: [],
+    serviceSummary: null,
+    serviceSummaryState: "idle",
+    serviceSummaryMessage: "",
+    submitting: false,
+    riskRequired: false,
+    riskMessage: "",
+    conflictItems: [],
+    outOfHoursRequired: false,
+    outOfHoursMessage: "",
+    openerElement: options.openerElement || document.activeElement || null,
+    scrollY: window.scrollY || 0,
+    idempotencyKey: buildOperationIdempotencyKey(`owner-${type}`),
+  };
+  const modal = ensureOwnerFlowModal();
+  renderOwnerFlowForm();
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  setTimeout(() => modal.querySelector("input, select, textarea, button")?.focus?.({ preventScroll: true }), 0);
+}
+
+function setOwnerFlowLoading(loading) {
+  ownerFlowState.submitting = loading;
+  const modal = ensureOwnerFlowModal();
+  const submit = modal.querySelector("#ownerFlowSubmitBtn");
+  modal.querySelectorAll("input, select, textarea").forEach((field) => {
+    field.disabled = loading;
+  });
+  if (submit) {
+    submit.disabled = loading;
+    submit.textContent = loading ? "Enviando..." : ownerFlowSubmitLabel(ownerFlowState.type);
+  }
+}
+
+function showOwnerFlowFeedback(type, message) {
+  const feedback = document.getElementById("ownerFlowFeedback");
+  if (!feedback) return;
+  const modifier = type === "error" ? "panel-msg-error" : type === "success" ? "panel-msg-success" : "panel-msg-warning";
+  feedback.innerHTML = `<p class="panel-msg ${modifier}">${escapeHtml(message)}</p>`;
+}
+
+async function submitOwnerFlowForm(event) {
+  event.preventDefault();
+  if (ownerFlowState.submitting) return;
+  const form = event.currentTarget;
+  const type = ownerFlowState.type;
+  const changedBy = getCurrentActorId();
+
+  try {
+    setOwnerFlowLoading(true);
+    let result = null;
+    if (type === "block-time" || type === "block-day") {
+      const dateValue = String(form.querySelector("#ownerFlowDate")?.value || "").trim();
+      const reason = String(form.querySelector("#ownerFlowReason")?.value || "").trim();
+      if (!reason) throw new Error("Informe o motivo do bloqueio.");
+      const startsAt = type === "block-day"
+        ? new Date(`${dateValue}T00:00:00`)
+        : new Date(`${dateValue}T${form.querySelector("#ownerFlowStartTime")?.value || ""}:00`);
+      const endsAt = type === "block-day"
+        ? new Date(new Date(`${dateValue}T00:00:00`).getTime() + 24 * 60 * 60 * 1000)
+        : new Date(`${dateValue}T${form.querySelector("#ownerFlowEndTime")?.value || ""}:00`);
+      if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt <= startsAt) {
+        throw new Error("Informe um periodo valido para o bloqueio.");
+      }
+      result = await callJson(`${API}/appointments/blocks`, "POST", {
+        idempotencyKey: ownerFlowState.idempotencyKey,
+        unitId,
+        professionalId: type === "block-time" ? String(form.querySelector("#ownerFlowProfessional")?.value || "").trim() || undefined : undefined,
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        reason,
+        isFullDay: type === "block-day" || undefined,
+        changedBy,
+      });
+    } else {
+      const clientPhone = normalizePhoneDigits(form.querySelector("#ownerFlowClientPhone")?.value || "");
+      const clientName = String(form.querySelector("#ownerFlowClientName")?.value || "").trim();
+      const professionalIdValue = String(form.querySelector("#ownerFlowProfessional")?.value || "").trim();
+      const serviceIds = getSelectedServiceIds(ownerFlowState.selectedServices);
+      if (!clientPhone) throw new Error("Informe o telefone do cliente.");
+      if (!serviceIds.length) throw new Error("Selecione ao menos um servico.");
+      if (!professionalIdValue) throw new Error("Selecione o profissional.");
+      const basePayload = {
+        idempotencyKey: ownerFlowState.idempotencyKey,
+        unitId,
+        clientName: clientName || `Cliente ${clientPhone}`,
+        clientPhone,
+        professionalId: professionalIdValue,
+        serviceIds,
+        changedBy,
+      };
+      if (type === "walk-in") {
+        result = await callJson(`${API}/appointments/walk-in`, "POST", {
+          ...basePayload,
+          confirmOutOfHours: ownerFlowState.outOfHoursRequired || undefined,
+          startedAt: new Date().toISOString(),
+        });
+      } else {
+        const startsAtValue = String(form.querySelector("#ownerFlowStartsAt")?.value || "").trim();
+        const startsAtDate = new Date(startsAtValue);
+        if (Number.isNaN(startsAtDate.getTime())) throw new Error("Informe data e horario do encaixe.");
+        const confirmRisk = Boolean(form.querySelector("#ownerFlowConfirmRisk")?.checked);
+        if (ownerFlowState.riskRequired && !confirmRisk) {
+          throw new Error("Confirme o risco de conflito para criar o encaixe.");
+        }
+        result = await callJson(`${API}/appointments/fitting`, "POST", {
+          ...basePayload,
+          startsAt: startsAtDate.toISOString(),
+          confirmRisk: confirmRisk || undefined,
+        });
+        if (result?.requiresConfirmation) {
+          ownerFlowState.riskRequired = true;
+          ownerFlowState.riskMessage = humanConflictMessage(result, "Conflito encontrado para o encaixe.");
+          ownerFlowState.conflictItems = result.conflicts || [];
+          setOwnerFlowLoading(false);
+          renderOwnerFlowForm();
+          return;
+        }
+      }
+    }
+    if (result?.appointment) syncLocalAppointmentFromPayload(result.appointment);
+    setOwnerFlowLoading(false);
+    closeOwnerFlowModal({ returnFocus: false });
+    setScheduleFeedback("success", `${ownerFlowTitle(type)} confirmado com sucesso.`);
+    await loadAll();
+  } catch (error) {
+    if (type === "walk-in" && error?.code === "WALK_IN_OUTSIDE_BUSINESS_HOURS") {
+      ownerFlowState.outOfHoursRequired = true;
+      ownerFlowState.outOfHoursMessage = "A barbearia esta fora do expediente de hoje. Deseja registrar este atendimento mesmo assim?";
+      setOwnerFlowLoading(false);
+      renderOwnerFlowForm();
+      showOwnerFlowFeedback("warning", ownerFlowState.outOfHoursMessage);
+      return;
+    }
+    ownerFlowState.riskMessage = humanConflictMessage(error, error?.message || "Nao foi possivel concluir a operacao.");
+    showOwnerFlowFeedback("error", ownerFlowState.riskMessage);
+  } finally {
+    if (ownerFlowState.type) setOwnerFlowLoading(false);
+  }
+}
+
+function ensureInServiceServicesModal() {
+  let modal = document.getElementById("appointmentServicesModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "appointmentServicesModal";
+  modal.className = "ds-modal-backdrop hidden";
+  modal.innerHTML = `
+    <div class="ds-modal-panel owner-flow-modal" style="max-width:720px" role="dialog" aria-modal="true" aria-labelledby="appointmentServicesTitle" tabindex="-1">
+      <div class="ds-modal-head">
+        <div>
+          <p class="ux-label">Atendimento</p>
+          <h3 id="appointmentServicesTitle" class="ux-section-label">Alterar servicos</h3>
+        </div>
+        <button type="button" class="ux-btn ux-btn-muted" data-services-modal-close>Fechar</button>
+      </div>
+      <form id="appointmentServicesForm" class="ds-form-grid" novalidate></form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelectorAll("[data-services-modal-close]").forEach((button) => {
+    button.addEventListener("click", () => closeInServiceServicesModal({ returnFocus: true }));
+  });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeInServiceServicesModal({ returnFocus: true });
+  });
+  modal.querySelector("#appointmentServicesForm")?.addEventListener("submit", submitInServiceServicesForm);
+  return modal;
+}
+
+function closeInServiceServicesModal(options = {}) {
+  const modal = document.getElementById("appointmentServicesModal");
+  if (!modal || inServiceServicesState.submitting) return false;
+  const openerElement = inServiceServicesState.openerElement;
+  const scrollY = inServiceServicesState.scrollY;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  inServiceServicesState = {
+    appointment: null,
+    selectedServices: [],
+    serviceSummary: null,
+    serviceSummaryState: "idle",
+    serviceSummaryMessage: "",
+    submitting: false,
+    riskRequired: false,
+    riskMessage: "",
+    openerElement: null,
+    scrollY: 0,
+    idempotencyKey: "",
+  };
+  if (options.restoreScroll !== false && Number.isFinite(scrollY)) window.scrollTo({ top: scrollY });
+  if (options.returnFocus !== false && openerElement && openerElement.isConnected && typeof openerElement.focus === "function") {
+    openerElement.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function renderInServiceServicesForm() {
+  const modal = ensureInServiceServicesModal();
+  const form = modal.querySelector("#appointmentServicesForm");
+  if (!form) return;
+  const appointment = inServiceServicesState.appointment || {};
+  form.innerHTML = `
+    <div class="ds-form-full owner-flow-summary">
+      ${escapeHtml(appointment.client || "Cliente")} | ${escapeHtml(appointment.service || "Servicos atuais")}
+    </div>
+    <label class="ds-form-label ds-form-full">Servicos *
+      ${servicePickerHtml(inServiceServicesState.selectedServices, "appointmentServices")}
+    </label>
+    <div class="owner-flow-summary ds-form-full">${escapeHtml(flowServiceSummaryText(inServiceServicesState))}</div>
+    <div id="appointmentServicesFeedback" class="ds-form-full panel-msg-host"></div>
+    ${inServiceServicesState.riskRequired ? `
+      <div class="owner-flow-summary owner-flow-risk ds-form-full">${escapeHtml(inServiceServicesState.riskMessage || "Conflito encontrado. Confirme o risco para continuar.")}</div>
+      <label class="ds-form-label ds-form-full"><input id="appointmentServicesConfirmRisk" type="checkbox" /> Confirmo o risco e quero continuar</label>
+    ` : ""}
+    <div class="ds-form-full catalog-row-actions">
+      <button type="button" class="ux-btn ux-btn-muted" data-services-modal-close>Cancelar</button>
+      <button type="submit" id="appointmentServicesSubmitBtn" class="ux-btn ux-btn-primary">Confirmar alteracao</button>
+    </div>
+  `;
+  form.querySelectorAll("[data-flow-service]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const ids = Array.from(form.querySelectorAll("[data-flow-service]:checked")).map((item) => item.value);
+      inServiceServicesState.selectedServices = normalizeServiceSelectionFromIds(ids);
+      inServiceServicesState.riskRequired = false;
+      inServiceServicesState.riskMessage = "";
+      await refreshFlowServicesPreview(inServiceServicesState, renderInServiceServicesForm);
+    });
+  });
+  form.querySelectorAll("[data-services-modal-close]").forEach((button) => {
+    button.addEventListener("click", () => closeInServiceServicesModal({ returnFocus: true }));
+  });
+}
+
+function setInServiceServicesLoading(loading) {
+  inServiceServicesState.submitting = loading;
+  const modal = ensureInServiceServicesModal();
+  const submit = modal.querySelector("#appointmentServicesSubmitBtn");
+  modal.querySelectorAll("input, select, textarea").forEach((field) => {
+    field.disabled = loading;
+  });
+  if (submit) {
+    submit.disabled = loading;
+    submit.textContent = loading ? "Salvando..." : "Confirmar alteracao";
+  }
+}
+
+function showInServiceServicesFeedback(type, message) {
+  const feedback = document.getElementById("appointmentServicesFeedback");
+  if (!feedback) return;
+  const modifier = type === "error" ? "panel-msg-error" : type === "success" ? "panel-msg-success" : "panel-msg-warning";
+  feedback.innerHTML = `<p class="panel-msg ${modifier}">${escapeHtml(message)}</p>`;
+}
+
+async function openInServiceServicesModal(appointment, options = {}) {
+  if (!appointment || appointment.status !== "IN_SERVICE") {
+    renderAppointmentsFeedback(appointmentsElements, "warning", "Servicos so podem ser alterados durante o atendimento.");
+    return;
+  }
+  const loaded = await ensureAppointmentLoaded(appointment.id, { force: true });
+  const selected = normalizeAppointmentServiceItems(loaded || appointment, schedulingCatalog.servicesById)
+    .map((item) => item.serviceId);
+  closeFloatingLayers({ keepServiceChange: true });
+  inServiceServicesState = {
+    appointment: loaded || appointment,
+    selectedServices: normalizeServiceSelectionFromIds(selected),
+    serviceSummary: null,
+    serviceSummaryState: "idle",
+    serviceSummaryMessage: "",
+    submitting: false,
+    riskRequired: false,
+    riskMessage: "",
+    openerElement: options.openerElement || document.activeElement || null,
+    scrollY: window.scrollY || 0,
+    idempotencyKey: buildOperationIdempotencyKey("appointment-services"),
+  };
+  await refreshFlowServicesPreview(inServiceServicesState, renderInServiceServicesForm);
+  const modal = ensureInServiceServicesModal();
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  setTimeout(() => modal.querySelector("input, button")?.focus?.({ preventScroll: true }), 0);
+}
+
+async function submitInServiceServicesForm(event) {
+  event.preventDefault();
+  if (inServiceServicesState.submitting) return;
+  const appointment = inServiceServicesState.appointment;
+  const serviceIds = getSelectedServiceIds(inServiceServicesState.selectedServices);
+  const confirmRisk = Boolean(document.getElementById("appointmentServicesConfirmRisk")?.checked);
+  if (!appointment?.id) return;
+  if (!serviceIds.length) {
+    showInServiceServicesFeedback("error", "Selecione ao menos um servico.");
+    return;
+  }
+  if (inServiceServicesState.riskRequired && !confirmRisk) {
+    showInServiceServicesFeedback("error", "Confirme o risco de conflito para alterar os servicos.");
+    return;
+  }
+  try {
+    setInServiceServicesLoading(true);
+    const response = await callJson(`${API}/appointments/${appointment.id}/services`, "PATCH", {
+      idempotencyKey: inServiceServicesState.idempotencyKey,
+      unitId,
+      serviceIds,
+      confirmRisk: confirmRisk || undefined,
+      changedBy: getCurrentActorId(),
+    });
+    syncLocalAppointmentFromPayload(response?.appointment);
+    setInServiceServicesLoading(false);
+    closeInServiceServicesModal({ returnFocus: false });
+    setScheduleFeedback("success", "Servicos alterados com sucesso.");
+    await loadAll();
+  } catch (error) {
+    const message = humanConflictMessage(error, error?.message || "Nao foi possivel alterar os servicos.");
+    if (/conflit|risco|ocupad/i.test(message)) {
+      inServiceServicesState.riskRequired = true;
+      inServiceServicesState.riskMessage = message;
+      renderInServiceServicesForm();
+    }
+    showInServiceServicesFeedback("error", message);
+  } finally {
+    if (inServiceServicesState.appointment) setInServiceServicesLoading(false);
+  }
 }
 
 function ensureCheckoutModal() {
@@ -3926,6 +4715,98 @@ function closeAppointmentDetailPanel() {
     onAction: handleAppointmentsAction,
   });
   closeScheduleDrawer();
+}
+
+function findAgendaEventById(eventId) {
+  const id = String(eventId || "");
+  if (!id) return null;
+  const sources = [currentAgenda, wcItems].filter(Array.isArray);
+  for (const source of sources) {
+    const found = source.find((item) => item?.id === id || item?.blockId === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function removeAgendaBlockLocal(blockId) {
+  const id = String(blockId || "");
+  if (!id) return;
+  const keep = (item) => !isAgendaBlockItem(item) || (item.blockId !== id && item.id !== id && item.id !== `block:${id}`);
+  currentAgenda = (currentAgenda || []).filter(keep);
+  wcItems = (wcItems || []).filter(keep);
+}
+
+async function cancelAgendaBlock(blockId) {
+  const id = String(blockId || "");
+  if (!id || !canUseOwnerAgendaFlows()) return;
+  const reason = window.prompt("Motivo para desbloquear este horario", "Agenda liberada");
+  if (reason === null) return;
+  const cleanReason = String(reason || "").trim();
+  if (cleanReason.length < 3) {
+    setScheduleFeedback("error", "Informe um motivo com pelo menos 3 caracteres.");
+    return;
+  }
+  await callJson(`${API}/appointments/blocks/${encodeURIComponent(id)}/cancel`, "POST", {
+    idempotencyKey: buildOperationIdempotencyKey("appointment-block-cancel"),
+    unitId,
+    reason: cleanReason,
+    changedBy: getCurrentActorId(),
+  });
+  removeAgendaBlockLocal(id);
+  closeAppointmentDetailPanel();
+  renderAgendaView();
+  setScheduleFeedback("success", "Bloqueio removido da Agenda.");
+  loadAll().catch(() => {
+    setScheduleFeedback("warning", "Bloqueio removido localmente. Nao foi possivel sincronizar todas as visoes agora.");
+  });
+}
+
+function openAgendaOperationalDetail(eventIdOrItem) {
+  const item = typeof eventIdOrItem === "object" ? eventIdOrItem : findAgendaEventById(eventIdOrItem);
+  if (!item || !isAgendaBlockItem(item)) return;
+  closeFloatingLayers({ keepAppointmentDetail: true });
+  const title = agendaBlockTitle(item);
+  const dateText = item.startsAt.toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+  });
+  const timeText = item.isFullDay ? "Dia inteiro" : agendaEventTimeRange(item);
+  const professional = item.professional || professionalsById?.[item.professionalId]?.name || "";
+  appointmentsElements.detail.panel.classList.remove("hidden");
+  appointmentsElements.detail.panel.innerHTML = renderEntityDrawer({
+    id: "agendaOperationalDrawer",
+    open: true,
+    title,
+    subtitle: `${dateText} ${timeText}`,
+    status: "BLOCKED",
+    summary: `
+      <dl class="op-summary-grid">
+        <div><dt>Tipo</dt><dd>${escapeHtml(title)}</dd></div>
+        <div><dt>Data</dt><dd>${escapeHtml(dateText)}</dd></div>
+        <div><dt>Horario</dt><dd>${escapeHtml(timeText)}</dd></div>
+        <div><dt>Estado</dt><dd>Ativo</dd></div>
+        ${professional ? `<div><dt>Profissional</dt><dd>${escapeHtml(professional)}</dd></div>` : ""}
+      </dl>
+    `,
+    details: `
+      <div class="op-detail-list">
+        <p>Motivo: <strong>${escapeHtml(item.reason || "Sem motivo informado")}</strong></p>
+      </div>
+    `,
+    actions: canUseOwnerAgendaFlows()
+      ? `<button type="button" class="op-action op-action-secondary" data-agenda-block-cancel="${escapeHtml(item.blockId || item.id)}">Desbloquear</button>`
+      : "",
+  });
+  bindEntityDrawers(appointmentsElements.detail.panel);
+  appointmentsElements.detail.panel.querySelector("[data-agenda-block-cancel]")?.addEventListener("click", async (event) => {
+    const blockId = event.currentTarget.getAttribute("data-agenda-block-cancel");
+    try {
+      await cancelAgendaBlock(blockId);
+    } catch (error) {
+      setScheduleFeedback("error", error?.message || "Nao foi possivel desbloquear o horario.");
+    }
+  });
 }
 
 function renderCheckoutProducts() {
@@ -4618,6 +5499,11 @@ async function updateStatus(item, action, options = {}) {
     return;
   }
 
+  if (action === "SERVICES") {
+    await openInServiceServicesModal(item, { openerElement: options.openerElement });
+    return;
+  }
+
   if (action === "REFUND") {
     if (item.status !== "COMPLETED") return;
     openAppointmentRefundModal(item);
@@ -4813,9 +5699,9 @@ function getAgendaListFilteredItems() {
       const useOperationalOnly = statusFilter === "__OPERATIONAL__";
       if (useOperationalOnly && !isSlotBlockingStatus(item.status)) return false;
       if (!useOperationalOnly && statusFilter && itemStatus !== normalizeAgendaStatus(statusFilter)) return false;
-      if (professionalFilter && item.professionalId !== professionalFilter) return false;
+      if (professionalFilter && item.professionalId && item.professionalId !== professionalFilter) return false;
       if (searchFilter) {
-        const blob = `${item.client || ""} ${item.clientPhone || ""} ${item.service || ""}`.toLowerCase();
+        const blob = `${item.client || ""} ${item.clientPhone || ""} ${item.service || ""} ${item.reason || ""} ${item.operationalLabel || ""}`.toLowerCase();
         if (!blob.includes(searchFilter)) return false;
       }
       return true;
@@ -4877,6 +5763,33 @@ function renderAgendaListMode(filteredItems) {
       const duration = item.serviceDurationMin || Math.max(15, Math.round((item.endsAt - item.startsAt) / 60000));
       const isLate = item.startsAt < now && (item.status === "SCHEDULED" || item.status === "CONFIRMED");
       const isFocused = alFocusedAppointmentId && item.id === alFocusedAppointmentId;
+      if (isAgendaBlockItem(item)) {
+        const title = agendaBlockTitle(item);
+        const timeLabel = item.isFullDay ? "Dia inteiro" : agendaEventTimeRange(item);
+        const professionalLabel = item.professional || professionalsById?.[item.professionalId]?.name || "Todos os profissionais";
+        const reason = item.reason || "Sem motivo informado";
+        return `
+        <article class="al-card al-card-operational" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar.BLOCKED};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
+          <div class="al-card-time">
+            <strong>${item.isFullDay ? startsAtText : timeLabel}</strong>
+            <span class="al-dur">Ativo</span>
+          </div>
+          <div class="al-card-info">
+            <div class="al-card-top">
+              <div class="al-card-client">${title}</div>
+            </div>
+            <div class="al-card-sub">${reason}</div>
+            <div class="al-card-sub al-card-muted">${professionalLabel}</div>
+          </div>
+          <div class="al-card-right">
+            <span class="al-chip">Bloqueio</span>
+            <div class="al-card-actions">
+              ${canUseOwnerAgendaFlows() ? `<button class="al-btn" data-al-block-action="CANCEL_BLOCK" data-al-id="${item.id}">Desbloquear</button>` : ""}
+            </div>
+          </div>
+        </article>
+      `;
+      }
       const clientPhone =
         item.clientPhone ||
         clientsById?.[item.clientId]?.phone ||
@@ -4891,6 +5804,7 @@ function renderAgendaListMode(filteredItems) {
       const professionalLabel = item.professional || "Profissional";
       const priceLabel = money(item.servicePrice || item.price || 0);
       const delayInfo = getAppointmentDelayInfo(item);
+      const originLabel = item.originLabel || (item.isFitting ? "Encaixe" : "");
       const actions = agendaListActionsForStatus(item.status).filter(
         (action) => action !== "NO_SHOW" || now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000,
       );
@@ -4907,6 +5821,7 @@ function renderAgendaListMode(filteredItems) {
             </div>
             <div class="al-card-sub">${serviceLabel} · ${professionalLabel}</div>
             <div class="al-card-sub al-card-muted">${clientPhone} · ${dateTime}</div>
+            ${originLabel ? `<div class="al-card-sub al-card-muted">${originLabel}</div>` : ""}
             ${delayInfo?.minutes ? `<div class="al-card-sub al-card-muted">Atraso: ${delayInfo.minutes} min</div>` : ""}
           </div>
           <div class="al-card-right">
@@ -4949,12 +5864,33 @@ function renderAgendaListMode(filteredItems) {
       }
     });
   });
+  agendaListContent.querySelectorAll("[data-al-block-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const eventId = btn.getAttribute("data-al-id");
+      const item = findAgendaEventById(eventId);
+      if (!item?.blockId) return;
+      try {
+        await cancelAgendaBlock(item.blockId);
+      } catch (error) {
+        renderAppointmentsFeedback(
+          appointmentsElements,
+          "error",
+          error?.message || "Nao foi possivel desbloquear o horario.",
+        );
+      }
+    });
+  });
   agendaListContent.querySelectorAll("[data-al-open]").forEach((card) => {
     card.addEventListener("click", async (event) => {
-      if (event.target.closest("[data-al-action]")) return;
-      const appointmentId = card.getAttribute("data-al-open");
-      if (!appointmentId) return;
-      await openAgendaAppointmentDetail(appointmentId);
+      if (event.target.closest("[data-al-action], [data-al-block-action]")) return;
+      const eventId = card.getAttribute("data-al-open");
+      if (!eventId) return;
+      const item = findAgendaEventById(eventId);
+      if (isAgendaBlockItem(item)) {
+        openAgendaOperationalDetail(item);
+        return;
+      }
+      await openAgendaAppointmentDetail(eventId);
     });
   });
 
@@ -5049,6 +5985,11 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
 
   if (action === "EDIT") {
     await openAppointmentEdit(item);
+    return;
+  }
+
+  if (action === "SERVICES") {
+    await openInServiceServicesModal(item, { openerElement: options.openerElement });
     return;
   }
 
@@ -9588,9 +10529,30 @@ if (mobileFocusSaleBtn) {
 
 if (agendaNewAppointmentBtn) {
   agendaNewAppointmentBtn.addEventListener("click", () => {
+    closeFloatingLayers();
     resetScheduleFormForCreate();
     openScheduleDrawer({ mode: "create" });
     clientSearch?.focus();
+  });
+}
+
+if (agendaMoreOptionsBtn) {
+  agendaMoreOptionsBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (agendaMoreOptionsMenu?.classList.contains("hidden")) {
+      openAgendaMoreOptionsMenu();
+    } else {
+      closeAgendaMoreOptionsMenu();
+    }
+  });
+}
+
+if (agendaMoreOptionsMenu) {
+  agendaMoreOptionsMenu.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-owner-flow]");
+    if (!target) return;
+    event.stopPropagation();
+    openOwnerFlow(target.getAttribute("data-owner-flow"), { openerElement: target });
   });
 }
 
@@ -9658,6 +10620,9 @@ async function init() {
 }
 
 document.addEventListener("click", (event) => {
+  if (!event.target.closest?.("#agendaMoreOptionsWrap")) {
+    closeAgendaMoreOptionsMenu();
+  }
   const pdvTab = event.target.closest("[data-pdv-target]");
   if (!pdvTab) return;
   navigate(pdvTab.getAttribute("data-pdv-target"));
@@ -9744,7 +10709,12 @@ function closeScheduleDrawer() {
 
 document.getElementById("scheduleDrawerClose")?.addEventListener("click", closeScheduleDrawer);
 document.getElementById("scheduleDrawerScrim")?.addEventListener("click", closeScheduleDrawer);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeScheduleDrawer(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeScheduleDrawer();
+    closeAgendaMoreOptionsMenu();
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMobileSidebarOpen(false);
 });
@@ -9931,6 +10901,7 @@ function renderWeekCalendar(options = {}) {
     COMPLETED:  { b: "#1f8a65",                bg: "rgba(31,138,101,0.18)" },
     CANCELLED:  { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
     NO_SHOW:    { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
+    BLOCKED:    { b: "#6b5b2e",                bg: "rgba(192,133,50,0.16)" },
   } : {
     SCHEDULED:  { b: "#26251e", bg: "#e6e5e0" },
     CONFIRMED:  { b: "#26251e", bg: "#e1e0db" },
@@ -9938,6 +10909,7 @@ function renderWeekCalendar(options = {}) {
     COMPLETED:  { b: "#1f8a65", bg: "#dce8df" },
     CANCELLED:  { b: "#cf2d56", bg: "#eadbe0" },
     NO_SHOW:    { b: "#cf2d56", bg: "#eadbe0" },
+    BLOCKED:    { b: "#6b5b2e", bg: "#eee3c9" },
   };
 
   const dayCols = days.map((d) => {
@@ -9992,10 +10964,14 @@ function renderWeekCalendar(options = {}) {
 
     const appts = laid.map((item) => {
       const startMins = item.startsAt.getHours() * 60 + item.startsAt.getMinutes();
-      if (startMins < SCALE_START_MIN || startMins > SCALE_END_MIN) return "";
-      const dur = item.serviceDurationMin || Math.round((item.endsAt - item.startsAt) / 60000) || 30;
-      const top = minuteToY(startMins);
-      const slotHeight = (dur / 60) * HOUR_H;
+      const isBlock = isAgendaBlockItem(item);
+      const isFullDayBlock = isBlock && (item.isFullDay || item.agendaKind === "block-day");
+      if (!isFullDayBlock && (startMins < SCALE_START_MIN || startMins > SCALE_END_MIN)) return "";
+      const dur = isFullDayBlock
+        ? 30
+        : item.serviceDurationMin || Math.round((item.endsAt - item.startsAt) / 60000) || 30;
+      const top = isFullDayBlock ? TRACK_PAD + 2 : minuteToY(startMins);
+      const slotHeight = isFullDayBlock ? 28 : (dur / 60) * HOUR_H;
       const ht = Math.max(0, Math.min(slotHeight, TOTAL_H - top));
       const col = item._col || 0;
       const total = item._totalCols || 1;
@@ -10009,6 +10985,17 @@ function renderWeekCalendar(options = {}) {
         ? Number(item.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
         : "";
       const delayInfo = getAppointmentDelayInfo(item);
+      if (isBlock) {
+        const label = agendaBlockTitle(item);
+        const rangeLabel = isFullDayBlock ? label : `${agendaEventTimeRange(item)} - ${label}`;
+        const reasonLabel = String(item.reason || "").trim();
+        return `<div class="wc-appt wc-appt-operational${isFullDayBlock ? " wc-appt-full-day" : ""}" data-wc-appt-id="${item.id}"
+        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
+        title="${rangeLabel}${reasonLabel ? ` - ${reasonLabel}` : ""}">
+        <span class="wc-appt-name">${rangeLabel}</span>
+        ${reasonLabel && !isFullDayBlock ? `<span class="wc-appt-time">${reasonLabel}</span>` : ""}
+      </div>`;
+      }
       return `<div class="wc-appt" data-wc-appt-id="${item.id}"
         style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
         title="${timeStr} — ${item.client} — ${item.service}${priceLabel ? ` — ${priceLabel}` : ""}">
@@ -10038,11 +11025,16 @@ function renderWeekCalendar(options = {}) {
 
   container.querySelectorAll("[data-wc-appt-id]").forEach((el) => {
     el.addEventListener("click", async () => {
-      const appointmentId = el.getAttribute("data-wc-appt-id") || "";
-      if (!appointmentId) return;
-      alFocusedAppointmentId = appointmentId;
+      const eventId = el.getAttribute("data-wc-appt-id") || "";
+      if (!eventId) return;
+      alFocusedAppointmentId = eventId;
       renderAgendaView();
-      await openAgendaAppointmentDetail(appointmentId);
+      const item = findAgendaEventById(eventId);
+      if (isAgendaBlockItem(item)) {
+        openAgendaOperationalDetail(item);
+        return;
+      }
+      await openAgendaAppointmentDetail(eventId);
     });
   });
 }

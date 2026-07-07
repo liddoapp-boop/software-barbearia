@@ -84,6 +84,13 @@ function statusLabel(status) {
   return status;
 }
 
+function friendlyAppointmentOrigin(item = {}) {
+  const raw = safeText(item.origin, "MANUAL").toUpperCase();
+  if (item.isFitting || raw === "FITTING") return "Encaixe";
+  if (raw === "WALK_IN") return "Sem agendamento";
+  if (raw === "MANUAL") return "Manual";
+  return safeText(item.origin, "Manual");
+}
 
 function computeClientProfile(item, allItems) {
   const tags = Array.isArray(item.clientTags) ? item.clientTags : [];
@@ -168,6 +175,8 @@ function quickFlags(item, now, allItems) {
   if (profile === "EM_RISCO") flags.push({ status: "EM_RISCO", label: "Cliente em risco" });
   if (upcoming) flags.push({ status: "PAID", label: "Horario proximo" });
   if (hasNotes) flags.push({ status: "INFO", label: "Observacao" });
+  if (item.origin === "Sem agendamento") flags.push({ status: "INFO", label: "Sem agendamento" });
+  if (item.isFitting || item.origin === "Encaixe") flags.push({ status: "INFO", label: "Encaixe" });
 
   return { flags, late, profile };
 }
@@ -213,8 +222,8 @@ function actionsForStatus(status, options = {}) {
   }
   if (status === "IN_SERVICE") {
     return canCheckout
-      ? ["COMPLETE", "DETAIL", "WHATSAPP", "DELAY"]
-      : ["DETAIL", "WHATSAPP", "DELAY"];
+      ? ["COMPLETE", "SERVICES", "DETAIL", "WHATSAPP", "DELAY"]
+      : ["SERVICES", "DETAIL", "WHATSAPP", "DELAY"];
   }
   if (status === "COMPLETED") return ["DETAIL", "WHATSAPP"];
   return ["DETAIL", "WHATSAPP"];
@@ -226,21 +235,22 @@ function primaryActionForStatus(status, options = {}) {
   if (status === "CONFIRMED") return "IN_SERVICE";
   if (status === "IN_SERVICE" && canCheckout) return "COMPLETE";
   if (status === "IN_SERVICE") return "DETAIL";
-  if (status === "COMPLETED") return "REFUND";
+  if (status === "COMPLETED") return "DETAIL";
   return "DETAIL";
 }
 
 function actionLabel(action) {
   if (action === "CONFIRMED") return "Confirmar";
   if (action === "IN_SERVICE") return "Iniciar atendimento";
-  if (action === "COMPLETE") return "Concluir";
+  if (action === "COMPLETE") return "Ir para checkout";
+  if (action === "SERVICES") return "Alterar servicos";
   if (action === "NO_SHOW") return "Falta";
   if (action === "DELAY") return "Registrar atraso";
   if (action === "CANCELLED") return "Cancelar";
   if (action === "DETAIL") return "Detalhes";
   if (action === "EDIT") return "Editar";
   if (action === "WHATSAPP") return "WhatsApp";
-  if (action === "REFUND") return "Estornar atendimento";
+  if (action === "REFUND") return "Correcao administrativa";
   return action;
 }
 
@@ -251,6 +261,7 @@ function actionClass(action) {
   if (action === "CANCELLED") return "ux-btn ux-btn-danger";
   if (action === "NO_SHOW") return "ux-btn ux-btn-danger";
   if (action === "DELAY") return "ux-btn ux-btn-muted";
+  if (action === "SERVICES") return "ux-btn ux-btn-muted";
   if (action === "REFUND") return "ux-btn ux-btn-muted";
   if (action === "WHATSAPP") return "ux-btn ux-btn-muted";
   if (action === "DETAIL") return "ux-btn ux-btn-muted";
@@ -286,7 +297,7 @@ export function normalizeAppointmentsPayload(payload) {
         professional: nestedText(item.professional, ["name", "fullName"], "Profissional"),
         service,
         notes: safeText(item.notes, ""),
-        origin: safeText(item.origin, "MANUAL"),
+        origin: friendlyAppointmentOrigin(item),
         confirmation: Boolean(item.confirmation),
         clientTags: Array.isArray(item.clientTags) ? item.clientTags : [],
         servicePrice: asNumber(

@@ -83,6 +83,60 @@ const statusLabel = {
   BLOCKED: "Bloqueado",
 };
 
+function isOperationalAgendaItem(item = {}) {
+  return item.agendaKind === "block-time" || item.agendaKind === "block-day";
+}
+
+function isAppointmentAgendaItem(item = {}) {
+  return !isOperationalAgendaItem(item);
+}
+
+function operationalAgendaLabel(item = {}) {
+  if (item.agendaKind === "block-day" || item.isFullDay) return "Dia bloqueado";
+  return "Horario bloqueado";
+}
+
+function normalizeBlockEvent(item) {
+  const startsAt = normalizeDate(item.startsAt);
+  const endsAt = normalizeDate(item.endsAt);
+  if (!startsAt || !endsAt) return null;
+  const rawStatus = safeText(item.status, "ACTIVE").toUpperCase();
+  if (rawStatus === "CANCELLED") return null;
+  const blockId = safeText(item.blockId || item.id);
+  if (!blockId) return null;
+  const isFullDay = Boolean(item.isFullDay);
+  const label = safeText(item.label, isFullDay ? "Dia bloqueado" : "Horario bloqueado");
+  const reason = safeText(item.reason, "");
+  return {
+    id: `block:${blockId}`,
+    blockId,
+    unitId: safeText(item.unitId),
+    clientId: "",
+    professionalId: safeText(item.professionalId),
+    serviceId: "",
+    serviceItems: [],
+    client: "",
+    professional: nestedText(item.professional, ["name", "fullName"], ""),
+    service: label,
+    startsAt,
+    endsAt,
+    status: "BLOCKED",
+    agendaKind: isFullDay ? "block-day" : "block-time",
+    isOperationalEvent: true,
+    isFullDay,
+    reason,
+    operationalLabel: label,
+    servicePrice: 0,
+    serviceDurationMin: Math.max(15, Math.round((endsAt - startsAt) / 60000)),
+    durationRuleLabel: "",
+    history: [],
+    clientTags: [],
+    hasProductSale: false,
+    productSalesCount: 0,
+    productItemsSoldCount: 0,
+  };
+}
+
 
 const actionLabel = {
   DETAIL: "Detalhes",
@@ -90,13 +144,14 @@ const actionLabel = {
   CONFIRMED: "Confirmar",
   IN_SERVICE: "Iniciar atendimento",
   COMPLETE: "Concluir",
+  SERVICES: "Alterar servicos",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
   NO_SHOW: "Falta",
   DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
-  REFUND: "Estornar atendimento",
+  REFUND: "Correcao administrativa",
 };
 
 function actionButtonClass(action) {
@@ -108,6 +163,9 @@ function actionButtonClass(action) {
   }
   if (action === "COMPLETE") {
     return "ux-btn ux-btn-success";
+  }
+  if (action === "SERVICES") {
+    return "ux-btn ux-btn-muted";
   }
   if (action === "PAYMENT") {
     return "ux-btn ux-btn-primary";
@@ -142,7 +200,7 @@ function actionsForStatus(status, options = {}) {
     return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
-    return canCheckout ? ["COMPLETE", "DETAIL", "DELAY"] : ["DETAIL", "DELAY"];
+    return canCheckout ? ["COMPLETE", "SERVICES", "DETAIL", "DELAY"] : ["SERVICES", "DETAIL", "DELAY"];
   }
   if (status === "COMPLETED") return ["DETAIL"];
   return ["DETAIL"];
@@ -154,13 +212,14 @@ export function normalizeAgendaItems(payload) {
     : Array.isArray(payload?.appointments)
       ? payload.appointments
       : [];
-  return rows
+  const appointmentItems = rows
     .map((item) => {
       const startsAt = normalizeDate(item.startsAt);
       const endsAt = normalizeDate(item.endsAt);
       if (!startsAt || !endsAt) return null;
       const serviceItems = normalizeAppointmentServiceItems(item);
       const service = buildServiceSelectionLabel(serviceItems, nestedText(item.service, ["name"], "-"));
+      const origin = safeText(item.origin, "").toUpperCase();
       const effectiveDuration = asNumber(
         item.effectiveDurationMinSnapshot ?? item.effectiveDurationMin ?? item.serviceDurationMin,
         Math.max(15, Math.round((endsAt - startsAt) / 60000)),
@@ -179,6 +238,7 @@ export function normalizeAgendaItems(payload) {
         endsAt,
         status: normalizeAgendaStatus(item.status),
         isFitting: Boolean(item.isFitting),
+        originLabel: Boolean(item.isFitting) ? "Encaixe" : origin === "WALK_IN" ? "Sem agendamento" : "",
         servicePrice: asNumber(
           item.totalPriceSnapshot ?? item.totalPrice ?? item.servicePrice,
           serviceItems.reduce((acc, serviceItem) => acc + asNumber(serviceItem.price), nestedNumber(item.service, ["price"])),
@@ -193,34 +253,55 @@ export function normalizeAgendaItems(payload) {
       };
     })
     .filter(Boolean);
+
+  const explicitBlockEvents = Array.isArray(payload?.blockEvents) ? payload.blockEvents : [];
+  const rawBlocks = explicitBlockEvents.length
+    ? explicitBlockEvents
+    : Array.isArray(payload?.blocks)
+      ? payload.blocks
+      : [];
+  const seenBlocks = new Set();
+  const blockItems = rawBlocks
+    .map(normalizeBlockEvent)
+    .filter(Boolean)
+    .filter((item) => {
+      if (seenBlocks.has(item.id)) return false;
+      seenBlocks.add(item.id);
+      return true;
+    });
+
+  return [...appointmentItems, ...blockItems]
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
 }
 
 export function filterAgendaItems(items, filterState) {
   const search = safeText(filterState.search).toLowerCase();
   const statusFilter = safeText(filterState.status).toUpperCase();
   return items.filter((item) => {
-    if (filterState.professionalId && item.professionalId !== filterState.professionalId) return false;
+    if (filterState.professionalId && item.professionalId && item.professionalId !== filterState.professionalId) return false;
     if (statusFilter && normalizeAgendaStatus(item.status) !== statusFilter) return false;
     if (
       filterState.serviceId &&
+      isAppointmentAgendaItem(item) &&
       item.serviceId !== filterState.serviceId &&
       !(Array.isArray(item.serviceItems) && item.serviceItems.some((serviceItem) => serviceItem.serviceId === filterState.serviceId))
     ) return false;
     if (!search) return true;
-    const text = `${item.client} ${item.professional} ${item.service}`.toLowerCase();
+    const text = `${item.client} ${item.professional} ${item.service} ${item.reason || ""}`.toLowerCase();
     return text.includes(search);
   });
 }
 
 export function computeAgendaMetrics(items, now = new Date()) {
-  const lateCount = items.filter((item) => {
+  const appointments = items.filter(isAppointmentAgendaItem);
+  const lateCount = appointments.filter((item) => {
     const isOperational = item.status === "SCHEDULED" || item.status === "CONFIRMED";
     return isOperational && item.startsAt.getTime() < now.getTime();
   }).length;
 
-  const noShowCount = items.filter((item) => item.status === "NO_SHOW").length;
-  const fittingCount = items.filter((item) => item.isFitting).length;
-  const queueCount = items.filter(
+  const noShowCount = appointments.filter((item) => item.status === "NO_SHOW").length;
+  const fittingCount = appointments.filter((item) => item.isFitting).length;
+  const queueCount = appointments.filter(
     (item) => item.status === "IN_SERVICE" || item.status === "CONFIRMED",
   ).length;
 
@@ -229,7 +310,7 @@ export function computeAgendaMetrics(items, now = new Date()) {
     noShowCount,
     fittingCount,
     queueCount,
-    totalCount: items.length,
+    totalCount: appointments.length,
   };
 }
 
@@ -257,6 +338,7 @@ export function renderAgendaError(elements, onRetry) {
 function renderAgendaMetrics(elements, metrics, items = []) {
   const now = new Date();
   const next = [...items]
+    .filter(isAppointmentAgendaItem)
     .filter((item) => ["SCHEDULED", "CONFIRMED", "IN_SERVICE"].includes(item.status))
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
     .find((item) => item.status === "IN_SERVICE" || item.startsAt.getTime() >= now.getTime());
@@ -284,7 +366,7 @@ function renderAgendaMetrics(elements, metrics, items = []) {
 }
 
 function renderQueue(elements, items) {
-  const queue = items.filter((item) => item.status === "IN_SERVICE" || item.status === "CONFIRMED");
+  const queue = items.filter((item) => isAppointmentAgendaItem(item) && (item.status === "IN_SERVICE" || item.status === "CONFIRMED"));
   if (!queue.length) {
     elements.queue.innerHTML = renderEmptyState({
       title: "Sem proximo atendimento ativo.",
@@ -324,6 +406,27 @@ function renderAgendaList(elements, list, handlers) {
         hour: "2-digit",
         minute: "2-digit",
       });
+      if (isOperationalAgendaItem(item)) {
+        const endTime = item.endsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const title = operationalAgendaLabel(item);
+        const reason = safeText(item.reason, "");
+        return `
+        <article class="ux-card agenda-appt-card agenda-operational-card" data-operational-id="${item.id}">
+          <div class="agenda-appt-head">
+            <strong>${item.isFullDay ? title : `${time}-${endTime} - ${title}`}</strong>
+            ${renderStatusChip("BLOCKED", { label: "Bloqueado" })}
+          </div>
+          <div class="ux-hint">${reason || "Evento operacional"}</div>
+          <div class="agenda-card-facts">
+            <div><span>Tipo</span> <strong>${title}</strong></div>
+            <div><span>Estado</span> <strong>Ativo</strong></div>
+          </div>
+          <div class="catalog-row-actions">
+            <button data-id="${item.id}" data-action="DETAIL" class="${actionButtonClass("DETAIL")}">Detalhes</button>
+          </div>
+        </article>
+      `;
+      }
       const actions = actionsForStatus(item.status, {
         canCheckout: handlers?.canCheckout !== false,
         canEdit: handlers?.canEdit,
@@ -340,6 +443,7 @@ function renderAgendaList(elements, list, handlers) {
               ? "Inativo"
               : "Novo";
       const late = (item.status === "SCHEDULED" || item.status === "CONFIRMED") && item.startsAt < new Date();
+      const originLabel = item.originLabel || (item.isFitting ? "Encaixe" : "");
 
       return `
         <article class="ux-card agenda-appt-card ${late ? "agenda-appt-card-late" : ""}">
@@ -348,6 +452,7 @@ function renderAgendaList(elements, list, handlers) {
             ${renderStatusChip(item.status)}
           </div>
           <div class="ux-hint">${item.service} - ${item.professional}</div>
+          ${originLabel ? `<div class="ux-badge ux-badge-info">${originLabel}</div>` : ""}
           ${delayInfo?.minutes ? `<div class="ux-badge ux-badge-warning">Atraso: ${delayInfo.minutes} min</div>` : ""}
           <div class="agenda-card-facts">
             <div><span>Valor</span> <strong>R$ ${item.servicePrice.toFixed(2)}</strong></div>

@@ -100,11 +100,24 @@
                   <button id="viewListBtn" type="button" class="wc-view-btn c-button-group-item">Lista</button>
                 </div>
               </div>
-              <button id="agendaNewAppointmentBtn" type="button" class="wc-add-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                <span class="wc-add-label-full">Novo agendamento</span>
-                <span class="wc-add-label-short">Novo</span>
-              </button>
+              <div class="agenda-owner-actions">
+                <button id="agendaNewAppointmentBtn" type="button" class="wc-add-btn">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                  <span class="wc-add-label-full">Novo agendamento</span>
+                  <span class="wc-add-label-short">Novo</span>
+                </button>
+                <div id="agendaMoreOptionsWrap" class="agenda-more-wrap hidden">
+                  <button id="agendaMoreOptionsBtn" type="button" class="wc-more-btn" aria-haspopup="menu" aria-expanded="false">
+                    Mais opções
+                  </button>
+                  <div id="agendaMoreOptionsMenu" class="agenda-more-menu hidden" role="menu" aria-label="Mais opcoes da agenda">
+                    <button type="button" role="menuitem" data-owner-flow="walk-in">Atendimento sem agendamento</button>
+                    <button type="button" role="menuitem" data-owner-flow="block-time">Bloquear horario</button>
+                    <button type="button" role="menuitem" data-owner-flow="block-day">Bloquear dia</button>
+                    <button type="button" role="menuitem" data-owner-flow="fitting">Criar encaixe</button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div id="agendaCalendarMode">

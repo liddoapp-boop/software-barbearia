@@ -60,12 +60,17 @@ import {
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
   calculateServiceCommission,
+  blockAppliesToProfessional,
   hasAppointmentConflict,
+  intervalsOverlap,
+  isActiveAppointmentBlock,
   assertAppointmentCanBeRescheduled,
   assertAppointmentTransitionAllowed,
   assertAppointmentCanBeUpdated,
   assertNoShowToleranceElapsed,
   validateAppointmentSchedulingWindow,
+  describeBusinessHourAt,
+  WalkInOutsideBusinessHoursError,
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
@@ -204,6 +209,33 @@ function timeToMinutes(value?: string) {
   return hh * 60 + mm;
 }
 
+function roundMoney(value: number) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+type OperationalPaymentMethod = "CASH" | "PIX" | "DEBIT" | "CREDIT";
+
+function normalizePaymentMethod(value: string): OperationalPaymentMethod {
+  const normalized = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[\s_-]+/g, "");
+  if (normalized === "DINHEIRO" || normalized === "CASH") return "CASH";
+  if (normalized === "PIX") return "PIX";
+  if (normalized === "DEBITO" || normalized === "DEBIT" || normalized === "CARTAODEDEBITO") return "DEBIT";
+  if (normalized === "CREDITO" || normalized === "CREDIT" || normalized === "CARTAODECREDITO") return "CREDIT";
+  throw new Error("Metodo de pagamento deve ser dinheiro, PIX, debito ou credito");
+}
+
+function paymentMethodLabel(method: OperationalPaymentMethod) {
+  if (method === "CASH") return "Dinheiro";
+  if (method === "PIX") return "PIX";
+  if (method === "DEBIT") return "Debito";
+  return "Credito";
+}
+
 export class PrismaOperationsService {
   private readonly reconciliationResolutions = new Map<
     string,
@@ -295,7 +327,14 @@ export class PrismaOperationsService {
           active: true,
           ...(unitId ? { businessId: unitId } : {}),
         },
-        include: { professionals: { select: { professionalId: true } } },
+        include: {
+          professionals: {
+            where: unitId
+              ? { professional: { businessId: unitId, active: true } }
+              : { professional: { active: true } },
+            select: { professionalId: true },
+          },
+        },
         orderBy: { name: "asc" },
       }),
       this.prisma.professional.findMany({
@@ -319,7 +358,9 @@ export class PrismaOperationsService {
 
     return {
       services: services.map((item) => this.mapService(item)),
-      professionals: professionals.map((item) => this.mapProfessional(item)),
+      professionals: Array.from(
+        new Map(professionals.map((item) => [item.id, this.mapProfessional(item)])).values(),
+      ),
       clients: clients.map((item) => this.mapClient(item)),
       products: products.map((item) => this.mapProduct(item)),
     };
@@ -1440,44 +1481,56 @@ export class PrismaOperationsService {
     }));
   }
 
-  private async assertProfessionalCanExecuteServicesInTransaction(
-    tx: Prisma.TransactionClient,
+  private async getEligibleProfessionalIdsForServices(
+    client: Prisma.TransactionClient | PrismaClient,
+    input: { unitId: string; serviceIds: string[] },
+  ) {
+    const activeProfessionals = await client.professional.findMany({
+      where: { businessId: input.unitId, active: true },
+      select: { id: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    let eligible = new Set(activeProfessionals.map((item) => item.id));
+    for (const serviceId of input.serviceIds) {
+      const service = await client.service.findFirst({
+        where: { id: serviceId, businessId: input.unitId, active: true },
+        select: { id: true },
+      });
+      if (!service) throw new Error("Servico nao encontrado ou inativo");
+      const linkedRows = await client.serviceProfessional.findMany({
+        where: {
+          serviceId,
+          service: { businessId: input.unitId, active: true },
+          professional: { businessId: input.unitId, active: true },
+        },
+        select: { professionalId: true },
+      });
+      if (!linkedRows.length) continue;
+      const linked = new Set(linkedRows.map((item) => item.professionalId));
+      eligible = new Set([...eligible].filter((professionalId) => linked.has(professionalId)));
+    }
+    return [...eligible];
+  }
+
+  private async assertProfessionalCanExecuteServices(
+    unitId: string,
     serviceIds: string[],
     professionalId: string,
   ) {
-    for (const serviceId of serviceIds) {
-      await this.assertProfessionalCanExecuteServiceInTransaction(tx, serviceId, professionalId);
-    }
-  }
-
-  private async canProfessionalExecuteService(serviceId: string, professionalId: string) {
-    const rows = await this.prisma.serviceProfessional.findMany({
-      where: { serviceId },
-      select: { professionalId: true },
-      take: 100,
-    });
-    if (!rows.length) return true;
-    return rows.some((item) => item.professionalId === professionalId);
-  }
-
-  private async assertProfessionalCanExecuteService(serviceId: string, professionalId: string) {
-    const allowed = await this.canProfessionalExecuteService(serviceId, professionalId);
-    if (!allowed) {
+    const eligible = await this.getEligibleProfessionalIdsForServices(this.prisma, { unitId, serviceIds });
+    if (!eligible.includes(professionalId)) {
       throw new Error("Profissional nao habilitado para este servico");
     }
   }
 
-  private async assertProfessionalCanExecuteServiceInTransaction(
+  private async assertProfessionalCanExecuteServicesInTransaction(
     tx: Prisma.TransactionClient,
-    serviceId: string,
+    unitId: string,
+    serviceIds: string[],
     professionalId: string,
   ) {
-    const rows = await tx.serviceProfessional.findMany({
-      where: { serviceId },
-      select: { professionalId: true },
-      take: 100,
-    });
-    if (rows.length && !rows.some((item) => item.professionalId === professionalId)) {
+    const eligible = await this.getEligibleProfessionalIdsForServices(tx, { unitId, serviceIds });
+    if (!eligible.includes(professionalId)) {
       throw new Error("Profissional nao habilitado para este servico");
     }
   }
@@ -2370,6 +2423,113 @@ export class PrismaOperationsService {
     };
   }
 
+  async recordInventoryCount(input: {
+    unitId: string;
+    productId: string;
+    countedQty: number;
+    reason: string;
+    responsible: string;
+    countedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do inventario fisico e obrigatorio");
+    const countedQty = Math.trunc(Number(input.countedQty));
+    if (!Number.isFinite(countedQty) || countedQty < 0) throw new Error("Quantidade contada invalida");
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: "INVENTORY_COUNT_RECORD",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<any>(scope);
+      if (replay) return replay;
+    }
+    let response: any;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (scope) {
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+        const product = await tx.product.findFirst({
+          where: { id: input.productId, businessId: input.unitId, active: true },
+          select: { id: true, stockQty: true },
+        });
+        if (!product) throw new Error("Produto nao encontrado ou inativo");
+        const expectedQty = product.stockQty;
+        const differenceQty = countedQty - expectedQty;
+        const countId = crypto.randomUUID();
+        let movement: any;
+        if (differenceQty !== 0) {
+          movement = await tx.stockMovement.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: input.unitId,
+              productId: product.id,
+              movementType: differenceQty > 0 ? "IN" : "OUT",
+              quantity: Math.abs(differenceQty),
+              occurredAt: input.countedAt ?? new Date(),
+              referenceType: "INVENTORY_COUNT",
+              referenceId: countId,
+            },
+          });
+          await tx.product.update({
+            where: { id: product.id },
+            data: { stockQty: countedQty },
+          });
+        }
+        const count = await tx.stockInventoryCount.create({
+          data: {
+            id: countId,
+            unitId: input.unitId,
+            productId: product.id,
+            expectedQty,
+            countedQty,
+            differenceQty,
+            reason,
+            responsible: input.responsible,
+            countedAt: input.countedAt ?? new Date(),
+            status: differenceQty === 0 ? "RECORDED" : "APPLIED",
+            movementId: movement?.id,
+            idempotencyKey: scope?.idempotencyKey,
+          },
+        });
+        response = { count, movement };
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+              resolution: count.id,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<typeof response>(error, scope);
+    }
+    return response;
+  }
+
   async getServiceStockConsumption(input: {
     unitId: string;
     serviceId: string;
@@ -2471,11 +2631,15 @@ export class PrismaOperationsService {
     serviceId?: string;
     serviceIds?: string[];
     startsAt: Date;
+    operationNow?: Date;
+    immediateStart?: boolean;
+    allowOutOfHoursOverride?: boolean;
     bufferAfterMin?: number;
     isFitting?: boolean;
     notes?: string;
     changedBy: string;
   }) {
+    const operationNow = input.operationNow ?? new Date();
     const serviceIds = this.resolveAppointmentServiceIds(input);
     const [serviceRows, settings, businessHours, unitRow, activeCombinationRules] = await Promise.all([
       this.prisma.service.findMany({
@@ -2501,9 +2665,7 @@ export class PrismaOperationsService {
     if (!professionalRow || !professionalRow.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
-    for (const serviceId of serviceIds) {
-      await this.assertProfessionalCanExecuteService(serviceId, professionalRow.id);
-    }
+    await this.assertProfessionalCanExecuteServices(input.unitId, serviceIds, professionalRow.id);
 
     const clientRow = await this.prisma.client.findFirst({
       where: { id: input.clientId, businessId: input.unitId },
@@ -2542,6 +2704,15 @@ export class PrismaOperationsService {
         isClosed: item.isClosed,
       })),
       timezone: unitRow?.timezone ?? undefined,
+      now: operationNow,
+      immediateStart: input.immediateStart,
+      allowOutOfHoursOverride: input.allowOutOfHoursOverride,
+    });
+    await this.assertNoPrismaScheduleBlockConflict({
+      unitId: input.unitId,
+      professionalId: input.professionalId,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
     });
 
     let appointment: Appointment | undefined;
@@ -2570,7 +2741,7 @@ export class PrismaOperationsService {
           bufferAfterMin,
           existingAppointments: existingRows.map((item) => this.mapAppointment(item)),
         });
-        if (hasConflict && !settings.allowOverbooking) {
+        if (hasConflict && !settings.allowOverbooking && !input.isFitting) {
           throw new Error("Conflito de horario detectado para o profissional");
         }
 
@@ -2596,7 +2767,7 @@ export class PrismaOperationsService {
           serviceItems,
           history: [
             {
-              changedAt: new Date(),
+              changedAt: operationNow,
               changedBy: input.changedBy,
               action: "CREATED",
             },
@@ -2663,17 +2834,13 @@ export class PrismaOperationsService {
     serviceId?: string;
   }) {
     const serviceIds = this.resolveAppointmentServiceIds(input);
-    const [serviceRows, activeCombinationRules, professionals] = await Promise.all([
+    const [serviceRows, activeCombinationRules] = await Promise.all([
       this.prisma.service.findMany({
         where: { id: { in: serviceIds }, businessId: input.unitId },
       }),
       this.prisma.serviceCombinationRule.findMany({
         where: { unitId: input.unitId, active: true },
         include: { items: true },
-      }),
-      this.prisma.professional.findMany({
-        where: { businessId: input.unitId, active: true },
-        select: { id: true },
       }),
     ]);
     const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, serviceIds);
@@ -2688,14 +2855,10 @@ export class PrismaOperationsService {
       items: serviceItems,
       activeRules: this.mapCombinationRules(activeCombinationRules),
     });
-    const compatibility = await Promise.all(
-      professionals.map(async (professional) => {
-        for (const serviceId of serviceIds) {
-          if (!(await this.canProfessionalExecuteService(serviceId, professional.id))) return null;
-        }
-        return professional.id;
-      }),
-    );
+    const compatibility = await this.getEligibleProfessionalIdsForServices(this.prisma, {
+      unitId: input.unitId,
+      serviceIds,
+    });
     return {
       serviceIds,
       serviceItems,
@@ -2704,8 +2867,501 @@ export class PrismaOperationsService {
       calculationMode: duration.calculationMode,
       ruleId: duration.matchedRuleId,
       ruleLabel: duration.matchedRuleLabel,
-      eligibleProfessionalIds: compatibility.filter((id): id is string => Boolean(id)),
+      eligibleProfessionalIds: compatibility,
     };
+  }
+
+  async createWalkInAppointment(input: {
+    unitId: string;
+    clientName: string;
+    clientPhone: string;
+    professionalId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    startedAt?: Date;
+    isFitting?: boolean;
+    originLabel?: string;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
+    confirmOutOfHours?: boolean;
+  }) {
+    const normalizedPhone = normalizeClientPhone(input.clientPhone);
+    if (!normalizedPhone) throw new Error("Telefone obrigatorio para atendimento sem agendamento");
+    if (!isValidClientPhone(normalizedPhone)) throw new Error("Telefone invalido. Informe um telefone com DDD");
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: input.isFitting ? "FITTING_APPOINTMENT_CREATE" : "WALK_IN_APPOINTMENT_CREATE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<Appointment>(scope);
+      if (replay) return replay;
+    }
+    let response: Appointment | undefined;
+    const operationNow = new Date();
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (scope) {
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+        const startsAt = operationNow;
+        const serviceIds = this.resolveAppointmentServiceIds(input);
+        const [serviceRows, settings, businessHours, unitRow, activeCombinationRules, professionalRow] =
+          await Promise.all([
+            tx.service.findMany({
+              where: { id: { in: serviceIds }, businessId: input.unitId },
+            }),
+            this.ensureBusinessSettingsInTransaction(tx, input.unitId),
+            this.ensureBusinessHoursInTransaction(tx, input.unitId),
+            tx.unit.findUnique({ where: { id: input.unitId }, select: { timezone: true } }),
+            tx.serviceCombinationRule.findMany({
+              where: { unitId: input.unitId, active: true },
+              include: { items: true },
+            }),
+            tx.professional.findFirst({
+              where: { id: input.professionalId, businessId: input.unitId },
+            }),
+          ]);
+        if (!professionalRow || !professionalRow.active) {
+          throw new Error("Profissional nao encontrado ou inativo");
+        }
+        await this.assertProfessionalCanExecuteServicesInTransaction(tx, input.unitId, serviceIds, professionalRow.id);
+
+        const orderedServices = this.orderServiceRowsByRequestedIds(serviceRows, serviceIds);
+        const services = orderedServices.map((item) => this.mapService(item));
+        const appointmentId = crypto.randomUUID();
+        const serviceItems = this.buildAppointmentServiceItems({ appointmentId, services });
+        const totalPriceSnapshot = calculateAppointmentServicesTotal(serviceItems);
+        const duration = resolveEffectiveAppointmentDuration({
+          items: serviceItems,
+          activeRules: this.mapCombinationRules(activeCombinationRules),
+        });
+        const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
+        const primaryServiceItem = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
+        const endsAt = new Date(startsAt.getTime() + duration.effectiveDurationMin * 60_000);
+        const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
+        const busyEnd = new Date(endsAt.getTime() + bufferAfterMin * 60_000);
+        const conflictWindowStart = new Date(startsAt.getTime() - bufferAfterMin * 60_000);
+
+        const mappedBusinessHours = businessHours.map((item) => ({
+            id: item.id,
+            unitId: item.unitId,
+            dayOfWeek: item.dayOfWeek,
+            opensAt: item.opensAt ?? undefined,
+            closesAt: item.closesAt ?? undefined,
+            breakStart: item.breakStart ?? undefined,
+            breakEnd: item.breakEnd ?? undefined,
+            isClosed: item.isClosed,
+          }));
+        try {
+          validateAppointmentSchedulingWindow({
+            unitId: input.unitId,
+            startsAt,
+            endsAt,
+            serviceDurationMin: duration.effectiveDurationMin,
+            bufferAfterMin,
+            settings,
+            businessHours: mappedBusinessHours,
+            timezone: unitRow?.timezone ?? undefined,
+            now: operationNow,
+            immediateStart: true,
+            allowOutOfHoursOverride: Boolean(input.confirmOutOfHours),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!input.confirmOutOfHours && /expediente|fechad|intervalo|atravessar/i.test(message)) {
+            throw new WalkInOutsideBusinessHoursError(
+              describeBusinessHourAt({
+                instant: operationNow,
+                businessHours: mappedBusinessHours,
+                timezone: unitRow?.timezone ?? undefined,
+              }),
+            );
+          }
+          throw error;
+        }
+        let client = await tx.client.findFirst({
+          where: { businessId: input.unitId, phone: normalizedPhone },
+        });
+        if (!client) {
+          client = await tx.client.create({
+            data: {
+              id: crypto.randomUUID(),
+              businessId: input.unitId,
+              fullName: String(input.clientName || "").trim() || `Cliente ${normalizedPhone}`,
+              phone: normalizedPhone,
+              tags: ["NEW"],
+            },
+          });
+        }
+        await this.assertNoPrismaScheduleBlockConflict({
+          tx,
+          unitId: input.unitId,
+          professionalId: input.professionalId,
+          startsAt,
+          endsAt,
+        });
+        await this.lockAppointmentScheduling(tx, input.unitId, input.professionalId, client.id);
+
+        const existingRows = await tx.appointment.findMany({
+          where: {
+            unitId: input.unitId,
+            OR: [{ professionalId: input.professionalId }, { clientId: client.id }],
+            status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
+            startsAt: { lt: busyEnd },
+            endsAt: { gt: conflictWindowStart },
+          },
+          include: { history: { orderBy: { changedAt: "asc" } } },
+        });
+        const hasConflict = hasAppointmentConflict({
+          businessId: input.unitId,
+          clientId: client.id,
+          professionalId: input.professionalId,
+          startsAt,
+          endsAt,
+          bufferAfterMin,
+          existingAppointments: existingRows.map((item) => this.mapAppointment(item)),
+        });
+        if (hasConflict && !settings.allowOverbooking && !input.isFitting) {
+          throw new Error("Conflito de horario detectado para o profissional");
+        }
+
+        await tx.appointment.create({
+          data: {
+            id: appointmentId,
+            unitId: input.unitId,
+            clientId: client.id,
+            professionalId: input.professionalId,
+            serviceId: primaryServiceId,
+            startsAt,
+            endsAt,
+            status: "IN_SERVICE",
+            isFitting: Boolean(input.isFitting),
+            notes: input.originLabel ?? "Atendimento sem agendamento",
+            serviceNameSnapshot: primaryServiceItem.serviceNameSnapshot,
+            servicePriceSnapshot: primaryServiceItem.servicePriceSnapshot,
+            serviceDurationMinSnapshot: primaryServiceItem.serviceDurationMinSnapshot,
+            totalPriceSnapshot,
+            effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+            durationCalculationMode: duration.calculationMode,
+            durationRuleIdSnapshot: duration.matchedRuleId,
+            durationRuleLabelSnapshot: duration.matchedRuleLabel,
+            history: {
+              create: [
+                {
+                  id: crypto.randomUUID(),
+                  changedAt: operationNow,
+                  changedBy: input.changedBy,
+                  action: "CREATED",
+                },
+                {
+                  id: crypto.randomUUID(),
+                  changedAt: startsAt,
+                  changedBy: input.changedBy,
+                  action: "CHECKED_IN",
+                  reason: input.originLabel ?? "Atendimento sem agendamento",
+                },
+              ],
+            },
+          },
+        });
+        await tx.appointmentServiceItem.createMany({
+          data: serviceItems.map((item) => ({
+            id: item.id,
+            appointmentId,
+            serviceId: item.serviceId,
+            position: item.position,
+            serviceNameSnapshot: item.serviceNameSnapshot,
+            servicePriceSnapshot: item.servicePriceSnapshot,
+            serviceDurationMinSnapshot: item.serviceDurationMinSnapshot,
+          })),
+        });
+        const created = await tx.appointment.findUniqueOrThrow({
+          where: { id: appointmentId },
+          include: {
+            service: true,
+            serviceItems: { orderBy: { position: "asc" } },
+            history: { orderBy: { changedAt: "asc" } },
+          },
+        });
+        response = this.mapAppointment(created);
+        await this.recordCriticalAudit(
+          tx,
+          input.audit
+            ? {
+                ...input.audit,
+                unitId: input.unitId,
+                action: input.isFitting ? "FITTING_APPOINTMENT_CREATED" : "WALK_IN_APPOINTMENT_CREATED",
+                entity: "appointment",
+                entityId: response.id,
+                after: {
+                  status: response.status,
+                  isFitting: response.isFitting,
+                  origin: input.originLabel ?? "Atendimento sem agendamento",
+                  startsAt: response.startsAt.toISOString(),
+                  endsAt: response.endsAt.toISOString(),
+                  outsideBusinessHours: Boolean(input.confirmOutOfHours),
+                  confirmOutOfHours: Boolean(input.confirmOutOfHours),
+                  ...(input.confirmOutOfHours
+                    ? describeBusinessHourAt({
+                        instant: operationNow,
+                        businessHours: mappedBusinessHours,
+                        timezone: unitRow?.timezone ?? undefined,
+                      })
+                    : {}),
+                  totalPriceSnapshot: response.totalPriceSnapshot,
+                  effectiveDurationMinSnapshot: response.effectiveDurationMinSnapshot,
+                },
+              }
+            : undefined,
+        );
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+              resolution: response.id,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<Appointment>(error, scope);
+    }
+    return response!;
+  }
+
+  async createAppointmentBlock(input: {
+    unitId: string;
+    professionalId?: string;
+    startsAt: Date;
+    endsAt: Date;
+    reason: string;
+    isFullDay?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do bloqueio e obrigatorio");
+    if (!(input.startsAt instanceof Date) || Number.isNaN(input.startsAt.getTime())) throw new Error("Inicio do bloqueio invalido");
+    if (!(input.endsAt instanceof Date) || Number.isNaN(input.endsAt.getTime()) || input.endsAt <= input.startsAt) {
+      throw new Error("Fim do bloqueio deve ser posterior ao inicio");
+    }
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: "APPOINTMENT_BLOCK_CREATE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<any>(scope);
+      if (replay) return replay;
+    }
+    const conflict = await this.prisma.appointment.findFirst({
+      where: {
+        unitId: input.unitId,
+        ...(input.professionalId ? { professionalId: input.professionalId } : {}),
+        status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
+        startsAt: { lt: input.endsAt },
+        endsAt: { gt: input.startsAt },
+      },
+      select: { id: true, startsAt: true, endsAt: true },
+    });
+    if (conflict) {
+      throw new Error(`Conflito com atendimento ${conflict.id} de ${conflict.startsAt.toISOString()} ate ${conflict.endsAt.toISOString()}`);
+    }
+    await this.assertNoPrismaScheduleBlockConflict(input);
+    let response: any;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (scope) {
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+        const block = await tx.appointmentBlock.create({
+          data: {
+            id: crypto.randomUUID(),
+            unitId: input.unitId,
+            professionalId: input.professionalId,
+            startsAt: input.startsAt,
+            endsAt: input.endsAt,
+            isFullDay: Boolean(input.isFullDay),
+            reason,
+            createdBy: input.changedBy,
+            idempotencyKey: scope?.idempotencyKey,
+          },
+        });
+        response = block;
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+              resolution: block.id,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<typeof response>(error, scope);
+    }
+    return response;
+  }
+
+  async cancelAppointmentBlock(input: {
+    unitId: string;
+    blockId: string;
+    changedBy: string;
+    reason: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do desbloqueio e obrigatorio");
+    const updated = await this.prisma.appointmentBlock.updateMany({
+      where: { id: input.blockId, unitId: input.unitId, status: "ACTIVE" },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        cancelledBy: input.changedBy,
+        cancelReason: reason,
+      },
+    });
+    if (updated.count === 0) {
+      const existing = await this.prisma.appointmentBlock.findFirst({
+        where: { id: input.blockId, unitId: input.unitId },
+      });
+      if (!existing) throw new Error("Bloqueio nao encontrado");
+      return existing;
+    }
+    return await this.prisma.appointmentBlock.findUnique({ where: { id: input.blockId } });
+  }
+
+  async createFittingAppointment(input: {
+    unitId: string;
+    clientName: string;
+    clientPhone: string;
+    professionalId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    startsAt: Date;
+    confirmRisk?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
+  }) {
+    const preview = await this.previewAppointmentServices({
+      unitId: input.unitId,
+      serviceId: input.serviceId,
+      serviceIds: input.serviceIds,
+    });
+    const endsAt = new Date(input.startsAt.getTime() + preview.effectiveDurationMin * 60_000);
+    const conflicts = await this.prisma.appointment.findMany({
+      where: {
+        unitId: input.unitId,
+        professionalId: input.professionalId,
+        status: { in: ACTIVE_APPOINTMENT_CONFLICT_STATUSES },
+        startsAt: { lt: endsAt },
+        endsAt: { gt: input.startsAt },
+      },
+      select: { id: true, startsAt: true, endsAt: true },
+    });
+    if (conflicts.length && !input.confirmRisk) {
+      return {
+        requiresConfirmation: true,
+        durationMin: preview.effectiveDurationMin,
+        conflicts: conflicts.map((item) => ({
+          appointmentId: item.id,
+          startsAt: item.startsAt,
+          endsAt: item.endsAt,
+        })),
+      };
+    }
+    const appointment = await this.createWalkInAppointment({
+      unitId: input.unitId,
+      clientName: input.clientName,
+      clientPhone: input.clientPhone,
+      professionalId: input.professionalId,
+      serviceId: input.serviceId,
+      serviceIds: input.serviceIds,
+      startedAt: input.startsAt,
+      isFitting: true,
+      originLabel: "Encaixe",
+      changedBy: input.changedBy,
+      idempotencyKey: input.idempotencyKey,
+      idempotencyPayloadHash: input.idempotencyPayloadHash,
+      audit: input.audit,
+    });
+    return { appointment, conflictsAccepted: conflicts.map((item) => item.id) };
+  }
+
+  async updateAppointmentServicesInService(input: {
+    appointmentId: string;
+    unitId?: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    confirmRisk?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const current = await this.prisma.appointment.findUnique({
+      where: { id: input.appointmentId },
+      select: { id: true, unitId: true, status: true },
+    });
+    if (!current) throw new Error("Agendamento nao encontrado");
+    if (input.unitId && current.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
+    if (current.status === "COMPLETED") throw new Error("Atendimento finalizado nao permite alterar servicos");
+    if (current.status !== "IN_SERVICE") throw new Error("Alteracao de servicos exige atendimento em andamento");
+    return await this.updateAppointment({
+      appointmentId: input.appointmentId,
+      unitId: input.unitId,
+      serviceId: input.serviceId,
+      serviceIds: input.serviceIds,
+      changedBy: input.changedBy,
+      confirmRisk: Boolean(input.confirmRisk),
+      idempotencyKey: input.idempotencyKey,
+      idempotencyPayloadHash: input.idempotencyPayloadHash,
+    });
   }
 
   private async lockAppointmentScheduling(
@@ -2725,6 +3381,32 @@ export class PrismaOperationsService {
     for (const key of keys) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
     }
+  }
+
+  private async assertNoPrismaScheduleBlockConflict(input: {
+    tx?: Prisma.TransactionClient;
+    unitId: string;
+    professionalId?: string;
+    startsAt: Date;
+    endsAt: Date;
+  }) {
+    const client = input.tx ?? this.prisma;
+    const block = await client.appointmentBlock.findFirst({
+      where: {
+        unitId: input.unitId,
+        status: "ACTIVE",
+        startsAt: { lt: input.endsAt },
+        endsAt: { gt: input.startsAt },
+        OR: [
+          { professionalId: null },
+          ...(input.professionalId ? [{ professionalId: input.professionalId }] : []),
+        ],
+      },
+      orderBy: { startsAt: "asc" },
+    });
+    if (!block) return;
+    if (!isActiveAppointmentBlock(block) || !blockAppliesToProfessional(block, input.professionalId) || !intervalsOverlap(block, input)) return;
+    throw new Error(`${block.isFullDay ? "Dia bloqueado" : "Horario bloqueado"}: ${block.reason}`);
   }
 
   async reschedule(input: {
@@ -2796,6 +3478,13 @@ export class PrismaOperationsService {
           const newEnd = new Date(input.startsAt.getTime() + effectiveDurationMin * 60_000);
           const newBusyEnd = new Date(newEnd.getTime() + bufferAfterMin * 60_000);
           const conflictWindowStart = new Date(input.startsAt.getTime() - bufferAfterMin * 60_000);
+          await this.assertNoPrismaScheduleBlockConflict({
+            tx,
+            unitId: appointment.unitId,
+            professionalId: appointment.professionalId,
+            startsAt: input.startsAt,
+            endsAt: newEnd,
+          });
           const overlappingRows = await tx.appointment.findMany({
             where: {
               unitId: appointment.unitId,
@@ -3768,6 +4457,17 @@ export class PrismaOperationsService {
     changedBy: string;
     completedAt: Date;
     paymentMethod: string;
+    payments?: Array<{
+      method: string;
+      amount: number;
+      receivedAmount?: number;
+      paidAt?: Date;
+      responsible?: string;
+      reference?: string;
+      status?: "CONFIRMED" | "FAILED";
+      failureReason?: string;
+      idempotencyKey?: string;
+    }>;
     expectedTotal?: number;
     notes?: string;
     products?: Array<{
@@ -3828,6 +4528,13 @@ export class PrismaOperationsService {
     const notes = String(input.notes || "").trim() || undefined;
 
     const appointment = this.mapAppointment(row);
+    const existingCheckout = await this.prisma.appointmentCheckout.findUnique({
+      where: { appointmentId: appointment.id },
+      include: { payments: true },
+    });
+    if (existingCheckout && existingCheckout.status !== "OPEN") {
+      throw new Error("Checkout existente nao esta aberto para nova tentativa");
+    }
     const serviceItems = appointment.serviceItems?.length
       ? appointment.serviceItems
       : this.buildAppointmentServiceItems({ appointmentId: appointment.id, services: [this.mapService(row.service)] });
@@ -3964,17 +4671,75 @@ export class PrismaOperationsService {
     }));
 
     const productSubtotal = Number((saleResult?.revenue.amount ?? 0).toFixed(2));
+    const checkoutTotal = roundMoney(serviceSubtotal + productSubtotal);
+    const rawPayments =
+      Array.isArray(input.payments) && input.payments.length
+        ? input.payments
+        : [
+            {
+              method: paymentMethod,
+              amount: checkoutTotal,
+              paidAt: completedAt,
+              responsible: input.changedBy,
+              status: "CONFIRMED" as const,
+            },
+          ];
+    const checkoutId = existingCheckout?.id ?? crypto.randomUUID();
+    const normalizedPayments = rawPayments.map((item, index) => {
+      const method = normalizePaymentMethod(item.method);
+      const amount = roundMoney(Number(item.amount));
+      const receivedAmount =
+        item.receivedAmount == null ? amount : roundMoney(Number(item.receivedAmount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Valor de pagamento deve ser maior que zero");
+      }
+      if (receivedAmount < amount) {
+        throw new Error("Valor recebido nao pode ser menor que o valor da parcela");
+      }
+      const changeAmount = method === "CASH" ? roundMoney(receivedAmount - amount) : 0;
+      if (method !== "CASH" && receivedAmount > amount) {
+        throw new Error("Valor maior que o total so e permitido em dinheiro com troco");
+      }
+      return {
+        id: crypto.randomUUID(),
+        unitId: appointment.unitId,
+        checkoutId,
+        method,
+        amount,
+        receivedAmount,
+        changeAmount,
+        paidAt: item.paidAt ?? completedAt,
+        responsible: String(item.responsible || input.changedBy),
+        reference: item.reference,
+        status: item.status ?? "CONFIRMED",
+        failureReason: item.failureReason,
+        idempotencyKey: item.idempotencyKey ?? (operationKey ? `${operationKey}:payment:${index}` : undefined),
+      };
+    });
+    const failedPayments = normalizedPayments.filter((item) => item.status === "FAILED");
+    const confirmedPayments = normalizedPayments.filter((item) => item.status === "CONFIRMED");
+    const existingConfirmedPayments = existingCheckout?.payments.filter((item) => item.status === "CONFIRMED") ?? [];
+    const existingFailedPayments = existingCheckout?.payments.filter((item) => item.status === "FAILED") ?? [];
+    const existingPaidAmount = roundMoney(existingConfirmedPayments.reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const existingChangeAmount = roundMoney(existingConfirmedPayments.reduce((acc, item) => acc + asNumber(item.changeAmount), 0));
+    const paidAmount = roundMoney(existingPaidAmount + confirmedPayments.reduce((acc, item) => acc + item.amount, 0));
+    const changeAmount = roundMoney(existingChangeAmount + confirmedPayments.reduce((acc, item) => acc + item.changeAmount, 0));
+    if (paidAmount > checkoutTotal) {
+      throw new Error("Soma dos pagamentos nao pode ultrapassar o total do checkout");
+    }
+    const checkoutStatus = paidAmount === checkoutTotal && failedPayments.length === 0 ? "PAID" : "OPEN";
     const checkoutRevenue = buildServiceRevenueEntry({
       unitId: appointment.unitId,
       appointmentId: appointment.id,
-      amount: serviceSubtotal + productSubtotal,
+      amount: checkoutTotal,
       occurredAt: completedAt,
       description:
         serviceItems.length === 1
           ? `Receita de atendimento: ${serviceItems[0].serviceNameSnapshot}`
           : `Receita de atendimento: ${serviceItems.length} servicos`,
     });
-    checkoutRevenue.paymentMethod = paymentMethod;
+    checkoutRevenue.paymentMethod =
+      confirmedPayments.length === 1 ? paymentMethodLabel(confirmedPayments[0].method) : "Dividido";
     checkoutRevenue.professionalId = appointment.professionalId;
     checkoutRevenue.customerId = appointment.clientId;
     if (notes) checkoutRevenue.notes = notes;
@@ -4004,6 +4769,125 @@ export class PrismaOperationsService {
             status: "IN_PROGRESS",
           },
         });
+      }
+
+      if (checkoutStatus === "OPEN") {
+        if (existingCheckout) {
+          await tx.appointmentCheckout.update({
+            where: { id: existingCheckout.id },
+            data: {
+              totalAmount: checkoutTotal,
+              serviceAmount: serviceSubtotal,
+              productAmount: productSubtotal,
+              paidAmount,
+              changeAmount,
+              changedBy: input.changedBy,
+            },
+          });
+        } else {
+          await tx.appointmentCheckout.create({
+            data: {
+              id: checkoutId,
+              unitId: appointment.unitId,
+              appointmentId: appointment.id,
+              status: "OPEN",
+              totalAmount: checkoutTotal,
+              serviceAmount: serviceSubtotal,
+              productAmount: productSubtotal,
+              paidAmount,
+              changeAmount,
+              openedAt: completedAt,
+              changedBy: input.changedBy,
+              idempotencyKey: operationKey,
+            },
+          });
+        }
+        for (const payment of normalizedPayments) {
+          await tx.checkoutPayment.create({
+            data: {
+              id: payment.id,
+              unitId: payment.unitId,
+              checkoutId,
+              method: payment.method,
+              amount: payment.amount,
+              receivedAmount: payment.receivedAmount,
+              changeAmount: payment.changeAmount,
+              paidAt: payment.paidAt,
+              responsible: payment.responsible,
+              reference: payment.reference,
+              status: payment.status,
+              failureReason: payment.failureReason,
+              idempotencyKey: payment.idempotencyKey,
+            },
+          });
+        }
+        checkoutResponse = {
+          appointment,
+          checkout: {
+            id: checkoutId,
+            unitId: appointment.unitId,
+            appointmentId: appointment.id,
+            status: "OPEN",
+            totalAmount: checkoutTotal,
+            serviceAmount: serviceSubtotal,
+            productAmount: productSubtotal,
+            paidAmount,
+            changeAmount,
+            openedAt: existingCheckout?.openedAt ?? completedAt,
+            changedBy: input.changedBy,
+          },
+          payments: [...(existingCheckout?.payments ?? []), ...normalizedPayments],
+          serviceRevenue: undefined,
+          productRevenue: undefined,
+          sale: undefined,
+          stockMovements: [],
+          commissions: [],
+          clientMetrics: {
+            lastVisitAt: null,
+            totalSpent: 0,
+            frequency90d: 0,
+          },
+          stockConsumption: {
+            applied: false,
+            movementsCount: 0,
+            items: [],
+            warnings: [...existingFailedPayments, ...failedPayments].map((item) => item.failureReason || "Pagamento falhou"),
+          },
+        };
+        await this.recordCriticalAudit(
+          tx,
+          input.audit
+            ? {
+                ...input.audit,
+                unitId: appointment.unitId,
+                action: "APPOINTMENT_CHECKOUT_OPENED",
+                entity: "appointment_checkout",
+                entityId: appointment.id,
+                after: {
+                  total: checkoutTotal,
+                  paidAmount,
+                  failedPayments: failedPayments.length,
+                },
+              }
+            : undefined,
+        );
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(checkoutResponse) as Prisma.InputJsonValue,
+              resolution: checkoutId,
+            },
+          });
+        }
+        return;
       }
 
       const appointmentUpdate = await tx.appointment.updateMany({
@@ -4043,6 +4927,66 @@ export class PrismaOperationsService {
           idempotencyKey: serviceEntryKey,
         },
       });
+
+      if (existingCheckout) {
+        await tx.appointmentCheckout.update({
+          where: { id: existingCheckout.id },
+          data: {
+            status: "PAID",
+            totalAmount: checkoutTotal,
+            serviceAmount: serviceSubtotal,
+            productAmount: productSubtotal,
+            paidAmount,
+            changeAmount,
+            paidAt: completedAt,
+            changedBy: input.changedBy,
+          },
+        });
+      } else {
+        await tx.appointmentCheckout.create({
+          data: {
+            id: checkoutId,
+            unitId: appointment.unitId,
+            appointmentId: appointment.id,
+            status: "PAID",
+            totalAmount: checkoutTotal,
+            serviceAmount: serviceSubtotal,
+            productAmount: productSubtotal,
+            paidAmount,
+            changeAmount,
+            openedAt: completedAt,
+            paidAt: completedAt,
+            changedBy: input.changedBy,
+            idempotencyKey: operationKey,
+          },
+        });
+      }
+      if (existingCheckout) {
+        await tx.checkoutPayment.updateMany({
+          where: { checkoutId: existingCheckout.id, status: "CONFIRMED" },
+          data: { financialEntryId: checkoutRevenue.id },
+        });
+      }
+      for (const payment of normalizedPayments) {
+        await tx.checkoutPayment.create({
+          data: {
+            id: payment.id,
+            unitId: payment.unitId,
+            checkoutId,
+            method: payment.method,
+            amount: payment.amount,
+            receivedAmount: payment.receivedAmount,
+            changeAmount: payment.changeAmount,
+            paidAt: payment.paidAt,
+            responsible: payment.responsible,
+            reference: payment.reference,
+            status: payment.status,
+            failureReason: payment.failureReason,
+            idempotencyKey: payment.idempotencyKey,
+            financialEntryId: checkoutRevenue.id,
+          },
+        });
+      }
 
       for (const commission of serviceCommissions) {
         await tx.commissionEntry.create({
@@ -4227,6 +5171,30 @@ export class PrismaOperationsService {
             },
           ],
         },
+        checkout: {
+          id: checkoutId,
+          unitId: appointment.unitId,
+          appointmentId: appointment.id,
+          status: "PAID",
+          totalAmount: checkoutTotal,
+          serviceAmount: serviceSubtotal,
+          productAmount: productSubtotal,
+          paidAmount,
+          changeAmount,
+          openedAt: existingCheckout?.openedAt ?? completedAt,
+          paidAt: completedAt,
+          changedBy: input.changedBy,
+        },
+        payments: [
+          ...(existingCheckout?.payments ?? []).map((item) => ({
+            ...item,
+            financialEntryId: item.status === "CONFIRMED" ? checkoutRevenue.id : item.financialEntryId,
+          })),
+          ...normalizedPayments.map((item) => ({
+            ...item,
+            financialEntryId: checkoutRevenue.id,
+          })),
+        ],
         serviceRevenue: checkoutRevenue,
         productRevenue: saleResult?.revenue,
         sale: saleResult?.sale,
@@ -4285,6 +5253,132 @@ export class PrismaOperationsService {
     }
 
     return checkoutResponse!;
+  }
+
+  async correctCheckoutPayment(input: {
+    unitId: string;
+    paymentId: string;
+    reason: string;
+    responsible: string;
+    correctedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    audit?: TransactionalAuditContext;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo da correcao administrativa e obrigatorio");
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: "CHECKOUT_PAYMENT_ADMIN_CORRECTION",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<any>(scope);
+      if (replay) return replay;
+    }
+    let response: any;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (scope) {
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+        const original = await tx.checkoutPayment.findFirst({
+          where: { id: input.paymentId, unitId: input.unitId },
+        });
+        if (!original) throw new Error("Pagamento nao encontrado");
+        if (original.status !== "CONFIRMED") throw new Error("Apenas pagamento confirmado pode ser corrigido");
+        const existing = await tx.checkoutPayment.findFirst({
+          where: { unitId: input.unitId, reversedPaymentId: original.id, status: "REVERSED" },
+        });
+        if (existing) {
+          const financialEntry = await tx.financialEntry.findFirst({
+            where: { unitId: input.unitId, referenceType: "CHECKOUT_PAYMENT", referenceId: existing.id },
+          });
+          response = { correction: existing, financialEntry };
+        } else {
+          const correctedAt = input.correctedAt ?? new Date();
+          const correction = await tx.checkoutPayment.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: input.unitId,
+              checkoutId: original.checkoutId,
+              method: original.method,
+              amount: original.amount,
+              receivedAmount: original.receivedAmount,
+              changeAmount: original.changeAmount,
+              paidAt: correctedAt,
+              responsible: input.responsible,
+              reference: original.reference,
+              status: "REVERSED",
+              reversedPaymentId: original.id,
+              reversalReason: reason,
+              idempotencyKey: scope?.idempotencyKey,
+            },
+          });
+          const financialEntry = await tx.financialEntry.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: input.unitId,
+              kind: "EXPENSE",
+              source: "REFUND",
+              category: "CORRECAO_ADMINISTRATIVA",
+              paymentMethod: paymentMethodLabel(original.method as OperationalPaymentMethod),
+              amount: original.amount,
+              occurredAt: correctedAt,
+              referenceType: "CHECKOUT_PAYMENT",
+              referenceId: correction.id,
+              description: "Correcao administrativa de pagamento",
+              notes: `originalPaymentId=${original.id}; reason=${reason}`,
+              idempotencyKey: scope ? `${scope.action}:${scope.idempotencyKey}:financial` : null,
+            },
+          });
+          response = { correction, financialEntry };
+        }
+        await this.recordCriticalAudit(
+          tx,
+          input.audit
+            ? {
+                ...input.audit,
+                unitId: input.unitId,
+                action: "CHECKOUT_PAYMENT_ADMIN_CORRECTED",
+                entity: "checkout_payment",
+                entityId: input.paymentId,
+                after: { reason, correctionId: response.correction.id },
+              }
+            : undefined,
+        );
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+              resolution: response.correction.id,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<typeof response>(error, scope);
+    }
+    return response;
   }
 
   async refundAppointment(input: {
@@ -4999,10 +6093,39 @@ export class PrismaOperationsService {
     occurredAt: Date;
     referenceType?: "ADJUSTMENT" | "INTERNAL";
     referenceId?: string;
+    reason?: string;
+    responsible?: string;
+    changedBy?: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
   }) {
     const quantity = Math.trunc(Number(input.quantity));
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new Error("Quantidade invalida para movimentacao de estoque");
+    }
+
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: "STOCK_MANUAL_MOVEMENT",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<{
+        movement: {
+          id: string;
+          unitId: string;
+          productId: string;
+          movementType: string;
+          quantity: number;
+          occurredAt: Date;
+          referenceType: string;
+          referenceId?: string;
+        };
+        product: { id: string; name: string; stockQty: number };
+      }>(scope);
+      if (replay) return replay;
     }
 
     const product = await this.prisma.product.findFirst({
@@ -5021,7 +6144,35 @@ export class PrismaOperationsService {
       throw new Error("Saldo insuficiente para movimentacao de saida");
     }
 
-    const movement = await this.prisma.$transaction(async (tx) => {
+    let response: {
+      movement: {
+        id: string;
+        unitId: string;
+        productId: string;
+        movementType: string;
+        quantity: number;
+        occurredAt: Date;
+        referenceType: string;
+        referenceId?: string;
+      };
+      product: { id: string; name: string; stockQty: number };
+    } | undefined;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+      if (scope) {
+        await tx.idempotencyRecord.create({
+          data: {
+            id: crypto.randomUUID(),
+            unitId: scope.unitId,
+            action: scope.action,
+            idempotencyKey: scope.idempotencyKey!,
+            payloadHash: scope.payloadHash,
+            status: "IN_PROGRESS",
+          },
+        });
+      }
+
       const createdMovement = await tx.stockMovement.create({
         data: {
           id: crypto.randomUUID(),
@@ -5031,7 +6182,7 @@ export class PrismaOperationsService {
           quantity,
           occurredAt: input.occurredAt,
           referenceType: input.referenceType ?? "ADJUSTMENT",
-          referenceId: input.referenceId,
+          referenceId: input.referenceId ?? input.reason,
         },
       });
 
@@ -5051,35 +6202,56 @@ export class PrismaOperationsService {
               },
       });
       if (updated.count !== 1) throw new Error("Produto nao encontrado ou inativo");
-      return createdMovement;
-    });
 
-    const updatedProduct = await this.prisma.product.findFirst({
-      where: { id: input.productId, businessId: input.unitId },
-      select: {
-        id: true,
-        name: true,
-        stockQty: true,
-      },
-    });
+      const updatedProduct = await tx.product.findFirst({
+        where: { id: input.productId, businessId: input.unitId },
+        select: {
+          id: true,
+          name: true,
+          stockQty: true,
+        },
+      });
 
-    return {
-      movement: {
-        id: movement.id,
-        unitId: movement.unitId,
-        productId: movement.productId,
-        movementType: movement.movementType,
-        quantity: movement.quantity,
-        occurredAt: movement.occurredAt,
-        referenceType: movement.referenceType,
-        referenceId: movement.referenceId ?? undefined,
-      },
-      product: {
-        id: updatedProduct?.id ?? input.productId,
-        name: updatedProduct?.name ?? "Produto",
-        stockQty: updatedProduct?.stockQty ?? 0,
-      },
-    };
+      response = {
+        movement: {
+          id: createdMovement.id,
+          unitId: createdMovement.unitId,
+          productId: createdMovement.productId,
+          movementType: createdMovement.movementType,
+          quantity: createdMovement.quantity,
+          occurredAt: createdMovement.occurredAt,
+          referenceType: createdMovement.referenceType,
+          referenceId: createdMovement.referenceId ?? undefined,
+        },
+        product: {
+          id: updatedProduct?.id ?? input.productId,
+          name: updatedProduct?.name ?? "Produto",
+          stockQty: updatedProduct?.stockQty ?? 0,
+        },
+      };
+
+      if (scope) {
+        await tx.idempotencyRecord.update({
+          where: {
+            unitId_action_idempotencyKey: {
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+            },
+          },
+          data: {
+            status: "SUCCEEDED",
+            responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+            resolution: createdMovement.id,
+          },
+        });
+      }
+    });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<typeof response>(error, scope);
+    }
+
+    return response!;
   }
 
   async getFinancialEntries(input: {
@@ -5119,6 +6291,144 @@ export class PrismaOperationsService {
         net: result.summary.net,
       },
     };
+  }
+
+  async closeDaily(input: {
+    unitId: string;
+    businessDate: Date;
+    informedCash?: number;
+    informedPix?: number;
+    informedDebit?: number;
+    informedCredit?: number;
+    notes?: string;
+    responsible: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const scope = this.buildIdempotencyScope({
+      unitId: input.unitId,
+      action: "DAILY_CLOSING_CLOSE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    if (scope) {
+      const replay = await this.getReplayResult<any>(scope);
+      if (replay) return replay;
+    }
+    const start = new Date(input.businessDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(input.businessDate);
+    end.setHours(23, 59, 59, 999);
+    const [payments, entries] = await Promise.all([
+      this.prisma.checkoutPayment.findMany({
+        where: { unitId: input.unitId, status: "CONFIRMED", paidAt: { gte: start, lte: end } },
+      }),
+      this.prisma.financialEntry.findMany({
+        where: { unitId: input.unitId, occurredAt: { gte: start, lte: end } },
+      }),
+    ]);
+    const sumPayment = (method: string) =>
+      roundMoney(payments.filter((item) => item.method === method).reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const servicesTotal = roundMoney(entries.filter((item) => item.kind === "INCOME" && item.source === "SERVICE").reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const productsTotal = roundMoney(entries.filter((item) => item.kind === "INCOME" && item.source === "PRODUCT").reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const expensesTotal = roundMoney(entries.filter((item) => item.kind === "EXPENSE" && item.source !== "REFUND").reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const correctionsTotal = roundMoney(entries.filter((item) => String(item.category || "").includes("CORRECAO")).reduce((acc, item) => acc + asNumber(item.amount), 0));
+    const cashExpected = sumPayment("CASH");
+    const pixExpected = sumPayment("PIX");
+    const debitExpected = sumPayment("DEBIT");
+    const creditExpected = sumPayment("CREDIT");
+    const expectedTotal = roundMoney(cashExpected + pixExpected + debitExpected + creditExpected - expensesTotal);
+    const informedTotal = roundMoney(
+      Number(input.informedCash ?? cashExpected) +
+      Number(input.informedPix ?? pixExpected) +
+      Number(input.informedDebit ?? debitExpected) +
+      Number(input.informedCredit ?? creditExpected) -
+      expensesTotal,
+    );
+    let response: any;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (scope) {
+          await tx.idempotencyRecord.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: scope.unitId,
+              action: scope.action,
+              idempotencyKey: scope.idempotencyKey!,
+              payloadHash: scope.payloadHash,
+              status: "IN_PROGRESS",
+            },
+          });
+        }
+        const closing = await tx.dailyClosing.create({
+          data: {
+            id: crypto.randomUUID(),
+            unitId: input.unitId,
+            businessDate: start,
+            cashExpected,
+            pixExpected,
+            debitExpected,
+            creditExpected,
+            servicesTotal,
+            productsTotal,
+            expensesTotal,
+            correctionsTotal,
+            expectedTotal,
+            informedCash: input.informedCash,
+            informedPix: input.informedPix,
+            informedDebit: input.informedDebit,
+            informedCredit: input.informedCredit,
+            divergence: roundMoney(informedTotal - expectedTotal),
+            notes: input.notes,
+            responsible: input.responsible,
+            closedAt: new Date(),
+            idempotencyKey: scope?.idempotencyKey,
+          },
+        });
+        response = { closing };
+        if (scope) {
+          await tx.idempotencyRecord.update({
+            where: {
+              unitId_action_idempotencyKey: {
+                unitId: scope.unitId,
+                action: scope.action,
+                idempotencyKey: scope.idempotencyKey!,
+              },
+            },
+            data: {
+              status: "SUCCEEDED",
+              responseJson: toJsonValue(response) as Prisma.InputJsonValue,
+              resolution: closing.id,
+            },
+          });
+        }
+      });
+    } catch (error) {
+      return await this.replayAfterUniqueConflict<typeof response>(error, scope);
+    }
+    return response;
+  }
+
+  async reopenDailyClosing(input: {
+    unitId: string;
+    closingId: string;
+    reopenedBy: string;
+    reason: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo da reabertura e obrigatorio");
+    const closing = await this.prisma.dailyClosing.updateMany({
+      where: { id: input.closingId, unitId: input.unitId, status: "CLOSED" },
+      data: {
+        status: "REOPENED",
+        reopenedAt: new Date(),
+        reopenedBy: input.reopenedBy,
+        reopenReason: reason,
+      },
+    });
+    if (closing.count !== 1) throw new Error("Fechamento diario nao encontrado ou ja reaberto");
+    return { closing: await this.prisma.dailyClosing.findUnique({ where: { id: input.closingId } }) };
   }
 
   async getFinancialSummary(input: {
@@ -9424,6 +10734,7 @@ export class PrismaOperationsService {
     notes?: string;
     isFitting?: boolean;
     confirmation?: boolean;
+    confirmRisk?: boolean;
     idempotencyKey?: string;
     idempotencyPayloadHash?: string;
     changedBy: string;
@@ -9532,6 +10843,7 @@ export class PrismaOperationsService {
           }
           await this.assertProfessionalCanExecuteServicesInTransaction(
             tx,
+            current.unitId,
             nextServiceIds,
             professionalRow.id,
           );
@@ -9607,7 +10919,7 @@ export class PrismaOperationsService {
             ignoreAppointmentId: current.id,
             existingAppointments: overlappingRows.map((item) => this.mapAppointment(item)),
           });
-          if (hasConflict && !settings.allowOverbooking) {
+          if (hasConflict && !settings.allowOverbooking && !input.confirmRisk) {
             throw new Error("Conflito de horario detectado para o profissional");
           }
 
@@ -9763,9 +11075,7 @@ export class PrismaOperationsService {
     if (!professionalRow || !professionalRow.active) {
       throw new Error("Profissional nao encontrado ou inativo");
     }
-    for (const serviceId of serviceIds) {
-      await this.assertProfessionalCanExecuteService(serviceId, professionalRow.id);
-    }
+    await this.assertProfessionalCanExecuteServices(input.unitId, serviceIds, professionalRow.id);
     const services = orderedServices.map((item) =>
       this.mapService(item),
     );

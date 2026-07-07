@@ -950,6 +950,161 @@ textarea.ds-input {
   overflow-y: auto;
 }
 
+.agenda-owner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.agenda-more-wrap {
+  position: relative;
+}
+
+.wc-more-btn {
+  min-height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wc-more-btn:hover,
+.wc-more-btn[aria-expanded="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.agenda-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 35;
+  min-width: 230px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  box-shadow: 0 18px 40px rgba(2, 8, 20, 0.32);
+  padding: 6px;
+}
+
+.agenda-more-menu button {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary);
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.agenda-more-menu button:hover,
+.agenda-more-menu button:focus-visible {
+  background: var(--color-border-soft);
+  outline: none;
+}
+
+.owner-flow-modal {
+  width: min(720px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px) !important;
+  max-height: min(92vh, 780px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.owner-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.owner-flow-service-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  min-width: 0;
+}
+
+.owner-flow-service-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  padding: 9px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.owner-flow-service-option input {
+  margin-top: 2px;
+}
+
+.owner-flow-service-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.owner-flow-service-option strong,
+.owner-flow-service-option small {
+  overflow-wrap: anywhere;
+}
+
+.owner-flow-summary {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  padding: 10px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.owner-flow-risk {
+  border-color: color-mix(in srgb, var(--color-warning) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--color-bg-primary));
+  color: var(--color-text-primary);
+}
+
+.owner-flow-client-hint {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.owner-flow-modal .catalog-row-actions {
+  justify-content: flex-end;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.owner-flow-modal .ds-form-grid,
+.owner-flow-modal .ds-form-label,
+.owner-flow-modal .ds-input,
+.owner-flow-modal select,
+.owner-flow-modal textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .checkout-total-panel {
   display: flex;
   align-items: center;
@@ -6012,6 +6167,16 @@ body {
 }
 
 @media (max-width: 640px) {
+  .owner-flow-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px) !important;
+  }
+
+  .owner-flow-grid,
+  .owner-flow-service-list {
+    grid-template-columns: 1fr;
+  }
+
   .svc-select-tools,
   .svc-selection-layout,
   .svc-summary-metrics,
@@ -7861,6 +8026,15 @@ body.theme-light .sb-brand-subtitle {
   transform: none !important;
 }
 
+#agendaSection .wc-appt-operational {
+  border-style: dashed !important;
+  cursor: pointer !important;
+}
+
+#agendaSection .wc-appt-full-day {
+  z-index: 4 !important;
+}
+
 #agendaSection .wc-appt-name {
   color: var(--color-text-primary) !important;
   font-size: 10px !important;
@@ -7963,6 +8137,10 @@ body.theme-light .sb-brand-subtitle {
 
 #agendaListMode .al-card:hover {
   background: var(--color-bg-secondary, #f2f1ed) !important;
+}
+
+#agendaListMode .al-card-operational {
+  border-style: dashed !important;
 }
 
 #agendaListMode .al-card-time {

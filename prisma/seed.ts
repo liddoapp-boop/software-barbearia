@@ -93,6 +93,11 @@ async function main() {
   await prisma.loyaltyLedger.deleteMany();
   await prisma.loyaltyProgram.deleteMany();
   await prisma.appointmentHistory.deleteMany();
+  await prisma.checkoutPayment.deleteMany();
+  await prisma.appointmentCheckout.deleteMany();
+  await prisma.appointmentBlock.deleteMany();
+  await prisma.stockInventoryCount.deleteMany();
+  await prisma.dailyClosing.deleteMany();
   await prisma.commissionEntry.deleteMany();
   await prisma.financialEntry.deleteMany();
   await prisma.stockMovement.deleteMany();
@@ -270,14 +275,14 @@ async function main() {
   });
 
   await prisma.professional.upsert({
-    where: { id: "pro-01" },
+    where: { id: "pro-geovane-borges" },
     update: {
       businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
     },
     create: {
-      id: "pro-01",
+      id: "pro-geovane-borges",
       businessId: "unit-01",
       name: "Geovane Borges",
       active: true,
@@ -286,19 +291,19 @@ async function main() {
 
   await prisma.professional.deleteMany({
     where: {
-      id: { not: "pro-01" },
+      id: { not: "pro-geovane-borges" },
     },
   });
 
   await prisma.serviceProfessional.createMany({
     data: [
-      { id: "svc-pro-svc-corte-pro-01", serviceId: "svc-corte", professionalId: "pro-01" },
-      { id: "svc-pro-svc-barba-pro-01", serviceId: "svc-barba", professionalId: "pro-01" },
+      { id: "svc-pro-svc-corte-pro-geovane-borges", serviceId: "svc-corte", professionalId: "pro-geovane-borges" },
+      { id: "svc-pro-svc-barba-pro-geovane-borges", serviceId: "svc-barba", professionalId: "pro-geovane-borges" },
     ],
     skipDuplicates: true,
   });
   await prisma.commissionRule.deleteMany({
-    where: { professionalId: "pro-01" },
+    where: { professionalId: "pro-geovane-borges" },
   });
 
   await prisma.client.upsert({

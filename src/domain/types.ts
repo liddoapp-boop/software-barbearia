@@ -15,6 +15,11 @@ export type RevenueSource = "SERVICE" | "PRODUCT";
 export type FinancialSource = RevenueSource | "COMMISSION" | "REFUND";
 export type AuditActorRole = "owner" | "recepcao" | "profissional" | "anonymous";
 export type AppointmentDurationCalculationMode = "SUM" | "COMBINATION_RULE";
+export type AppointmentBlockStatus = "ACTIVE" | "CANCELLED";
+export type CheckoutStatus = "OPEN" | "PAID" | "CANCELLED";
+export type CheckoutPaymentMethod = "CASH" | "PIX" | "DEBIT" | "CREDIT";
+export type CheckoutPaymentStatus = "CONFIRMED" | "FAILED" | "REVERSED";
+export type DailyClosingStatus = "CLOSED" | "REOPENED";
 
 export interface AuditEvent {
   id: UUID;
@@ -296,7 +301,8 @@ export interface FinancialEntry {
     | "MANUAL"
     | "COMMISSION"
     | "APPOINTMENT_REFUND"
-    | "PRODUCT_SALE_REFUND";
+    | "PRODUCT_SALE_REFUND"
+    | "CHECKOUT_PAYMENT";
   referenceId?: UUID;
   professionalId?: UUID;
   customerId?: UUID;
@@ -569,8 +575,106 @@ export interface StockMovement {
     | "SERVICE_CONSUMPTION"
     | "ADJUSTMENT"
     | "INTERNAL"
-    | "PRODUCT_REFUND";
+    | "PRODUCT_REFUND"
+    | "INVENTORY_COUNT";
   referenceId?: UUID;
+}
+
+export interface AppointmentBlock {
+  id: UUID;
+  unitId: UUID;
+  professionalId?: UUID;
+  startsAt: Date;
+  endsAt: Date;
+  isFullDay: boolean;
+  reason: string;
+  status: AppointmentBlockStatus;
+  cancelledAt?: Date;
+  cancelledBy?: string;
+  cancelReason?: string;
+  createdBy: string;
+  idempotencyKey?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface AppointmentCheckout {
+  id: UUID;
+  unitId: UUID;
+  appointmentId: UUID;
+  status: CheckoutStatus;
+  totalAmount: number;
+  serviceAmount: number;
+  productAmount: number;
+  paidAmount: number;
+  changeAmount: number;
+  openedAt: Date;
+  paidAt?: Date;
+  changedBy: string;
+  idempotencyKey?: string;
+  payments?: CheckoutPayment[];
+}
+
+export interface CheckoutPayment {
+  id: UUID;
+  unitId: UUID;
+  checkoutId: UUID;
+  method: CheckoutPaymentMethod;
+  amount: number;
+  receivedAmount?: number;
+  changeAmount: number;
+  paidAt: Date;
+  responsible: string;
+  reference?: string;
+  status: CheckoutPaymentStatus;
+  failureReason?: string;
+  reversedPaymentId?: string;
+  reversalReason?: string;
+  idempotencyKey?: string;
+  financialEntryId?: string;
+}
+
+export interface StockInventoryCount {
+  id: UUID;
+  unitId: UUID;
+  productId: UUID;
+  expectedQty: number;
+  countedQty: number;
+  differenceQty: number;
+  reason: string;
+  responsible: string;
+  countedAt: Date;
+  status: "RECORDED" | "APPLIED";
+  movementId?: UUID;
+  idempotencyKey?: string;
+}
+
+export interface DailyClosing {
+  id: UUID;
+  unitId: UUID;
+  businessDate: Date;
+  status: DailyClosingStatus;
+  cashExpected: number;
+  pixExpected: number;
+  debitExpected: number;
+  creditExpected: number;
+  servicesTotal: number;
+  productsTotal: number;
+  expensesTotal: number;
+  correctionsTotal: number;
+  expectedTotal: number;
+  informedCash?: number;
+  informedPix?: number;
+  informedDebit?: number;
+  informedCredit?: number;
+  divergence: number;
+  notes?: string;
+  responsible: string;
+  closedAt: Date;
+  reopenedAt?: Date;
+  reopenedBy?: string;
+  reopenReason?: string;
+  idempotencyKey?: string;
 }
 
 export interface ServiceStockConsumptionAppliedItem {

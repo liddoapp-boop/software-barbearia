@@ -287,6 +287,22 @@ async function applyPlan(
   productPlan: ProductProvisionPlan,
 ) {
   await prisma.$transaction(async (tx) => {
+    const geovane = await tx.professional.findFirst({
+      where: {
+        businessId: CANONICAL_UNIT_ID,
+        OR: [{ id: "pro-geovane-borges" }, { name: "Geovane Borges" }],
+      },
+      orderBy: [{ id: "asc" }],
+      select: { id: true },
+    });
+    if (!geovane) {
+      throw new Error("Geovane Borges nao encontrado na unidade canonica");
+    }
+    await tx.professional.update({
+      where: { id: geovane.id },
+      data: { name: "Geovane Borges", active: true },
+    });
+
     for (const service of plan.servicesToCreate) {
       await tx.service.create({
         data: {
@@ -385,28 +401,39 @@ async function applyPlan(
       data: { active: false },
     });
 
-    const activeProfessionals = await tx.professional.findMany({
-      where: { businessId: CANONICAL_UNIT_ID, active: true },
-      select: { id: true },
+    await tx.serviceProfessional.deleteMany({
+      where: {
+        serviceId: { in: canonicalServiceIds() },
+        professionalId: { not: geovane.id },
+      },
+    });
+    await tx.serviceProfessional.deleteMany({
+      where: {
+        professionalId: geovane.id,
+        service: {
+          businessId: CANONICAL_UNIT_ID,
+          active: false,
+        },
+      },
     });
     for (const serviceId of canonicalServiceIds()) {
-      for (const professional of activeProfessionals) {
-        await tx.serviceProfessional.upsert({
-          where: {
-            serviceId_professionalId: {
-              serviceId,
-              professionalId: professional.id,
-            },
-          },
-          update: {},
-          create: {
-            id: `svc-pro-${serviceId}-${professional.id}`,
+      await tx.serviceProfessional.upsert({
+        where: {
+          serviceId_professionalId: {
             serviceId,
-            professionalId: professional.id,
+            professionalId: geovane.id,
           },
-        });
-      }
+        },
+        update: {},
+        create: {
+          id: `svc-pro-${serviceId}-${geovane.id}`,
+          serviceId,
+          professionalId: geovane.id,
+        },
+      });
     }
+    await tx.commissionRule.deleteMany({ where: { professionalId: geovane.id } });
+    await tx.businessCommissionRule.deleteMany({ where: { professionalId: geovane.id } });
 
     for (const hour of CANONICAL_BUSINESS_HOURS) {
       const existing = await tx.businessHour.findFirst({
@@ -449,7 +476,7 @@ async function applyPlan(
 }
 
 async function assertOperationalContract() {
-  const [activeServices, hours, settings] = await Promise.all([
+  const [activeServices, hours, settings, geovane] = await Promise.all([
     prisma.service.findMany({
       where: { businessId: CANONICAL_UNIT_ID, active: true },
       orderBy: { name: "asc" },
@@ -470,6 +497,18 @@ async function assertOperationalContract() {
     prisma.businessSettings.findUnique({
       where: { unitId: CANONICAL_UNIT_ID },
       select: { bufferBetweenAppointmentsMinutes: true },
+    }),
+    prisma.professional.findFirst({
+      where: { businessId: CANONICAL_UNIT_ID, name: "Geovane Borges", active: true },
+      select: {
+        id: true,
+        services: {
+          where: { serviceId: { in: canonicalServiceIds() } },
+          select: { serviceId: true },
+        },
+        commissionRules: { select: { id: true } },
+        businessCommissionRules: { select: { id: true } },
+      },
     }),
   ]);
   const activeServiceIds = activeServices.map((item) => item.id).sort();
@@ -503,6 +542,16 @@ async function assertOperationalContract() {
   }
   if (!settings || settings.bufferBetweenAppointmentsMinutes !== 0) {
     throw new Error("BusinessSettings divergente: bufferBetweenAppointmentsMinutes");
+  }
+  if (!geovane) {
+    throw new Error("Geovane Borges ativo nao encontrado na unidade canonica");
+  }
+  const linkedServiceIds = geovane.services.map((item) => item.serviceId).sort();
+  if (JSON.stringify(linkedServiceIds) !== JSON.stringify(expectedServiceIds)) {
+    throw new Error(`Vinculos de Geovane divergentes: ${linkedServiceIds.join(",")}`);
+  }
+  if (geovane.commissionRules.length || geovane.businessCommissionRules.length) {
+    throw new Error("Geovane possui regras de comissao ativas no cadastro");
   }
 }
 

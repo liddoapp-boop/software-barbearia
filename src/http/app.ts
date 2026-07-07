@@ -395,6 +395,15 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/appointments/:id/checkout") {
     return { isPublic: false, roles: ["owner", "recepcao"] };
   }
+  if (
+    route === "/appointments/walk-in" ||
+    route === "/appointments/fitting" ||
+    route === "/appointments/blocks" ||
+    route === "/appointments/blocks/:id/cancel" ||
+    route === "/appointments/:id/services"
+  ) {
+    return { isPublic: false, roles: ["owner"], unitSource: "body" };
+  }
   if (route === "/appointments/:id/complete") {
     return { isPublic: false, roles: ["owner"] };
   }
@@ -412,6 +421,15 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"], unitSource: "body" };
   }
   if (route === "/financial/commissions/:id/pay") {
+    return { isPublic: false, roles: ["owner"], unitSource: "body" };
+  }
+  if (
+    route === "/financial/daily-closing" ||
+    route === "/financial/daily-closing/:id/reopen" ||
+    route === "/financial/checkout-payments/:id/correct" ||
+    route === "/inventory/counts" ||
+    route === "/stock/movements/manual"
+  ) {
     return { isPublic: false, roles: ["owner"], unitSource: "body" };
   }
   if (route === "/sales/products") {
@@ -702,6 +720,55 @@ export function createApp() {
       ? new PrismaOperationsService(prisma)
       : new OperationsService(memoryStore);
 
+  const buildAppointmentBlockEvents = (blocks: Array<{
+    id: string;
+    unitId: string;
+    professionalId?: string | null;
+    startsAt: Date;
+    endsAt: Date;
+    isFullDay: boolean;
+    reason: string;
+  }>) =>
+    blocks.map((block) => ({
+      id: block.id,
+      unitId: block.unitId,
+      startsAt: block.startsAt,
+      endsAt: block.endsAt,
+      status: "BLOCKED",
+      label: block.isFullDay ? "Dia bloqueado" : "Horario bloqueado",
+      reason: block.reason,
+      isFullDay: block.isFullDay,
+      professionalId: block.professionalId ?? null,
+      kind: "BLOCK",
+    }));
+
+  const getActiveAppointmentBlocksForAgenda = async (input: {
+    unitId: string;
+    start?: Date;
+    end?: Date;
+  }) => {
+    if (backend === "prisma") {
+      return await prisma.appointmentBlock.findMany({
+        where: {
+          unitId: input.unitId,
+          status: "ACTIVE",
+          ...(input.start || input.end
+            ? {
+                startsAt: input.end ? { lte: input.end } : undefined,
+                endsAt: input.start ? { gte: input.start } : undefined,
+              }
+            : {}),
+        },
+        orderBy: { startsAt: "asc" },
+      });
+    }
+    return memoryStore.appointmentBlocks
+      .filter((block) => block.unitId === input.unitId && block.status === "ACTIVE")
+      .filter((block) => (!input.start ? true : block.endsAt >= input.start))
+      .filter((block) => (!input.end ? true : block.startsAt <= input.end))
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  };
+
   const app = Fastify({
     logger: httpLogEnabled
       ? {
@@ -864,7 +931,22 @@ export function createApp() {
     idempotencyKey: z.string().trim().min(1).max(160).optional(),
     changedBy: z.string().min(1),
     completedAt: z.string().datetime().optional(),
-    paymentMethod: z.string().trim().min(1, "Metodo de pagamento obrigatorio").max(60),
+    paymentMethod: z.string().trim().min(1, "Metodo de pagamento obrigatorio").max(60).optional(),
+    payments: z
+      .array(
+        z.object({
+          method: z.string().trim().min(1).max(60),
+          amount: z.number().positive(),
+          receivedAmount: z.number().positive().optional(),
+          paidAt: z.string().datetime().optional(),
+          responsible: z.string().min(1).max(120).optional(),
+          reference: z.string().max(160).optional(),
+          status: z.enum(["CONFIRMED", "FAILED"]).optional(),
+          failureReason: z.string().max(240).optional(),
+          idempotencyKey: z.string().trim().min(1).max(160).optional(),
+        }),
+      )
+      .optional(),
     expectedTotal: z.number().min(0).optional(),
     notes: z.string().max(500).optional(),
     products: z
@@ -875,6 +957,66 @@ export function createApp() {
         }),
       )
       .optional(),
+  }).refine((value) => Boolean(value.paymentMethod || value.payments?.length), {
+    message: "Informe paymentMethod ou payments para o checkout",
+  });
+
+  const walkInBaseSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    clientName: z.string().min(2).max(120),
+    clientPhone: z.string().min(8).max(30),
+    professionalId: z.string().min(1),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(1).max(6).optional(),
+    startedAt: z.string().datetime().optional(),
+    confirmOutOfHours: z.boolean().optional(),
+    changedBy: z.string().min(1),
+  });
+  const walkInSchema = walkInBaseSchema.refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
+  });
+
+  const fittingSchema = walkInBaseSchema.extend({
+    startsAt: z.string().datetime(),
+    confirmRisk: z.boolean().optional(),
+  }).omit({ startedAt: true }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
+  });
+
+  const appointmentBlockSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    professionalId: z.string().min(1).optional(),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    reason: z.string().trim().min(3).max(240),
+    isFullDay: z.boolean().optional(),
+    changedBy: z.string().min(1),
+  });
+
+  const appointmentBlockCancelSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    reason: z.string().trim().min(3).max(240),
+    changedBy: z.string().min(1),
+  });
+
+  const appointmentServicesInServiceSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1).optional(),
+    serviceId: z.string().min(1).optional(),
+    serviceIds: z.array(z.string().min(1)).min(1).max(6).optional(),
+    confirmRisk: z.boolean().optional(),
+    changedBy: z.string().min(1),
+  }).refine((value) => value.serviceId != null || value.serviceIds != null, {
+    message: "Informe ao menos um servico",
+  }).refine((value) => !(value.serviceId != null && value.serviceIds != null), {
+    message: "Informe serviceId ou serviceIds, nao ambos",
   });
 
   const dashboardSuggestionTelemetrySchema = z.object({
@@ -1678,10 +1820,13 @@ export function createApp() {
   });
 
   const stockManualMovementSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
     unitId: z.string().min(1),
     productId: z.string().min(1),
     movementType: z.enum(["IN", "OUT", "LOSS", "INTERNAL_USE"]),
     quantity: z.number().int().positive(),
+    reason: z.string().trim().min(3).max(240),
+    responsible: z.string().min(1).max(120),
     occurredAt: z.string().datetime().optional(),
     referenceType: z.enum(["ADJUSTMENT", "INTERNAL"]).optional(),
     referenceId: z.string().min(1).optional(),
@@ -1745,6 +1890,42 @@ export function createApp() {
     quantity: z.number().int().min(0),
     reason: z.string().max(240).optional(),
     changedBy: z.string().min(1),
+  });
+
+  const inventoryCountSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    productId: z.string().min(1),
+    countedQty: z.number().int().min(0),
+    reason: z.string().trim().min(3).max(240),
+    responsible: z.string().min(1).max(120),
+    countedAt: z.string().datetime().optional(),
+  });
+
+  const dailyClosingSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    informedCash: z.number().min(0).optional(),
+    informedPix: z.number().min(0).optional(),
+    informedDebit: z.number().min(0).optional(),
+    informedCredit: z.number().min(0).optional(),
+    notes: z.string().max(500).optional(),
+    responsible: z.string().min(1).max(120),
+  });
+
+  const dailyClosingReopenSchema = z.object({
+    unitId: z.string().min(1),
+    reopenedBy: z.string().min(1).max(120),
+    reason: z.string().trim().min(3).max(240),
+  });
+
+  const checkoutPaymentCorrectionSchema = z.object({
+    idempotencyKey: z.string().trim().min(1).max(160).optional(),
+    unitId: z.string().min(1),
+    reason: z.string().trim().min(3).max(240),
+    responsible: z.string().min(1).max(120),
+    correctedAt: z.string().datetime().optional(),
   });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -1903,6 +2084,9 @@ export function createApp() {
       metadata: payload.metadata,
     });
   }
+
+  const auditDateIso = (value: Date | string) =>
+    value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
   function transactionalAuditContext(request: FastifyRequest): TransactionalAuditContext | undefined {
     if (backend !== "prisma") return undefined;
@@ -2381,12 +2565,19 @@ export function createApp() {
       })
       .parse(request.query);
 
+    const date = new Date(query.date);
     const appointments = await operations.getDailyAgenda({
       unitId: query.unitId,
-      date: new Date(query.date),
+      date,
     });
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setHours(23, 59, 59, 999);
+    const blocks = await getActiveAppointmentBlocksForAgenda({ unitId: query.unitId, start, end });
+    const blockEvents = buildAppointmentBlockEvents(blocks);
     const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
-    return { appointments, workingHours };
+    return { appointments, blocks, blockEvents, workingHours };
   });
 
   app.get("/agenda/range", async (request) => {
@@ -2402,13 +2593,17 @@ export function createApp() {
       throw new Error("Operacao de agenda por periodo indisponivel");
     }
 
+    const start = new Date(query.start);
+    const end = new Date(query.end);
     const appointments = await operations.getAgendaRange({
       unitId: query.unitId,
-      start: new Date(query.start),
-      end: new Date(query.end),
+      start,
+      end,
     });
+    const blocks = await getActiveAppointmentBlocksForAgenda({ unitId: query.unitId, start, end });
+    const blockEvents = buildAppointmentBlockEvents(blocks);
     const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
-    return { appointments, workingHours };
+    return { appointments, blocks, blockEvents, workingHours };
   });
 
   app.get("/dashboard", async (request) => {
@@ -2618,6 +2813,127 @@ export function createApp() {
     return { suggestions };
   });
 
+  app.post("/appointments/walk-in", async (request, reply) => {
+    const body = walkInSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    let appointment;
+    try {
+      appointment = await operations.createWalkInAppointment({
+        unitId: body.unitId,
+        clientName: body.clientName,
+        clientPhone: body.clientPhone,
+        professionalId: body.professionalId,
+        serviceId: body.serviceId,
+        serviceIds: body.serviceIds,
+        startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
+        confirmOutOfHours: body.confirmOutOfHours,
+        changedBy: body.changedBy,
+        idempotencyKey,
+        idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/walk-in", body }),
+        audit: transactionalAuditContext(request),
+      });
+    } catch (error) {
+      const outOfHours = error as Error & {
+        code?: string;
+        businessHours?: unknown;
+        currentLocalTime?: string;
+        requiresConfirmation?: boolean;
+      };
+      if (outOfHours.code === "WALK_IN_OUTSIDE_BUSINESS_HOURS") {
+        reply.status(409).send({
+          code: outOfHours.code,
+          message: outOfHours.message,
+          businessHours: outOfHours.businessHours,
+          currentLocalTime: outOfHours.currentLocalTime,
+          requiresConfirmation: true,
+        });
+        return;
+      }
+      throw error;
+    }
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: body.unitId,
+      action: "WALK_IN_APPOINTMENT_CREATED",
+      entity: "appointment",
+      entityId: appointment.id,
+      after: {
+        origin: "Atendimento sem agendamento",
+        status: appointment.status,
+        startsAt: auditDateIso(appointment.startsAt),
+        endsAt: auditDateIso(appointment.endsAt),
+        outsideBusinessHours: Boolean(body.confirmOutOfHours),
+        confirmOutOfHours: Boolean(body.confirmOutOfHours),
+      },
+    });
+    return { appointment };
+  });
+
+  app.post("/appointments/fitting", async (request) => {
+    const body = fittingSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const result = await operations.createFittingAppointment({
+      unitId: body.unitId,
+      clientName: body.clientName,
+      clientPhone: body.clientPhone,
+      professionalId: body.professionalId,
+      serviceId: body.serviceId,
+      serviceIds: body.serviceIds,
+      startsAt: new Date(body.startsAt),
+      confirmRisk: body.confirmRisk,
+      changedBy: body.changedBy,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/fitting", body }),
+      audit: transactionalAuditContext(request),
+    });
+    return result;
+  });
+
+  app.post("/appointments/blocks", async (request) => {
+    const body = appointmentBlockSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const block = await operations.createAppointmentBlock({
+      unitId: body.unitId,
+      professionalId: body.professionalId,
+      startsAt: new Date(body.startsAt),
+      endsAt: new Date(body.endsAt),
+      reason: body.reason,
+      isFullDay: body.isFullDay,
+      changedBy: body.changedBy,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/blocks", body }),
+    });
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: body.unitId,
+      action: block.isFullDay ? "APPOINTMENT_DAY_BLOCKED" : "APPOINTMENT_TIME_BLOCKED",
+      entity: "appointment_block",
+      entityId: block.id,
+      after: (block ?? {}) as Record<string, unknown>,
+    });
+    return { block };
+  });
+
+  app.post("/appointments/blocks/:id/cancel", async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = appointmentBlockCancelSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const block = await operations.cancelAppointmentBlock({
+      unitId: body.unitId,
+      blockId: params.id,
+      changedBy: body.changedBy,
+      reason: body.reason,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/blocks/:id/cancel", params, body }),
+    });
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: body.unitId,
+      action: "APPOINTMENT_BLOCK_CANCELLED",
+      entity: "appointment_block",
+      entityId: params.id,
+      after: (block ?? {}) as Record<string, unknown>,
+    });
+    return { block };
+  });
+
   app.get("/appointments", async (request) => {
     const query = appointmentsListQuerySchema.parse(request.query);
     const now = new Date();
@@ -2682,8 +2998,10 @@ export function createApp() {
       serviceId: query.serviceId,
       search: query.search,
     });
+    const blocks = await getActiveAppointmentBlocksForAgenda({ unitId: query.unitId, start, end });
+    const blockEvents = buildAppointmentBlockEvents(blocks);
     const workingHours = await resolveWorkingHoursForUnit(query.unitId, operations);
-    return { appointments, workingHours };
+    return { appointments, blocks, blockEvents, workingHours };
   });
 
   app.get("/appointments/:id", async (request) => {
@@ -2743,6 +3061,36 @@ export function createApp() {
         professionalId: appointment.professionalId,
         clientId: appointment.clientId,
         serviceId: appointment.serviceId,
+      },
+    });
+    return { appointment };
+  });
+
+  app.patch("/appointments/:id/services", async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = appointmentServicesInServiceSchema.parse(request.body);
+    const req = request as RequestWithAuth;
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const appointment = await operations.updateAppointmentServicesInService({
+      appointmentId: params.id,
+      unitId: body.unitId ?? req.auth?.activeUnitId,
+      serviceId: body.serviceId,
+      serviceIds: body.serviceIds,
+      confirmRisk: body.confirmRisk,
+      changedBy: body.changedBy,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/appointments/:id/services", params, body }),
+    });
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_SERVICES_CHANGED_IN_SERVICE",
+      entity: "appointment",
+      entityId: appointment.id,
+      after: {
+        serviceId: appointment.serviceId,
+        totalPriceSnapshot: appointment.totalPriceSnapshot,
+        effectiveDurationMinSnapshot: appointment.effectiveDurationMinSnapshot,
+        endsAt: appointment.endsAt.toISOString(),
       },
     });
     return { appointment };
@@ -2873,7 +3221,11 @@ export function createApp() {
       unitId: req.auth?.activeUnitId,
       changedBy: body.changedBy,
       completedAt: body.completedAt ? new Date(body.completedAt) : new Date(),
-      paymentMethod: body.paymentMethod,
+      paymentMethod: body.paymentMethod ?? body.payments?.[0]?.method ?? "PIX",
+      payments: body.payments?.map((payment) => ({
+        ...payment,
+        paidAt: payment.paidAt ? new Date(payment.paidAt) : undefined,
+      })),
       expectedTotal: body.expectedTotal,
       notes: body.notes,
       products: body.products ?? [],
@@ -2899,7 +3251,13 @@ export function createApp() {
     return result;
   });
 
-  app.post("/appointments/:id/refund", async (request) => {
+  app.post("/appointments/:id/refund", async (request, reply) => {
+    if (process.env.BLOCK_COMMERCIAL_REFUNDS === "true") {
+      return reply.status(410).send({
+        error:
+          "Estorno comercial de atendimento desativado para esta unidade. Use correcao administrativa auditada.",
+      });
+    }
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = appointmentRefundSchema.parse(request.body);
     const req = request as RequestWithAuth;
@@ -2997,7 +3355,13 @@ export function createApp() {
     });
   });
 
-  app.post("/sales/products/:id/refund", async (request) => {
+  app.post("/sales/products/:id/refund", async (request, reply) => {
+    if (process.env.BLOCK_COMMERCIAL_REFUNDS === "true") {
+      return reply.status(410).send({
+        error:
+          "Devolucao comercial de produto desativada para esta unidade. Use correcao administrativa auditada.",
+      });
+    }
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const body = productSaleRefundSchema.parse(request.body);
     const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
@@ -3256,6 +3620,30 @@ export function createApp() {
     return result;
   });
 
+  app.post("/financial/checkout-payments/:id/correct", async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = checkoutPaymentCorrectionSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const result = await operations.correctCheckoutPayment({
+      unitId: body.unitId,
+      paymentId: params.id,
+      reason: body.reason,
+      responsible: body.responsible,
+      correctedAt: body.correctedAt ? new Date(body.correctedAt) : undefined,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/financial/checkout-payments/:id/correct", params, body }),
+      audit: transactionalAuditContext(request),
+    });
+    if (backend !== "prisma") await recordAudit(request, {
+      unitId: body.unitId,
+      action: "CHECKOUT_PAYMENT_ADMIN_CORRECTED",
+      entity: "checkout_payment",
+      entityId: params.id,
+      after: result,
+    });
+    return result;
+  });
+
   app.get("/financial/reports", async (request) => {
     const query = financialReportsQuerySchema.parse(request.query);
     return await operations.getFinancialReports({
@@ -3263,6 +3651,50 @@ export function createApp() {
       start: new Date(query.start),
       end: new Date(query.end),
     });
+  });
+
+  app.post("/financial/daily-closing", async (request) => {
+    const body = dailyClosingSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const result = await operations.closeDaily({
+      unitId: body.unitId,
+      businessDate: new Date(`${body.businessDate}T00:00:00.000-03:00`),
+      informedCash: body.informedCash,
+      informedPix: body.informedPix,
+      informedDebit: body.informedDebit,
+      informedCredit: body.informedCredit,
+      notes: body.notes,
+      responsible: body.responsible,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/financial/daily-closing", body }),
+    });
+    await recordAudit(request, {
+      unitId: body.unitId,
+      action: "DAILY_CLOSING_CLOSED",
+      entity: "daily_closing",
+      entityId: result.closing.id,
+      after: (result.closing ?? {}) as Record<string, unknown>,
+    });
+    return result;
+  });
+
+  app.post("/financial/daily-closing/:id/reopen", async (request) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const body = dailyClosingReopenSchema.parse(request.body);
+    const result = await operations.reopenDailyClosing({
+      unitId: body.unitId,
+      closingId: params.id,
+      reopenedBy: body.reopenedBy,
+      reason: body.reason,
+    });
+    await recordAudit(request, {
+      unitId: body.unitId,
+      action: "DAILY_CLOSING_REOPENED",
+      entity: "daily_closing",
+      entityId: params.id,
+      after: (result.closing ?? {}) as Record<string, unknown>,
+    });
+    return result;
   });
 
   app.get("/inventory", async (request) => {
@@ -3393,6 +3825,29 @@ export function createApp() {
         type: body.type,
         quantity: body.quantity,
       },
+    });
+    return result;
+  });
+
+  app.post("/inventory/counts", async (request) => {
+    const body = inventoryCountSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
+    const result = await operations.recordInventoryCount({
+      unitId: body.unitId,
+      productId: body.productId,
+      countedQty: body.countedQty,
+      reason: body.reason,
+      responsible: body.responsible,
+      countedAt: body.countedAt ? new Date(body.countedAt) : undefined,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/inventory/counts", body }),
+    });
+    await recordAudit(request, {
+      unitId: body.unitId,
+      action: "INVENTORY_PHYSICAL_COUNT_RECORDED",
+      entity: "inventory_count",
+      entityId: result.count.id,
+      after: result,
     });
     return result;
   });
@@ -3604,6 +4059,7 @@ export function createApp() {
 
   app.post("/stock/movements/manual", async (request) => {
     const body = stockManualMovementSchema.parse(request.body);
+    const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
     if (
       !("registerStockManualMovement" in operations) ||
       typeof operations.registerStockManualMovement !== "function"
@@ -3618,7 +4074,12 @@ export function createApp() {
       quantity: body.quantity,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : new Date(),
       referenceType: body.referenceType,
-      referenceId: body.referenceId,
+      referenceId: body.referenceId ?? body.reason,
+      reason: body.reason,
+      responsible: body.responsible,
+      changedBy: body.changedBy,
+      idempotencyKey,
+      idempotencyPayloadHash: getIdempotencyPayloadHash({ route: "/stock/movements/manual", body }),
     });
     await recordAudit(request, {
       unitId: body.unitId,
@@ -3629,6 +4090,8 @@ export function createApp() {
         productId: body.productId,
         movementType: body.movementType,
         quantity: body.quantity,
+        reason: body.reason,
+        responsible: body.responsible,
         stockQty: result.product.stockQty,
       },
     });
@@ -4561,13 +5024,18 @@ export function createApp() {
         include: {
           professional: { select: { id: true, name: true } },
         },
+        orderBy: [{ professional: { name: "asc" } }, { professionalId: "asc" }],
       });
       return sortPublicProfessionals(
-        rows
-          .map((row) => ({
+        Array.from(
+          new Map(rows.map((row) => [
+            row.professional.id,
+            {
             id: row.professional.id,
             name: row.professional.name,
-          }))
+            },
+          ])).values(),
+        )
           .filter(isPublicOperationalProfessional),
       );
     }
@@ -4613,7 +5081,8 @@ export function createApp() {
     const queryStart = new Date(start.getTime() - bufferMs);
     const queryEnd = new Date(end.getTime() + bufferMs);
     if (backend === "prisma") {
-      return await prisma.appointment.findMany({
+      const [appointments, blocks] = await Promise.all([
+        prisma.appointment.findMany({
         where: {
           unitId,
           professionalId: { in: professionalIds },
@@ -4622,9 +5091,30 @@ export function createApp() {
           status: { in: activeAppointmentStatuses },
         },
         select: { professionalId: true, startsAt: true, endsAt: true },
-      });
+        }),
+        prisma.appointmentBlock.findMany({
+          where: {
+            unitId,
+            status: "ACTIVE",
+            startsAt: { lt: queryEnd },
+            endsAt: { gt: queryStart },
+            OR: [{ professionalId: null }, { professionalId: { in: professionalIds } }],
+          },
+          select: { professionalId: true, startsAt: true, endsAt: true },
+        }),
+      ]);
+      return [
+        ...appointments,
+        ...blocks.flatMap((block) =>
+          (block.professionalId ? [block.professionalId] : professionalIds).map((professionalId) => ({
+            professionalId,
+            startsAt: block.startsAt,
+            endsAt: block.endsAt,
+          })),
+        ),
+      ];
     }
-    return memoryStore.appointments
+    const appointmentSlots = memoryStore.appointments
       .filter(
         (item) =>
           item.unitId === unitId &&
@@ -4638,6 +5128,23 @@ export function createApp() {
         startsAt: item.startsAt,
         endsAt: item.endsAt,
       }));
+    const blockSlots = memoryStore.appointmentBlocks
+      .filter(
+        (block) =>
+          block.unitId === unitId &&
+          block.status === "ACTIVE" &&
+          block.startsAt < queryEnd &&
+          block.endsAt > queryStart &&
+          (!block.professionalId || professionalIds.includes(block.professionalId)),
+      )
+      .flatMap((block) =>
+        (block.professionalId ? [block.professionalId] : professionalIds).map((professionalId) => ({
+          professionalId,
+          startsAt: block.startsAt,
+          endsAt: block.endsAt,
+        })),
+      );
+    return [...appointmentSlots, ...blockSlots];
   };
 
   const isProfessionalAvailableFromBusySlots = (

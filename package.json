@@ -17,6 +17,8 @@
     "deploy": "npm run build && npx prisma generate && npx prisma migrate deploy",
     "canonicals:dry-run": "tsx scripts/provision-canonicals-local.ts --dry-run --target=local",
     "canonicals:apply:local": "tsx scripts/provision-canonicals-local.ts --apply --target=local",
+    "macro233:cleanup:dry-run": "tsx scripts/cleanup-macro-233-local.ts --dry-run",
+    "macro233:cleanup:apply:local": "tsx scripts/cleanup-macro-233-local.ts --apply",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:demo": "tsx prisma/demo-seed.ts",
     "db:up": "docker compose up -d postgres",

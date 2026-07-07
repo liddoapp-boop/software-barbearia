@@ -2,6 +2,7 @@ import { BarbershopEngine } from "./barbershop-engine";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import {
   Appointment,
+  AppointmentBlock,
   AppointmentStatus,
   AppointmentServiceItem,
   AuditEvent,
@@ -28,6 +29,9 @@ import {
   AuditReportPayload,
   BillingReconciliationDiscrepancy,
   CommissionEntry,
+  CheckoutPayment,
+  CheckoutPaymentMethod,
+  DailyClosing,
   DashboardSuggestionTelemetryEvent,
   DashboardSuggestionTelemetryOutcome,
   ClientsOverviewPayload,
@@ -52,21 +56,28 @@ import {
   Service,
   ServiceStockConsumptionItem,
   StockReportPayload,
+  StockInventoryCount,
+  StockMovement,
 } from "../domain/types";
 import {
-  ACTIVE_APPOINTMENT_CONFLICT_STATUSES,
   buildCommissionPaymentExpenseEntry,
   buildProductRefundExpenseEntry,
   buildServiceRevenueEntry,
   buildServiceRefundExpenseEntry,
   buildStockMovementsFromProductRefund,
   calculateServiceCommission,
+  blockAppliesToProfessional,
   hasAppointmentConflict,
+  intervalsOverlap,
+  isActiveAppointmentBlock,
+  isActiveAppointmentConflictStatus,
   assertAppointmentCanBeRescheduled,
   assertAppointmentTransitionAllowed,
   assertAppointmentCanBeUpdated,
   assertNoShowToleranceElapsed,
   validateAppointmentSchedulingWindow,
+  describeBusinessHourAt,
+  WalkInOutsideBusinessHoursError,
 } from "../domain/rules";
 import {
   calculateAppointmentServicesTotal,
@@ -141,6 +152,31 @@ function timeToMinutes(value?: string) {
   if (!normalized) return null;
   const [hh, mm] = normalized.split(":").map((item) => Number(item));
   return hh * 60 + mm;
+}
+
+function roundMoney(value: number) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function normalizePaymentMethod(value: string): CheckoutPaymentMethod {
+  const normalized = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[\s_-]+/g, "");
+  if (normalized === "DINHEIRO" || normalized === "CASH") return "CASH";
+  if (normalized === "PIX") return "PIX";
+  if (normalized === "DEBITO" || normalized === "DEBIT" || normalized === "CARTAODEDEBITO") return "DEBIT";
+  if (normalized === "CREDITO" || normalized === "CREDIT" || normalized === "CARTAODECREDITO") return "CREDIT";
+  throw new Error("Metodo de pagamento deve ser dinheiro, PIX, debito ou credito");
+}
+
+function paymentMethodLabel(method: CheckoutPaymentMethod) {
+  if (method === "CASH") return "Dinheiro";
+  if (method === "PIX") return "PIX";
+  if (method === "DEBIT") return "Debito";
+  return "Credito";
 }
 
 export class OperationsService {
@@ -244,6 +280,34 @@ export class OperationsService {
     return "Movimentacao de estoque";
   }
 
+  private getActiveBlocksForRange(input: {
+    unitId: string;
+    professionalId?: string;
+    startsAt: Date;
+    endsAt: Date;
+  }) {
+    return this.store.appointmentBlocks.filter((block) => (
+      block.unitId === input.unitId &&
+      isActiveAppointmentBlock(block) &&
+      blockAppliesToProfessional(block, input.professionalId) &&
+      intervalsOverlap(block, input)
+    ));
+  }
+
+  private assertNoScheduleBlockConflict(input: {
+    unitId: string;
+    professionalId?: string;
+    startsAt: Date;
+    endsAt: Date;
+  }) {
+    const conflicts = this.getActiveBlocksForRange(input);
+    if (!conflicts.length) return;
+    const block = conflicts[0];
+    throw new Error(
+      `${block.isFullDay ? "Dia bloqueado" : "Horario bloqueado"}: ${block.reason}`,
+    );
+  }
+
   private mapInventoryProduct(
     product: Product,
     unitId: string,
@@ -276,16 +340,6 @@ export class OperationsService {
 
   getCatalog(input?: { unitId?: string }) {
     const unitId = input?.unitId;
-    const serviceIds = new Set(
-      this.store.services
-        .filter((service) => !unitId || this.isServiceFromUnit(service, unitId))
-        .map((service) => service.id),
-    );
-    const professionalIds = new Set(
-      this.store.serviceProfessionalAssignments
-        .filter((assignment) => serviceIds.has(assignment.serviceId))
-        .map((assignment) => assignment.professionalId),
-    );
     return {
       services: (unitId
         ? this.store.services.filter((service) => this.isServiceFromUnit(service, unitId))
@@ -298,9 +352,9 @@ export class OperationsService {
       professionals: unitId
         ? this.store.professionals.filter(
             (professional) =>
-              professional.businessId === unitId || professionalIds.has(professional.id),
+              professional.businessId === unitId && professional.active,
           )
-        : this.store.professionals,
+        : this.store.professionals.filter((professional) => professional.active),
       clients: unitId
         ? this.store.clients.filter((client) => ((client as typeof client & { businessId?: string }).businessId ?? unitId) === unitId)
         : this.store.clients,
@@ -1920,6 +1974,74 @@ export class OperationsService {
     };
   }
 
+  recordInventoryCount(input: {
+    unitId: string;
+    productId: string;
+    countedQty: number;
+    reason: string;
+    responsible: string;
+    countedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const product = this.store.products.find(
+      (item) =>
+        item.id === input.productId &&
+        item.active &&
+        ((item as Product & { businessId?: string }).businessId ?? input.unitId) === input.unitId,
+    );
+    if (!product) throw new Error("Produto nao encontrado ou inativo");
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do inventario fisico e obrigatorio");
+    const countedQty = Math.trunc(Number(input.countedQty));
+    if (!Number.isFinite(countedQty) || countedQty < 0) throw new Error("Quantidade contada invalida");
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "INVENTORY_COUNT_RECORD",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<{ count: StockInventoryCount; movement?: StockMovement }>(scope);
+    if (replay) return replay;
+    const expectedQty = Number(product.stockQty || 0);
+    const differenceQty = countedQty - expectedQty;
+    const count: StockInventoryCount = {
+      id: crypto.randomUUID(),
+      unitId: input.unitId,
+      productId: product.id,
+      expectedQty,
+      countedQty,
+      differenceQty,
+      reason,
+      responsible: input.responsible,
+      countedAt: input.countedAt ?? new Date(),
+      status: differenceQty === 0 ? "RECORDED" : "APPLIED",
+      idempotencyKey: scope?.idempotencyKey,
+    };
+    let movement: StockMovement | undefined;
+    this.startMemoryIdempotency(scope);
+    if (differenceQty !== 0) {
+      movement = {
+        id: crypto.randomUUID(),
+        unitId: input.unitId,
+        productId: product.id,
+        movementType: differenceQty > 0 ? "IN" : "OUT",
+        quantity: Math.abs(differenceQty),
+        occurredAt: count.countedAt,
+        referenceType: "INVENTORY_COUNT",
+        referenceId: count.id,
+      };
+      count.movementId = movement.id;
+      product.stockQty = countedQty;
+      this.store.stockMovements.push(movement);
+    }
+    this.store.inventoryCounts.push(count);
+    const response = { count, movement };
+    this.finishMemoryIdempotency(scope, response);
+    return response;
+  }
+
   getServiceStockConsumption(input: {
     unitId: string;
     serviceId: string;
@@ -1992,11 +2114,15 @@ export class OperationsService {
     serviceId?: string;
     serviceIds?: string[];
     startsAt: Date;
+    operationNow?: Date;
+    immediateStart?: boolean;
+    allowOutOfHoursOverride?: boolean;
     bufferAfterMin?: number;
     isFitting?: boolean;
     notes?: string;
     changedBy: string;
   }) {
+    const operationNow = input.operationNow ?? new Date();
     const serviceIds = this.resolveAppointmentServiceIds(input);
     const services = this.resolveServicesForAppointment({ unitId: input.unitId, serviceIds });
 
@@ -2039,6 +2165,15 @@ export class OperationsService {
       settings,
       businessHours,
       timezone,
+      now: operationNow,
+      immediateStart: input.immediateStart,
+      allowOutOfHoursOverride: input.allowOutOfHoursOverride,
+    });
+    this.assertNoScheduleBlockConflict({
+      unitId: input.unitId,
+      professionalId: professional.id,
+      startsAt: input.startsAt,
+      endsAt: expectedEnd,
     });
     const conflict = hasAppointmentConflict({
       businessId: input.unitId,
@@ -2055,7 +2190,7 @@ export class OperationsService {
       ),
       bufferAfterMin,
     });
-    if (conflict && !settings.allowOverbooking) {
+    if (conflict && !settings.allowOverbooking && !input.isFitting) {
       throw new Error("Conflito de horario detectado para o profissional");
     }
 
@@ -2081,7 +2216,7 @@ export class OperationsService {
       serviceItems,
       history: [
         {
-          changedAt: new Date(),
+          changedAt: operationNow,
           changedBy: input.changedBy,
           action: "CREATED",
         },
@@ -2127,6 +2262,389 @@ export class OperationsService {
     };
   }
 
+  createWalkInAppointment(input: {
+    unitId: string;
+    clientName: string;
+    clientPhone: string;
+    professionalId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    startedAt?: Date;
+    isFitting?: boolean;
+    originLabel?: string;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+    confirmOutOfHours?: boolean;
+  }) {
+    const normalizedPhone = normalizeClientPhone(input.clientPhone);
+    if (!normalizedPhone) throw new Error("Telefone obrigatorio para atendimento sem agendamento");
+    if (!isValidClientPhone(normalizedPhone)) throw new Error("Telefone invalido. Informe um telefone com DDD");
+    const operationNow = new Date();
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "WALK_IN_APPOINTMENT_CREATE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<Appointment>(scope);
+    if (replay) return replay;
+
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const services = this.resolveServicesForAppointment({ unitId: input.unitId, serviceIds });
+    const professional = this.store.professionals.find(
+      (item) => item.id === input.professionalId && item.businessId === input.unitId,
+    );
+    if (!professional || !professional.active) {
+      throw new Error("Profissional nao encontrado ou inativo");
+    }
+    this.assertProfessionalCanExecuteServices(serviceIds, professional.id);
+    const settings = this.ensureBusinessSettings(input.unitId);
+    const businessHours = this.ensureBusinessHours(input.unitId);
+    const timezone = this.store.units.find((item) => item.id === input.unitId)?.timezone;
+    const serviceItemsPreview = this.buildAppointmentServiceItems({ appointmentId: "walk-in-preview", services });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItemsPreview,
+      activeRules: this.store.serviceCombinationRules.filter(
+        (rule) => rule.unitId === input.unitId && rule.active,
+      ),
+    });
+    const endsAt = new Date(operationNow.getTime() + duration.effectiveDurationMin * 60_000);
+    try {
+      validateAppointmentSchedulingWindow({
+        unitId: input.unitId,
+        startsAt: operationNow,
+        endsAt,
+        serviceDurationMin: duration.effectiveDurationMin,
+        bufferAfterMin: settings.bufferBetweenAppointmentsMinutes,
+        settings,
+        businessHours,
+        timezone,
+        now: operationNow,
+        immediateStart: true,
+        allowOutOfHoursOverride: Boolean(input.confirmOutOfHours),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!input.confirmOutOfHours && /expediente|fechad|intervalo|atravessar/i.test(message)) {
+        throw new WalkInOutsideBusinessHoursError(
+          describeBusinessHourAt({ instant: operationNow, businessHours, timezone }),
+        );
+      }
+      throw error;
+    }
+
+    let client = this.store.clients.find(
+      (item) => (item.businessId ?? "unit-01") === input.unitId && normalizeClientPhone(item.phone ?? "") === normalizedPhone,
+    );
+    if (!client) {
+      client = {
+        id: crypto.randomUUID(),
+        businessId: input.unitId,
+        fullName: String(input.clientName || "").trim() || `Cliente ${normalizedPhone}`,
+        phone: normalizedPhone,
+        tags: ["NEW"],
+      };
+      this.store.clients.push(client);
+    }
+
+    this.startMemoryIdempotency(scope);
+    try {
+      const appointment = this.schedule({
+        unitId: input.unitId,
+        clientId: client.id,
+        professionalId: input.professionalId,
+        serviceId: input.serviceId,
+        serviceIds: input.serviceIds,
+        startsAt: operationNow,
+        operationNow,
+        immediateStart: true,
+        allowOutOfHoursOverride: Boolean(input.confirmOutOfHours),
+        isFitting: Boolean(input.isFitting),
+        notes: input.originLabel ?? "Atendimento sem agendamento",
+        changedBy: input.changedBy,
+      });
+      const inService: Appointment = {
+        ...appointment,
+        status: "IN_SERVICE",
+        history: [
+          ...appointment.history,
+          {
+            changedAt: operationNow,
+            changedBy: input.changedBy,
+            action: "CHECKED_IN",
+            reason: input.originLabel ?? "Atendimento sem agendamento",
+          },
+        ],
+      };
+      this.replaceAppointment(inService);
+      this.finishMemoryIdempotency(scope, inService);
+      return inService;
+    } catch (error) {
+      this.clearMemoryIdempotency(scope);
+      throw error;
+    }
+  }
+
+  createAppointmentBlock(input: {
+    unitId: string;
+    professionalId?: string;
+    startsAt: Date;
+    endsAt: Date;
+    reason: string;
+    isFullDay?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do bloqueio e obrigatorio");
+    if (!(input.startsAt instanceof Date) || Number.isNaN(input.startsAt.getTime())) {
+      throw new Error("Inicio do bloqueio invalido");
+    }
+    if (!(input.endsAt instanceof Date) || Number.isNaN(input.endsAt.getTime()) || input.endsAt <= input.startsAt) {
+      throw new Error("Fim do bloqueio deve ser posterior ao inicio");
+    }
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "APPOINTMENT_BLOCK_CREATE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<AppointmentBlock>(scope);
+    if (replay) return replay;
+
+    const appointmentConflict = this.store.appointments.find(
+      (appointment) =>
+        appointment.unitId === input.unitId &&
+        (!input.professionalId || appointment.professionalId === input.professionalId) &&
+        isActiveAppointmentConflictStatus(appointment.status) &&
+        intervalsOverlap(appointment, input),
+    );
+    if (appointmentConflict) {
+      throw new Error(
+        `Conflito com atendimento ${appointmentConflict.id} de ${appointmentConflict.startsAt.toISOString()} ate ${appointmentConflict.endsAt.toISOString()}`,
+      );
+    }
+    this.assertNoScheduleBlockConflict({
+      unitId: input.unitId,
+      professionalId: input.professionalId,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+    });
+
+    const now = new Date();
+    const block: AppointmentBlock = {
+      id: crypto.randomUUID(),
+      unitId: input.unitId,
+      professionalId: input.professionalId,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      isFullDay: Boolean(input.isFullDay),
+      reason,
+      status: "ACTIVE",
+      createdBy: input.changedBy,
+      idempotencyKey: scope?.idempotencyKey,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.startMemoryIdempotency(scope);
+    this.store.appointmentBlocks.push(block);
+    this.finishMemoryIdempotency(scope, block);
+    return block;
+  }
+
+  cancelAppointmentBlock(input: {
+    unitId: string;
+    blockId: string;
+    changedBy: string;
+    reason: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo do desbloqueio e obrigatorio");
+    const block = this.store.appointmentBlocks.find(
+      (item) => item.id === input.blockId && item.unitId === input.unitId,
+    );
+    if (!block) throw new Error("Bloqueio nao encontrado");
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "APPOINTMENT_BLOCK_CANCEL",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<AppointmentBlock>(scope);
+    if (replay) return replay;
+    if (block.status === "CANCELLED") return block;
+    this.startMemoryIdempotency(scope);
+    block.status = "CANCELLED";
+    block.cancelledAt = new Date();
+    block.cancelledBy = input.changedBy;
+    block.cancelReason = reason;
+    block.updatedAt = block.cancelledAt;
+    this.finishMemoryIdempotency(scope, block);
+    return block;
+  }
+
+  createFittingAppointment(input: {
+    unitId: string;
+    clientName: string;
+    clientPhone: string;
+    professionalId: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    startsAt: Date;
+    confirmRisk?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const preview = this.previewAppointmentServices({
+      unitId: input.unitId,
+      serviceId: input.serviceId,
+      serviceIds: input.serviceIds,
+    });
+    const endsAt = new Date(input.startsAt.getTime() + preview.effectiveDurationMin * 60_000);
+    const conflicts = this.store.appointments.filter(
+      (appointment) =>
+        appointment.unitId === input.unitId &&
+        appointment.professionalId === input.professionalId &&
+        isActiveAppointmentConflictStatus(appointment.status) &&
+        intervalsOverlap(appointment, { startsAt: input.startsAt, endsAt }),
+    );
+    if (conflicts.length && !input.confirmRisk) {
+      return {
+        requiresConfirmation: true,
+        durationMin: preview.effectiveDurationMin,
+        conflicts: conflicts.map((item) => ({
+          appointmentId: item.id,
+          startsAt: item.startsAt,
+          endsAt: item.endsAt,
+        })),
+      };
+    }
+    const appointment = this.createWalkInAppointment({
+      unitId: input.unitId,
+      clientName: input.clientName,
+      clientPhone: input.clientPhone,
+      professionalId: input.professionalId,
+      serviceId: input.serviceId,
+      serviceIds: input.serviceIds,
+      startedAt: input.startsAt,
+      isFitting: true,
+      originLabel: "Encaixe",
+      changedBy: input.changedBy,
+      idempotencyKey: input.idempotencyKey,
+      idempotencyPayloadHash: input.idempotencyPayloadHash,
+    });
+    const updated: Appointment = {
+      ...appointment,
+      isFitting: true,
+      notes: [appointment.notes, "Encaixe"].filter(Boolean).join(" - "),
+      history: [
+        ...appointment.history,
+        {
+          changedAt: new Date(),
+          changedBy: input.changedBy,
+          action: "CREATED",
+          reason: conflicts.length
+            ? `Encaixe com conflito aceito: ${conflicts.map((item) => item.id).join(", ")}`
+            : "Encaixe",
+        },
+      ],
+    };
+    this.replaceAppointment(updated);
+    return { appointment: updated, conflictsAccepted: conflicts.map((item) => item.id) };
+  }
+
+  updateAppointmentServicesInService(input: {
+    appointmentId: string;
+    unitId?: string;
+    serviceIds?: string[];
+    serviceId?: string;
+    confirmRisk?: boolean;
+    changedBy: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const appointment = this.store.appointments.find((item) => item.id === input.appointmentId);
+    if (!appointment) throw new Error("Agendamento nao encontrado");
+    if (input.unitId && appointment.unitId !== input.unitId) throw new Error("Unidade nao autorizada");
+    if (appointment.status === "COMPLETED") throw new Error("Atendimento finalizado nao permite alterar servicos");
+    if (appointment.status !== "IN_SERVICE") throw new Error("Alteracao de servicos exige atendimento em andamento");
+    const scope = this.idempotencyScope({
+      unitId: appointment.unitId,
+      action: "APPOINTMENT_SERVICES_IN_SERVICE_UPDATE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<Appointment>(scope);
+    if (replay) return replay;
+
+    const serviceIds = this.resolveAppointmentServiceIds(input);
+    const services = this.resolveServicesForAppointment({ unitId: appointment.unitId, serviceIds });
+    const serviceItems = this.buildAppointmentServiceItems({ appointmentId: appointment.id, services });
+    const duration = resolveEffectiveAppointmentDuration({
+      items: serviceItems,
+      activeRules: this.store.serviceCombinationRules.filter(
+        (rule) => rule.unitId === appointment.unitId && rule.active,
+      ),
+    });
+    const nextEndsAt = new Date(appointment.startsAt.getTime() + duration.effectiveDurationMin * 60_000);
+    const conflicts = this.store.appointments.filter(
+      (item) =>
+        item.unitId === appointment.unitId &&
+        item.id !== appointment.id &&
+        item.professionalId === appointment.professionalId &&
+        isActiveAppointmentConflictStatus(item.status) &&
+        intervalsOverlap(item, { startsAt: appointment.startsAt, endsAt: nextEndsAt }),
+    );
+    if (conflicts.length && !input.confirmRisk) {
+      const conflict = conflicts[0];
+      throw new Error(
+        `Novo termino conflita com atendimento ${conflict.id} de ${conflict.startsAt.toISOString()} ate ${conflict.endsAt.toISOString()}`,
+      );
+    }
+    const primaryServiceId = resolveLegacyPrimaryServiceId(serviceItems);
+    const primary = serviceItems.find((item) => item.serviceId === primaryServiceId)!;
+    this.startMemoryIdempotency(scope);
+    this.store.appointmentServiceItems = this.store.appointmentServiceItems.filter(
+      (item) => item.appointmentId !== appointment.id,
+    );
+    this.store.appointmentServiceItems.push(...serviceItems);
+    const updated: Appointment = {
+      ...appointment,
+      serviceId: primaryServiceId,
+      endsAt: nextEndsAt,
+      serviceNameSnapshot: primary.serviceNameSnapshot,
+      servicePriceSnapshot: primary.servicePriceSnapshot,
+      serviceDurationMinSnapshot: primary.serviceDurationMinSnapshot,
+      totalPriceSnapshot: calculateAppointmentServicesTotal(serviceItems),
+      effectiveDurationMinSnapshot: duration.effectiveDurationMin,
+      durationCalculationMode: duration.calculationMode,
+      durationRuleIdSnapshot: duration.matchedRuleId,
+      durationRuleLabelSnapshot: duration.matchedRuleLabel,
+      serviceItems,
+      history: [
+        ...appointment.history,
+        {
+          changedAt: new Date(),
+          changedBy: input.changedBy,
+          action: "RESCHEDULED",
+          reason: "Servicos alterados durante atendimento",
+        },
+      ],
+    };
+    this.replaceAppointment(updated);
+    this.finishMemoryIdempotency(scope, updated);
+    return updated;
+  }
+
   reschedule(input: {
     appointmentId: string;
     unitId?: string;
@@ -2165,6 +2683,12 @@ export class OperationsService {
     const bufferAfterMin = settings.bufferBetweenAppointmentsMinutes;
     const newEnd = new Date(input.startsAt.getTime() + effectiveDurationMin * 60_000);
     const newBusyEnd = new Date(newEnd.getTime() + bufferAfterMin * 60_000);
+    this.assertNoScheduleBlockConflict({
+      unitId: appointment.unitId,
+      professionalId: appointment.professionalId,
+      startsAt: input.startsAt,
+      endsAt: newEnd,
+    });
 
     this.startMemoryIdempotency(scope);
     try {
@@ -2565,6 +3089,17 @@ export class OperationsService {
     changedBy: string;
     completedAt: Date;
     paymentMethod: string;
+    payments?: Array<{
+      method: string;
+      amount: number;
+      receivedAmount?: number;
+      paidAt?: Date;
+      responsible?: string;
+      reference?: string;
+      status?: "CONFIRMED" | "FAILED";
+      failureReason?: string;
+      idempotencyKey?: string;
+    }>;
     expectedTotal?: number;
     notes?: string;
     products?: Array<{
@@ -2691,17 +3226,118 @@ export class OperationsService {
       }
 
       const productSubtotal = Number((saleResult?.revenue.amount ?? 0).toFixed(2));
+      const checkoutTotal = roundMoney(serviceSubtotal + productSubtotal);
+      const rawPayments =
+        Array.isArray(input.payments) && input.payments.length
+          ? input.payments
+          : [
+              {
+                method: paymentMethod,
+                amount: checkoutTotal,
+                paidAt: input.completedAt,
+                responsible: input.changedBy,
+                status: "CONFIRMED" as const,
+              },
+            ];
+      const normalizedPayments = rawPayments.map((item, index) => {
+        const method = normalizePaymentMethod(item.method);
+        const amount = roundMoney(Number(item.amount));
+        const receivedAmount =
+          item.receivedAmount == null ? amount : roundMoney(Number(item.receivedAmount));
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new Error("Valor de pagamento deve ser maior que zero");
+        }
+        if (receivedAmount < amount) {
+          throw new Error("Valor recebido nao pode ser menor que o valor da parcela");
+        }
+        const changeAmount = method === "CASH" ? roundMoney(receivedAmount - amount) : 0;
+        if (method !== "CASH" && receivedAmount > amount) {
+          throw new Error("Valor maior que o total so e permitido em dinheiro com troco");
+        }
+        return {
+          id: crypto.randomUUID(),
+          unitId: appointment.unitId,
+          checkoutId: "",
+          method,
+          amount,
+          receivedAmount,
+          changeAmount,
+          paidAt: item.paidAt ?? input.completedAt,
+          responsible: String(item.responsible || input.changedBy),
+          reference: item.reference,
+          status: item.status ?? "CONFIRMED",
+          failureReason: item.failureReason,
+          idempotencyKey: item.idempotencyKey ?? (checkoutScope ? `${checkoutScope.idempotencyKey}:payment:${index}` : undefined),
+        } satisfies CheckoutPayment;
+      });
+      const failedPayments = normalizedPayments.filter((item) => item.status === "FAILED");
+      const confirmedPayments = normalizedPayments.filter((item) => item.status === "CONFIRMED");
+      const paidAmount = roundMoney(confirmedPayments.reduce((acc, item) => acc + item.amount, 0));
+      const changeAmount = roundMoney(confirmedPayments.reduce((acc, item) => acc + item.changeAmount, 0));
+      const checkoutId = crypto.randomUUID();
+      const checkout = {
+        id: checkoutId,
+        unitId: appointment.unitId,
+        appointmentId: appointment.id,
+        status: paidAmount >= checkoutTotal && failedPayments.length === 0 ? "PAID" as const : "OPEN" as const,
+        totalAmount: checkoutTotal,
+        serviceAmount: serviceSubtotal,
+        productAmount: productSubtotal,
+        paidAmount,
+        changeAmount,
+        openedAt: input.completedAt,
+        paidAt: paidAmount >= checkoutTotal && failedPayments.length === 0 ? input.completedAt : undefined,
+        changedBy: input.changedBy,
+        idempotencyKey: checkoutScope?.idempotencyKey,
+        payments: normalizedPayments.map((item) => ({ ...item, checkoutId })),
+      };
+      if (failedPayments.length > 0 || paidAmount < checkoutTotal) {
+        this.store.productSales = this.store.productSales.filter((sale) => sale.id !== saleResult?.sale.id);
+        this.store.stockMovements = this.store.stockMovements.filter(
+          (movement) => movement.referenceId !== saleResult?.sale.id,
+        );
+        this.store.products = rollback.products;
+        this.store.appointmentCheckouts.push(checkout);
+        this.store.checkoutPayments.push(...checkout.payments);
+        const response = {
+          appointment,
+          checkout,
+          payments: checkout.payments,
+          serviceRevenue: undefined,
+          productRevenue: undefined,
+          sale: undefined,
+          stockMovements: [],
+          commissions: [],
+          clientMetrics: {
+            lastVisitAt: null,
+            totalSpent: 0,
+            frequency90d: 0,
+          },
+          stockConsumption: {
+            applied: false,
+            movementsCount: 0,
+            items: [],
+            warnings: failedPayments.map((item) => item.failureReason || "Pagamento falhou"),
+          },
+        };
+        this.finishMemoryIdempotency(checkoutScope, response);
+        return response;
+      }
+      if (paidAmount > checkoutTotal) {
+        throw new Error("Soma dos pagamentos nao pode ultrapassar o total do checkout");
+      }
       const serviceRevenue = buildServiceRevenueEntry({
         unitId: appointment.unitId,
         appointmentId: appointment.id,
-        amount: serviceSubtotal + productSubtotal,
+        amount: checkoutTotal,
         occurredAt: input.completedAt,
         description:
           serviceItems.length === 1
             ? `Receita de atendimento: ${serviceItems[0].serviceNameSnapshot}`
             : `Receita de atendimento: ${serviceItems.length} servicos`,
       });
-      serviceRevenue.paymentMethod = paymentMethod;
+      serviceRevenue.paymentMethod =
+        confirmedPayments.length === 1 ? paymentMethodLabel(confirmedPayments[0].method) : "Dividido";
       serviceRevenue.professionalId = appointment.professionalId;
       serviceRevenue.customerId = appointment.clientId;
       if (input.notes) serviceRevenue.notes = String(input.notes).trim();
@@ -2730,6 +3366,11 @@ export class OperationsService {
       };
       this.replaceAppointment(completedAppointment);
       this.store.financialEntries.push(serviceRevenue);
+      const financialEntryId = serviceRevenue.id;
+      this.store.appointmentCheckouts.push(checkout);
+      this.store.checkoutPayments.push(
+        ...checkout.payments.map((item) => ({ ...item, financialEntryId })),
+      );
       this.store.commissionEntries.push(...serviceCommissions);
       const stockConsumptionItems = serviceItems.flatMap((item) => {
         const consumption = this.applyServiceStockConsumption({
@@ -2771,6 +3412,8 @@ export class OperationsService {
 
       const response = {
         appointment: completedAppointment,
+        checkout,
+        payments: checkout.payments.map((item) => ({ ...item, financialEntryId })),
         serviceRevenue,
         productRevenue: saleResult?.revenue,
         sale: saleResult?.sale,
@@ -2800,6 +3443,79 @@ export class OperationsService {
       this.clearMemoryIdempotency(checkoutScope);
       throw error;
     }
+  }
+
+  correctCheckoutPayment(input: {
+    unitId: string;
+    paymentId: string;
+    reason: string;
+    responsible: string;
+    correctedAt?: Date;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo da correcao administrativa e obrigatorio");
+    const original = this.store.checkoutPayments.find(
+      (item) => item.id === input.paymentId && item.unitId === input.unitId,
+    );
+    if (!original) throw new Error("Pagamento nao encontrado");
+    if (original.status !== "CONFIRMED") throw new Error("Apenas pagamento confirmado pode ser corrigido");
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "CHECKOUT_PAYMENT_ADMIN_CORRECTION",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<{ correction: CheckoutPayment; financialEntry: FinancialEntry }>(scope);
+    if (replay) return replay;
+    const existing = this.store.checkoutPayments.find(
+      (item) => item.reversedPaymentId === original.id && item.status === "REVERSED",
+    );
+    if (existing) {
+      const financialEntry = this.store.financialEntries.find((entry) => entry.referenceId === existing.id);
+      return { correction: existing, financialEntry };
+    }
+    const correctedAt = input.correctedAt ?? new Date();
+    const correction: CheckoutPayment = {
+      id: crypto.randomUUID(),
+      unitId: input.unitId,
+      checkoutId: original.checkoutId,
+      method: original.method,
+      amount: original.amount,
+      receivedAmount: original.receivedAmount,
+      changeAmount: original.changeAmount,
+      paidAt: correctedAt,
+      responsible: input.responsible,
+      reference: original.reference,
+      status: "REVERSED",
+      reversedPaymentId: original.id,
+      reversalReason: reason,
+      idempotencyKey: scope?.idempotencyKey,
+    };
+    const financialEntry: FinancialEntry = {
+      id: crypto.randomUUID(),
+      unitId: input.unitId,
+      kind: "EXPENSE",
+      source: "REFUND",
+      category: "CORRECAO_ADMINISTRATIVA",
+      paymentMethod: paymentMethodLabel(original.method),
+      amount: original.amount,
+      occurredAt: correctedAt,
+      referenceType: "CHECKOUT_PAYMENT",
+      referenceId: correction.id,
+      description: "Correcao administrativa de pagamento",
+      notes: `originalPaymentId=${original.id}; reason=${reason}`,
+      createdAt: correctedAt,
+      updatedAt: correctedAt,
+    };
+    this.startMemoryIdempotency(scope);
+    this.store.checkoutPayments.push(correction);
+    this.store.financialEntries.push(financialEntry);
+    const response = { correction, financialEntry };
+    this.finishMemoryIdempotency(scope, response);
+    return response;
   }
 
   refundAppointment(input: {
@@ -3147,7 +3863,25 @@ export class OperationsService {
     occurredAt: Date;
     referenceType?: "ADJUSTMENT" | "INTERNAL";
     referenceId?: string;
+    reason?: string;
+    responsible?: string;
+    changedBy?: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
   }) {
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "STOCK_MANUAL_MOVEMENT",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<{
+      movement: StockMovement;
+      product: { id: string; name: string; stockQty: number };
+    }>(scope);
+    if (replay) return replay;
+
     const product = this.store.products.find(
       (item) =>
         item.id === input.productId &&
@@ -3164,6 +3898,8 @@ export class OperationsService {
       throw new Error("Saldo insuficiente para movimentacao de saida");
     }
 
+    this.startMemoryIdempotency(scope);
+
     if (input.movementType === "IN") {
       product.stockQty += quantity;
     } else {
@@ -3178,10 +3914,10 @@ export class OperationsService {
       quantity,
       occurredAt: input.occurredAt,
       referenceType: input.referenceType ?? "ADJUSTMENT",
-      referenceId: input.referenceId,
+      referenceId: input.referenceId ?? input.reason,
     };
     this.store.stockMovements.push(movement);
-    return {
+    const response = {
       movement,
       product: {
         id: product.id,
@@ -3189,6 +3925,8 @@ export class OperationsService {
         stockQty: product.stockQty,
       },
     };
+    this.finishMemoryIdempotency(scope, response);
+    return response;
   }
 
   private normalizeTransactionSource(source?: string) {
@@ -5420,6 +6158,107 @@ export class OperationsService {
     return { entries };
   }
 
+  closeDaily(input: {
+    unitId: string;
+    businessDate: Date;
+    informedCash?: number;
+    informedPix?: number;
+    informedDebit?: number;
+    informedCredit?: number;
+    notes?: string;
+    responsible: string;
+    idempotencyKey?: string;
+    idempotencyPayloadHash?: string;
+  }) {
+    const scope = this.idempotencyScope({
+      unitId: input.unitId,
+      action: "DAILY_CLOSING_CLOSE",
+      idempotencyKey: input.idempotencyKey,
+      payloadHash: input.idempotencyPayloadHash,
+      payload: input,
+    });
+    const replay = this.replayMemoryIdempotency<{ closing: DailyClosing }>(scope);
+    if (replay) return replay;
+    const start = new Date(input.businessDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(input.businessDate);
+    end.setHours(23, 59, 59, 999);
+    const payments = this.store.checkoutPayments.filter(
+      (item) => item.unitId === input.unitId && item.status === "CONFIRMED" && item.paidAt >= start && item.paidAt <= end,
+    );
+    const sumPayment = (method: string) =>
+      roundMoney(payments.filter((item) => item.method === method).reduce((acc, item) => acc + item.amount, 0));
+    const entries = this.store.financialEntries.filter(
+      (item) => item.unitId === input.unitId && item.occurredAt >= start && item.occurredAt <= end,
+    );
+    const servicesTotal = roundMoney(entries.filter((item) => item.kind === "INCOME" && item.source === "SERVICE").reduce((acc, item) => acc + item.amount, 0));
+    const productsTotal = roundMoney(entries.filter((item) => item.kind === "INCOME" && item.source === "PRODUCT").reduce((acc, item) => acc + item.amount, 0));
+    const expensesTotal = roundMoney(entries.filter((item) => item.kind === "EXPENSE" && item.source !== "REFUND").reduce((acc, item) => acc + item.amount, 0));
+    const correctionsTotal = roundMoney(entries.filter((item) => String(item.category || "").includes("CORRECAO")).reduce((acc, item) => acc + item.amount, 0));
+    const cashExpected = sumPayment("CASH");
+    const pixExpected = sumPayment("PIX");
+    const debitExpected = sumPayment("DEBIT");
+    const creditExpected = sumPayment("CREDIT");
+    const expectedTotal = roundMoney(cashExpected + pixExpected + debitExpected + creditExpected - expensesTotal);
+    const informedTotal = roundMoney(
+      Number(input.informedCash ?? cashExpected) +
+      Number(input.informedPix ?? pixExpected) +
+      Number(input.informedDebit ?? debitExpected) +
+      Number(input.informedCredit ?? creditExpected) -
+      expensesTotal,
+    );
+    const closing: DailyClosing = {
+      id: crypto.randomUUID(),
+      unitId: input.unitId,
+      businessDate: start,
+      status: "CLOSED",
+      cashExpected,
+      pixExpected,
+      debitExpected,
+      creditExpected,
+      servicesTotal,
+      productsTotal,
+      expensesTotal,
+      correctionsTotal,
+      expectedTotal,
+      informedCash: input.informedCash,
+      informedPix: input.informedPix,
+      informedDebit: input.informedDebit,
+      informedCredit: input.informedCredit,
+      divergence: roundMoney(informedTotal - expectedTotal),
+      notes: input.notes,
+      responsible: input.responsible,
+      closedAt: new Date(),
+      idempotencyKey: scope?.idempotencyKey,
+    };
+    this.startMemoryIdempotency(scope);
+    const existing = this.store.dailyClosings.find(
+      (item) => item.unitId === input.unitId && item.businessDate.getTime() === start.getTime(),
+    );
+    if (existing && existing.status === "CLOSED") throw new Error("Dia ja fechado");
+    this.store.dailyClosings.push(closing);
+    const response = { closing };
+    this.finishMemoryIdempotency(scope, response);
+    return response;
+  }
+
+  reopenDailyClosing(input: {
+    unitId: string;
+    closingId: string;
+    reopenedBy: string;
+    reason: string;
+  }) {
+    const reason = String(input.reason || "").trim();
+    if (!reason) throw new Error("Motivo da reabertura e obrigatorio");
+    const closing = this.store.dailyClosings.find((item) => item.id === input.closingId && item.unitId === input.unitId);
+    if (!closing) throw new Error("Fechamento diario nao encontrado");
+    closing.status = "REOPENED";
+    closing.reopenedAt = new Date();
+    closing.reopenedBy = input.reopenedBy;
+    closing.reopenReason = reason;
+    return { closing };
+  }
+
   adjustLoyalty(input: {
     unitId: string;
     clientId: string;
@@ -7159,7 +7998,7 @@ export class OperationsService {
       (item) =>
         item.unitId === input.unitId &&
         item.professionalId === professional.id &&
-        ACTIVE_APPOINTMENT_CONFLICT_STATUSES.includes(item.status) &&
+        isActiveAppointmentConflictStatus(item.status) &&
         item.startsAt < new Date(windowEnd.getTime() + busyDurationMs) &&
         item.endsAt > new Date(windowStart.getTime() - bufferAfterMin * 60_000),
     );
