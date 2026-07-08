@@ -4894,9 +4894,147 @@ export function createApp() {
 
   // ─── Rotas públicas de agendamento (sem autenticação) ──────────────────────
 
-  const publicUnitId = (value?: unknown) => {
-    const fromRequest = String(value ?? "").trim();
-    return fromRequest || process.env.PUBLIC_BOOKING_UNIT_ID || "unit-01";
+  const PILOT_PUBLIC_BOOKING_UNIT_ID = "unit-geovane-borges";
+  const PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE =
+    "Nao encontramos a unidade de agendamento. Confira o link e tente novamente.";
+
+  const normalizePublicUnitId = (value?: unknown) => String(value ?? "").trim();
+
+  const hasPublicCatalogForUnit = async (unitId: string) => {
+    if (!unitId) return false;
+    if (backend === "prisma") {
+      const [unit, services] = await Promise.all([
+        prisma.unit.findUnique({ where: { id: unitId }, select: { id: true } }),
+        prisma.service.findMany({
+          where: { businessId: unitId, active: true },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            category: true,
+            notes: true,
+            active: true,
+            professionals: {
+              select: {
+                professional: {
+                  select: { id: true, name: true, businessId: true, active: true },
+                },
+              },
+            },
+          },
+        }),
+      ]);
+      if (!unit) return false;
+      return services.some(
+        (service) =>
+          isPublicOperationalService(service) &&
+          service.professionals.some(
+            ({ professional }) =>
+              professional.businessId === unitId &&
+              professional.active &&
+              isPublicOperationalProfessional(professional),
+          ),
+      );
+    }
+    if (!memoryStore.units.some((unit) => unit.id === unitId)) return false;
+    const publicProfessionalIds = new Set(
+      memoryStore.professionals
+        .filter((professional) => professional.businessId === unitId && professional.active)
+        .filter(isPublicOperationalProfessional)
+        .map((professional) => professional.id),
+    );
+    return memoryStore.services
+      .filter((service) => (service.businessId ?? unitId) === unitId && service.active)
+      .filter(isPublicOperationalService)
+      .some((service) =>
+        memoryStore.serviceProfessionalAssignments.some(
+          (assignment) =>
+            assignment.serviceId === service.id &&
+            publicProfessionalIds.has(assignment.professionalId),
+        ),
+      );
+  };
+
+  const findPublicBookingUnitCandidates = async () => {
+    if (backend === "prisma") {
+      const services = await prisma.service.findMany({
+        where: { active: true },
+        select: {
+          businessId: true,
+          id: true,
+          name: true,
+          description: true,
+          category: true,
+          notes: true,
+          active: true,
+          professionals: {
+            select: {
+              professional: {
+                select: { id: true, name: true, businessId: true, active: true },
+              },
+            },
+          },
+        },
+      });
+      const unitIds = Array.from(new Set(
+        services
+          .filter(
+            (service) =>
+              isPublicOperationalService(service) &&
+              service.professionals.some(
+                ({ professional }) =>
+                  professional.businessId === service.businessId &&
+                  professional.active &&
+                  isPublicOperationalProfessional(professional),
+              ),
+          )
+          .map((service) => service.businessId),
+      ));
+      if (!unitIds.length) return [];
+      const units = await prisma.unit.findMany({
+        where: { id: { in: unitIds } },
+        select: { id: true },
+      });
+      const existingUnitIds = new Set(units.map((unit) => unit.id));
+      return unitIds.filter((unitId) => existingUnitIds.has(unitId)).sort();
+    }
+    const unitIds = new Set<string>();
+    for (const service of memoryStore.services) {
+      const unitId = service.businessId ?? "";
+      if (!unitId || !service.active || !isPublicOperationalService(service)) continue;
+      const hasProfessional = memoryStore.serviceProfessionalAssignments.some((assignment) => {
+        if (assignment.serviceId !== service.id) return false;
+        const professional = memoryStore.professionals.find((item) => item.id === assignment.professionalId);
+        return Boolean(
+          professional &&
+          professional.businessId === unitId &&
+          professional.active &&
+          isPublicOperationalProfessional(professional),
+        );
+      });
+      if (hasProfessional && memoryStore.units.some((unit) => unit.id === unitId)) unitIds.add(unitId);
+    }
+    return Array.from(unitIds).sort();
+  };
+
+  const resolvePublicUnitId = async (value?: unknown) => {
+    const fromRequest = normalizePublicUnitId(value);
+    if (fromRequest) {
+      return (await hasPublicCatalogForUnit(fromRequest)) ? fromRequest : null;
+    }
+
+    const fromConfig = normalizePublicUnitId(process.env.PUBLIC_BOOKING_UNIT_ID);
+    if (fromConfig && (await hasPublicCatalogForUnit(fromConfig))) return fromConfig;
+
+    const candidates = await findPublicBookingUnitCandidates();
+    if (candidates.length === 1) return candidates[0];
+
+    // Fallback centralizado do piloto. Substituir por PUBLIC_BOOKING_UNIT_ID
+    // quando houver mais de uma unidade publica ativa.
+    if (await hasPublicCatalogForUnit(PILOT_PUBLIC_BOOKING_UNIT_ID)) {
+      return PILOT_PUBLIC_BOOKING_UNIT_ID;
+    }
+    return null;
   };
 
   type PublicBookingService = {
@@ -5278,9 +5416,13 @@ export function createApp() {
     };
   };
 
-  app.get("/public/services", async (request) => {
+  app.get("/public/services", async (request, reply) => {
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
-    const unitId = publicUnitId(query.unitId);
+    const unitId = await resolvePublicUnitId(query.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     if (backend === "prisma") {
       const services = (await prisma.service.findMany({
         where: { businessId: unitId, active: true },
@@ -5323,7 +5465,11 @@ export function createApp() {
       unitId: z.string().min(1).optional(),
       serviceIds: z.array(z.string().min(1)).min(MIN_APPOINTMENT_SERVICES).max(MAX_APPOINTMENT_SERVICES),
     }).parse(request.body);
-    const unitId = publicUnitId(body.unitId);
+    const unitId = await resolvePublicUnitId(body.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     const serviceIds = normalizePublicServiceIds({ serviceIds: body.serviceIds });
     const contract = await resolvePublicServicesContract(unitId, serviceIds);
     if (!contract) {
@@ -5350,7 +5496,11 @@ export function createApp() {
   app.get("/public/services/:serviceId/professionals", async (request, reply) => {
     const params = z.object({ serviceId: z.string().min(1) }).parse(request.params);
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
-    const unitId = publicUnitId(query.unitId);
+    const unitId = await resolvePublicUnitId(query.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     const service = await getPublicServiceForBooking(unitId, params.serviceId);
     if (!service) {
       reply.status(404).send({ error: "Servico nao encontrado" });
@@ -5370,9 +5520,13 @@ export function createApp() {
     };
   });
 
-  app.get("/public/business", async (request) => {
+  app.get("/public/business", async (request, reply) => {
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
-    const unitId = publicUnitId(query.unitId);
+    const unitId = await resolvePublicUnitId(query.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     if (backend === "prisma") {
       const settings = await prisma.businessSettings.findUnique({
         where: { unitId },
@@ -5401,9 +5555,13 @@ export function createApp() {
     };
   });
 
-  app.get("/public/working-hours", async (request) => {
+  app.get("/public/working-hours", async (request, reply) => {
     const query = z.object({ unitId: z.string().min(1).optional() }).parse(request.query);
-    const unitId = publicUnitId(query.unitId);
+    const unitId = await resolvePublicUnitId(query.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
     return { workingHours };
   });
@@ -5428,7 +5586,11 @@ export function createApp() {
       })
       .parse(request.query);
 
-    const unitId = publicUnitId(query.unitId);
+    const unitId = await resolvePublicUnitId(query.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     const weekStartDate = new Date(`${query.weekStart}T00:00:00.000-03:00`);
 
     const serviceIds = normalizePublicServiceIds({
@@ -5634,7 +5796,11 @@ export function createApp() {
       return;
     }
     const body = parsedBody.data;
-    const unitId = publicUnitId(body.unitId);
+    const unitId = await resolvePublicUnitId(body.unitId);
+    if (!unitId) {
+      reply.status(404).send({ error: PUBLIC_BOOKING_UNIT_NOT_FOUND_MESSAGE });
+      return;
+    }
     const publicBookingIdempotencyKey = getIdempotencyKey(request, body.idempotencyKey);
     const publicBookingPayloadHash = publicBookingIdempotencyKey
       ? getIdempotencyPayloadHash({ route: "/public/booking", unitId, body: { ...body, unitId } })

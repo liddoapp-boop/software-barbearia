@@ -258,14 +258,24 @@
       overflow-x: auto;
       padding: 4px 0 8px;
       -webkit-overflow-scrolling: touch;
+      cursor: grab;
+      overscroll-behavior-x: contain;
+      scroll-snap-type: x proximity;
       scrollbar-width: none;
+      touch-action: pan-y;
+    }
+    .svc-scroll.dragging {
+      cursor: grabbing;
+      scroll-snap-type: none;
+      user-select: none;
     }
     .svc-scroll::-webkit-scrollbar { display: none; }
-    .svc-row { display: flex; gap: 10px; width: max-content; }
+    .svc-row { display: flex; gap: 10px; width: max-content; padding-right: 16px; }
 
     .svc-card {
       width: 148px;
       flex-shrink: 0;
+      scroll-snap-align: start;
       background: var(--s2);
       border: 1px solid var(--bd);
       border-radius: var(--r-lg);
@@ -721,6 +731,7 @@ const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFI
 
 let step = STEPS.NAME;
 let services = [], slots = {};
+let servicesLoadMessage = 'Não conseguimos carregar os serviços agora. Tente novamente em instantes.';
 let selectedServices = [], selectedProfessional = null, selectedDate = null, selectedSlot = null, selectedSlotProfessional = null;
 let servicePreview = { status: 'empty', summary: null, message: '' };
 let servicePreviewRequestId = 0, servicePreviewController = null, slotsRequestSeq = 0;
@@ -970,6 +981,50 @@ function appendWidget(html) {
   return w;
 }
 
+function setupServiceDragScroll(scroller) {
+  if (!scroller || scroller.dataset.dragScrollReady === 'true') return;
+  scroller.dataset.dragScrollReady = 'true';
+  let activePointerId = null;
+  let startX = 0;
+  let startScrollLeft = 0;
+  let dragged = false;
+
+  const clearDrag = () => {
+    activePointerId = null;
+    scroller.classList.remove('dragging');
+    window.setTimeout(() => { dragged = false; }, 0);
+  };
+
+  scroller.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (scroller.scrollWidth <= scroller.clientWidth) return;
+    activePointerId = event.pointerId;
+    startX = event.clientX;
+    startScrollLeft = scroller.scrollLeft;
+    dragged = false;
+    try { scroller.setPointerCapture(event.pointerId); } catch {}
+  });
+
+  scroller.addEventListener('pointermove', (event) => {
+    if (activePointerId !== event.pointerId) return;
+    const deltaX = event.clientX - startX;
+    if (Math.abs(deltaX) < 4 && !dragged) return;
+    dragged = true;
+    scroller.classList.add('dragging');
+    scroller.scrollLeft = startScrollLeft - deltaX;
+    event.preventDefault();
+  });
+
+  scroller.addEventListener('pointerup', clearDrag);
+  scroller.addEventListener('pointercancel', clearDrag);
+  scroller.addEventListener('lostpointercapture', clearDrag);
+  scroller.addEventListener('click', (event) => {
+    if (!dragged) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+}
+
 let typingEl = null;
 function showTyping() {
   if (typingEl) return;
@@ -1130,13 +1185,19 @@ async function handleSend() {
 async function loadServices() {
   disableInput();
   showTyping();
+  servicesLoadMessage = 'Não conseguimos carregar os serviços agora. Tente novamente em instantes.';
   try {
     const r = await fetch(publicUrl('/public/services'));
-    if (r.ok) services = (await r.json())
-      .filter(isPublicServiceVisible)
-      .map(s => BookingSelection.normalizeService({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
-    else throw 0;
-  } catch {
+    if (r.ok) {
+      services = (await r.json())
+        .filter(isPublicServiceVisible)
+        .map(s => BookingSelection.normalizeService({ ...s, duration: s.durationMinutes ?? s.durationMin ?? s.duration }));
+    } else {
+      const data = await r.json().catch(() => ({}));
+      servicesLoadMessage = data?.error || servicesLoadMessage;
+      throw 0;
+    }
+  } catch (_) {
     services = [];
   }
   hideTyping();
@@ -1195,7 +1256,7 @@ function renderServices() {
     appendWidget(`
       <div id="serviceWidgetWrap" class="svc-scroll" role="status" aria-live="polite">
         <div class="svc-row">
-          <div class="svc-empty">Não conseguimos carregar os serviços agora. Tente novamente em instantes.</div>
+          <div class="svc-empty">${escapeHtml(servicesLoadMessage)}</div>
         </div>
       </div>`);
     return;
@@ -1230,6 +1291,7 @@ function renderServices() {
       ${renderServiceSummaryHtml()}
       <div class="professional-note">Atendimento com Geovane Borges</div>
     </div>`);
+  setupServiceDragScroll(w.querySelector('.svc-scroll'));
 
   w.querySelectorAll('[data-service-id]').forEach(c => {
     c.addEventListener('click', () => onPickService(c.dataset.serviceId, runId));

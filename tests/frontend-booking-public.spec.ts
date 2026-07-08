@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import vm from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const source = () => readFileSync("public/booking.html", "utf8");
+const designSource = () => readFileSync("public/styles/design-system.css", "utf8");
 
 type Listener = (event?: { key?: string; shiftKey?: boolean; preventDefault(): void }) => void;
 
@@ -169,6 +170,7 @@ class FakeDocument {
 type FetchRequest = {
   method: string;
   path: string;
+  search: string;
   body?: Record<string, unknown>;
 };
 
@@ -182,6 +184,8 @@ type BookingHarnessOptions = {
   professionals?: PublicProfessional[];
   services?: Array<Record<string, unknown>>;
   servicesStatus?: number;
+  servicesError?: string;
+  locationSearch?: string;
 };
 
 function stripTags(value: string) {
@@ -254,10 +258,16 @@ function createFetchMock(requests: FetchRequest[], options: BookingHarnessOption
     const url = new URL(input, "http://booking.local");
     const method = init?.method ?? "GET";
     const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : undefined;
-    requests.push({ method, path: url.pathname, body });
+    requests.push({ method, path: url.pathname, search: url.search, body });
 
     if (url.pathname === "/public/business") return jsonResponse({ name: "Barbearia Harness" });
     if (url.pathname === "/public/services") {
+      if ((options.servicesStatus ?? 200) >= 400) {
+        const fallbackError = options.servicesStatus === 404
+          ? "Nao encontramos a unidade de agendamento. Confira o link e tente novamente."
+          : undefined;
+        return jsonResponse({ error: options.servicesError ?? fallbackError }, options.servicesStatus);
+      }
       return jsonResponse(services, options.servicesStatus ?? 200);
     }
     if (url.pathname === "/public/services/preview") {
@@ -331,7 +341,7 @@ async function createBookingHarness(initialStorage: Record<string, string> = {},
   const storage = new Map(Object.entries(initialStorage));
   const requests: FetchRequest[] = [];
   const context = {
-    window: { location: { search: "?unitId=unit-01" } },
+    window: { location: { search: options.locationSearch ?? "?unitId=unit-01" } },
     document,
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -417,6 +427,118 @@ async function completeBookingUntilConfirm() {
 describe("booking publico - trava pos-sucesso", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("mantem estrutura publica e composer responsivo", () => {
+    const html = source();
+    const css = designSource();
+    const app = readFileSync("src/http/app.ts", "utf8");
+    const inputBarRule = css.match(/body\.public-booking \.input-bar \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+    expect(existsSync("public/booking.html")).toBe(true);
+    expect(existsSync("public/modules/booking-service-selection.js")).toBe(true);
+    expect(existsSync("public/styles/design-system.css")).toBe(true);
+    expect(html).toContain('<link rel="stylesheet" href="/styles/design-system.css">');
+    expect(html).toContain('<script src="/modules/booking-service-selection.js"></script>');
+    expect(html).toContain('<main class="chat" id="chat"');
+    expect(html).toContain('<div class="input-bar">');
+    expect(html).toContain('id="btnAppts"');
+    expect(html).toContain("const BOOKING_UNIT_ID = new URLSearchParams(window.location.search).get('unitId') || '';");
+    expect(app).toContain("const resolvePublicUnitId = async");
+    expect(app).toContain('const PILOT_PUBLIC_BOOKING_UNIT_ID = "unit-geovane-borges";');
+    expect(app).toContain("const candidates = await findPublicBookingUnitCandidates()");
+    expect(html).toContain("function setupServiceDragScroll");
+    expect(html).toContain("setupServiceDragScroll(w.querySelector('.svc-scroll'))");
+    expect(html).toContain("scroll-snap-type: x proximity;");
+    expect(html).toContain("touch-action: pan-y;");
+    expect(html).toContain(".svc-scroll.dragging");
+    expect(html).toContain("scroll-snap-align: start;");
+    expect(app).toContain('app.get("/agendamento"');
+    expect(app).toContain('return reply.sendFile("booking.html")');
+    expect(css).toContain("body.public-booking {");
+    expect(css).toContain("height: 100dvh !important;");
+    expect(css).toContain("overflow: hidden !important;");
+    expect(inputBarRule).toContain("width: min(100%, 760px);");
+    expect(inputBarRule).toContain("margin: 0 auto;");
+    expect(inputBarRule).toContain("transform: none !important;");
+    expect(inputBarRule).not.toContain("translateX");
+  });
+
+  it("carrega servicos na rota sem unitId deixando o backend resolver a unidade publica", async () => {
+    const harness = await createBookingHarness({}, { locationSearch: "" });
+
+    await harness.api.beginNewBooking();
+
+    const businessRequest = harness.requests.find((request) => request.path === "/public/business");
+    const servicesRequest = harness.requests.find((request) => request.path === "/public/services");
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+
+    expect(businessRequest?.search).toBe("");
+    expect(servicesRequest?.search).toBe("");
+    expect(text).toContain("Barba Terapia");
+    expect(text).toContain("Atendimento com Geovane Borges");
+    expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(1);
+  });
+
+  it("preserva unitId valido na URL para links explicitos de unidade", async () => {
+    const harness = await createBookingHarness({}, {
+      locationSearch: "?unitId=unit-geovane-borges",
+    });
+
+    await harness.api.beginNewBooking();
+    await harness.api.onPickService("svc-barba");
+
+    const servicesRequest = harness.requests.find((request) => request.path === "/public/services");
+    const previewRequest = harness.requests.find((request) => request.path === "/public/services/preview");
+
+    expect(servicesRequest?.search).toBe("?unitId=unit-geovane-borges");
+    expect(previewRequest?.search).toBe("?unitId=unit-geovane-borges");
+    expect(previewRequest?.body).toMatchObject({ unitId: "unit-geovane-borges", serviceIds: ["svc-barba"] });
+    expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(1);
+  });
+
+  it("mostra mensagem humana para unidade invalida sem quebrar a tela", async () => {
+    const message = "Nao encontramos a unidade de agendamento. Confira o link e tente novamente.";
+    const harness = await createBookingHarness({}, {
+      locationSearch: "?unitId=unit-invalida",
+      servicesStatus: 404,
+      servicesError: message,
+    });
+
+    await harness.api.beginNewBooking();
+
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    const servicesRequest = harness.requests.find((request) => request.path === "/public/services");
+
+    expect(servicesRequest?.search).toBe("?unitId=unit-invalida");
+    expect(text).toContain(message);
+    expect(text).not.toContain("Error");
+    expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);
+  });
+
+  it("preserva Meus agendamentos ao carregar a rota sem unitId", async () => {
+    const harness = await createBookingHarness({
+      liddo_appts: JSON.stringify([
+        {
+          service: "Corte",
+          professional: "Geovane Borges",
+          date: "01/06/2026",
+          time: "10:00",
+          price: "R$ 30,00",
+          status: "pending",
+        },
+      ]),
+    }, { locationSearch: "" });
+
+    harness.document.getElementById("btnAppts")?.click();
+
+    const sheet = harness.document.getElementById("sheet");
+    const sheetText = harness.document.getElementById("sheetBody")?.textContent ?? "";
+
+    expect(sheet?.classList.contains("open")).toBe(true);
+    expect(sheetText).toContain("Corte");
+    expect(sheetText).toContain("Geovane Borges");
+    expect(sheetText).toContain("R$ 30,00");
   });
 
   it("mantem estado explicito de conclusao e bloqueia mutacoes do fluxo antigo", () => {

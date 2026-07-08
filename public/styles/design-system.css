@@ -806,7 +806,16 @@ body.public-booking {
   --sh-focus: 0 0 0 3px rgba(155, 119, 77, 0.16);
   --hdr-bg: rgba(244, 241, 236, 0.9);
   --inputbar-bg: rgba(244, 241, 236, 0.94);
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  max-height: 100vh !important;
+  max-height: 100dvh !important;
   max-width: none !important;
+  overflow: hidden !important;
   background:
     linear-gradient(90deg, rgba(155, 119, 77, 0.05) 0 1px, transparent 1px 100%),
     linear-gradient(180deg, #f4f1ec 0%, #fbf8f2 46%, #f4f1ec 100%) !important;
@@ -851,7 +860,10 @@ body.public-booking .brand-sub {
 body.public-booking .chat {
   width: min(100%, 760px);
   margin: 0 auto;
-  padding: 28px 18px 120px !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  padding: 28px 18px 18px !important;
 }
 
 body.public-booking .booking-powered {
@@ -908,8 +920,9 @@ body.public-booking .appt-price {
 
 body.public-booking .input-bar {
   width: min(100%, 760px);
-  left: 50% !important;
-  transform: translateX(-50%);
+  margin: 0 auto;
+  left: auto !important;
+  transform: none !important;
   border-top: 1px solid var(--bk-border) !important;
   background: var(--inputbar-bg) !important;
 }
