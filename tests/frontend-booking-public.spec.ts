@@ -551,6 +551,17 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(api).toContain("APPOINTMENT_CREATED");
   });
 
+  it("mantem a interface publica sem mojibake visivel", () => {
+    const html = source();
+    const mojibakePattern = /[\u00c3\u00c2\ufffd]|\u00ef\u00bf\u00bd|\u00e2\u20ac[\u00a6\u201c\u201d]/;
+
+    expect(html).not.toMatch(mojibakePattern);
+    expect(html).toContain("Agende seu horário");
+    expect(html).toContain("Horários de atendimento");
+    expect(html).toContain("Informe um e-mail válido ou deixe o campo em branco.");
+    expect(html).toContain("Não há horários disponíveis para esta data.");
+  });
+
   it("mostra Geovane como informacao e nao consulta/seletor de profissional", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
@@ -653,7 +664,7 @@ describe("booking publico - trava pos-sucesso", () => {
     await harness.api.beginNewBooking();
 
     const text = harness.document.getElementById("chat")?.textContent ?? "";
-    expect(text).toContain("Nao conseguimos carregar os servicos agora");
+    expect(text).toContain("Não conseguimos carregar os serviços agora");
     expect(text).not.toContain("Corte Clássico");
     expect(text).not.toContain("Barba Completa");
     expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);

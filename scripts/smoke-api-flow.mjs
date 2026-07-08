@@ -263,13 +263,13 @@ async function main() {
   step("Confirmando e iniciando atendimento");
   const confirmed = await json(`/appointments/${appointmentId}/status`, {
     method: "PATCH",
-    headers,
+    headers: { ...headers, "idempotency-key": `smoke-status-confirmed-${correlationId}` },
     body: JSON.stringify({ status: "CONFIRMED", changedBy: "smoke-test@owner" }),
   });
   assert(confirmed.appointment.status === "CONFIRMED", "Status esperado CONFIRMED");
   const started = await json(`/appointments/${appointmentId}/status`, {
     method: "PATCH",
-    headers,
+    headers: { ...headers, "idempotency-key": `smoke-status-started-${correlationId}` },
     body: JSON.stringify({ status: "IN_SERVICE", changedBy: "smoke-test@owner" }),
   });
   assert(started.appointment.status === "IN_SERVICE", "Status esperado IN_SERVICE");

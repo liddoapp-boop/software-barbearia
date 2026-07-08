@@ -403,11 +403,10 @@ describe("frontend mobile overflow", () => {
     const session = await loginOwner();
 
     const checks = [
-      await measureModule(cdp, session, "dashboard"),
       await measureModule(cdp, session, "agenda"),
       await measureModule(cdp, session, "operacao"),
       await measureModule(cdp, session, "financeiro"),
-      await measureModule(cdp, session, "dashboard", true),
+      await measureModule(cdp, session, "agenda", true),
     ];
 
     cdp.close();

@@ -98,7 +98,7 @@ describe("booking publico multi-servico", () => {
     expect(html).toContain("Revise seu agendamento");
     expect(html).toContain("Voltar e alterar");
     expect(html).toContain("Confirmando...");
-    expect(html).toContain("Esse horario acabou de ser reservado. Escolha outro horario.");
+    expect(html).toContain("Esse horário acabou de ser reservado. Escolha outro horário.");
     expect(html).toContain("Agendamento confirmado com sucesso.");
     expect(html).toContain("Fazer novo agendamento");
     expect(html).toContain("bookingIdempotencyKey = createBookingIdempotencyKey()");
