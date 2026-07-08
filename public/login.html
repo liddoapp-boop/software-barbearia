@@ -225,7 +225,7 @@
         const res = await fetch("/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password, activeUnitId: "unit-01" }),
+          body: JSON.stringify({ email, password }),
         });
 
         if (!res.ok) {
