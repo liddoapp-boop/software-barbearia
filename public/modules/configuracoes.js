@@ -953,7 +953,12 @@ export function renderSettingsData(elements, payload = {}, context = {}, activeS
   renderSettingsDataWithSection(elements, payload, context, activeSection);
 }
 
-export function renderSettingsSidebar({ activeSection = "business", user = null, accountMenuOpen = false } = {}) {
+export function renderSettingsSidebar({
+  activeSection = "business",
+  user = null,
+  accountMenuOpen = false,
+  operationName = "Barbearia Geovane Borges",
+} = {}) {
   const selectedSection = SETTINGS_SECTIONS.some((section) => section.id === activeSection)
     ? activeSection
     : "business";
@@ -975,10 +980,13 @@ export function renderSettingsSidebar({ activeSection = "business", user = null,
 
   return `
     <div class="sidebar-wrap settings-sidebar-wrap">
-      <div class="sb-brand" aria-label="LIDDO BARBER">
+      <div class="sb-brand" aria-label="Liddo Barber">
         <div class="sb-brand-inner">
-          <span class="sb-brand-name">LIDDO</span>
-          <span class="sb-brand-subtitle">BARBER</span>
+          <span class="sb-brand-name">Liddo Barber</span>
+        </div>
+        <div class="sb-operation" aria-label="Estabelecimento atual">
+          <span class="sb-operation-label">Estabelecimento</span>
+          <strong>${escapeHtml(operationName || "Barbearia Geovane Borges")}</strong>
         </div>
       </div>
 

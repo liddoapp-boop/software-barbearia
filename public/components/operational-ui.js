@@ -1,4 +1,5 @@
 import { escapeHtml } from "../modules/sanitize.js";
+import { statusLanguage } from "../modules/operational-language.js";
 
 export {
   escapeHtml,
@@ -8,54 +9,6 @@ export {
   safeNumber,
   safeText,
 } from "../modules/sanitize.js";
-
-const STATUS_MAP = {
-  INFO: ["Informativo", "info"],
-  WARNING: ["Atencao", "warning"],
-  SCHEDULED: ["Agendado", "neutral"],
-  AGENDADO: ["Agendado", "neutral"],
-  CONFIRMED: ["Confirmado", "info"],
-  CONFIRMADO: ["Confirmado", "info"],
-  IN_SERVICE: ["Em atendimento", "warning"],
-  EM_ATENDIMENTO: ["Em atendimento", "warning"],
-  COMPLETED: ["Concluido", "success"],
-  CONCLUIDO: ["Concluido", "success"],
-  CANCELLED: ["Cancelado", "danger"],
-  CANCELADO: ["Cancelado", "danger"],
-  NO_SHOW: ["Falta", "danger"],
-  NAO_COMPARECEU: ["Falta", "danger"],
-  PAID: ["Paga", "success"],
-  PAGO: ["Pago", "success"],
-  PENDING: ["Pendente", "warning"],
-  PENDENTE: ["Pendente", "warning"],
-  CANCELED: ["Cancelada", "danger"],
-  REFUNDED: ["Devolvido", "danger"],
-  DEVOLVIDO: ["Devolvido", "danger"],
-  NOT_REFUNDED: ["Sem devolucao", "muted"],
-  PARTIALLY_REFUNDED: ["Parcialmente devolvido", "warning"],
-  PARCIALMENTE_DEVOLVIDO: ["Parcialmente devolvido", "warning"],
-  LOW_STOCK: ["Estoque baixo", "warning"],
-  ESTOQUE_BAIXO: ["Estoque baixo", "warning"],
-  CRITICAL: ["Critico", "danger"],
-  CRITICAL_STOCK: ["Critico", "danger"],
-  OUT_OF_STOCK: ["Sem estoque", "danger"],
-  ESTOQUE_CRITICO: ["Estoque critico", "danger"],
-  IN_STOCK: ["Em estoque", "success"],
-  EM_ESTOQUE: ["Em estoque", "success"],
-  BLOCKED: ["Bloqueado", "danger"],
-  BLOQUEADO: ["Bloqueado", "danger"],
-  ACTIVE: ["Ativo", "success"],
-  ATIVO: ["Ativo", "success"],
-  NEW: ["Novo", "info"],
-  NOVO: ["Novo", "info"],
-  RECURRING: ["Recorrente", "success"],
-  RECORRENTE: ["Recorrente", "success"],
-  INACTIVE: ["Inativo", "muted"],
-  INATIVO: ["Inativo", "muted"],
-  VIP: ["VIP", "premium"],
-  AT_RISK: ["Em risco", "warning"],
-  EM_RISCO: ["Em risco", "warning"],
-};
 
 function attrsToString(attrs = {}) {
   return Object.entries(attrs)
@@ -72,7 +25,7 @@ function normalizeFilterFieldMarkup(field) {
 
 function normalizeStatus(status, fallbackLabel = "") {
   const key = String(status || "").trim().toUpperCase();
-  const [label, tone] = STATUS_MAP[key] || [fallbackLabel || key || "Status", "neutral"];
+  const { label, tone } = statusLanguage(key, fallbackLabel || key || "Status");
   return { label, tone, key };
 }
 

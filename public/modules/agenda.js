@@ -139,15 +139,15 @@ function normalizeBlockEvent(item) {
 
 
 const actionLabel = {
-  DETAIL: "Detalhes",
+  DETAIL: "Ver detalhes",
   EDIT: "Editar",
   CONFIRMED: "Confirmar",
   IN_SERVICE: "Iniciar atendimento",
-  COMPLETE: "Concluir",
+  COMPLETE: "Ir para checkout",
   SERVICES: "Alterar servicos",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
-  NO_SHOW: "Falta",
+  NO_SHOW: "Marcar falta",
   DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
@@ -194,16 +194,52 @@ function actionButtonClass(action) {
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return [options.canEdit ? "EDIT" : "", "CONFIRMED", "DETAIL", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
+    return ["CONFIRMED", options.canEdit ? "RESCHEDULE" : "", "CANCELLED"].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
+    return ["IN_SERVICE", "DELAY", options.canEdit ? "RESCHEDULE" : "", "CANCELLED", options.canNoShow ? "NO_SHOW" : ""].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
-    return canCheckout ? ["COMPLETE", "SERVICES", "DETAIL", "DELAY"] : ["SERVICES", "DETAIL", "DELAY"];
+    return canCheckout ? ["COMPLETE", "SERVICES"] : ["SERVICES", "DETAIL"];
   }
-  if (status === "COMPLETED") return ["DETAIL"];
+  if (status === "COMPLETED" || status === "CANCELLED" || status === "NO_SHOW") return ["DETAIL"];
   return ["DETAIL"];
+}
+
+function primaryActionForStatus(status, options = {}) {
+  const canCheckout = options.canCheckout !== false;
+  if (status === "SCHEDULED") return "CONFIRMED";
+  if (status === "CONFIRMED") return "IN_SERVICE";
+  if (status === "IN_SERVICE" && canCheckout) return "COMPLETE";
+  if (status === "IN_SERVICE") return "SERVICES";
+  return "DETAIL";
+}
+
+function actionLabelForStatus(action, status) {
+  if (action === "DETAIL" && (status === "CANCELLED" || status === "NO_SHOW")) return "Ver historico";
+  return actionLabel[action] || action;
+}
+
+function renderActionHierarchy(item, actions, options = {}) {
+  const primaryAction = primaryActionForStatus(item.status, options);
+  const primary = actions.includes(primaryAction) ? primaryAction : actions[0];
+  const secondary = actions.filter((action) => action !== primary);
+  const primaryMarkup = primary
+    ? `<button data-id="${item.id}" data-action="${primary}" class="${actionButtonClass(primary)} appointment-next-action">${actionLabelForStatus(primary, item.status)}</button>`
+    : "";
+  const secondaryMarkup = secondary.length
+    ? `
+      <details class="appointment-secondary-actions">
+        <summary class="ux-btn ux-btn-muted" aria-label="Mais opcoes para ${item.client || "atendimento"}">Mais opcoes</summary>
+        <div class="appointment-secondary-menu">
+          ${secondary
+            .map((action) => `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${actionLabelForStatus(action, item.status)}</button>`)
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+  return `${primaryMarkup}${secondaryMarkup}`;
 }
 
 export function normalizeAgendaItems(payload) {
@@ -465,12 +501,9 @@ function renderAgendaList(elements, list, handlers) {
           }
           <div class="ux-hint">Perfil: <strong>${clientTagLabel}</strong></div>
           <div class="catalog-row-actions">
-            ${actions
-              .map(
-                (action) =>
-                  `<button data-id="${item.id}" data-action="${action}" class="${actionButtonClass(action)}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel[action] || action}</button>`,
-              )
-              .join("")}
+            ${renderActionHierarchy(item, actions, {
+              canCheckout: handlers?.canCheckout !== false,
+            })}
           </div>
         </article>
       `;

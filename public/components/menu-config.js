@@ -4,7 +4,6 @@ export const MENU_GROUPS = [
     label: "Operacao",
     modules: [
       { id: "agenda", label: "Agenda" },
-      { id: "operacao", label: "PDV" },
       { id: "clientes", label: "Clientes" },
     ],
   },
@@ -13,38 +12,43 @@ export const MENU_GROUPS = [
     label: "Gestao",
     modules: [
       { id: "financeiro", label: "Financeiro" },
-      { id: "profissionais", label: "Equipe" },
+      { id: "estoque", label: "Estoque" },
     ],
   },
   {
     id: "administracao",
     label: "Administracao",
     modules: [
-      { id: "servicos", label: "Serviços" },
+      { id: "configuracoes", label: "Configuracoes" },
+      { id: "servicos", label: "Servicos" },
       { id: "auditoria", label: "Auditoria" },
-    ],
-  },
-  {
-    id: "integracoes",
-    label: "Integracoes",
-    modules: [
-      { id: "whatsapp", label: "WhatsApp" },
-      { id: "agendamento-link", label: "Link Agendamento" },
     ],
   },
 ];
 
+export const HIDDEN_OWNER_MODULES = [
+  "profissionais",
+  "comissoes",
+  "metas",
+  "fidelizacao",
+  "automacoes",
+  "relatorios",
+  "whatsapp",
+  "agendamento-link",
+  "operacao",
+];
+
 export const ROLE_ACCESS = {
   owner: [
-    ...MENU_GROUPS.flatMap((group) => group.modules).map((module) => module.id),
-    "configuracoes",
+    "agenda",
+    "clientes",
+    "financeiro",
     "estoque",
-    "metas",
-    "fidelizacao",
-    "automacoes",
-    "relatorios",
+    "configuracoes",
+    "servicos",
+    "auditoria",
   ],
-  recepcao: ["agenda", "operacao", "clientes"],
+  recepcao: ["agenda", "clientes"],
   profissional: ["agenda", "clientes"],
 };
 
@@ -79,29 +83,21 @@ export function filterMenuGroupsByRole(groups, role) {
 
 export const QUICK_ACTIONS = [
   { id: "novo-agendamento", label: "Novo Agendamento", moduleId: "agenda" },
-  { id: "registrar-venda", label: "Registrar Venda", moduleId: "operacao" },
+  { id: "registrar-venda", label: "Registrar Venda", moduleId: "financeiro" },
 ];
 
 export const MOBILE_TABS = [
-  { id: "inicio", label: "Inicio", moduleId: "financeiro" },
   { id: "agenda", label: "Agenda", moduleId: "agenda" },
-  { id: "operacao", label: "PDV", moduleId: "operacao" },
+  { id: "clientes", label: "Clientes", moduleId: "clientes" },
   { id: "mais", label: "Mais", moduleId: null },
 ];
 
 export const SECONDARY_MODULE_IDS = [
-  "clientes",
   "estoque",
   "financeiro",
-  "profissionais",
+  "configuracoes",
   "servicos",
   "auditoria",
-  "metas",
-  "fidelizacao",
-  "automacoes",
-  "relatorios",
-  "whatsapp",
-  "agendamento-link",
 ];
 
 const MODULE_MAP = new Map(
@@ -121,8 +117,7 @@ export function isSecondaryModule(moduleId) {
 }
 
 export function mapModuleToMobileTab(moduleId) {
-  if (moduleId === "dashboard" || moduleId === "financeiro") return "inicio";
   if (moduleId === "agenda") return "agenda";
-  if (moduleId === "operacao") return "operacao";
+  if (moduleId === "clientes") return "clientes";
   return "mais";
 }

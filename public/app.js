@@ -12,11 +12,6 @@ import { renderSidebar } from "./components/sidebar.js";
 import { renderMobileTabs } from "./components/mobile-tabs.js";
 import { renderWhatsAppSection } from "./components/whatsapp.js";
 import {
-  renderDashboardData,
-  renderDashboardError,
-  renderDashboardLoading,
-} from "./modules/dashboard.js";
-import {
   filterAgendaItems,
   normalizeAgendaItems,
   renderAgendaData,
@@ -172,24 +167,13 @@ const STORAGE_AGENDA_VIEW = "sb.agendaView";
 const API_REQUEST_TIMEOUT_MS = 15000;
 
 function renderOperationalChrome() {
-  const dashboardHeaderMount = document.getElementById("dashboardHeaderMount");
-  if (dashboardHeaderMount) {
-    dashboardHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Dashboard",
-      eyebrow: "Painel executivo",
-      title: "Dashboard",
-      subtitle: "Visao rapida para decisao imediata: receita, ocupacao, meta e prioridades com baixa friccao visual.",
-      meta: `<span>Menos ruido</span><span>Mais clareza</span>`,
-    });
-  }
-
   const agendaHeaderMount = document.getElementById("agendaHeaderMount");
   if (agendaHeaderMount) {
     agendaHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Agenda",
-      eyebrow: "Funil operacional",
+      breadcrumb: "Barbearia Geovane Borges / Agenda",
+      eyebrow: "Tempo e atendimento",
       title: "Agenda",
-      subtitle: "Agenda do dia, proximo atendimento e acoes principais sem expor dados tecnicos.",
+      subtitle: "Semana, lista, bloqueios e encaixes com leitura rapida do que vem agora.",
     });
   }
 
@@ -230,10 +214,10 @@ function renderOperationalChrome() {
   const saleHeaderMount = document.getElementById("saleHeaderMount");
   if (saleHeaderMount) {
     saleHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / PDV",
-      eyebrow: "Funil operacional",
-      title: "PDV de produtos",
-      subtitle: "Busque o produto, monte o carrinho, confira o total e cobre a venda sem expor rastros tecnicos.",
+      breadcrumb: "Barbearia Geovane Borges / Venda",
+      eyebrow: "Produtos no balcao",
+      title: "Venda de produtos",
+      subtitle: "Busque o item, confira o carrinho e cobre sem misturar com ajustes administrativos.",
       secondaryActions: `
         <div class="pdv-module-tabs pdv-header-tabs" role="tablist" aria-label="Modulo PDV">
           <button type="button" class="pdv-tab-btn is-active" data-pdv-target="operacao">Venda</button>
@@ -307,10 +291,10 @@ function renderOperationalChrome() {
   const inventoryHeaderMount = document.getElementById("inventoryHeaderMount");
   if (inventoryHeaderMount) {
     inventoryHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Estoque",
-      eyebrow: "Funil operacional",
+      breadcrumb: "Barbearia Geovane Borges / Estoque",
+      eyebrow: "Produtos e reposicao",
       title: "Estoque",
-      subtitle: "Produtos criticos primeiro, reposicao clara e rastreabilidade tecnica apenas no detalhe.",
+      subtitle: "Produtos criticos primeiro, reposicao clara e historico tecnico apenas no detalhe.",
       secondaryActions: `
         <div class="pdv-module-tabs pdv-header-tabs" role="tablist" aria-label="Modulo PDV">
           <button type="button" class="pdv-tab-btn" data-pdv-target="operacao">Venda</button>
@@ -349,10 +333,10 @@ function renderOperationalChrome() {
   const financialHeaderMount = document.getElementById("financialHeaderMount");
   if (financialHeaderMount) {
     financialHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Financeiro",
-      eyebrow: "Financeiro conciliado",
+      breadcrumb: "Barbearia Geovane Borges / Financeiro",
+      eyebrow: "Caixa e fechamento",
       title: "Financeiro",
-      subtitle: "Resultado, entradas, saidas e lancamentos em uma visao operacional limpa.",
+      subtitle: "Resultado do periodo, formas de pagamento e lancamentos sem competir com o checkout.",
     });
   }
 
@@ -437,10 +421,10 @@ function renderOperationalChrome() {
   const clientsHeaderMount = document.getElementById("clientsHeaderMount");
   if (clientsHeaderMount) {
     clientsHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Clientes",
-      eyebrow: "Relacionamento operacional",
+      breadcrumb: "Barbearia Geovane Borges / Clientes",
+      eyebrow: "Relacionamento",
       title: "Clientes",
-      subtitle: "Carteira com ativos, risco, VIPs e reativacao prioritaria. Historico completo e rastros tecnicos ficam no detalhe.",
+      subtitle: "Busca, ultima visita, historico e proximo agendamento sem transformar a tela em relatorio.",
     });
   }
 
@@ -511,10 +495,10 @@ function renderOperationalChrome() {
   const servicesHeaderMount = document.getElementById("servicesHeaderMount");
   if (servicesHeaderMount) {
     servicesHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Servicos",
+      breadcrumb: "Liddo / Configuracoes",
       eyebrow: "Catalogo operacional",
       title: "Serviços",
-      subtitle: "Catalogo de servicos vendaveis com preco, duracao, margem e profissionais habilitados. Detalhe tecnico no drawer.",
+      subtitle: "Nome, preco, duracao e disponibilidade em primeiro plano. Dados avancados ficam na edicao.",
     });
   }
 
@@ -541,10 +525,10 @@ function renderOperationalChrome() {
   const auditHeaderMount = document.getElementById("auditHeaderMount");
   if (auditHeaderMount) {
     auditHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Inicio / Auditoria",
-      eyebrow: "Auditoria owner-only",
+      breadcrumb: "Liddo / Administracao",
+      eyebrow: "Auditoria administrativa",
       title: "Auditoria",
-      subtitle: "Linha do tempo legivel de acoes criticas, com rastreabilidade tecnica preservada apenas no detalhe.",
+      subtitle: "Linha do tempo legivel de acoes criticas, com rastreabilidade tecnica preservada no detalhe.",
     });
   }
 
@@ -596,9 +580,9 @@ function renderOperationalChrome() {
           <option value="500">500 eventos</option>
         </select>
         <input id="auditActionFilter" type="search" placeholder="Acao" class="aud-filter-input aud-filter-input-hidden" />
-        <input id="auditRequestIdFilter" type="search" placeholder="requestId" class="aud-filter-input aud-filter-input-hidden" />
-        <input id="auditIdempotencyFilter" type="search" placeholder="idempotencyKey" class="aud-filter-input aud-filter-input-hidden" />
-        <input id="auditEntityIdFilter" type="search" placeholder="entityId" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditRequestIdFilter" type="search" placeholder="Referencia da operacao" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditIdempotencyFilter" type="search" placeholder="Operacao ja processada" class="aud-filter-input aud-filter-input-hidden" />
+        <input id="auditEntityIdFilter" type="search" placeholder="Registro relacionado" class="aud-filter-input aud-filter-input-hidden" />
         <input id="auditRouteFilter" type="search" placeholder="rota" class="aud-filter-input aud-filter-input-hidden" />
         <select id="auditMethodFilter" class="aud-filter-input aud-filter-input-hidden">
           <option value="">Todos metodos</option>
@@ -752,21 +736,9 @@ const agendaList = document.getElementById("agendaList");
 const agendaMetricsGrid = document.getElementById("agendaMetricsGrid");
 const queueList = document.getElementById("queueList");
 const lowStockList = document.getElementById("lowStockList");
-const kpiGrid = document.getElementById("kpiGrid");
 const saleFeedback = document.getElementById("saleFeedback");
 const saleTotalValue = document.getElementById("saleTotalValue");
 const saleTotalItems = document.getElementById("saleTotalItems");
-const goalBlock = document.getElementById("goalBlock");
-const topProfessionalsList = document.getElementById("topProfessionalsList");
-const topsList = document.getElementById("topsList");
-const alertsList = document.getElementById("alertsList");
-const forecastList = document.getElementById("forecastList");
-const smartAlertsList = document.getElementById("smartAlertsList");
-const actionSuggestionsList = document.getElementById("actionSuggestionsList");
-const dashboardLowStockList = document.getElementById("dashboardLowStockList");
-const dashboardPlaybookPanel = document.getElementById("dashboardPlaybookPanel");
-const dashboardTelemetryPanel = document.getElementById("dashboardTelemetryPanel");
-const dashboardAutomationSignals = document.getElementById("dashboardAutomationSignals");
 const clientInsights = document.getElementById("clientInsights");
 const serviceSuggestions = document.getElementById("serviceSuggestions");
 const appointmentFeedback = document.getElementById("appointmentFeedback");
@@ -1024,28 +996,12 @@ const alFilterProfessional = document.getElementById("alFilterProfessional");
 const alFilterSearch = document.getElementById("alFilterSearch");
 const agendaListContent = document.getElementById("agendaListContent");
 
-const dashboardElements = {
-  kpiGrid,
-  goalBlock,
-  topProfessionalsList,
-  topsList,
-  alertsList,
-  lowStockList: dashboardLowStockList,
-  forecastList,
-  smartAlertsList,
-  actionSuggestionsList,
-  playbookPanel: dashboardPlaybookPanel,
-  telemetryPanel: dashboardTelemetryPanel,
-  automationSignals: dashboardAutomationSignals,
-};
-
 const reportsElements = {
   root: reportsRoot,
   feedback: reportsFeedback,
 };
 
 const sectionsByModule = {
-  dashboard: document.getElementById("dashboardSection"),
   agenda: document.getElementById("agendaSection"),
   operacao: document.getElementById("operationSection"),
   financeiro: document.getElementById("financeiroSection"),
@@ -1393,7 +1349,7 @@ const actionLabel = {
   SERVICES: "Alterar servicos",
   RESCHEDULE: "Remarcar",
   CANCELLED: "Cancelar",
-  NO_SHOW: "Falta",
+  NO_SHOW: "Marcar falta",
   DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
@@ -1491,7 +1447,7 @@ const state = {
   role: getStoredSessionRole(),
   activeModule: restoreActiveModule(),
   viewport: getViewport(),
-  mobileTab: "inicio",
+  mobileTab: "agenda",
   mobileMoreOpen: false,
   mobileSidebarOpen: false,
   agendaFiltersOpen: false,
@@ -1524,13 +1480,59 @@ function syncAgendaOwnerActionsVisibility() {
 
 function agendaListActionsForStatus(status) {
   status = normalizeAgendaStatus(status);
-  if (status === "SCHEDULED") return [canEditAppointment() ? "EDIT" : "", "CONFIRMED", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
-  if (status === "CONFIRMED") return [canEditAppointment() ? "EDIT" : "", "IN_SERVICE", "NO_SHOW", "DELAY", "CANCELLED"].filter(Boolean);
+  if (status === "SCHEDULED") return ["CONFIRMED", canEditAppointment() ? "RESCHEDULE" : "", "CANCELLED"].filter(Boolean);
+  if (status === "CONFIRMED") return ["IN_SERVICE", "DELAY", canEditAppointment() ? "RESCHEDULE" : "", "CANCELLED", "NO_SHOW"].filter(Boolean);
   if (status === "IN_SERVICE") {
-    return canCheckoutAppointment() ? ["COMPLETE", "SERVICES", "DELAY"] : ["SERVICES", "DELAY"];
+    return canCheckoutAppointment() ? ["COMPLETE", "SERVICES"] : ["SERVICES", "DETAIL"];
   }
   if (status === "COMPLETED") return ["DETAIL"];
-  return [];
+  if (status === "CANCELLED" || status === "NO_SHOW") return ["DETAIL"];
+  return ["DETAIL"];
+}
+
+function agendaPrimaryActionForStatus(status) {
+  status = normalizeAgendaStatus(status);
+  if (status === "SCHEDULED") return "CONFIRMED";
+  if (status === "CONFIRMED") return "IN_SERVICE";
+  if (status === "IN_SERVICE" && canCheckoutAppointment()) return "COMPLETE";
+  if (status === "IN_SERVICE") return "SERVICES";
+  return "DETAIL";
+}
+
+function agendaActionLabelForStatus(action, status) {
+  if (action === "DETAIL" && (status === "CANCELLED" || status === "NO_SHOW")) return "Ver historico";
+  return actionLabel[action] || action;
+}
+
+function renderAgendaActionHierarchy(item, actions) {
+  const primaryAction = agendaPrimaryActionForStatus(item.status);
+  const primary = actions.includes(primaryAction) ? primaryAction : actions[0];
+  const secondary = actions.filter((action) => action !== primary);
+  const buttonClass = (action) => {
+    const isDanger = action === "CANCELLED" || action === "NO_SHOW";
+    const isSuccess = action === "COMPLETE";
+    return isSuccess
+      ? "al-btn al-btn-primary appointment-next-action"
+      : isDanger
+        ? "al-btn al-btn-cancel"
+        : `al-btn${action === primary ? " appointment-next-action" : ""}`;
+  };
+  const primaryMarkup = primary
+    ? `<button class="${buttonClass(primary)}" data-al-action="${primary}" data-al-id="${item.id}">${agendaActionLabelForStatus(primary, item.status)}</button>`
+    : "";
+  const secondaryMarkup = secondary.length
+    ? `
+      <details class="appointment-secondary-actions al-secondary-actions">
+        <summary class="al-btn" aria-label="Mais opcoes para ${escapeHtml(item.client || "atendimento")}">Mais opcoes</summary>
+        <div class="appointment-secondary-menu">
+          ${secondary
+            .map((action) => `<button class="${buttonClass(action)}" data-al-action="${action}" data-al-id="${item.id}">${agendaActionLabelForStatus(action, item.status)}</button>`)
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+  return `${primaryMarkup}${secondaryMarkup}`;
 }
 
 function syncWeekCalendarToActivePeriod() {
@@ -1568,7 +1570,7 @@ if (localStorage.getItem(STORAGE_THEME_MODE) && localStorage.getItem(STORAGE_THE
 function normalizeThemeMode(mode) {
   const value = String(mode || "").trim().toLowerCase();
   if (value === "dark" || value === "light" || value === "system") return value;
-  return "system";
+  return "dark";
 }
 
 function resolveEffectiveTheme(themeMode) {
@@ -1599,7 +1601,7 @@ function applyThemeMode(themeMode, options = {}) {
 
 function applyThemeFromSettingsPayload() {
   const localPreference = localStorage.getItem(STORAGE_THEME_MODE);
-  applyThemeMode(localPreference || "system", { persist: Boolean(localPreference) });
+  applyThemeMode(localPreference || "dark", { persist: Boolean(localPreference) });
 }
 
 if (systemThemeQuery) {
@@ -1615,7 +1617,7 @@ if (systemThemeQuery) {
   }
 }
 
-applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "system", { persist: false });
+applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "dark", { persist: false });
 
 startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
 if (reportsCustomStart) reportsCustomStart.value = asDateInputValue(new Date());
@@ -1776,10 +1778,11 @@ async function apiFetch(url, options = {}) {
 
 function restoreActiveModule() {
   const stored = localStorage.getItem(STORAGE_ACTIVE_MODULE);
+  if (stored === "dashboard") return "agenda";
   if (stored === "agendamentos") return "agenda";
-  if (stored === "dashboard") return "financeiro";
+  if (stored === "operacao") return "financeiro";
   if (stored && allModuleIds.has(stored)) return stored;
-  return "financeiro";
+  return "agenda";
 }
 
 function getViewport() {
@@ -1802,8 +1805,6 @@ function getAllowedModules() {
 }
 
 function isAllowedModule(moduleId) {
-  if (moduleId === "dashboard") return isAllowedModule("financeiro");
-  if (moduleId === "estoque" && getAllowedModules().includes("operacao")) return true;
   return getAllowedModules().includes(moduleId);
 }
 
@@ -1826,11 +1827,27 @@ function getMobileTabsForRole() {
   return MOBILE_TABS.filter((tab) => !tab.moduleId || allowed.has(tab.moduleId));
 }
 
+function normalizeOperationName(business = {}) {
+  const rawName = business.displayName || business.businessName || "";
+  const normalized = String(rawName).trim();
+  const placeholder = normalized
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (!normalized || placeholder === "unidade padrao") {
+    return "Barbearia Geovane Borges";
+  }
+
+  return normalized;
+}
+
 function renderShell() {
   const roleMenuGroups = getRoleMenuGroups();
   const secondaryModules = getSecondaryModulesForRole();
   const mobileTabs = getMobileTabsForRole();
   const isSettingsMode = state.activeModule === "configuracoes";
+  const operationName = normalizeOperationName(currentSettingsPayload?.business);
 
   appShell?.classList.toggle("settings-mode", isSettingsMode);
   appShell?.classList.toggle("mobile-sidebar-open", state.mobileSidebarOpen);
@@ -1841,14 +1858,16 @@ function renderShell() {
         activeSection: settingsActiveSection,
         user: authSession?.user,
         accountMenuOpen,
+        operationName,
       })
     : renderSidebar({
         groups: roleMenuGroups,
-        activeModule: state.activeModule === "estoque" ? "operacao" : state.activeModule,
+        activeModule: state.activeModule,
         badges: state.navBadges,
         user: authSession?.user,
         accountMenuOpen,
         canOpenSettings: isAllowedModule("configuracoes"),
+        operationName,
       });
 
   appMobileTabs.innerHTML = renderMobileTabs({
@@ -2058,8 +2077,14 @@ function syncMobileOperationActions() {
 
 function navigate(moduleId, options = {}) {
   const normalizedModuleId =
-    moduleId === "agendamentos" ? "agenda" : moduleId === "dashboard" ? "financeiro" : moduleId;
-  if (!normalizedModuleId || !allModuleIds.has(normalizedModuleId) || !isAllowedModule(normalizedModuleId)) return;
+    moduleId === "agendamentos" || moduleId === "dashboard" ? "agenda" : moduleId;
+  if (!normalizedModuleId || !allModuleIds.has(normalizedModuleId) || !isAllowedModule(normalizedModuleId)) {
+    const fallback = firstAllowedModule();
+    if (fallback && fallback !== state.activeModule) {
+      navigate(fallback, options);
+    }
+    return;
+  }
 
   if (normalizedModuleId === "configuracoes" && state.activeModule !== "configuracoes") {
     settingsReturnModule = state.activeModule || firstAllowedModule();
@@ -2076,187 +2101,6 @@ function navigate(moduleId, options = {}) {
   if (options.scrollTop !== false) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
-}
-
-function parseDashboardActionPayload(encoded) {
-  if (!encoded) return {};
-  try {
-    return JSON.parse(decodeURIComponent(encoded));
-  } catch (_error) {
-    return {};
-  }
-}
-
-const dashboardPlaybookContext = {
-  suggestionId: "",
-  actionType: "",
-  estimatedImpact: 0,
-};
-
-function renderDashboardPlaybook(actionType, payload = {}) {
-  if (!dashboardPlaybookPanel) return;
-  const steps = Array.isArray(payload.playbookSteps) ? payload.playbookSteps : [];
-  const clients = Array.isArray(payload.suggestedClients) ? payload.suggestedClients : [];
-  const windows = Array.isArray(payload.idleWindows) ? payload.idleWindows : [];
-
-  const details =
-    actionType === "REACTIVATION_CAMPAIGN"
-      ? clients
-          .slice(0, 3)
-          .map(
-            (client) =>
-              `<li class="ds-cell-secondary">${client.fullName || "Cliente"} (${Number(client.daysWithoutReturn || 0)} dias) - impacto ${Number(client.estimatedImpact || 0).toFixed(2)}</li>`,
-          )
-          .join("")
-      : actionType === "FILL_IDLE_SLOTS"
-        ? windows
-            .slice(0, 3)
-            .map(
-              (windowItem) =>
-                `<li class="ds-cell-secondary">${windowItem.professionalName || "Profissional"} | faixa ${windowItem.band || "-"} | ${windowItem.horizonHours || 0}h</li>`,
-            )
-            .join("")
-        : "";
-
-  const executeButton =
-    actionType === "REACTIVATION_CAMPAIGN"
-      ? `
-        <button
-          type="button"
-          class="ux-btn ux-btn-success"
-          data-playbook-execute-reactivation="1"
-        >
-          Executar campanha de reativacao agora
-        </button>
-      `
-      : "";
-
-  dashboardPlaybookPanel.innerHTML = `
-    <div class="panel-msg panel-msg-success">
-      <p class="ds-cell-primary">Playbook: ${actionType || "ACAO"}</p>
-      <ol>${steps.map((step) => `<li class="ds-cell-secondary">${step}</li>`).join("") || "<li class='ds-cell-secondary'>Sem passos detalhados.</li>"}</ol>
-      ${details ? `<ul>${details}</ul>` : ""}
-      <div>${executeButton}</div>
-    </div>
-  `;
-}
-
-async function reportDashboardSuggestionTelemetry(input = {}) {
-  const suggestionId = String(input.suggestionId || "").trim();
-  const actionType = String(input.actionType || "").trim();
-  const outcome = String(input.outcome || "").trim();
-  if (!suggestionId || !actionType || !outcome) return;
-  try {
-    await callJson(`${API}/dashboard/suggestions/${encodeURIComponent(suggestionId)}/telemetry`, "POST", {
-      unitId,
-      actionType,
-      outcome,
-      estimatedImpact: Number(input.estimatedImpact || 0),
-      realizedRevenue:
-        typeof input.realizedRevenue === "number" ? Number(input.realizedRevenue) : undefined,
-      sourceModule: input.sourceModule || "dashboard",
-      playbookType: input.playbookType || undefined,
-      note: input.note ? String(input.note) : undefined,
-    });
-  } catch (_error) {
-    // Telemetria nao pode interromper o fluxo operacional.
-  }
-}
-
-async function executeReactivationPlaybook(payload = {}) {
-  try {
-    await callJson(`${API}/automations/campaigns/execute`, "POST", {
-      unitId,
-      campaignType: "REATIVACAO_SMART_DASHBOARD",
-      riskLevel: "HIGH",
-      ruleId: undefined,
-      sourceModule: "dashboard",
-      sourceSuggestionId: dashboardPlaybookContext.suggestionId || undefined,
-      playbookType: "REACTIVATION",
-    });
-    renderSaleFeedback(
-      "success",
-      "Campanha de reativacao disparada com sucesso a partir do dashboard.",
-      automacoesFeedback,
-    );
-    renderDashboardPlaybook("REACTIVATION_CAMPAIGN", {
-      ...payload,
-      playbookSteps: [
-        "Campanha enviada.",
-        "Acompanhe execucoes no modulo de Automacoes.",
-        "Revise conversao em 24h para ajustar proxima rodada.",
-      ],
-    });
-    await reportDashboardSuggestionTelemetry({
-      suggestionId: dashboardPlaybookContext.suggestionId || "action-reactivation-top3",
-      actionType: dashboardPlaybookContext.actionType || "REACTIVATION_CAMPAIGN",
-      outcome: "CONVERTED",
-      estimatedImpact: Number(dashboardPlaybookContext.estimatedImpact || 0),
-      realizedRevenue: Number(dashboardPlaybookContext.estimatedImpact || 0),
-      sourceModule: "dashboard",
-      playbookType: "REACTIVATION",
-      note: "Campanha de reativacao disparada via playbook do dashboard.",
-    });
-    navigate("automacoes");
-    await loadAll();
-  } catch (error) {
-    renderSaleFeedback(
-      "error",
-      error?.message || "Nao foi possivel disparar campanha de reativacao.",
-      automacoesFeedback,
-    );
-  }
-}
-
-function buildDashboardAutomationSignals(automacoesPayload) {
-  const rows = Array.isArray(automacoesPayload?.executions?.executions)
-    ? automacoesPayload.executions.executions
-    : [];
-  const summary = automacoesPayload?.executions?.summary ?? {};
-  const byCampaign = new Map();
-  let lastExecutedAt = null;
-  for (const row of rows) {
-    const key = String(row.campaignType || "N/A");
-    byCampaign.set(key, Number(byCampaign.get(key) || 0) + 1);
-    if (row.startedAt) {
-      const currentTs = new Date(row.startedAt).getTime();
-      const lastTs = lastExecutedAt ? new Date(lastExecutedAt).getTime() : 0;
-      if (Number.isFinite(currentTs) && currentTs > lastTs) {
-        lastExecutedAt = row.startedAt;
-      }
-    }
-  }
-  const topPlaybooks = Array.from(byCampaign.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([label, total]) => ({ label, total }));
-
-  return {
-    queued: Number(summary.pending || 0),
-    executed: Number(summary.success || 0),
-    failed: Number(summary.failed || 0),
-    lastExecutedAt,
-    topPlaybooks,
-  };
-}
-
-function buildRevenueMachineDashboardPayload(options = {}) {
-  const dashboardPayload = options.dashboardPayload || {};
-  return {
-    ...dashboardPayload,
-    automationSignals: options.dashboardAutomationSignals || {
-      queued: 0,
-      executed: 0,
-      failed: 0,
-      lastExecutedAt: null,
-      topPlaybooks: [],
-    },
-    clientsOverview: options.clientsPayload || null,
-    financialOverview: options.financialPayload?.management || null,
-    stockOverview: options.stockPayload || null,
-    automationsOverview: options.automacoesPayload || null,
-    scoringOverview: options.automacoesPayload?.scoringOverview || null,
-  };
 }
 
 function buildClientsAutomationSignals(clientsPayload, automacoesPayload) {
@@ -2360,78 +2204,6 @@ function fillAutomationRuleForm(rule) {
   automationRuleName.focus();
 }
 
-async function handleDashboardSuggestionAction(button) {
-  const suggestionId = button.dataset.suggestionId || "";
-  const ctaModule = button.dataset.ctaModule || "";
-  const actionType = button.dataset.actionType || "";
-  const estimatedImpact = Number(button.dataset.estimatedImpact || 0);
-  const payload = parseDashboardActionPayload(button.dataset.actionPayload || "");
-
-  dashboardPlaybookContext.suggestionId = suggestionId;
-  dashboardPlaybookContext.actionType = actionType;
-  dashboardPlaybookContext.estimatedImpact = estimatedImpact;
-
-  await reportDashboardSuggestionTelemetry({
-    suggestionId: suggestionId || `manual-${actionType || "unknown"}`,
-    actionType: actionType || "UPSELL_COMBO",
-    outcome: "EXECUTED",
-    estimatedImpact,
-    sourceModule: "dashboard",
-    playbookType:
-      actionType === "REACTIVATION_CAMPAIGN"
-        ? "REACTIVATION"
-        : actionType === "FILL_IDLE_SLOTS"
-          ? "IDLE_WINDOW_FILL"
-          : "FORECAST_PROTECTION",
-    note: "CTA da sugestao executado no dashboard.",
-  });
-
-  if (ctaModule && allModuleIds.has(ctaModule) && isAllowedModule(ctaModule)) {
-    navigate(ctaModule);
-  }
-
-  if (actionType === "REACTIVATION_CAMPAIGN") {
-    if (retentionRiskFilter) retentionRiskFilter.value = "HIGH";
-    if (automacoesRiskFilter) automacoesRiskFilter.value = "HIGH";
-  }
-  if (actionType === "FILL_IDLE_SLOTS") {
-    if (filterPeriod) filterPeriod.value = "week";
-  }
-  if (actionType === "UPSELL_COMBO") {
-    if (clientsPeriod) clientsPeriod.value = "today";
-  }
-
-  if (payload && typeof payload === "object") {
-    if (payload.moduleId && allModuleIds.has(payload.moduleId) && isAllowedModule(payload.moduleId)) {
-      navigate(payload.moduleId, { scrollTop: false });
-    }
-  }
-
-  renderDashboardPlaybook(actionType, payload);
-  await loadAll();
-}
-
-async function handleDashboardSuggestionIgnore(button) {
-  const suggestionId = button.dataset.suggestionId || "";
-  const actionType = button.dataset.actionType || "";
-  const estimatedImpact = Number(button.dataset.estimatedImpact || 0);
-  await reportDashboardSuggestionTelemetry({
-    suggestionId: suggestionId || `manual-${actionType || "unknown"}`,
-    actionType: actionType || "UPSELL_COMBO",
-    outcome: "IGNORED",
-    estimatedImpact,
-    sourceModule: "dashboard",
-    playbookType:
-      actionType === "REACTIVATION_CAMPAIGN"
-        ? "REACTIVATION"
-        : actionType === "FILL_IDLE_SLOTS"
-          ? "IDLE_WINDOW_FILL"
-          : "FORECAST_PROTECTION",
-    note: "Sugestao ignorada manualmente no dashboard.",
-  });
-  await loadAll();
-}
-
 function updateNavigationBadges(snapshot = {}) {
   state.navBadges = {
     agenda: Number(snapshot.lateCount || 0),
@@ -2481,11 +2253,11 @@ function renderPlaceholderModule() {
     <article class="placeholder-module ux-card">
       <h2 class="ux-section-label">${label}</h2>
       <p class="ds-text-muted">Modulo em preparacao. A navegacao ja esta pronta no App Shell premium.</p>
-      <button type="button" class="ux-btn ux-btn-muted" data-go-dashboard>Voltar para Financeiro</button>
+      <button type="button" class="ux-btn ux-btn-muted" data-go-home>Voltar para Financeiro</button>
     </article>
   `;
 
-  const goHomeBtn = placeholderSection.querySelector("[data-go-dashboard]");
+  const goHomeBtn = placeholderSection.querySelector("[data-go-home]");
   if (goHomeBtn) goHomeBtn.addEventListener("click", () => navigate("financeiro"));
 }
 
@@ -5511,7 +5283,7 @@ async function updateStatus(item, action, options = {}) {
   }
 
   if (action === "SELL") {
-    navigate("operacao", { scrollTop: false });
+    navigate("financeiro", { scrollTop: false });
     saleClientId.value = item.clientId || "";
     saleProfessionalId.value = item.professionalId || "";
     saleForm.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -5827,17 +5599,7 @@ function renderAgendaListMode(filteredItems) {
           <div class="al-card-right">
             <span class="al-chip">${statusLabelMap[item.status] || item.status}</span>
             <div class="al-card-actions">
-              ${actions.map((action) => {
-                const isDanger = action === "CANCELLED" || action === "NO_SHOW";
-                const isSuccess = action === "COMPLETE";
-                const label = action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel[action] || action;
-                const className = isSuccess
-                  ? "al-btn al-btn-primary"
-                  : isDanger
-                    ? "al-btn al-btn-cancel"
-                    : "al-btn";
-                return `<button class="${className}" data-al-action="${action}" data-al-id="${item.id}">${label}</button>`;
-              }).join("")}
+              ${renderAgendaActionHierarchy(item, actions)}
             </div>
           </div>
         </article>
@@ -6241,17 +6003,6 @@ async function loadAppointmentsByFilters() {
   }
   updateWorkingHoursFromPayload(data?.workingHours || data);
   return normalizeAppointmentsPayload(data.appointments);
-}
-
-async function loadDashboard() {
-  const response = await apiFetch(
-    `${API}/dashboard?unitId=${unitId}&date=${encodeURIComponent(isoDayStart())}`,
-  );
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "Falha ao carregar dashboard");
-  }
-  return data;
 }
 
 async function loadFinancialEntries() {
@@ -7411,7 +7162,6 @@ function isSkippedModuleLoad(result) {
 
 async function loadAll() {
   const runId = ++loadAllRunId;
-  renderDashboardLoading(dashboardElements);
   renderAgendaLoading(agendaElements);
   renderFinancialLoading(financialElements);
   renderStockLoading(stockElements);
@@ -7430,7 +7180,6 @@ async function loadAll() {
   const [
     agendaResult,
     appointmentsResult,
-    dashboardResult,
     financialResult,
     stockResult,
     clientsResult,
@@ -7447,7 +7196,6 @@ async function loadAll() {
   ] = await Promise.allSettled([
     loadAgendaByPeriod(),
     loadAppointmentsByFilters(),
-    loadDashboard(),
     loadModuleIfAllowed("financeiro", loadFinancialEntries),
     loadStockOverview(),
     loadClientsOverview(),
@@ -7459,7 +7207,7 @@ async function loadAll() {
     loadModuleIfAllowed("configuracoes", loadSettingsModule),
     loadModuleIfAllowed("metas", loadMetasModule),
     loadModuleIfAllowed("auditoria", loadAuditEvents),
-    loadModuleIfAllowed("operacao", loadProductSalesHistory),
+    loadModuleIfAllowed("financeiro", loadProductSalesHistory),
     loadModuleIfAllowed("relatorios", loadReportsBundle),
   ]);
   if (runId !== loadAllRunId) return;
@@ -7504,16 +7252,6 @@ async function loadAll() {
     renderAgendaView();
   }
 
-  const dashboardAutomationSignalsPayload =
-    automacoesResult.status === "fulfilled" && !automacoesSkipped
-      ? buildDashboardAutomationSignals(automacoesResult.value)
-      : {
-          queued: 0,
-          executed: 0,
-          failed: 0,
-          lastExecutedAt: null,
-          topPlaybooks: [],
-        };
   const clientsAutomationSignalsPayload =
     automacoesResult.status === "fulfilled" && !automacoesSkipped && clientsResult.status === "fulfilled"
       ? buildClientsAutomationSignals(clientsResult.value, automacoesResult.value)
@@ -7522,24 +7260,6 @@ async function loadAll() {
           reactivationPlaybookExecutions: 0,
           recentClients: [],
         };
-
-  if (dashboardResult.status === "fulfilled") {
-    renderDashboardData(
-      dashboardElements,
-      buildRevenueMachineDashboardPayload({
-        dashboardPayload: dashboardResult.value,
-        dashboardAutomationSignals: dashboardAutomationSignalsPayload,
-        clientsPayload: clientsResult.status === "fulfilled" ? clientsResult.value : null,
-        financialPayload: financialResult.status === "fulfilled" && !financialSkipped ? financialResult.value : null,
-        stockPayload: stockResult.status === "fulfilled" ? stockResult.value : null,
-        automacoesPayload: automacoesResult.status === "fulfilled" && !automacoesSkipped ? automacoesResult.value : null,
-      }),
-    );
-  } else {
-    renderDashboardError(dashboardElements, () => {
-      loadAll();
-    });
-  }
 
   if (financialSkipped) {
     currentFinancialTransactions = [];
@@ -7770,7 +7490,7 @@ function settingsBusinessBasePayload() {
     document: String(business.document || "").trim(),
     displayName: String(business.displayName || "").trim(),
     primaryColor: String(business.primaryColor || "#0f172a").trim(),
-    themeMode: String(business.themeMode || "system"),
+    themeMode: String(business.themeMode || "dark"),
     defaultAppointmentDuration: Number(business.defaultAppointmentDuration || 45),
     minimumAdvanceMinutes: Number(business.minimumAdvanceMinutes || 30),
     bufferBetweenAppointmentsMinutes: Number(business.bufferBetweenAppointmentsMinutes ?? 0),
@@ -10553,35 +10273,6 @@ if (agendaMoreOptionsMenu) {
     if (!target) return;
     event.stopPropagation();
     openOwnerFlow(target.getAttribute("data-owner-flow"), { openerElement: target });
-  });
-}
-
-if (actionSuggestionsList) {
-  actionSuggestionsList.addEventListener("click", async (event) => {
-    const ctaTarget = event.target.closest("[data-dashboard-cta]");
-    if (ctaTarget) {
-      await handleDashboardSuggestionAction(ctaTarget);
-      return;
-    }
-    const ignoreTarget = event.target.closest("[data-dashboard-ignore]");
-    if (ignoreTarget) {
-      await handleDashboardSuggestionIgnore(ignoreTarget);
-    }
-  });
-}
-
-if (dashboardPlaybookPanel) {
-  dashboardPlaybookPanel.addEventListener("click", async (event) => {
-    const target = event.target.closest("[data-playbook-execute-reactivation]");
-    if (!target) return;
-    const fallbackPayload = {
-      playbookSteps: [
-        "Segmentar clientes de alto risco.",
-        "Disparar campanha de retorno via WhatsApp.",
-        "Monitorar respostas e reengajar nao respondentes.",
-      ],
-    };
-    await executeReactivationPlaybook(fallbackPayload);
   });
 }
 

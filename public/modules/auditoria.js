@@ -428,8 +428,8 @@ export function renderAuditEventDrawer(elements, event = {}) {
     ["ID da entidade", event.entityId],
     ["Rota", event.route],
     ["Metodo", event.method],
-    ["requestId", event.requestId],
-    ["idempotencyKey", event.idempotencyKey],
+    ["Referencia da operacao", event.requestId],
+    ["Operacao ja processada", event.idempotencyKey],
   ]
     .filter(([, v]) => v)
     .map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`)

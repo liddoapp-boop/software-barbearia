@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agendar</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231a1915'/%3E%3Cpath d='M18 18l28 28M46 18L18 46' stroke='%23e6e5e0' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap" rel="stylesheet">
   <style>
     /* ══════════════════════════════════════════════
        Warm palette — dark default, light via media query
@@ -661,8 +658,9 @@
       .sheet.open { transform: translateX(-50%) translateY(0); }
     }
   </style>
+  <link rel="stylesheet" href="/styles/design-system.css">
 </head>
-<body>
+<body class="public-booking">
 
 <div class="sr-only" aria-live="polite" id="liveRgn"></div>
 
@@ -676,8 +674,8 @@
       <line x1="8.12" y1="8.12" x2="12" y2="12"/>
     </svg>
     <div>
-      <div class="brand-name" id="brandName">Agendamento</div>
-      <div class="brand-sub">Agendamento online</div>
+      <div class="brand-name" id="brandName">Barbearia Geovane Borges</div>
+      <div class="brand-sub">Agende seu horário</div>
     </div>
   </div>
   <button class="btn-appts" id="btnAppts" aria-label="Ver meus agendamentos">
@@ -692,6 +690,7 @@
 
 <!-- Chat -->
 <main class="chat" id="chat" role="log" aria-label="Conversa de agendamento" aria-live="polite"></main>
+<p class="booking-powered">Tecnologia Liddo</p>
 
 <!-- Input -->
 <div class="input-bar">
@@ -714,7 +713,6 @@
   <div class="sheet-body" id="sheetBody"></div>
 </div>
 
-<script src="https://unpkg.com/imask@7.6.1/dist/imask.min.js"></script>
 <script src="/modules/booking-service-selection.js"></script>
 <script>
 const API   = '';
@@ -756,16 +754,16 @@ const BookingSelection = window.BookingServiceSelection || (function () {
   const isSelected = (current, serviceId) => current.some((service) => service.id === serviceId);
   const add = (current, service) => {
     const normalized = normalizeService(service);
-    if (!normalized) return { ok: false, selected: [...current], message: 'Servico invalido.' };
+    if (!normalized) return { ok: false, selected: [...current], message: 'Serviço inválido.' };
     if (isSelected(current, normalized.id)) return { ok: false, selected: [...current], message: 'Este servico ja foi selecionado.' };
-    if (current.length >= max) return { ok: false, selected: [...current], message: `Selecione no maximo ${max} servicos.` };
+    if (current.length >= max) return { ok: false, selected: [...current], message: `Selecione no máximo ${max} serviços.` };
     return { ok: true, selected: [...current, normalized], message: '' };
   };
   const remove = (current, serviceId) => current.filter((service) => service.id !== serviceId);
   const clear = () => [];
   const ids = (current) => current.map((service) => text(service.id)).filter(Boolean);
   const validate = (current) => ids(current).length ? { ok: true, message: '' } : { ok: false, message: 'Selecione ao menos um servico.' };
-  const label = (current, fallback = 'Servicos') => current.map((service) => text(service.name || service.serviceNameSnapshot)).filter(Boolean).join(' + ') || fallback;
+  const label = (current, fallback = 'Serviços') => current.map((service) => text(service.name || service.serviceNameSnapshot)).filter(Boolean).join(' + ') || fallback;
   const catalogTotal = (current) => Number(current.reduce((sum, service) => sum + numberValue(service.price ?? service.servicePriceSnapshot), 0).toFixed(2));
   const normalizeItems = (source = {}, fallback = []) => {
     const raw = Array.isArray(source.serviceItems) ? [...source.serviceItems] : [];
@@ -783,7 +781,7 @@ const BookingSelection = window.BookingServiceSelection || (function () {
     const serviceItems = normalizeItems(source, fallback);
     return {
       serviceItems,
-      label: label(serviceItems.map((item) => ({ name: item.name })), 'Servicos'),
+      label: label(serviceItems.map((item) => ({ name: item.name })), 'Serviços'),
       totalPrice: numberValue(source.totalPriceSnapshot ?? source.totalPrice ?? source.price, catalogTotal(fallback)),
       effectiveDurationMin: numberValue(source.effectiveDurationMinSnapshot ?? source.effectiveDurationMin ?? source.durationMinutes),
       ruleLabel: text(source.durationRuleLabelSnapshot || source.ruleLabel),
@@ -934,8 +932,8 @@ function renderWorkingHoursBlock() {
     return `<div class="booking-hours-item"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</div>`;
   }).join('');
   return `
-    <section class="booking-hours" aria-label="Horarios de atendimento da semana">
-      <div class="booking-hours-title">Horarios de atendimento</div>
+    <section class="booking-hours" aria-label="Horários de atendimento da semana">
+      <div class="booking-hours-title">Horários de atendimento</div>
       <div class="booking-hours-list">${items}</div>
     </section>
   `;
@@ -1074,7 +1072,7 @@ async function beginNewBooking(fromUserAction = false) {
   disableInput();
   resetBookingFlowState();
   if (fromUserAction) appendBubble('Novo agendamento', true);
-  await say('Escolha os servicos', 300);
+  await say('Escolha os serviços', 300);
   step = STEPS.SERVICE;
   await loadServices();
 }
@@ -1122,7 +1120,7 @@ async function handleSend() {
     appendBubble(email || 'Prefiro não informar', true);
     setClient({ email });
     chatInput.value = '';
-    await say('Escolha os servicos', 400);
+    await say('Escolha os serviços', 400);
     step = STEPS.SERVICE;
     await loadServices();
   }
@@ -1165,21 +1163,21 @@ function renderServiceSummaryHtml() {
         <span>${escapeHtml(service.name)}</span>
         <button type="button" data-remove-service-id="${escapeHtml(service.id)}" aria-label="Remover ${escapeHtml(service.name)}">Remover</button>
       </div>`).join('')
-    : '<div class="svc-rule-note">Selecione ao menos um servico para consultar duracao e valor.</div>';
+    : '<div class="svc-rule-note">Selecione ao menos um serviço para consultar duração e valor.</div>';
   const statusText = servicePreview.status === 'loading'
-    ? 'Calculando valor e duracao...'
+    ? 'Calculando valor e duração...'
     : servicePreview.status === 'error'
-      ? 'Nao foi possivel calcular agora. Tente novamente.'
-      : summary.ruleLabel || 'Preco e duracao calculados pelo sistema.';
+      ? 'Não foi possível calcular agora. Tente novamente.'
+      : summary.ruleLabel || 'Preço e duração calculados pelo sistema.';
   const canContinue = validation.ok && servicePreview.status === 'ready';
   return `
     <div class="svc-selection-panel" aria-live="polite">
-      <div class="svc-selection-title">Servicos selecionados</div>
+      <div class="svc-selection-title">Serviços selecionados</div>
       <div class="svc-selected-list">${selectedList}</div>
       <div class="svc-summary-grid">
         <div class="svc-summary-metric"><span>Quantidade</span><strong>${selectedServices.length}</strong></div>
         <div class="svc-summary-metric"><span>Total</span><strong>${fmtBRL(summary.totalPrice || BookingSelection.catalogTotal(selectedServices))}</strong></div>
-        <div class="svc-summary-metric"><span>Duracao</span><strong>${formatDuration(summary.effectiveDurationMin)}</strong></div>
+        <div class="svc-summary-metric"><span>Duração</span><strong>${formatDuration(summary.effectiveDurationMin)}</strong></div>
       </div>
       <div class="svc-rule-note">${escapeHtml(statusText)}</div>
       <div class="svc-selection-actions">
@@ -1197,7 +1195,7 @@ function renderServices() {
     appendWidget(`
       <div id="serviceWidgetWrap" class="svc-scroll" role="status" aria-live="polite">
         <div class="svc-row">
-          <div class="svc-empty">Nao conseguimos carregar os servicos agora. Tente novamente em instantes.</div>
+          <div class="svc-empty">Não conseguimos carregar os serviços agora. Tente novamente em instantes.</div>
         </div>
       </div>`);
     return;
@@ -1226,7 +1224,7 @@ function renderServices() {
 
   const w = appendWidget(`
     <div id="serviceWidgetWrap" style="width:100%">
-      <div class="svc-scroll" role="group" aria-label="Servicos disponiveis">
+      <div class="svc-scroll" role="group" aria-label="Serviços disponíveis">
         <div class="svc-row">${cards}</div>
       </div>
       ${renderServiceSummaryHtml()}
@@ -1305,7 +1303,7 @@ async function onPickService(id, runId = bookingRunId) {
   clearSelectedTimeAndCalendar();
   await refreshServicePreview(runId);
   if ((step === STEPS.CALENDAR || step === STEPS.CONFIRM) && selectedServices.length) {
-    await say('Servicos atualizados. Escolha uma data.', 200);
+    await say('Serviços atualizados. Escolha uma data.', 200);
     step = STEPS.CALENDAR;
     await loadCalendar(runId);
   }
@@ -1338,7 +1336,7 @@ async function continueToCalendar(runId = bookingRunId) {
     return;
   }
   if (servicePreview.status !== 'ready') {
-    await say('Aguarde o calculo de valor e duracao antes de continuar.', 250);
+    await say('Aguarde o cálculo de valor e duração antes de continuar.', 250);
     return;
   }
   appendBubble(BookingSelection.label(selectedServices), true);
@@ -1448,7 +1446,7 @@ function renderCalendar() {
       <div class="cal-grid" role="group" aria-label="Escolha uma data">${hdrs}${cells}</div>
       ${renderWorkingHoursBlock()}
       <div class="slots-wrap" id="slotsWrap" aria-live="polite">
-        <div class="slots-grid" id="slotsGrid">${slotsLoadFailed ? '<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Nao conseguimos carregar os horarios agora. Tente novamente em instantes.</p>' : ''}</div>
+        <div class="slots-grid" id="slotsGrid">${slotsLoadFailed ? '<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">Não conseguimos carregar os horários agora. Tente novamente em instantes.</p>' : ''}</div>
       </div>
     </div>`);
 
@@ -1487,8 +1485,8 @@ function onPickDay(key, runId = bookingRunId) {
   const taken = (slots[key]||[]).filter(s => s.available === false);
   if (avail.length === 0 && taken.length === 0) {
     const message = slotsLoadFailed
-      ? 'Nao conseguimos carregar os horarios agora. Tente novamente em instantes.'
-      : 'Nao ha horarios disponiveis para esta data.';
+      ? 'Não conseguimos carregar os horários agora. Tente novamente em instantes.'
+      : 'Não há horários disponíveis para esta data.';
     grid.innerHTML = `<p style="grid-column:1/-1;color:var(--tx2);font-size:13px;padding:8px 0">${message}</p>`;
   } else {
     const all = [...avail,...taken].sort((a,b) => a.time.localeCompare(b.time));
@@ -1547,11 +1545,11 @@ async function showConfirm(runId = bookingRunId) {
     <div class="confirm-card" id="confirmWidgetWrap">
       <div class="cfr-row"><span class="cfr-lbl">Cliente</span><span class="cfr-val">${escapeHtml(confirmData.clientName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Telefone</span><span class="cfr-val">${escapeHtml(fmtPhone(confirmData.phone))}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Servicos</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Serviços</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(confirmData.professionalName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(dateStr)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Horario</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Duracao</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(confirmData.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(confirmData.duration)} min</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Total previsto</span><span class="cfr-price">${fmtBRL(confirmData.price)}</span></div>
       <button class="btn-confirm" id="btnConfirm" aria-label="Confirmar agendamento">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
@@ -1589,7 +1587,7 @@ async function submitBooking(runId = bookingRunId) {
     };
     const email = sanitizeEmailValue(submittedData.email);
     if (email && !isValidEmail(email)) {
-      const err = new Error('Informe um e-mail valido ou deixe o campo em branco.');
+      const err = new Error('Informe um e-mail válido ou deixe o campo em branco.');
       err.status = 400;
       throw err;
     }
@@ -1600,7 +1598,7 @@ async function submitBooking(runId = bookingRunId) {
     });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      const err = new Error('Nao conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.');
+      const err = new Error('Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.');
       err.status = r.status;
       err.backendError = data?.error || '';
       throw err;
@@ -1625,10 +1623,10 @@ async function submitBooking(runId = bookingRunId) {
     bookingSubmitting = false;
     const backendError = String(error?.backendError || error?.message || '').toLowerCase();
     const message = error?.status === 409
-      ? 'Esse horario acabou de ser reservado. Escolha outro horario.'
+      ? 'Esse horário acabou de ser reservado. Escolha outro horário.'
       : error?.status === 400 && backendError.includes('e-mail')
-        ? 'Informe um e-mail valido ou deixe o campo em branco.'
-        : 'Nao conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
+        ? 'Informe um e-mail válido ou deixe o campo em branco.'
+        : 'Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar novamente`; }
     await say(escapeHtml(message), 300);
     if (error?.status === 409 && selectedServices.length && weekStart) {
@@ -1657,11 +1655,11 @@ function renderBookingSuccess(summary) {
     : summary.serviceName;
   const success = appendWidget(`
     <div class="confirm-card" id="bookingSuccessWrap" aria-live="polite">
-      <div class="cfr-row"><span class="cfr-lbl">Servicos</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Serviços</span><span class="cfr-val">${escapeHtml(servicesText)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Profissional</span><span class="cfr-val">${escapeHtml(summary.professionalName)}</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Data</span><span class="cfr-val">${escapeHtml(summary.dateStr)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Horario</span><span class="cfr-val">${escapeHtml(summary.time)}</span></div>
-      <div class="cfr-row"><span class="cfr-lbl">Duracao</span><span class="cfr-val">${escapeHtml(summary.duration)} min</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Horário</span><span class="cfr-val">${escapeHtml(summary.time)}</span></div>
+      <div class="cfr-row"><span class="cfr-lbl">Duração</span><span class="cfr-val">${escapeHtml(summary.duration)} min</span></div>
       <div class="cfr-row"><span class="cfr-lbl">Total previsto</span><span class="cfr-price">${fmtBRL(summary.price)}</span></div>
       <button class="btn-confirm" id="btnRestartBooking" aria-label="Fazer novo agendamento">
         Fazer novo agendamento
@@ -1720,7 +1718,7 @@ function showVerifyCard(c) {
 
   w.querySelector('#btnVOk').addEventListener('click', async () => {
     appendBubble('Está correto', true);
-    await say('Escolha os servicos', 400);
+    await say('Escolha os serviços', 400);
     step = STEPS.SERVICE;
     await loadServices();
   });
@@ -1738,6 +1736,13 @@ function showVerifyCard(c) {
 /* ─ Business name (vindo das Configurações da empresa) ─ */
 let businessName = 'Agendamento';
 
+function normalizePublicBusinessName(value) {
+  const name = String(value || '').trim();
+  const normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (!name || normalized === 'unidade padrao') return 'Barbearia Geovane Borges';
+  return name;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -1749,12 +1754,12 @@ async function loadBusinessName() {
     const r = await fetch(publicUrl('/public/business'));
     if (!r.ok) return;
     const data = await r.json();
-    const name = String(data?.name || '').trim();
+    const name = normalizePublicBusinessName(data?.name);
     if (!name) return;
     businessName = name;
     const brand = document.getElementById('brandName');
-    if (brand) brand.textContent = name;
-    document.title = `${name} — Agendar`;
+    if (brand) brand.textContent = businessName;
+    document.title = `${businessName} - Agendar`;
   } catch (_) { /* mantém fallback */ }
 }
 

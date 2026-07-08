@@ -1498,7 +1498,7 @@ textarea.ds-input {
 }
 
 /* ============================================================
-   DS: Semantic KPI cards (dashboard + overviews)
+   DS: Semantic KPI cards (overviews)
    ============================================================ */
 
 .ds-kpi {
@@ -1580,7 +1580,7 @@ textarea.ds-input {
 .ds-kpi-danger .ds-kpi-progress-bar { background: var(--color-danger); }
 
 /* ============================================================
-   DS: Alert articles (dashboard risk/status alerts)
+   DS: Alert articles (risk/status alerts)
    ============================================================ */
 
 .ds-alert {
@@ -1637,7 +1637,7 @@ textarea.ds-input {
 .ds-alert-danger .ds-alert-body  { color: color-mix(in srgb, var(--color-danger) 48%, var(--color-text-muted)); }
 
 /* ============================================================
-   DS: Action suggestion cards (dashboard playbook CTAs)
+   DS: Action suggestion cards (playbook CTAs)
    ============================================================ */
 
 .ds-action-card {
@@ -6600,6 +6600,49 @@ body {
 }
 
 .al-card-actions { display: flex; gap: 5px; flex-shrink: 0; }
+
+.appointment-secondary-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.appointment-secondary-actions > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.appointment-secondary-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.appointment-secondary-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 45;
+  display: grid;
+  gap: 6px;
+  min-width: 190px;
+  padding: 8px;
+  border: 1px solid var(--color-border, rgba(38,37,30,0.14));
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+.appointment-secondary-menu .ux-btn,
+.appointment-secondary-menu .al-btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.al-secondary-actions .appointment-secondary-menu {
+  min-width: 180px;
+}
 .al-btn {
   font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 7px;
   border: 1px solid var(--color-border,#334155); background: transparent;
@@ -11496,7 +11539,6 @@ details[open].cl-accordion > summary::before { transform: rotate(90deg); }
 #estoqueSection .op-page-title,
 #clientsSection .op-page-title,
 #financeiroSection .op-page-title,
-#dashboardSection .op-page-title,
 #professionalsSection .op-page-title,
 #servicesSection .op-page-title,
 #commissionsSection .op-page-title,
@@ -11517,7 +11559,6 @@ details[open].cl-accordion > summary::before { transform: rotate(90deg); }
 #estoqueSection .op-page-subtitle,
 #clientsSection .op-page-subtitle,
 #financeiroSection .op-page-subtitle,
-#dashboardSection .op-page-subtitle,
 #professionalsSection .op-page-subtitle,
 #servicesSection .op-page-subtitle,
 #commissionsSection .op-page-subtitle,

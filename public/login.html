@@ -3,26 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Entrar — Liddo Barber</title>
+    <title>Entrar - Liddo Barber</title>
     <script>
       (function () {
-        var mode = localStorage.getItem("sb.themeMode") || "system";
+        var mode = localStorage.getItem("sb.themeMode") || "dark";
         var isDark = mode === "dark" || (mode === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
       })();
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet" />
     <style>
       :root[data-theme="light"] {
-        --bg:             #f2f1ed;
-        --surface:        #ffffff;
-        --text-primary:   #26251e;
-        --text-secondary: rgba(38, 37, 30, 0.55);
-        --text-tertiary:  rgba(38, 37, 30, 0.40);
-        --border-default: rgba(38, 37, 30, 0.10);
-        --accent:         #f54e00;
+        --bg:             #0b0c0e;
+        --surface:        #131518;
+        --text-primary:   #f3f1ec;
+        --text-secondary: #aaa7a0;
+        --text-tertiary:  #74726d;
+        --border-default: #292c32;
+        --accent:         #c89b5d;
         --error:          #cf2d56;
         --error-soft:     rgba(207, 45, 86, 0.08);
         --error-border:   rgba(207, 45, 86, 0.20);
@@ -35,13 +32,13 @@
       }
 
       :root[data-theme="dark"] {
-        --bg:             #1a1915;
-        --surface:        #2a2922;
-        --text-primary:   #e6e5e0;
-        --text-secondary: rgba(230, 229, 224, 0.55);
-        --text-tertiary:  rgba(230, 229, 224, 0.35);
-        --border-default: rgba(230, 229, 224, 0.10);
-        --accent:         #f54e00;
+        --bg:             #0b0c0e;
+        --surface:        #131518;
+        --text-primary:   #f3f1ec;
+        --text-secondary: #aaa7a0;
+        --text-tertiary:  #74726d;
+        --border-default: #292c32;
+        --accent:         #c89b5d;
         --error:          #e04a6f;
         --error-soft:     rgba(224, 74, 111, 0.10);
         --error-border:   rgba(224, 74, 111, 0.30);
@@ -77,15 +74,16 @@
       }
 
       .logo {
-        font-family: 'Bebas Neue', sans-serif;
-        font-size: 32px;
-        letter-spacing: 3px;
+        font-family: system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-size: 30px;
+        letter-spacing: 0;
         color: var(--text-primary);
         text-align: center;
         margin-bottom: 4px;
       }
 
       .subtitle {
+        display: none;
         text-align: center;
         color: var(--text-secondary);
         font-size: 14px;
@@ -158,11 +156,11 @@
       }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
+    <link rel="stylesheet" href="/styles/design-system.css" />
   </head>
-  <body>
+  <body class="auth-screen">
     <div class="card">
-      <div class="logo">✂ LIDDO BARBER</div>
-      <p class="subtitle">Painel de gestão — acesso restrito</p>
+      <div class="logo">Liddo Barber</div>
 
       <form id="loginForm">
         <label for="email">Email</label>

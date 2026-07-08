@@ -196,11 +196,11 @@ export function renderAutomacoesData(elements, payload) {
                   <div>
                     <strong>${escapeHtml(row.provider)}</strong>
                     <span>${escapeHtml(row.direction)} · HTTP ${toNumber(row.httpStatus)} · Tentativa ${toNumber(row.attempt)}</span>
-                    <span>Correlation: ${escapeHtml(row.correlationId || "-")}</span>
+                    <span>Referencia da operacao: ${escapeHtml(row.correlationId || "-")}</span>
                     ${row.errorMessage ? `<span class="ds-text-muted">${escapeHtml(row.errorMessage)}</span>` : ""}
                   </div>
                   <div class="reports-row-value">
-                    ${renderStatusChip(row.status === "SUCCESS" ? "PAID" : "CANCELED", { label: row.status })}
+                    ${renderStatusChip(row.status === "SUCCESS" ? "PAID" : "CANCELED", { label: row.status === "SUCCESS" ? "Concluido" : "Falha" })}
                   </div>
                 </article>
               `,

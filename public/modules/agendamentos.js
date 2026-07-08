@@ -207,26 +207,18 @@ function formatHistoryEntry(entry = {}) {
 function actionsForStatus(status, options = {}) {
   const canCheckout = options.canCheckout !== false;
   if (status === "SCHEDULED") {
-    return [
-      options.canEdit ? "EDIT" : "",
-      "CONFIRMED",
-      "DETAIL",
-      "WHATSAPP",
-      options.canNoShow ? "NO_SHOW" : "",
-      "DELAY",
-      "CANCELLED",
-    ].filter(Boolean);
+    return ["CONFIRMED", options.canEdit ? "RESCHEDULE" : "", "CANCELLED"].filter(Boolean);
   }
   if (status === "CONFIRMED") {
-    return [options.canEdit ? "EDIT" : "", "IN_SERVICE", "DETAIL", "WHATSAPP", options.canNoShow ? "NO_SHOW" : "", "DELAY", "CANCELLED"].filter(Boolean);
+    return ["IN_SERVICE", "DELAY", options.canEdit ? "RESCHEDULE" : "", "CANCELLED", options.canNoShow ? "NO_SHOW" : ""].filter(Boolean);
   }
   if (status === "IN_SERVICE") {
     return canCheckout
-      ? ["COMPLETE", "SERVICES", "DETAIL", "WHATSAPP", "DELAY"]
-      : ["SERVICES", "DETAIL", "WHATSAPP", "DELAY"];
+      ? ["COMPLETE", "SERVICES"]
+      : ["SERVICES", "DETAIL"];
   }
-  if (status === "COMPLETED") return ["DETAIL", "WHATSAPP"];
-  return ["DETAIL", "WHATSAPP"];
+  if (status === "COMPLETED" || status === "CANCELLED" || status === "NO_SHOW") return ["DETAIL"];
+  return ["DETAIL"];
 }
 
 function primaryActionForStatus(status, options = {}) {
@@ -244,7 +236,8 @@ function actionLabel(action) {
   if (action === "IN_SERVICE") return "Iniciar atendimento";
   if (action === "COMPLETE") return "Ir para checkout";
   if (action === "SERVICES") return "Alterar servicos";
-  if (action === "NO_SHOW") return "Falta";
+  if (action === "RESCHEDULE") return "Remarcar";
+  if (action === "NO_SHOW") return "Marcar falta";
   if (action === "DELAY") return "Registrar atraso";
   if (action === "CANCELLED") return "Cancelar";
   if (action === "DETAIL") return "Detalhes";
@@ -252,6 +245,35 @@ function actionLabel(action) {
   if (action === "WHATSAPP") return "WhatsApp";
   if (action === "REFUND") return "Correcao administrativa";
   return action;
+}
+
+function actionLabelForStatus(action, status) {
+  if (action === "DETAIL" && (status === "CANCELLED" || status === "NO_SHOW")) return "Ver historico";
+  if (action === "DETAIL") return "Ver detalhes";
+  return actionLabel(action);
+}
+
+function renderAppointmentActions(item, actions, primaryAction, options = {}) {
+  const dataPrefix = options.dataPrefix || "data-action";
+  const idAttr = options.idAttr || "data-id";
+  const primary = actions.includes(primaryAction) ? primaryAction : actions[0];
+  const secondary = actions.filter((action) => action !== primary);
+  const primaryMarkup = primary
+    ? `<button ${dataPrefix}="${primary}" ${idAttr}="${item.id}" class="${actionClass(primary)} appointment-next-action">${actionLabelForStatus(primary, item.status)}</button>`
+    : "";
+  const secondaryMarkup = secondary.length
+    ? `
+      <details class="appointment-secondary-actions">
+        <summary class="ux-btn ux-btn-muted" aria-label="Mais opcoes para ${escapeHtml(item.client || "atendimento")}">Mais opcoes</summary>
+        <div class="appointment-secondary-menu">
+          ${secondary
+            .map((action) => `<button ${dataPrefix}="${action}" ${idAttr}="${item.id}" class="${actionClass(action)}">${actionLabelForStatus(action, item.status)}</button>`)
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+  return `${primaryMarkup}${secondaryMarkup}`;
 }
 
 function actionClass(action) {
@@ -428,12 +450,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
           </td>
           <td class="appts-td">
             <div class="catalog-row-actions">
-              ${actions
-                .map(
-                  (action) =>
-                    `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
-                )
-                .join("")}
+              ${renderAppointmentActions(item, actions, primaryAction)}
             </div>
           </td>
         </tr>
@@ -464,12 +481,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
           <div class="ds-cell-secondary">Telefone: ${escapeHtml(item.clientPhone || "Nao informado")} | Valor: ${money(item.servicePrice)}</div>
           ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido (${item.productItemsSoldCount} item(ns))</div>` : ""}
           <div class="catalog-row-actions">
-            ${actions
-              .map(
-                (action) =>
-                  `<button data-action="${action}" data-id="${item.id}" class="${actionClass(action)} ${action === primaryAction ? "appointment-next-action" : ""}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
-              )
-              .join("")}
+            ${renderAppointmentActions(item, actions, primaryAction)}
           </div>
         </article>
       `;
@@ -575,12 +587,10 @@ export function renderAppointmentDetail(elements, item, allItems, options = {}) 
       auditAction: item.status,
     }),
     actions: `
-      ${actions
-        .map(
-          (action) =>
-            `<button type="button" data-drawer-appointment-action="${action}" data-id="${item.id}" class="ux-btn ${action === primaryActionForStatus(item.status, { canCheckout: itemCanCheckout }) ? "ux-btn-primary" : actionButtonTone(action)}">${action === "DETAIL" && item.status === "COMPLETED" ? "Ver resumo" : actionLabel(action)}</button>`,
-        )
-        .join("")}
+      ${renderAppointmentActions(item, actions, primaryActionForStatus(item.status, { canCheckout: itemCanCheckout }), {
+        dataPrefix: "data-drawer-appointment-action",
+        idAttr: "data-id",
+      })}
     `,
   });
   elements.panel

@@ -18,22 +18,17 @@
         } catch (_) {}
       })();
     </script>
-    <title>Barbearia Premium | Dashboard Operacional</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;700;800&display=swap"
-      rel="stylesheet"
-    />
+    <title>Liddo Barber | Painel Operacional</title>
     <link rel="stylesheet" href="/styles/layout.css" />
+    <link rel="stylesheet" href="/styles/design-system.css" />
   </head>
-  <body class="overflow-x-hidden" style="font-family: 'Manrope', sans-serif">
+  <body class="overflow-x-hidden">
     <script>
       (function () {
         if (localStorage.getItem("sb.themeMode") && localStorage.getItem("sb.themeModeUserSet") !== "true") {
           localStorage.removeItem("sb.themeMode");
         }
-        var mode = localStorage.getItem("sb.themeMode") || "system";
+        var mode = localStorage.getItem("sb.themeMode") || "dark";
         var isDark = mode === "dark" || (mode === "system" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.setAttribute("data-theme-mode", mode);
         document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
@@ -48,41 +43,6 @@
 
       <div id="appMain">
         <main id="appContent" class="min-w-0">
-          <section id="dashboardSection" data-section="dashboard" class="module-section hidden">
-            <div id="dashboardHeaderMount"></div>
-            <section id="kpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
-
-            <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              <article class="ux-card">
-                <h3 class="ux-section-label">Meta mensal</h3>
-                <div id="goalBlock"></div>
-              </article>
-              <article class="ux-card">
-                <h3 class="ux-section-label ds-kpi-tone-danger">Alertas (max 3)</h3>
-                <div id="alertsList"></div>
-              </article>
-              <article class="ux-card">
-                <h3 class="ux-section-label ds-kpi-tone-success">Performance</h3>
-                <div id="topProfessionalsList"></div>
-              </article>
-            </section>
-
-            <section class="grid grid-cols-1 gap-3">
-              <article class="ux-card">
-                <h3 class="ux-section-label ds-kpi-tone-info">Insights</h3>
-                <div id="actionSuggestionsList"></div>
-              </article>
-            </section>
-
-            <div id="topsList" class="hidden"></div>
-            <div id="forecastList" class="hidden"></div>
-            <div id="smartAlertsList" class="hidden"></div>
-            <div id="dashboardLowStockList" class="hidden"></div>
-            <div id="dashboardPlaybookPanel" class="hidden"></div>
-            <div id="dashboardTelemetryPanel" class="hidden"></div>
-            <div id="dashboardAutomationSignals" class="hidden"></div>
-          </section>
-
           <section id="agendaSection" data-section="agenda" class="module-section hidden">
             <div id="agendaHeaderMount" class="ds-mb"></div>
 
