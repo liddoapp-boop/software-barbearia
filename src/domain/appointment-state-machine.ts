@@ -63,6 +63,12 @@ export function assertAppointmentTransitionAllowed(from: AppointmentStatus, to: 
   }
 }
 
+export function assertCancellationReasonProvided(status: AppointmentStatus, reason?: string) {
+  if (status === "CANCELLED" && !reason?.trim()) {
+    throw new Error("Motivo do cancelamento e obrigatorio");
+  }
+}
+
 export function assertAppointmentCanBeRescheduled(status: AppointmentStatus) {
   if (isTerminalAppointmentStatus(status)) {
     throw new Error(`Agendamento em estado terminal (${status}) nao pode ser remarcado.`);

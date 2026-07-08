@@ -475,7 +475,7 @@ describe("API MVP", () => {
       method: "PATCH",
       url: `/appointments/${firstId}/status`,
       headers: { "idempotency-key": "status-api-003" },
-      payload: { status: "CANCELLED", changedBy: "owner" },
+      payload: { status: "CANCELLED", changedBy: "owner", reason: "Cliente cancelou" },
     });
 
     const second = await app.inject({
@@ -912,7 +912,7 @@ describe("API MVP", () => {
       method: "PATCH",
       url: `/appointments/${cancelled.json().appointment.id}/status`,
       headers: { "idempotency-key": "status-api-008" },
-      payload: { status: "CANCELLED", changedBy: "owner" },
+      payload: { status: "CANCELLED", changedBy: "owner", reason: "Cliente cancelou" },
     });
 
     const reusedSlot = await app.inject({
@@ -1036,6 +1036,7 @@ describe("API MVP", () => {
       unitId: "unit-01",
       status: "CANCELLED",
       changedBy: "owner",
+      reason: "Cliente cancelou",
     });
     const reusedSlot = operations.schedule({
       unitId: "unit-01",

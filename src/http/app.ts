@@ -911,8 +911,11 @@ export function createApp() {
       "BLOCKED",
     ] as [AppointmentStatus, ...AppointmentStatus[]]),
     changedBy: z.string().min(1),
-    reason: z.string().max(250).optional(),
+    reason: z.string().trim().max(250).optional(),
     idempotencyKey: z.string().trim().min(1).max(160).optional(),
+  }).refine((value) => value.status !== "CANCELLED" || Boolean(value.reason), {
+    message: "Motivo do cancelamento e obrigatorio",
+    path: ["reason"],
   });
 
   const delaySchema = z.object({

@@ -367,7 +367,7 @@ describe("blindagem de agendamentos", () => {
     expect(conflict.statusCode).toBe(409);
   });
 
-  it("cancela SCHEDULED liberando slot e bloqueia cancelamento em IN_SERVICE", async () => {
+  it("exige motivo para cancelar SCHEDULED, libera slot e bloqueia cancelamento em IN_SERVICE", async () => {
     const app = createApp();
     await setUnit01WideWednesdayHours(app);
     const first = await app.inject({
@@ -377,6 +377,10 @@ describe("blindagem de agendamentos", () => {
     });
     expect(first.statusCode).toBe(200);
     const firstId = first.json().appointment.id;
+
+    const missingReason = await patchAppointmentStatus(app, firstId, "CANCELLED", "cancel-missing-reason-001");
+    expect([400, 422]).toContain(missingReason.statusCode);
+    expect(missingReason.json().error).toMatch(/motivo.*cancelamento.*obrigatorio/i);
 
     const cancelled = await patchAppointmentStatus(app, firstId, "CANCELLED", "cancel-scheduled-001", {
       reason: "Cliente cancelou",
@@ -398,7 +402,9 @@ describe("blindagem de agendamentos", () => {
     expect(inService.statusCode).toBe(200);
     const started = await patchAppointmentStatus(app, reusedSlot.json().appointment.id, "IN_SERVICE", "start-before-cancel-001");
     expect(started.statusCode).toBe(200);
-    const blocked = await patchAppointmentStatus(app, reusedSlot.json().appointment.id, "CANCELLED", "cancel-in-service-001");
+    const blocked = await patchAppointmentStatus(app, reusedSlot.json().appointment.id, "CANCELLED", "cancel-in-service-001", {
+      reason: "Cliente pediu cancelamento depois de iniciar",
+    });
     expect([400, 422]).toContain(blocked.statusCode);
     expect(blocked.json().error).toMatch(/andamento|cancelado diretamente/i);
   });

@@ -74,7 +74,9 @@ import {
   assertAppointmentCanBeRescheduled,
   assertAppointmentTransitionAllowed,
   assertAppointmentCanBeUpdated,
+  assertCancellationReasonProvided,
   assertNoShowToleranceElapsed,
+  buildDailyClosingPendingError,
   validateAppointmentSchedulingWindow,
   describeBusinessHourAt,
   WalkInOutsideBusinessHoursError,
@@ -2742,6 +2744,7 @@ export class OperationsService {
     if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
       throw new Error("Use checkout para finalizar atendimento com financeiro");
     }
+    assertCancellationReasonProvided(input.status, input.reason);
     if (input.status === "NO_SHOW") {
       assertNoShowToleranceElapsed(appointment.startsAt);
     }
@@ -6183,6 +6186,23 @@ export class OperationsService {
     start.setHours(0, 0, 0, 0);
     const end = new Date(input.businessDate);
     end.setHours(23, 59, 59, 999);
+    const pendingError = buildDailyClosingPendingError({
+      inServiceAppointments: this.store.appointments.filter(
+        (item) =>
+          item.unitId === input.unitId &&
+          item.status === "IN_SERVICE" &&
+          item.startsAt <= end &&
+          item.endsAt >= start,
+      ).length,
+      openCheckouts: this.store.appointmentCheckouts.filter(
+        (item) =>
+          item.unitId === input.unitId &&
+          item.status === "OPEN" &&
+          item.openedAt >= start &&
+          item.openedAt <= end,
+      ).length,
+    });
+    if (pendingError) throw new Error(pendingError);
     const payments = this.store.checkoutPayments.filter(
       (item) => item.unitId === input.unitId && item.status === "CONFIRMED" && item.paidAt >= start && item.paidAt <= end,
     );

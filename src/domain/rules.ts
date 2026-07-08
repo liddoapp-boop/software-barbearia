@@ -21,6 +21,7 @@ export {
   assertAppointmentCanBeRescheduled,
   assertAppointmentCanBeUpdated,
   assertAppointmentTransitionAllowed,
+  assertCancellationReasonProvided,
   assertNoShowToleranceElapsed,
   canTransitionAppointmentStatus,
   describeAppointmentTransitionError,
@@ -547,6 +548,21 @@ export function calculateProductSaleGrossAmount(sale: ProductSale): number {
   return roundMoney(
     sale.items.reduce((acc, item) => acc + item.unitPrice * item.quantity, 0),
   );
+}
+
+export function buildDailyClosingPendingError(input: {
+  inServiceAppointments: number;
+  openCheckouts: number;
+}) {
+  const reasons: string[] = [];
+  if (input.inServiceAppointments > 0) {
+    reasons.push(`${input.inServiceAppointments} atendimento(s) em andamento`);
+  }
+  if (input.openCheckouts > 0) {
+    reasons.push(`${input.openCheckouts} checkout(s) aberto(s) ou pagamento(s) pendente(s)`);
+  }
+  if (!reasons.length) return null;
+  return `Fechamento bloqueado: ${reasons.join("; ")}. Resolva as pendencias antes de fechar o dia.`;
 }
 
 function roundMoney(value: number): number {

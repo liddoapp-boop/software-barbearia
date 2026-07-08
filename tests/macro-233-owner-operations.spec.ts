@@ -528,6 +528,24 @@ describe("Macro 233 owner-only operations", () => {
     expect(failedCheckout.json().checkout.status).toBe("OPEN");
     expect(failedCheckout.json().serviceRevenue).toBeUndefined();
 
+    const pendingClosing = await app.inject({
+      method: "POST",
+      url: "/financial/daily-closing",
+      headers: { ...owner, "idempotency-key": "daily-closing-pending-blocked" },
+      payload: {
+        unitId: "unit-01",
+        businessDate: "2026-04-22",
+        informedCash: 0,
+        informedPix: 0,
+        informedDebit: 0,
+        informedCredit: 0,
+        notes: "Tentativa com checkout aberto",
+        responsible: "Geovane",
+      },
+    });
+    expect([400, 409]).toContain(pendingClosing.statusCode);
+    expect(pendingClosing.json().error).toMatch(/fechamento bloqueado|atendimento.*andamento|checkout.*aberto|pagamento.*pendente/i);
+
     const paidAppointment = await createAppointment(app, owner, "2026-04-22T20:00:00.000Z");
     await setStatus(app, owner, paidAppointment.id, "CONFIRMED");
     await setStatus(app, owner, paidAppointment.id, "IN_SERVICE");
@@ -550,6 +568,28 @@ describe("Macro 233 owner-only operations", () => {
     expect(paidCheckout.json().checkout.status).toBe("PAID");
     expect(paidCheckout.json().payments.map((item: any) => item.method)).toEqual(["CASH", "PIX"]);
     expect(paidCheckout.json().commissions).toHaveLength(0);
+
+    const paidCheckoutReplay = await app.inject({
+      method: "POST",
+      url: `/appointments/${paidAppointment.id}/checkout`,
+      headers: { ...owner, "idempotency-key": "checkout-split-001" },
+      payload: {
+        unitId: "unit-01",
+        changedBy: "macro-233-test",
+        completedAt: "2026-04-22T20:45:00.000Z",
+        payments: [
+          { method: "dinheiro", amount: 20, receivedAmount: 20, responsible: "Geovane" },
+          { method: "PIX", amount: 55, responsible: "Geovane", reference: "pix-abc" },
+        ],
+      },
+    });
+    expect(paidCheckoutReplay.statusCode).toBe(200);
+    expect(paidCheckoutReplay.json().appointment.id).toBe(paidCheckout.json().appointment.id);
+    expect(paidCheckoutReplay.json().checkout.id).toBe(paidCheckout.json().checkout.id);
+    expect(paidCheckoutReplay.json().payments.map((item: any) => item.id)).toEqual(
+      paidCheckout.json().payments.map((item: any) => item.id),
+    );
+    expect(paidCheckoutReplay.json().serviceRevenue.id).toBe(paidCheckout.json().serviceRevenue.id);
 
     const cashAppointment = await createAppointment(app, owner, "2026-04-22T21:00:00.000Z");
     await setStatus(app, owner, cashAppointment.id, "CONFIRMED");

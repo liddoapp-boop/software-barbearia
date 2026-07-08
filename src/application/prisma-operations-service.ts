@@ -67,7 +67,9 @@ import {
   assertAppointmentCanBeRescheduled,
   assertAppointmentTransitionAllowed,
   assertAppointmentCanBeUpdated,
+  assertCancellationReasonProvided,
   assertNoShowToleranceElapsed,
+  buildDailyClosingPendingError,
   validateAppointmentSchedulingWindow,
   describeBusinessHourAt,
   WalkInOutsideBusinessHoursError,
@@ -3644,6 +3646,7 @@ export class PrismaOperationsService {
           if (input.status === "COMPLETED" && appointment.status === "IN_SERVICE") {
             throw new Error("Use checkout para finalizar atendimento com financeiro");
           }
+          assertCancellationReasonProvided(input.status, input.reason);
           if (input.status === "NO_SHOW") {
             assertNoShowToleranceElapsed(appointment.startsAt);
           }
@@ -6320,7 +6323,22 @@ export class PrismaOperationsService {
     start.setHours(0, 0, 0, 0);
     const end = new Date(input.businessDate);
     end.setHours(23, 59, 59, 999);
-    const [payments, entries] = await Promise.all([
+    const [inServiceAppointments, openCheckouts, payments, entries] = await Promise.all([
+      this.prisma.appointment.count({
+        where: {
+          unitId: input.unitId,
+          status: "IN_SERVICE",
+          startsAt: { lte: end },
+          endsAt: { gte: start },
+        },
+      }),
+      this.prisma.appointmentCheckout.count({
+        where: {
+          unitId: input.unitId,
+          status: "OPEN",
+          openedAt: { gte: start, lte: end },
+        },
+      }),
       this.prisma.checkoutPayment.findMany({
         where: { unitId: input.unitId, status: "CONFIRMED", paidAt: { gte: start, lte: end } },
       }),
@@ -6328,6 +6346,8 @@ export class PrismaOperationsService {
         where: { unitId: input.unitId, occurredAt: { gte: start, lte: end } },
       }),
     ]);
+    const pendingError = buildDailyClosingPendingError({ inServiceAppointments, openCheckouts });
+    if (pendingError) throw new Error(pendingError);
     const sumPayment = (method: string) =>
       roundMoney(payments.filter((item) => item.method === method).reduce((acc, item) => acc + asNumber(item.amount), 0));
     const servicesTotal = roundMoney(entries.filter((item) => item.kind === "INCOME" && item.source === "SERVICE").reduce((acc, item) => acc + asNumber(item.amount), 0));

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertAppointmentCanBeRescheduled,
   assertAppointmentTransitionAllowed,
+  assertCancellationReasonProvided,
   assertNoShowToleranceElapsed,
   canTransitionAppointmentStatus,
   isNoShowEligible,
@@ -40,5 +41,12 @@ describe("appointment state machine", () => {
     expect(() => assertNoShowToleranceElapsed(startsAt, new Date("2026-04-22T10:14:00.000Z"))).toThrow(
       /tolerancia de 15 minutos/i,
     );
+  });
+
+  it("exige motivo para cancelamento operacional", () => {
+    expect(() => assertCancellationReasonProvided("CANCELLED")).toThrow(/motivo do cancelamento/i);
+    expect(() => assertCancellationReasonProvided("CANCELLED", "   ")).toThrow(/motivo do cancelamento/i);
+    expect(() => assertCancellationReasonProvided("CANCELLED", "Cliente avisou")).not.toThrow();
+    expect(() => assertCancellationReasonProvided("NO_SHOW")).not.toThrow();
   });
 });

@@ -1428,6 +1428,26 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(partial.json().checkout).toMatchObject({ status: "OPEN", paidAmount: 20 });
     expect(partial.json().serviceRevenue).toBeUndefined();
 
+    const pendingClosing = await app.inject({
+      method: "POST",
+      url: "/financial/daily-closing",
+      headers: { "idempotency-key": uniqueId("daily-closing-pending") },
+      payload: {
+        unitId: scenario.unitId,
+        businessDate: "2026-05-24",
+        informedCash: 0,
+        informedPix: 0,
+        informedDebit: 0,
+        informedCredit: 0,
+        notes: "Tentativa com checkout parcial",
+        responsible: "db-test",
+      },
+    });
+    expect([400, 409]).toContain(pendingClosing.statusCode);
+    expect(pendingClosing.json().error).toMatch(
+      /fechamento bloqueado|atendimento.*andamento|checkout.*aberto|pagamento.*pendente/i,
+    );
+
     const complement = await app.inject({
       method: "POST",
       url: `/appointments/${appointmentId}/checkout`,
