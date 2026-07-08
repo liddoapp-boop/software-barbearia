@@ -3,7 +3,7 @@
 Este diretorio e a memoria operacional do projeto Software Barbearia. Use este README como ponto de entrada antes de abrir documentos especificos.
 
 ## Status do README
-- Atualizado em: 2026-05-04.
+- Atualizado em: 2026-07-08.
 - Estado: pronto como indice e resumo executivo da pasta `.planning`.
 - Fonte de verdade para proximas tarefas: [24_NEXT_PRIORITIES.md](./24_NEXT_PRIORITIES.md).
 - Checklist de validacao manual/producao controlada: [92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md](./92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md).
@@ -95,16 +95,6 @@ Eles ainda sao uteis para contexto, mas podem estar desatualizados diante das fa
 - A SPA ainda usa `unit-01` como baseline operacional; seguranca real deve vir do backend/token.
 
 ## Proxima acao recomendada
-Executar a validacao manual do documento [92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md](./92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md) em ambiente controlado com:
-- `AUTH_ENFORCED=true`;
-- `DATA_BACKEND=prisma`;
-- PostgreSQL real;
-- usuarios persistentes;
-- evidencias de sucesso/falha por fluxo.
+Macro 235.1 - Preparacao segura do banco e dos dados do piloto.
 
-Somente depois disso decidir entre:
-- producao controlada;
-- refinamento mobile/UX;
-- CRUD operacional de usuarios/equipe;
-- vinculo formal `User -> Professional`;
-- retomada do plano de IA/WhatsApp.
+Comecar por backup verificado, validacao de migrations, dry-run de saneamento dos dados e smoke no banco preparado. O fechamento da Macro 234 esta registrado em [234_FECHAMENTO_RELEASE_CANDIDATE.md](./234_FECHAMENTO_RELEASE_CANDIDATE.md): o codigo foi aprovado como Release Candidate, mas o piloto continua bloqueado ate o banco principal e os dados serem preparados de forma controlada.
