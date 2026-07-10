@@ -20,6 +20,12 @@ Criar uma Evolution API local isolada via Docker para o Software Barbearia, sem 
 - `infra/evolution-local/README.md`
 - `infra/evolution-local/.env` local gerado e ignorado pelo Git
 
+## Consolidacao
+
+- Os arquivos legados `.env.evolution.local.example`, `.planning/240_EVOLUTION_LOCAL_DOCKER.md` e `docker-compose.evolution.local.yml` foram aposentados por duplicarem uma tentativa anterior na raiz com outra porta e outro compose.
+- O arquivo `.planning/239_WHATSAPP_EVOLUTION_MAPEAMENTO.md` tambem foi removido do fechamento desta etapa; o que seguia util para a operacao local ficou consolidado neste documento oficial.
+- A estrutura versionada da Evolution local fica restrita a `infra/evolution-local/docker-compose.yml`, `infra/evolution-local/.env.example`, `infra/evolution-local/README.md` e `.planning/239_1_EVOLUTION_LOCAL_DOCKER.md`.
+
 ## Portas locais
 
 - API: `127.0.0.1:8080 -> 8080`
