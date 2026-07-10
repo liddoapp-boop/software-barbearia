@@ -7,6 +7,8 @@ dist/
 # Environment variables
 .env
 .env*.local
+infra/evolution-local/.env
+infra/evolution-local/*.session
 
 # IDE
 .vscode/
