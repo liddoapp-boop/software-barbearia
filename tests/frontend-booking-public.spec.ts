@@ -183,6 +183,8 @@ type PublicProfessional = {
 type BookingHarnessOptions = {
   professionals?: PublicProfessional[];
   services?: Array<Record<string, unknown>>;
+  businessStatus?: number;
+  businessError?: string;
   servicesStatus?: number;
   servicesError?: string;
   locationSearch?: string;
@@ -260,7 +262,15 @@ function createFetchMock(requests: FetchRequest[], options: BookingHarnessOption
     const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : undefined;
     requests.push({ method, path: url.pathname, search: url.search, body });
 
-    if (url.pathname === "/public/business") return jsonResponse({ name: "Barbearia Harness" });
+    if (url.pathname === "/public/business") {
+      if ((options.businessStatus ?? 200) >= 400) {
+        const fallbackError = options.businessStatus === 404
+          ? "Nao encontramos a unidade de agendamento. Confira o link e tente novamente."
+          : undefined;
+        return jsonResponse({ error: options.businessError ?? fallbackError }, options.businessStatus);
+      }
+      return jsonResponse({ name: "Barbearia Harness" });
+    }
     if (url.pathname === "/public/services") {
       if ((options.servicesStatus ?? 200) >= 400) {
         const fallbackError = options.servicesStatus === 404
@@ -413,7 +423,6 @@ async function completeBookingUntilConfirm() {
     liddo_client: JSON.stringify({
       name: "Cliente Mobile",
       phone: "11999999999",
-      email: "",
     }),
   });
   await harness.api.beginNewBooking();
@@ -501,18 +510,21 @@ describe("booking publico - trava pos-sucesso", () => {
     const message = "Nao encontramos a unidade de agendamento. Confira o link e tente novamente.";
     const harness = await createBookingHarness({}, {
       locationSearch: "?unitId=unit-invalida",
+      businessStatus: 404,
+      businessError: message,
       servicesStatus: 404,
       servicesError: message,
     });
 
-    await harness.api.beginNewBooking();
-
     const text = harness.document.getElementById("chat")?.textContent ?? "";
+    const businessRequest = harness.requests.find((request) => request.path === "/public/business");
     const servicesRequest = harness.requests.find((request) => request.path === "/public/services");
 
-    expect(servicesRequest?.search).toBe("?unitId=unit-invalida");
+    expect(businessRequest?.search).toBe("?unitId=unit-invalida");
+    expect(servicesRequest).toBeUndefined();
     expect(text).toContain(message);
     expect(text).not.toContain("Error");
+    expect(text).not.toContain("Qual e o seu nome");
     expect(harness.document.querySelectorAll(".svc-card")).toHaveLength(0);
   });
 
@@ -614,7 +626,6 @@ describe("booking publico - trava pos-sucesso", () => {
       liddo_client: JSON.stringify({
         name: "Cliente Mobile",
         phone: "11999999999",
-        email: "",
       }),
     }, {
       services: [
@@ -666,11 +677,13 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(html).toContain("isPublicServiceVisible");
     expect(html).toContain("serviceIds: submittedData.serviceIds");
     expect(html).not.toContain("payload.professionalId");
-    expect(html).toContain("if (email) payload.clientEmail = email");
-    expect(html).toContain("isValidEmail(email)");
+    expect(html).not.toContain("payload.clientEmail");
+    expect(html).toContain("Perfeito. Vamos enviar a confirmação por WhatsApp nesse número.");
+    expect(html).toContain("Guarde este resumo do seu agendamento.");
     expect(api).toContain("professionalName");
     expect(api).toContain("/public/services/preview");
     expect(api).toContain("APPOINTMENT_CREATED");
+    expect(api).toContain("sendWhatsAppMessage(body.clientPhone");
   });
 
   it("mantem a interface publica sem mojibake visivel", () => {
@@ -680,7 +693,7 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(html).not.toMatch(mojibakePattern);
     expect(html).toContain("Agende seu horário");
     expect(html).toContain("Horários de atendimento");
-    expect(html).toContain("Informe um e-mail válido ou deixe o campo em branco.");
+    expect(html).toContain("Perfeito. Vamos enviar a confirmação por WhatsApp nesse número.");
     expect(html).toContain("Não há horários disponíveis para esta data.");
   });
 
@@ -735,30 +748,20 @@ describe("booking publico - trava pos-sucesso", () => {
     expect(harness.document.getElementById("chat")?.textContent).not.toContain("clientEmail Invalid email address");
   });
 
-  it("aceita e-mail vazio e rejeita e-mail invalido com mensagem publica amigavel", async () => {
-    const invalidEmail = await createBookingHarness();
-    invalidEmail.document.getElementById("chatInput")!.value = "Cliente Mobile";
-    await invalidEmail.api.handleSend();
-    invalidEmail.document.getElementById("chatInput")!.value = "(11) 99999-9999";
-    await invalidEmail.api.handleSend();
-    invalidEmail.document.getElementById("chatInput")!.value = "clientEmail Invalid email address";
-    await invalidEmail.api.handleSend();
+  it("segue do WhatsApp direto para servicos e nao coleta e-mail", async () => {
+    const harness = await createBookingHarness();
+    harness.document.getElementById("chatInput")!.value = "Cliente Mobile";
+    await harness.api.handleSend();
+    harness.document.getElementById("chatInput")!.value = "(11) 99999-9999";
+    await harness.api.handleSend();
 
-    const invalidText = invalidEmail.document.getElementById("chat")?.textContent ?? "";
-    expect(invalidText).toContain("Informe um e-mail válido ou deixe o campo em branco.");
-    expect(invalidText).not.toContain("clientEmail Invalid email address");
-    expect(invalidEmail.requests.filter((request) => request.path === "/public/booking")).toHaveLength(0);
-
-    const emptyEmail = await createBookingHarness();
-    emptyEmail.document.getElementById("chatInput")!.value = "Cliente Mobile";
-    await emptyEmail.api.handleSend();
-    emptyEmail.document.getElementById("chatInput")!.value = "(11) 99999-9999";
-    await emptyEmail.api.handleSend();
-    emptyEmail.document.getElementById("chatInput")!.value = "";
-    await emptyEmail.api.handleSend();
-
-    expect(emptyEmail.document.querySelectorAll(".svc-card").length).toBeGreaterThan(0);
-    expect(emptyEmail.requests.filter((request) => request.path === "/public/booking")).toHaveLength(0);
+    const text = harness.document.getElementById("chat")?.textContent ?? "";
+    expect(text).toContain("Perfeito. Vamos enviar a confirmação por WhatsApp nesse número.");
+    expect(text).not.toContain("e-mail");
+    expect(text).not.toContain("E-mail");
+    expect(harness.api.getClient()).toEqual({ name: "Cliente Mobile", phone: "11999999999" });
+    expect(harness.document.querySelectorAll(".svc-card").length).toBeGreaterThan(0);
+    expect(harness.requests.filter((request) => request.path === "/public/booking")).toHaveLength(0);
   });
 
   it("nao renderiza servicos publicos com marcadores de teste, TG, demo ou db", async () => {

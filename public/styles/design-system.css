@@ -933,6 +933,27 @@ body.public-booking .btn-send {
   border-radius: var(--radius-md) !important;
 }
 
+body.public-booking .input-wrap {
+  box-sizing: border-box;
+}
+
+body.public-booking .input-wrap:focus-within {
+  border-color: rgba(155, 119, 77, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(155, 119, 77, 0.14) !important;
+}
+
+body.public-booking .input-wrap:has(.chat-input:focus-visible) {
+  border-color: rgba(155, 119, 77, 0.42) !important;
+  box-shadow: 0 0 0 3px rgba(155, 119, 77, 0.14) !important;
+}
+
+body.public-booking .chat-input:focus,
+body.public-booking .chat-input:focus-visible {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 body.public-booking .btn-confirm,
 body.public-booking .btn-v-ok,
 body.public-booking .btn-send {

@@ -727,7 +727,7 @@
 <script>
 const API   = '';
 const BOOKING_UNIT_ID = new URLSearchParams(window.location.search).get('unitId') || '';
-const STEPS = { NAME:0, PHONE:1, EMAIL:2, VERIFY:3, SERVICE:4, CALENDAR:5, CONFIRM:6, DONE:7 };
+const STEPS = { NAME:0, PHONE:1, VERIFY:2, SERVICE:3, CALENDAR:4, CONFIRM:5, DONE:6 };
 
 let step = STEPS.NAME;
 let services = [], slots = {};
@@ -741,6 +741,7 @@ let publicWorkingHours = null;
 let slotsLoadFailed = false;
 let bookingSubmitting = false;
 let bookingCompleted = false;
+let bookingInitError = '';
 let bookingRunId = 0;
 let confirmRenderSeq = 0;
 
@@ -864,11 +865,9 @@ function normalizeClientRecord(record) {
   const source = record && typeof record === 'object' ? record : {};
   const name = sanitizeTextValue(source.name, 120);
   const phone = normalizePhoneDigits(source.phone);
-  const email = sanitizeEmailValue(source.email);
   const cleaned = {};
   if (name.length >= 2 && !isSuspiciousStoredText(name)) cleaned.name = name;
   if (phone) cleaned.phone = phone;
-  if (email && isValidEmail(email) && !isSuspiciousStoredText(email)) cleaned.email = email;
   return cleaned;
 }
 
@@ -988,9 +987,14 @@ function setupServiceDragScroll(scroller) {
   let startX = 0;
   let startScrollLeft = 0;
   let dragged = false;
+  let capturedPointerId = null;
 
   const clearDrag = () => {
+    if (capturedPointerId != null) {
+      try { scroller.releasePointerCapture(capturedPointerId); } catch {}
+    }
     activePointerId = null;
+    capturedPointerId = null;
     scroller.classList.remove('dragging');
     window.setTimeout(() => { dragged = false; }, 0);
   };
@@ -1002,13 +1006,18 @@ function setupServiceDragScroll(scroller) {
     startX = event.clientX;
     startScrollLeft = scroller.scrollLeft;
     dragged = false;
-    try { scroller.setPointerCapture(event.pointerId); } catch {}
   });
 
   scroller.addEventListener('pointermove', (event) => {
     if (activePointerId !== event.pointerId) return;
     const deltaX = event.clientX - startX;
     if (Math.abs(deltaX) < 4 && !dragged) return;
+    if (!dragged) {
+      try {
+        scroller.setPointerCapture(event.pointerId);
+        capturedPointerId = event.pointerId;
+      } catch {}
+    }
     dragged = true;
     scroller.classList.add('dragging');
     scroller.scrollLeft = startScrollLeft - deltaX;
@@ -1056,7 +1065,7 @@ function enableInput(ph = 'Digite sua resposta…', type = 'text') {
   chatInput.placeholder = ph;
   chatInput.value = '';
   chatInput.disabled = false;
-  btnSend.disabled = step !== STEPS.EMAIL;
+  btnSend.disabled = true;
   requestAnimationFrame(() => chatInput.focus());
   if (type === 'tel' && typeof IMask !== 'undefined') {
     phoneMask = IMask(chatInput, { mask: '(00) 00000-0000' });
@@ -1135,7 +1144,7 @@ async function beginNewBooking(fromUserAction = false) {
 /* ─ Handle send ─ */
 async function handleSend() {
   const raw = chatInput.value.trim();
-  if (!raw && step !== STEPS.EMAIL) return;
+  if (!raw) return;
   disableInput();
 
   if (step === STEPS.NAME) {
@@ -1161,20 +1170,7 @@ async function handleSend() {
     appendBubble(phoneMask ? phoneMask.value : raw, true);
     setClient({ phone: digits });
     chatInput.value = '';
-    await say('Informe seu e-mail, se quiser receber a confirmação. <span style="color:var(--tx3);font-size:13px">(opcional)</span>');
-    step = STEPS.EMAIL;
-    enableInput('E-mail opcional', 'email');
-
-  } else if (step === STEPS.EMAIL) {
-    const email = sanitizeEmailValue(raw);
-    if (email && (!isValidEmail(email) || isSuspiciousStoredText(email))) {
-      await say('Informe um e-mail válido ou deixe o campo em branco.', 300);
-      enableInput('E-mail opcional', 'email');
-      return;
-    }
-    appendBubble(email || 'Prefiro não informar', true);
-    setClient({ email });
-    chatInput.value = '';
+    await say('Perfeito. Vamos enviar a confirmação por WhatsApp nesse número.', 300);
     await say('Escolha os serviços', 400);
     step = STEPS.SERVICE;
     await loadServices();
@@ -1584,12 +1580,11 @@ async function showConfirm(runId = bookingRunId) {
   const oldConfirm = document.getElementById('confirmWidgetWrap');
   if (oldConfirm) oldConfirm.remove();
   const client = getClient();
-  const email = sanitizeEmailValue(client.email);
   const dateObj = new Date(selectedDate + 'T12:00:00');
   const dateStr = dateObj.toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
   const summary = currentPreviewSummary();
   confirmData = {
-    clientName: sanitizeTextValue(client.name, 120), phone: normalizePhoneDigits(client.phone), email: isValidEmail(email) ? email : '',
+    clientName: sanitizeTextValue(client.name, 120), phone: normalizePhoneDigits(client.phone),
     serviceIds: BookingSelection.ids(selectedServices), serviceName: summary.label || BookingSelection.label(selectedServices),
     serviceItems: summary.serviceItems,
     professionalName: 'Geovane Borges',
@@ -1647,13 +1642,6 @@ async function submitBooking(runId = bookingRunId) {
       startsAt: iso,
       idempotencyKey: bookingIdempotencyKey,
     };
-    const email = sanitizeEmailValue(submittedData.email);
-    if (email && !isValidEmail(email)) {
-      const err = new Error('Informe um e-mail válido ou deixe o campo em branco.');
-      err.status = 400;
-      throw err;
-    }
-    if (email) payload.clientEmail = email;
     const r = await fetch(publicUrl('/public/booking'), {
       method: 'POST', headers,
       body: JSON.stringify(payload),
@@ -1686,9 +1674,7 @@ async function submitBooking(runId = bookingRunId) {
     const backendError = String(error?.backendError || error?.message || '').toLowerCase();
     const message = error?.status === 409
       ? 'Esse horário acabou de ser reservado. Escolha outro horário.'
-      : error?.status === 400 && backendError.includes('e-mail')
-        ? 'Informe um e-mail válido ou deixe o campo em branco.'
-        : 'Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
+      : 'Não conseguimos concluir seu agendamento agora. Confira os dados e tente novamente.';
     if (btn) { btn.disabled = false; btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Tentar novamente`; }
     await say(escapeHtml(message), 300);
     if (error?.status === 409 && selectedServices.length && weekStart) {
@@ -1709,7 +1695,7 @@ function renderBookingSuccess(summary) {
   const oldSuccessMessage = document.getElementById('bookingSuccessMessageWrap');
   if (oldSuccessMessage) oldSuccessMessage.remove();
   const successMessage = appendBubble(
-    `<strong>Agendamento confirmado com sucesso.</strong><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} - ${escapeHtml(summary.dateStr)} as ${escapeHtml(summary.time)}.</span>`,
+    `<strong>Agendamento confirmado com sucesso.</strong><br><span style="color:var(--tx2);font-size:14px">Guarde este resumo do seu agendamento.</span><br><span style="color:var(--tx2);font-size:14px">${escapeHtml(summary.professionalName)} - ${escapeHtml(summary.dateStr)} as ${escapeHtml(summary.time)}.</span>`,
   );
   successMessage.id = 'bookingSuccessMessageWrap';
   const servicesText = summary.serviceItems?.length
@@ -1730,7 +1716,7 @@ function renderBookingSuccess(summary) {
   success.querySelector('#btnRestartBooking').addEventListener('click', () => beginNewBooking(true));
 }
 
-/* Input events */chatInput.addEventListener('input', () => { btnSend.disabled = step !== STEPS.EMAIL && chatInput.value.trim().length === 0; });
+/* Input events */chatInput.addEventListener('input', () => { btnSend.disabled = chatInput.value.trim().length === 0; });
 chatInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey && !btnSend.disabled) { e.preventDefault(); handleSend(); } });
 btnSend.addEventListener('click', handleSend);
 
@@ -1771,7 +1757,6 @@ function showVerifyCard(c) {
     <div class="verify-card">
       <div class="verify-row"><span class="verify-lbl">Nome</span><span class="verify-val">${escapeHtml(c.name)}</span></div>
       <div class="verify-row"><span class="verify-lbl">WhatsApp</span><span class="verify-val">${escapeHtml(fmtPhone(c.phone))}</span></div>
-      ${c.email ? `<div class="verify-row"><span class="verify-lbl">E-mail</span><span class="verify-val">${escapeHtml(c.email)}</span></div>` : ''}
       <div class="verify-actions">
         <button class="btn-v-ok" id="btnVOk">Está correto, continuar</button>
         <button class="btn-v-alt" id="btnVAlt">Alterar dados</button>
@@ -1814,7 +1799,11 @@ function escapeHtml(value) {
 async function loadBusinessName() {
   try {
     const r = await fetch(publicUrl('/public/business'));
-    if (!r.ok) return;
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      bookingInitError = sanitizeTextValue(data?.error, 240) || 'Não conseguimos carregar a unidade de agendamento agora. Tente novamente em instantes.';
+      return;
+    }
     const data = await r.json();
     const name = normalizePublicBusinessName(data?.name);
     if (!name) return;
@@ -1828,6 +1817,11 @@ async function loadBusinessName() {
 /* ─ Init ─ */
 async function init() {
   await loadBusinessName();
+  if (bookingInitError) {
+    await say(escapeHtml(bookingInitError));
+    disableInput();
+    return;
+  }
   const c = getClient();
   if (c.name && c.phone) {
     await say(`Olá de novo, <strong>${escapeHtml(c.name)}</strong>! Que bom te ver.`);
