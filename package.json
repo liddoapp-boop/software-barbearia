@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:pilot": "node scripts/start-pilot-local.mjs",
     "dev:api": "prisma db push && tsx src/server.ts",
     "start": "node dist/src/server.js",
     "build": "tsc -p tsconfig.json",
