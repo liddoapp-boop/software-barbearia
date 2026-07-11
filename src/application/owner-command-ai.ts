@@ -35,7 +35,27 @@ export type OwnerCommandParseResult = {
   warnings: string[];
   allowedNextActions: string[];
   executed: false;
+  fallbackReason?: OwnerCommandFallbackReason;
 };
+
+export type OwnerCommandFallbackReason =
+  | "gemini_429"
+  | "gemini_5xx"
+  | "gemini_timeout"
+  | "gemini_invalid_json"
+  | "gemini_invalid_schema"
+  | "gemini_circuit_open"
+  | "parser_error";
+
+export class OwnerCommandParserError extends Error {
+  constructor(
+    readonly reason: OwnerCommandFallbackReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "OwnerCommandParserError";
+  }
+}
 
 export interface OwnerCommandParser {
   readonly modelVersion: string;
@@ -442,16 +462,48 @@ function normalizeResult(value: unknown): OwnerCommandParseResult {
 
 export class GeminiOwnerCommandParser implements OwnerCommandParser {
   readonly modelVersion: string;
+  private rateLimitCount = 0;
+  private rateLimitWindowStartedAt = 0;
+  private circuitOpenUntil = 0;
 
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
     private readonly timeoutMs = 8000,
+    private readonly rateLimitThreshold = 2,
+    private readonly circuitCooldownMs = 60_000,
   ) {
     this.modelVersion = `gemini:${model}`;
   }
 
+  private registerRateLimit(now: number) {
+    if (now - this.rateLimitWindowStartedAt > this.circuitCooldownMs) {
+      this.rateLimitCount = 0;
+      this.rateLimitWindowStartedAt = now;
+    }
+    this.rateLimitCount += 1;
+    if (this.rateLimitCount >= this.rateLimitThreshold) {
+      this.circuitOpenUntil = now + this.circuitCooldownMs;
+    }
+  }
+
+  private fallbackOrThrow(input: OwnerCommandParseInput, reason: OwnerCommandFallbackReason) {
+    const productSale = deterministicProductSaleParse(input);
+    if (productSale) return { ...productSale, fallbackReason: reason };
+    const schedule = deterministicScheduleParse(input);
+    if (schedule) return { ...schedule, fallbackReason: reason };
+    throw new OwnerCommandParserError(
+      reason,
+      reason === "gemini_invalid_json" || reason === "gemini_invalid_schema" || reason === "parser_error"
+        ? "IA nao conseguiu interpretar a mensagem com seguranca."
+        : "IA indisponivel no momento. Tente novamente em instantes.",
+    );
+  }
+
   async parse(input: OwnerCommandParseInput): Promise<OwnerCommandParseResult> {
+    if (Date.now() < this.circuitOpenUntil) {
+      return this.fallbackOrThrow(input, "gemini_circuit_open");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -471,7 +523,9 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
         },
       );
       if (!response.ok) {
-        throw new Error("IA indisponivel no momento. Tente novamente em instantes.");
+        const reason = response.status === 429 ? "gemini_429" : response.status >= 500 ? "gemini_5xx" : "parser_error";
+        if (reason === "gemini_429") this.registerRateLimit(Date.now());
+        throw new OwnerCommandParserError(reason, "IA indisponivel no momento. Tente novamente em instantes.");
       }
 
       const payload = (await response.json()) as GeminiGenerateContentResponse;
@@ -482,14 +536,21 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
       if (!text) {
         throw new Error("IA retornou uma resposta vazia.");
       }
-      return normalizeResult(JSON.parse(stripJsonFence(text)));
+      try {
+        return normalizeResult(JSON.parse(stripJsonFence(text)));
+      } catch (error) {
+        throw new OwnerCommandParserError(
+          error instanceof z.ZodError ? "gemini_invalid_schema" : "gemini_invalid_json",
+          "IA nao conseguiu interpretar a mensagem com seguranca.",
+        );
+      }
     } catch (error) {
-      const productSale = deterministicProductSaleParse(input);
-      if (productSale) return productSale;
-      const deterministic = deterministicScheduleParse(input);
-      if (deterministic) return deterministic;
-      if (error instanceof Error && error.message.startsWith("IA ")) throw error;
-      throw new Error("IA nao conseguiu interpretar a mensagem com seguranca.");
+      const reason = error instanceof OwnerCommandParserError
+        ? error.reason
+        : error instanceof Error && error.name === "AbortError"
+          ? "gemini_timeout"
+          : "parser_error";
+      return this.fallbackOrThrow(input, reason);
     } finally {
       clearTimeout(timeout);
     }
@@ -501,9 +562,13 @@ export function createGeminiOwnerCommandParserFromEnv(): OwnerCommandParser | nu
   if (!apiKey) return null;
   const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
   const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS ?? 8000);
+  const rateLimitThreshold = Number(process.env.GEMINI_CIRCUIT_429_THRESHOLD ?? 2);
+  const circuitCooldownMs = Number(process.env.GEMINI_CIRCUIT_COOLDOWN_MS ?? 60_000);
   return new GeminiOwnerCommandParser(
     apiKey,
     model,
     Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000,
+    Number.isFinite(rateLimitThreshold) && rateLimitThreshold > 0 ? Math.trunc(rateLimitThreshold) : 2,
+    Number.isFinite(circuitCooldownMs) && circuitCooldownMs > 0 ? circuitCooldownMs : 60_000,
   );
 }

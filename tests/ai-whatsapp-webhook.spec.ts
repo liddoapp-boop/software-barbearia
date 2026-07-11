@@ -23,6 +23,29 @@ function mockGeminiUnavailableAndWhatsapp() {
   });
 }
 
+function mockGeminiTimeoutAndWhatsapp() {
+  return vi.fn(async (url: string) => {
+    if (String(url).includes("/message/sendText/")) return { ok: true, text: async () => "" };
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    throw error;
+  });
+}
+
+function mockGeminiInvalidSchemaAndWhatsapp() {
+  return vi.fn(async (url: string) => {
+    if (String(url).includes("/message/sendText/")) return { ok: true, text: async () => "" };
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"intent":"invalid"}' }] } }] }) };
+  });
+}
+
+function mockGeminiAndFailedWhatsapp() {
+  return vi.fn(async (url: string) => {
+    if (String(url).includes("/message/sendText/")) return { ok: false, status: 503, text: async () => "unavailable" };
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "{" }] } }] }) };
+  });
+}
+
 function mockGeminiIntentAndWhatsapp(
   intent: string,
   draft: Record<string, unknown>,
@@ -158,6 +181,16 @@ async function countCommercialState(app: FastifyInstance, token: string) {
   };
 }
 
+async function auditEvents(app: FastifyInstance, token: string) {
+  const response = await app.inject({
+    method: "GET",
+    url: "/audit/events?unitId=unit-01&limit=500",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>;
+}
+
 describe("Atendente IA WhatsApp-first", () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -207,6 +240,18 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, ignored: true });
     expect(sentWhatsAppTexts(fetchMock)).toEqual([]);
+  });
+
+  it("payload incompleto do owner recebe orientacao controlada", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload("", "5511999999999", { data: { key: { remoteJid: "5511999999999@s.whatsapp.net", fromMe: false }, message: {} } }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, ignored: true, responseDelivered: true });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Agendamento: Agendar corte");
   });
 
   it("texto de venda gera previa e nao executa", async () => {
@@ -275,8 +320,74 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui processar sua mensagem agora");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui processar essa mensagem agora");
     await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("timeout, JSON invalido e schema invalido respondem sem executar", async () => {
+    for (const fetchMock of [mockGeminiTimeoutAndWhatsapp(), mockGeminiInvalidJsonAndWhatsapp(), mockGeminiInvalidSchemaAndWhatsapp()]) {
+      vi.stubGlobal("fetch", fetchMock);
+      const app = createApp();
+      const token = await loginOwner(app);
+      const before = await countCommercialState(app, token);
+
+      const response = await postWebhook(app, evolutionPayload("asdf teste qualquer"));
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
+      expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui");
+      await expect(countCommercialState(app, token)).resolves.toEqual(before);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("429 repetido abre circuito, usa fallback e nao insiste no Gemini", async () => {
+    const fetchMock = mockGeminiUnavailableAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    await postWebhook(app, evolutionPayload("PING IA"));
+    await postWebhook(app, evolutionPayload("PING IA"));
+    const fallback = await postWebhook(app, evolutionPayload("Agendar corte para CLIENTE TESTE IA dia 15/07/2026 as 11:00"));
+
+    expect(fallback.statusCode).toBe(200);
+    expect(fallback.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment" });
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(2);
+    const events = await auditEvents(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_FALLBACK_USED" && event.afterJson?.reason === "gemini_circuit_open")).toBe(true);
+  });
+
+  it("comando desconhecido recebe orientacao de formato e auditoria sem numero completo", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    const response = await postWebhook(app, evolutionPayload("asdf teste qualquer"));
+
+    expect(response.statusCode).toBe(200);
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Agendamento: Agendar corte");
+    const events = await auditEvents(app, token);
+    const serialized = JSON.stringify(events.filter((event) => event.action === "AI_WHATSAPP_AI_FAILURE"));
+    expect(serialized).not.toContain("5511999999999");
+  });
+
+  it("falha ao enviar resposta pela Evolution permanece controlada e auditada", async () => {
+    const fetchMock = mockGeminiAndFailedWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para CLIENTE TESTE IA, ele pagou no Pix."));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, responseDelivered: false });
+    expect((await auditEvents(app, token)).some((event) => event.action === "AI_WHATSAPP_RESPONSE_FAILED")).toBe(true);
+    const after = await countCommercialState(app, token);
+    expect(after.sales).toBe(before.sales);
+    expect(after.appointments).toBe(before.appointments);
   });
 
   it("CONFIRMAR codigo executa venda uma vez pelo fluxo oficial", async () => {
@@ -337,9 +448,11 @@ describe("Atendente IA WhatsApp-first", () => {
     const code = lastConfirmationCode(fetchMock);
     const cancel = await postWebhook(app, evolutionPayload("CANCELAR"));
     const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const newPreview = await postWebhook(app, evolutionPayload("Agendar corte para CLIENTE TESTE IA WPP dia 15/07/2026 as 11:00"));
 
     expect(cancel.json()).toMatchObject({ ok: true, cancelled: true });
     expect(confirm.json()).toMatchObject({ ok: true, executed: false });
+    expect(newPreview.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
     const after = await countCommercialState(app, token);
     expect(after.sales).toBe(before.sales);
     expect(after.financialEntries).toBe(before.financialEntries);

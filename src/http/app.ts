@@ -9,6 +9,7 @@ import { PrismaOperationsService } from "../application/prisma-operations-servic
 import { createGeminiRetentionScorerFromEnv } from "../application/gemini-retention-scoring";
 import {
   createGeminiOwnerCommandParserFromEnv,
+  OwnerCommandParserError,
   OwnerCommandParseResult,
 } from "../application/owner-command-ai";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
@@ -1534,6 +1535,18 @@ export function createApp() {
     if (warnings.length) lines.push("", `Avisos: ${warnings.join(" ")}`);
     lines.push("", `Para confirmar, responda: CONFIRMAR ${code}`, "Para cancelar, responda: CANCELAR");
     return lines.join("\n");
+  }
+
+  function formatAiWhatsappGuidance() {
+    return [
+      "Nao consegui entender com seguranca.",
+      "Venda: Vendi uma pomada para Joao, ele pagou no Pix.",
+      "Agendamento: Agendar corte para Joao dia 14/07/2026 as 11:00.",
+    ].join("\n");
+  }
+
+  function formatAiWhatsappTemporaryFailure() {
+    return "Nao consegui processar essa mensagem agora. Tente novamente em instantes ou envie no formato: Agendar corte para NOME dia DATA as HORARIO.";
   }
 
   async function parseOwnerCommandPreview(input: {
@@ -5860,6 +5873,37 @@ export function createApp() {
     const ownerPhone = normalizePhoneDigits(process.env.AI_WHATSAPP_OWNER_PHONE);
     const unitId = String(process.env.AI_WHATSAPP_UNIT_ID ?? process.env.PUBLIC_BOOKING_UNIT_ID ?? "unit-01").trim();
     const actorId = "ai-whatsapp-owner";
+    const safeAudit = async (payload: {
+      unitId: string;
+      action: string;
+      entity: string;
+      entityId?: string;
+      after?: Record<string, unknown>;
+    }) => {
+      try {
+        await recordAudit(request, payload);
+        return true;
+      } catch {
+        app.log.error({ event: "ai.whatsapp.audit_failed", action: payload.action, phone: message.maskedPhone });
+        return false;
+      }
+    };
+    const safeSend = async (text: string) => {
+      try {
+        await sendWhatsAppMessage(message.phone, text);
+        return true;
+      } catch {
+        app.log.error({ event: "ai.whatsapp.response_failed", phone: message.maskedPhone });
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_RESPONSE_FAILED",
+          entity: "ai_whatsapp_command",
+          entityId: message.maskedPhone,
+          after: { reason: "evolution_send_failed", phone: message.maskedPhone },
+        });
+        return false;
+      }
+    };
 
     if (message.instance && expectedInstance && message.instance !== expectedInstance) {
       app.log.warn({ event: "ai.whatsapp.rejected", reason: "wrong_instance", phone: message.maskedPhone });
@@ -5875,7 +5919,7 @@ export function createApp() {
     }
     if (!ownerPhone || message.phone !== ownerPhone) {
       app.log.warn({ event: "ai.whatsapp.rejected", reason: "unauthorized_phone", phone: message.maskedPhone });
-      await recordAudit(request, {
+      await safeAudit({
         unitId,
         action: "AI_WHATSAPP_COMMAND_REJECTED",
         entity: "ai_whatsapp_command",
@@ -5886,9 +5930,18 @@ export function createApp() {
     }
     if (!message.text) {
       app.log.info({ event: "ai.whatsapp.ignored", reason: "empty_text", phone: message.maskedPhone });
-      return { ok: true, ignored: true };
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: { reason: "empty_text", phone: message.maskedPhone },
+      });
+      const responseDelivered = await safeSend(formatAiWhatsappGuidance());
+      return { ok: true, ignored: true, responseDelivered };
     }
 
+    try {
     pruneAiWhatsappPendingCommands();
     const normalizedText = message.text.trim();
     const confirmMatch = normalizedText.match(/^CONFIRMAR\s+(\d{4})$/i);
@@ -5901,15 +5954,15 @@ export function createApp() {
           cancelled = true;
         }
       }
-      await recordAudit(request, {
+      await safeAudit({
         unitId,
         action: "AI_WHATSAPP_COMMAND_CANCELLED",
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
         after: { cancelled, phone: message.maskedPhone },
       });
-      await sendWhatsAppMessage(message.phone, "Acao cancelada. Nada foi alterado.");
-      return { ok: true, cancelled };
+      const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.");
+      return { ok: true, cancelled, responseDelivered };
     }
 
     if (confirmMatch) {
@@ -5917,15 +5970,15 @@ export function createApp() {
       const pendingKey = buildAiWhatsappPendingKey(message.phone, code);
       const pending = aiWhatsappPendingCommands.get(pendingKey);
       if (!pending || pending.used || pending.expiresAt <= Date.now()) {
-        await recordAudit(request, {
+        await safeAudit({
           unitId,
           action: "AI_WHATSAPP_COMMAND_REJECTED",
           entity: "ai_whatsapp_command",
           entityId: message.maskedPhone,
           after: { reason: "missing_or_expired_confirmation", phone: message.maskedPhone },
         });
-        await sendWhatsAppMessage(message.phone, "Essa acao ja foi confirmada ou expirou.");
-        return { ok: true, executed: false };
+        const responseDelivered = await safeSend("Essa acao ja foi confirmada ou expirou.");
+        return { ok: true, executed: false, responseDelivered };
       }
       pending.used = true;
       aiWhatsappPendingCommands.delete(pendingKey);
@@ -5941,7 +5994,7 @@ export function createApp() {
       });
       const executionRecord = asRecord(execution);
       const executed = executionRecord?.executed === true;
-      await recordAudit(request, {
+      await safeAudit({
         unitId: pending.unitId,
         action: executed ? "AI_WHATSAPP_COMMAND_CONFIRMED" : "AI_WHATSAPP_COMMAND_REJECTED",
         entity: "ai_whatsapp_command",
@@ -5952,13 +6005,12 @@ export function createApp() {
           phone: message.maskedPhone,
         },
       });
-      await sendWhatsAppMessage(
-        message.phone,
+      const responseDelivered = await safeSend(
         executed
           ? String(executionRecord?.message ?? "Acao confirmada com sucesso.")
           : String(executionRecord?.message ?? "Nao foi possivel confirmar essa acao."),
       );
-      return { ok: true, executed };
+      return { ok: true, executed, responseDelivered };
     }
 
     let preview: OwnerCommandPreviewResponse;
@@ -5969,23 +6021,22 @@ export function createApp() {
         message: message.text,
         screenContext: "whatsapp",
       });
-    } catch {
-      app.log.warn({ event: "ai.whatsapp.rejected", reason: "parser_unavailable", phone: message.maskedPhone });
-      await recordAudit(request, {
+    } catch (error) {
+      const reason = error instanceof OwnerCommandParserError ? error.reason : "parser_error";
+      const temporaryFailure = ["gemini_429", "gemini_5xx", "gemini_timeout", "gemini_circuit_open"].includes(reason);
+      app.log.warn({ event: "ai.whatsapp.rejected", reason, phone: message.maskedPhone });
+      await safeAudit({
         unitId,
-        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        action: "AI_WHATSAPP_AI_FAILURE",
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
-        after: { reason: "parser_unavailable", phone: message.maskedPhone },
+        after: { reason, phone: message.maskedPhone },
       });
-      await sendWhatsAppMessage(
-        message.phone,
-        "Nao consegui processar sua mensagem agora. Tente novamente em instantes.",
-      );
-      return { ok: true, executed: false, unavailable: true };
+      const responseDelivered = await safeSend(temporaryFailure ? formatAiWhatsappTemporaryFailure() : formatAiWhatsappGuidance());
+      return { ok: true, executed: false, unavailable: true, reason, responseDelivered };
     }
     if (!aiWhatsappAllowedIntents.has(preview.intent) || !preview.confirmationToken || !preview.allowedNextActions.includes("confirm_execute")) {
-      await recordAudit(request, {
+      await safeAudit({
         unitId,
         action: "AI_WHATSAPP_COMMAND_REJECTED",
         entity: "ai_whatsapp_command",
@@ -5997,8 +6048,10 @@ export function createApp() {
           phone: message.maskedPhone,
         },
       });
-      await sendWhatsAppMessage(message.phone, preview.executionMessage ?? "Nao consegui montar uma previa segura para confirmar.");
-      return { ok: true, executed: false, intent: preview.intent };
+      const responseDelivered = await safeSend(
+        preview.intent === "unknown" ? formatAiWhatsappGuidance() : preview.executionMessage ?? formatAiWhatsappGuidance(),
+      );
+      return { ok: true, executed: false, intent: preview.intent, responseDelivered };
     }
 
     const code = generateAiWhatsappCode();
@@ -6015,7 +6068,16 @@ export function createApp() {
       used: false,
     };
     aiWhatsappPendingCommands.set(buildAiWhatsappPendingKey(message.phone, code), pending);
-    await recordAudit(request, {
+    if (preview.fallbackReason) {
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_FALLBACK_USED",
+        entity: "ai_whatsapp_command",
+        entityId: pending.id,
+        after: { reason: preview.fallbackReason, intent: preview.intent, phone: message.maskedPhone },
+      });
+    }
+    await safeAudit({
       unitId,
       action: "AI_WHATSAPP_COMMAND_PARSED",
       entity: "ai_whatsapp_command",
@@ -6027,8 +6089,20 @@ export function createApp() {
         missingFields: preview.missingFields,
       },
     });
-    await sendWhatsAppMessage(message.phone, formatAiWhatsappPreview(preview, code));
-    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false };
+    const responseDelivered = await safeSend(formatAiWhatsappPreview(preview, code));
+    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, responseDelivered };
+    } catch {
+      app.log.error({ event: "ai.whatsapp.unexpected_failure", phone: message.maskedPhone });
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: { reason: "webhook_unexpected_failure", phone: message.maskedPhone },
+      });
+      const responseDelivered = await safeSend(formatAiWhatsappTemporaryFailure());
+      return { ok: true, executed: false, unavailable: true, reason: "webhook_unexpected_failure", responseDelivered };
+    }
   });
 
   app.post("/integrations/webhooks/outbound/test", async (request) => {
