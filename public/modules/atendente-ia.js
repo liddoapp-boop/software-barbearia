@@ -33,6 +33,15 @@ function intentLabel(intent = "") {
   return labels[intent] || labels.unknown;
 }
 
+export function canConfirmAtendenteIa(payload = {}) {
+  return Boolean(
+    payload?.intent === "schedule_appointment" &&
+      Array.isArray(payload.allowedNextActions) &&
+      payload.allowedNextActions.includes("confirm_execute") &&
+      payload.confirmationToken,
+  );
+}
+
 export function renderAtendenteIaShell() {
   return `
     <div class="ai-owner-workbench">
@@ -59,7 +68,7 @@ export function renderAtendenteIaShell() {
           <button type="button" id="aiOwnerInterpretBtn" class="ux-btn ux-btn-primary">Interpretar</button>
           <button type="button" id="aiOwnerConfirmBtn" class="ux-btn ux-btn-muted" disabled>Confirmar acao</button>
         </div>
-        <p class="ds-text-muted">Execucao sera liberada na proxima etapa.</p>
+        <p id="aiOwnerExecutionHint" class="ds-text-muted">A execucao segura sera habilitada somente quando houver uma previa valida.</p>
       </section>
 
       <section class="ux-card ai-owner-preview">
@@ -121,6 +130,16 @@ export function renderAtendenteIaPreview(payload = {}) {
     ${
       warnings.length
         ? `<div class="panel-message panel-message-warning">${warnings.map((item) => escapeHtml(item)).join("<br>")}</div>`
+        : ""
+    }
+    ${
+      payload.confirmationMessage
+        ? `<div class="panel-message panel-message-info">${escapeHtml(payload.confirmationMessage)}</div>`
+        : ""
+    }
+    ${
+      payload.executionMessage
+        ? `<div class="panel-message panel-message-warning">${escapeHtml(payload.executionMessage)}</div>`
         : ""
     }
   `;

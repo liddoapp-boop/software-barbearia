@@ -15,9 +15,9 @@ describe("frontend Atendente IA", () => {
     );
   });
 
-  it("renderiza previa mockada sem permitir execucao", async () => {
-    const { renderAtendenteIaPreview } = await loadAtendenteIa();
-    const html = renderAtendenteIaPreview({
+  it("renderiza previa incompleta sem permitir execucao", async () => {
+    const { canConfirmAtendenteIa, renderAtendenteIaPreview } = await loadAtendenteIa();
+    const payload = {
       ok: true,
       mode: "preview_only",
       intent: "schedule_appointment",
@@ -27,6 +27,9 @@ describe("frontend Atendente IA", () => {
       missingFields: ["date", "time"],
       warnings: ["Informe data e horario antes de confirmar."],
       executed: false,
+    };
+    const html = renderAtendenteIaPreview({
+      ...payload,
     });
 
     expect(html).toContain("Agendamento");
@@ -34,5 +37,49 @@ describe("frontend Atendente IA", () => {
     expect(html).toContain("Campos faltantes");
     expect(html).toContain("Executado");
     expect(html).toContain("Nao");
+    expect(canConfirmAtendenteIa(payload)).toBe(false);
+  });
+
+  it("renderiza confirmacao apenas para agendamento liberado pelo backend", async () => {
+    const { canConfirmAtendenteIa, renderAtendenteIaPreview } = await loadAtendenteIa();
+    const payload = {
+      ok: true,
+      mode: "preview_only",
+      intent: "schedule_appointment",
+      confidence: 0.92,
+      summary: "Agendamento pronto para confirmar.",
+      draft: {
+        clientName: "Joao",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-12-15",
+        time: "10:00",
+      },
+      missingFields: [],
+      warnings: [],
+      allowedNextActions: ["confirm_execute"],
+      confirmationToken: "token-assinado",
+      confirmationMessage: "Confirmar criacao deste agendamento?",
+      executed: false,
+    };
+    const html = renderAtendenteIaPreview(payload);
+
+    expect(html).toContain("Confirmar criacao deste agendamento?");
+    expect(canConfirmAtendenteIa(payload)).toBe(true);
+  });
+
+  it("mantem checkout e venda como proxima etapa", async () => {
+    const { canConfirmAtendenteIa, renderAtendenteIaPreview } = await loadAtendenteIa();
+    const payload = {
+      intent: "product_sale",
+      summary: "Venda de produto para Lucas.",
+      draft: { clientName: "Lucas", products: ["Pomada"] },
+      executionMessage: "Execucao desta acao sera liberada em uma proxima etapa.",
+      executed: false,
+    };
+    const html = renderAtendenteIaPreview(payload);
+
+    expect(html).toContain("Execucao desta acao sera liberada em uma proxima etapa.");
+    expect(canConfirmAtendenteIa(payload)).toBe(false);
   });
 });

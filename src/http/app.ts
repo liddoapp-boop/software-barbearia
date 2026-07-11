@@ -10,7 +10,7 @@ import { createGeminiRetentionScorerFromEnv } from "../application/gemini-retent
 import { createGeminiOwnerCommandParserFromEnv } from "../application/owner-command-ai";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
-import { AppointmentStatus, ReportExportType } from "../domain/types";
+import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
 import { prisma } from "../infrastructure/database/prisma";
 import {
   hashIdempotencyPayload,
@@ -94,6 +94,29 @@ function requireIdempotencyKey(request: FastifyRequest, bodyKey?: string) {
 
 function getIdempotencyPayloadHash(payload: unknown) {
   return hashIdempotencyPayload(payload);
+}
+
+function toBase64UrlJson(input: unknown) {
+  return Buffer.from(JSON.stringify(input), "utf-8").toString("base64url");
+}
+
+function fromBase64UrlJson(input: string) {
+  return JSON.parse(Buffer.from(input, "base64url").toString("utf-8")) as unknown;
+}
+
+function stableJson(input: unknown): string {
+  if (input === null || typeof input !== "object") return JSON.stringify(input);
+  if (Array.isArray(input)) return `[${input.map((item) => stableJson(item)).join(",")}]`;
+  const record = input as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function signOwnerCommandConfirmation(payload: unknown) {
+  return crypto.createHmac("sha256", getAuthSecret()).update(stableJson(payload)).digest("base64url");
 }
 
 function getAllowedCorsOrigins() {
@@ -321,7 +344,10 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
     return { isPublic: false, roles: ["owner"] };
   }
   if (route === "/ai/owner-command/parse") {
-    return { isPublic: false, roles: ["owner"], unitSource: "body" };
+    return { isPublic: false, roles: ["owner"] };
+  }
+  if (route === "/ai/owner-command/confirm") {
+    return { isPublic: false, roles: ["owner"] };
   }
   if (route === "/auth/me") {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"] };
@@ -776,6 +802,24 @@ export function createApp() {
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   };
 
+  function getAuthenticatedOwnerUnitId(request: FastifyRequest) {
+    const unitId = (request as RequestWithAuth).auth?.activeUnitId;
+    if (!unitId) {
+      throw new Error("Unidade ativa nao encontrada para o usuario autenticado.");
+    }
+    return unitId;
+  }
+
+  const assertOwnerCommandUnitExists = async (unitId: string) => {
+    const exists =
+      backend === "prisma"
+        ? await prisma.unit.findUnique({ where: { id: unitId }, select: { id: true } })
+        : memoryStore.units.find((item) => item.id === unitId);
+    if (!exists) {
+      throw new Error("Unidade ativa nao encontrada para o usuario autenticado.");
+    }
+  };
+
   const getOwnerCommandContext = async (input: {
     unitId: string;
     screenContext?: string;
@@ -796,13 +840,14 @@ export function createApp() {
       backend === "prisma"
         ? prisma.unit.findUnique({
             where: { id: input.unitId },
-            select: { timezone: true },
+            select: { name: true, timezone: true },
           })
         : Promise.resolve(memoryStore.units.find((item) => item.id === input.unitId) ?? null),
     ]);
 
     return {
       unitId: input.unitId,
+      unitName: unit?.name,
       screenContext: input.screenContext,
       now: new Date(),
       timezone: unit?.timezone ?? "America/Sao_Paulo",
@@ -824,6 +869,319 @@ export function createApp() {
       })),
     };
   };
+
+  const ownerCommandIntentSchema = z.enum([
+    "checkout_service",
+    "product_sale",
+    "schedule_appointment",
+    "cancel_appointment",
+    "report_query",
+    "unknown",
+  ]);
+
+  type OwnerCommandIntent = z.infer<typeof ownerCommandIntentSchema>;
+
+  type OwnerCommandScheduleDraft = {
+    clientName: string;
+    serviceNames: string[];
+    professionalName?: string;
+    date: string;
+    time: string;
+    notes?: string;
+  };
+
+  type OwnerCommandConfirmationPayload = {
+    unitId?: string;
+    actorId?: string;
+    intent?: string;
+    draft?: OwnerCommandScheduleDraft;
+    exp?: number;
+  };
+
+  const unsupportedOwnerCommandExecutionMessage =
+    "Execucao desta acao sera liberada em uma proxima etapa.";
+
+  function normalizeMatchText(value: unknown) {
+    return String(value ?? "")
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function getSaoPauloDateTimeParts(value: Date) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(value);
+    const map = new Map(parts.map((part) => [part.type, part.value]));
+    const year = map.get("year");
+    const month = map.get("month");
+    const day = map.get("day");
+    const hour = map.get("hour");
+    const minute = map.get("minute");
+    return year && month && day && hour && minute
+      ? { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` }
+      : { date: "", time: "" };
+  }
+
+  function getDraftString(draft: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = draft[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  }
+
+  function getDraftStringArray(draft: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = draft[key];
+      if (Array.isArray(value)) {
+        const items = value.map((item) => String(item ?? "").trim()).filter(Boolean);
+        if (items.length) return items;
+      }
+      if (typeof value === "string" && value.trim()) return [value.trim()];
+    }
+    return [];
+  }
+
+  function normalizeOwnerScheduleDraft(rawDraft: Record<string, unknown>) {
+    const startsAt = getDraftString(rawDraft, ["startsAt", "startAt", "datetime", "dateTime"]);
+    const startsAtDate = startsAt ? new Date(startsAt) : null;
+    const startsAtParts =
+      startsAtDate && !Number.isNaN(startsAtDate.getTime())
+        ? getSaoPauloDateTimeParts(startsAtDate)
+        : { date: "", time: "" };
+    const draft: Partial<OwnerCommandScheduleDraft> = {
+      clientName: getDraftString(rawDraft, ["clientName", "client", "cliente"]),
+      serviceNames: getDraftStringArray(rawDraft, [
+        "serviceNames",
+        "services",
+        "serviceName",
+        "servicos",
+        "servico",
+      ]),
+      professionalName: getDraftString(rawDraft, [
+        "professionalName",
+        "professional",
+        "barberName",
+        "barber",
+        "profissional",
+      ]),
+      date: getDraftString(rawDraft, ["date", "data"]) || startsAtParts.date,
+      time: getDraftString(rawDraft, ["time", "horario", "hour"]) || startsAtParts.time,
+      notes: getDraftString(rawDraft, ["notes", "observations", "observacoes"]),
+    };
+
+    const missingFields: string[] = [];
+    if (!draft.clientName) missingFields.push("clientName");
+    if (!draft.serviceNames?.length) missingFields.push("serviceNames");
+    if (!draft.date) missingFields.push("date");
+    if (!draft.time) missingFields.push("time");
+    if (draft.date && !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) missingFields.push("date");
+    if (draft.time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.time)) missingFields.push("time");
+
+    return {
+      draft: {
+        clientName: draft.clientName ?? "",
+        serviceNames: draft.serviceNames ?? [],
+        professionalName: draft.professionalName || undefined,
+        date: draft.date ?? "",
+        time: draft.time ?? "",
+        notes: draft.notes || undefined,
+      },
+      missingFields: Array.from(new Set(missingFields)),
+    };
+  }
+
+  function buildOwnerCommandConfirmationToken(input: {
+    unitId: string;
+    actorId?: string;
+    intent: OwnerCommandIntent;
+    draft: OwnerCommandScheduleDraft;
+  }) {
+    const payload = {
+      unitId: input.unitId,
+      actorId: input.actorId ?? "anonymous",
+      intent: input.intent,
+      draft: input.draft,
+      exp: Math.floor(Date.now() / 1000) + 15 * 60,
+    };
+    return `${toBase64UrlJson(payload)}.${signOwnerCommandConfirmation(payload)}`;
+  }
+
+  function verifyOwnerCommandConfirmationToken(input: {
+    token?: string;
+    unitId: string;
+    actorId?: string;
+    intent: OwnerCommandIntent;
+    draft: OwnerCommandScheduleDraft;
+  }) {
+    const token = String(input.token ?? "").trim();
+    if (!token) throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
+    const [payloadSegment, signature] = token.split(".");
+    if (!payloadSegment || !signature) {
+      throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
+    }
+    let payload: OwnerCommandConfirmationPayload;
+    try {
+      payload = fromBase64UrlJson(payloadSegment) as OwnerCommandConfirmationPayload;
+    } catch {
+      throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
+    }
+    const expectedSignature = signOwnerCommandConfirmation(payload);
+    const expected = Buffer.from(expectedSignature, "base64url");
+    const incoming = Buffer.from(signature, "base64url");
+    if (expected.length !== incoming.length || !crypto.timingSafeEqual(expected, incoming)) {
+      throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
+    }
+    if (!payload.exp || payload.exp <= Math.floor(Date.now() / 1000)) {
+      throw new Error("Confirmacao expirada. Gere uma nova previa antes de executar.");
+    }
+    const expectedPayload = {
+      unitId: input.unitId,
+      actorId: input.actorId ?? "anonymous",
+      intent: input.intent,
+      draft: input.draft,
+      exp: payload.exp,
+    };
+    if (stableJson(payload) !== stableJson(expectedPayload)) {
+      throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
+    }
+  }
+
+  function findUniqueByName<T extends Record<string, unknown>>(
+    rows: T[],
+    getName: (item: T) => unknown,
+    name: string,
+  ) {
+    const needle = normalizeMatchText(name);
+    if (!needle) return null;
+    const exact = rows.filter((item) => normalizeMatchText(getName(item)) === needle);
+    if (exact.length === 1) return exact[0];
+    const partial = rows.filter((item) => {
+      const haystack = normalizeMatchText(getName(item));
+      return haystack.includes(needle) || needle.includes(haystack);
+    });
+    return partial.length === 1 ? partial[0] : null;
+  }
+
+  async function resolveOwnerCommandSchedule(input: {
+    unitId: string;
+    draft: OwnerCommandScheduleDraft;
+  }) {
+    const catalog = await operations.getCatalog({ unitId: input.unitId });
+    const clients = catalog.clients as unknown as Array<Record<string, unknown>>;
+    const services = catalog.services as unknown as Array<Record<string, unknown>>;
+    const professionals = catalog.professionals as unknown as Array<Record<string, unknown>>;
+    const missingFields: string[] = [];
+    const warnings: string[] = [];
+
+    const client = findUniqueByName(
+      clients,
+      (item) => item.fullName ?? item.name,
+      input.draft.clientName,
+    );
+    if (!client) warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+
+    const serviceIds = input.draft.serviceNames
+      .map((name) => {
+        const service = findUniqueByName(services, (item) => item.name, name);
+        if (!service) {
+          warnings.push(`Servico nao encontrado ou ambiguo: ${name}.`);
+          return "";
+        }
+        return String(service.id ?? "");
+      })
+      .filter(Boolean);
+    if (serviceIds.length !== input.draft.serviceNames.length) missingFields.push("serviceNames");
+
+    let professional = input.draft.professionalName
+      ? findUniqueByName(professionals, (item) => item.name, input.draft.professionalName)
+      : null;
+    if (!professional && professionals.length === 1) {
+      professional = professionals[0];
+    }
+    if (!professional) {
+      missingFields.push("professionalName");
+      warnings.push("Profissional nao encontrado ou ambiguo.");
+    }
+
+    const startsAt = new Date(`${input.draft.date}T${input.draft.time}:00.000-03:00`);
+    if (Number.isNaN(startsAt.getTime())) missingFields.push("date");
+
+    return {
+      missingFields: Array.from(new Set(missingFields)),
+      warnings,
+      schedule: professional && serviceIds.length === input.draft.serviceNames.length
+        ? {
+            clientId: client ? String(client.id ?? "") : "",
+            clientName: String(client?.fullName ?? client?.name ?? input.draft.clientName),
+            professionalId: String(professional.id ?? ""),
+            serviceIds,
+            startsAt,
+            professionalName: String(professional.name ?? input.draft.professionalName ?? ""),
+          }
+        : null,
+    };
+  }
+
+  async function getOwnerCommandClients(unitId: string) {
+    if (backend === "prisma") {
+      return await prisma.client.findMany({
+        where: { businessId: unitId },
+        select: { id: true, fullName: true },
+      });
+    }
+    return memoryStore.clients
+      .filter((item) => (item.businessId ?? "unit-01") === unitId)
+      .map((item) => ({ id: item.id, fullName: item.fullName }));
+  }
+
+  async function ensureOwnerCommandClient(input: { unitId: string; clientName: string }) {
+    const normalizedName = normalizeMatchText(input.clientName);
+    if (!normalizedName) throw new Error("Cliente obrigatorio para confirmar agendamento.");
+    const clients = await getOwnerCommandClients(input.unitId);
+    const exact = clients.filter((item) => normalizeMatchText(item.fullName) === normalizedName);
+    if (exact.length === 1) return exact[0].id;
+    if (exact.length > 1) throw new Error("Cliente ambiguo. Revise a previa antes de confirmar.");
+
+    const partial = clients.filter((item) => {
+      const haystack = normalizeMatchText(item.fullName);
+      return haystack.includes(normalizedName) || normalizedName.includes(haystack);
+    });
+    if (partial.length === 1) return partial[0].id;
+    if (partial.length > 1) throw new Error("Cliente ambiguo. Revise a previa antes de confirmar.");
+
+    const id = crypto.randomUUID();
+    if (backend === "prisma") {
+      const created = await prisma.client.create({
+        data: {
+          id,
+          businessId: input.unitId,
+          fullName: input.clientName,
+          tags: ["NEW"],
+        },
+        select: { id: true },
+      });
+      return created.id;
+    }
+    const created: Client = {
+      id,
+      businessId: input.unitId,
+      fullName: input.clientName,
+      tags: ["NEW"],
+    };
+    memoryStore.clients.push(created);
+    return created.id;
+  }
 
   const app = Fastify({
     logger: httpLogEnabled
@@ -1710,9 +2068,16 @@ export function createApp() {
   });
 
   const ownerCommandParseSchema = z.object({
-    unitId: z.string().min(1),
+    unitId: z.string().min(1).optional(),
     message: z.string().trim().min(3).max(1000),
     screenContext: z.string().trim().min(1).max(80).optional(),
+  });
+
+  const ownerCommandConfirmSchema = z.object({
+    unitId: z.string().min(1).optional(),
+    intent: ownerCommandIntentSchema,
+    draft: z.record(z.string(), z.unknown()).default({}),
+    confirmationToken: z.string().trim().min(20).max(3000).optional(),
   });
 
   const integrationWebhookOutboundTestSchema = z.object({
@@ -4827,22 +5192,142 @@ export function createApp() {
 
   app.post("/ai/owner-command/parse", async (request) => {
     const body = ownerCommandParseSchema.parse(request.body);
+    const req = request as RequestWithAuth;
+    const unitId = getAuthenticatedOwnerUnitId(request);
+    await assertOwnerCommandUnitExists(unitId);
     if (!ownerCommandParser) {
       throw new Error("IA indisponivel: configure GEMINI_API_KEY no ambiente local seguro.");
     }
     const context = await getOwnerCommandContext({
-      unitId: body.unitId,
+      unitId,
       screenContext: body.screenContext,
     });
     const parsed = await ownerCommandParser.parse({
       message: body.message,
       context,
     });
-    return {
+    const response: Record<string, unknown> = {
       ...parsed,
       ok: true,
       mode: "preview_only",
       executed: false,
+      allowedNextActions: [],
+    };
+    if (parsed.intent === "schedule_appointment") {
+      const normalized = normalizeOwnerScheduleDraft(parsed.draft);
+      const resolved = normalized.missingFields.length
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], schedule: null }
+        : await resolveOwnerCommandSchedule({ unitId, draft: normalized.draft });
+      const missingFields = Array.from(
+        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
+      );
+      response.draft = normalized.draft;
+      response.missingFields = missingFields;
+      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
+      if (!missingFields.length && resolved.schedule) {
+        response.allowedNextActions = ["confirm_execute"];
+        response.confirmationToken = buildOwnerCommandConfirmationToken({
+          unitId,
+          actorId: req.auth?.userId,
+          intent: parsed.intent,
+          draft: normalized.draft,
+        });
+        response.confirmationMessage = "Confirmar criacao deste agendamento?";
+      }
+    } else {
+      response.executionMessage = unsupportedOwnerCommandExecutionMessage;
+    }
+    return {
+      ...response,
+    };
+  });
+
+  app.post("/ai/owner-command/confirm", async (request) => {
+    const body = ownerCommandConfirmSchema.parse(request.body);
+    const req = request as RequestWithAuth;
+    const unitId = getAuthenticatedOwnerUnitId(request);
+    await assertOwnerCommandUnitExists(unitId);
+    if (body.intent !== "schedule_appointment") {
+      return {
+        ok: true,
+        mode: "preview_only",
+        intent: body.intent,
+        executed: false,
+        message: unsupportedOwnerCommandExecutionMessage,
+      };
+    }
+
+    const normalized = normalizeOwnerScheduleDraft(body.draft);
+    if (normalized.missingFields.length) {
+      return {
+        ok: false,
+        mode: "confirmation_required",
+        intent: body.intent,
+        executed: false,
+        missingFields: normalized.missingFields,
+        message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
+      };
+    }
+    verifyOwnerCommandConfirmationToken({
+      token: body.confirmationToken,
+      unitId,
+      actorId: req.auth?.userId,
+      intent: body.intent,
+      draft: normalized.draft,
+    });
+    const resolved = await resolveOwnerCommandSchedule({ unitId, draft: normalized.draft });
+    if (resolved.missingFields.length || !resolved.schedule) {
+      return {
+        ok: false,
+        mode: "confirmation_required",
+        intent: body.intent,
+        executed: false,
+        missingFields: resolved.missingFields,
+        warnings: resolved.warnings,
+        message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
+      };
+    }
+
+    const clientId = resolved.schedule.clientId || await ensureOwnerCommandClient({
+      unitId,
+      clientName: resolved.schedule.clientName,
+    });
+    const appointment = await operations.schedule({
+      unitId,
+      clientId,
+      professionalId: resolved.schedule.professionalId,
+      serviceIds: resolved.schedule.serviceIds,
+      startsAt: resolved.schedule.startsAt,
+      notes: normalized.draft.notes
+        ? `Atendente IA - ${normalized.draft.notes}`
+        : "Atendente IA - confirmado pelo owner",
+      changedBy: req.auth?.email || req.auth?.userId || "owner",
+    });
+    await recordAudit(request, {
+      unitId: appointment.unitId,
+      action: "AI_OWNER_COMMAND_APPOINTMENT_CREATED",
+      entity: "appointment",
+      entityId: appointment.id,
+      after: {
+        origin: "atendente_ia",
+        startsAt: appointment.startsAt.toISOString(),
+        professionalId: appointment.professionalId,
+        clientId: appointment.clientId,
+        serviceId: appointment.serviceId,
+        serviceIds: resolved.schedule.serviceIds,
+      },
+      metadata: {
+        humanConfirmed: true,
+        intent: body.intent,
+      },
+    });
+    return {
+      ok: true,
+      mode: "executed_after_confirmation",
+      intent: body.intent,
+      executed: true,
+      message: "Agendamento criado com sucesso.",
+      appointment,
     };
   });
 

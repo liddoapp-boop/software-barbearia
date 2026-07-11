@@ -141,6 +141,7 @@ import {
   renderAuditLoading,
 } from "./modules/auditoria.js";
 import {
+  canConfirmAtendenteIa,
   renderAtendenteIaError,
   renderAtendenteIaLoading,
   renderAtendenteIaPreview,
@@ -166,7 +167,7 @@ import {
 } from "./components/operational-ui.js";
 
 const API = "";
-let unitId = "unit-01";
+let unitId = "";
 const STORAGE_ACTIVE_MODULE = "sb.activeModule";
 const STORAGE_AUTH_SESSION = "sb.authSession";
 const STORAGE_AGENDA_VIEW = "sb.agendaView";
@@ -1680,13 +1681,13 @@ function persistAuthSession(session) {
 
 function clearAuthSession() {
   authSession = null;
-  unitId = "unit-01";
+  unitId = "";
   localStorage.removeItem(STORAGE_AUTH_SESSION);
   localStorage.removeItem("authToken");
 }
 
 function getSessionUnitId(session) {
-  return session?.user?.activeUnitId || session?.user?.unitIds?.[0] || "unit-01";
+  return session?.user?.activeUnitId || session?.activeUnitId || session?.user?.unitIds?.[0] || session?.unitIds?.[0] || "";
 }
 
 function redirectToLogin() {
@@ -10772,8 +10773,22 @@ function initAtendenteIaSection() {
 
   const messageInput = document.getElementById("aiOwnerMessage");
   const interpretBtn = document.getElementById("aiOwnerInterpretBtn");
+  const confirmBtn = document.getElementById("aiOwnerConfirmBtn");
   const preview = document.getElementById("aiOwnerPreview");
   const feedback = document.getElementById("aiOwnerFeedback");
+  const executionHint = document.getElementById("aiOwnerExecutionHint");
+  let currentPreview = null;
+
+  function updateConfirmState(payload = null) {
+    currentPreview = payload;
+    const canConfirm = canConfirmAtendenteIa(payload);
+    if (confirmBtn) confirmBtn.disabled = !canConfirm;
+    if (executionHint) {
+      executionHint.textContent = canConfirm
+        ? "Confirmar criacao deste agendamento?"
+        : payload?.executionMessage || "A execucao segura sera habilitada somente quando houver uma previa valida.";
+    }
+  }
 
   mount.querySelectorAll("[data-ai-suggestion]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -10791,6 +10806,7 @@ function initAtendenteIaSection() {
     }
     if (feedback) feedback.innerHTML = "";
     if (preview) preview.innerHTML = renderAtendenteIaLoading();
+    updateConfirmState(null);
     interpretBtn.disabled = true;
     try {
       const response = await apiFetch(`${API}/ai/owner-command/parse`, {
@@ -10808,10 +10824,41 @@ function initAtendenteIaSection() {
         throw new Error(payload.error || "IA indisponivel no momento.");
       }
       if (preview) preview.innerHTML = renderAtendenteIaPreview(payload);
+      updateConfirmState(payload);
     } catch (error) {
       if (preview) preview.innerHTML = renderAtendenteIaError(error?.message || "Falha ao interpretar mensagem.");
+      updateConfirmState(null);
     } finally {
       interpretBtn.disabled = false;
+    }
+  });
+
+  confirmBtn?.addEventListener("click", async () => {
+    if (!canConfirmAtendenteIa(currentPreview)) return;
+    if (feedback) feedback.innerHTML = "";
+    confirmBtn.disabled = true;
+    try {
+      const response = await apiFetch(`${API}/ai/owner-command/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          unitId,
+          intent: currentPreview.intent,
+          draft: currentPreview.draft,
+          confirmationToken: currentPreview.confirmationToken,
+        }),
+        timeoutMs: 20000,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || payload.message || "Nao foi possivel executar a acao.");
+      }
+      currentPreview = { ...currentPreview, executed: true, allowedNextActions: [] };
+      if (feedback) feedback.innerHTML = `<div class="panel-message panel-message-success">${escapeHtml(payload.message || "Acao executada com sucesso.")}</div>`;
+      if (executionHint) executionHint.textContent = "Acao confirmada pelo owner e executada com auditoria.";
+    } catch (error) {
+      if (feedback) feedback.innerHTML = renderAtendenteIaError(error?.message || "Falha ao confirmar acao.");
+      updateConfirmState(currentPreview);
     }
   });
 }
