@@ -22,6 +22,7 @@ export type OwnerCommandParseResult = {
   mode: "preview_only";
   intent:
     | "checkout_service"
+    | "sell_product"
     | "product_sale"
     | "schedule_appointment"
     | "cancel_appointment"
@@ -47,6 +48,7 @@ const ownerCommandResponseSchema = z.object({
   intent: z
     .enum([
       "checkout_service",
+      "sell_product",
       "product_sale",
       "schedule_appointment",
       "cancel_appointment",
@@ -106,13 +108,16 @@ function buildPrompt(input: OwnerCommandParseInput) {
     "Interprete datas relativas como hoje, amanha e dias da semana usando context.now e context.timezone.",
     "Aceite nomes de clientes em maiusculas, minusculas ou com acentos exatamente como foram escritos.",
     "Se houver apenas um profissional no contexto, use esse nome em draft.professionalName.",
+    "Para venda de produto, reconheca vendi, venda, vendeu e registrar venda como intent sell_product.",
+    "Para venda de produto, retorne draft.clientName, draft.productName, draft.quantity, draft.paymentMethod e, se o owner informar valor, draft.quotedUnitPrice.",
+    "Para venda de produto, use somente produtos e metodos de pagamento presentes no contexto.",
     "Se faltar dado obrigatorio, preencha missingFields e warnings.",
     "Se houver ambiguidade, peca confirmacao humana em warnings.",
     "Nunca sugira acao irreversivel sem confirmacao.",
     "Mantenha portugues brasileiro.",
     "Nao inclua segredos, tokens, chaves, senhas, URLs de banco ou logs.",
     "Responda exclusivamente JSON valido, sem texto fora do JSON.",
-    'Formato: {"ok":true,"mode":"preview_only","intent":"checkout_service|product_sale|schedule_appointment|cancel_appointment|report_query|unknown","confidence":0.0,"summary":"...","draft":{},"missingFields":[],"warnings":[],"allowedNextActions":[],"executed":false}',
+    'Formato: {"ok":true,"mode":"preview_only","intent":"checkout_service|sell_product|product_sale|schedule_appointment|cancel_appointment|report_query|unknown","confidence":0.0,"summary":"...","draft":{},"missingFields":[],"warnings":[],"allowedNextActions":[],"executed":false}',
     "",
     "Mensagem do owner:",
     input.message,
@@ -243,6 +248,71 @@ function findServiceName(message: string, context: OwnerCommandContext) {
   return undefined;
 }
 
+function findProductName(message: string, context: OwnerCommandContext) {
+  const normalized = ` ${normalizeMatchText(message)} `;
+  const fullMatch = context.products
+    .map((product) => product.name)
+    .filter(Boolean)
+    .sort((a, b) => normalizeMatchText(b).length - normalizeMatchText(a).length)
+    .find((name) => normalized.includes(` ${normalizeMatchText(name)} `));
+  if (fullMatch) return fullMatch;
+
+  const wordMatches = context.products
+    .flatMap((product) => {
+      const candidates = [product.name, product.category]
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .flatMap((item) => normalizeMatchText(item).split(" "))
+        .filter((item) => item.length >= 4);
+      return Array.from(new Set(candidates)).map((word) => ({ word, productName: product.name }));
+    })
+    .filter((candidate) => normalized.includes(` ${candidate.word} `));
+  const uniqueWords = Array.from(new Set(wordMatches.map((candidate) => candidate.word)));
+  const uniqueProducts = Array.from(new Set(wordMatches.map((candidate) => candidate.productName)));
+  if (uniqueWords.length === 1 && uniqueProducts.length === 1) {
+    const word = uniqueWords[0];
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }
+  return undefined;
+}
+
+function findPaymentMethodName(message: string, context: OwnerCommandContext) {
+  const normalized = ` ${normalizeMatchText(message)} `;
+  return context.paymentMethods
+    .map((method) => method.name)
+    .filter(Boolean)
+    .sort((a, b) => normalizeMatchText(b).length - normalizeMatchText(a).length)
+    .find((name) => normalized.includes(` ${normalizeMatchText(name)} `));
+}
+
+function parseProductQuantity(message: string) {
+  const normalized = normalizeMatchText(message);
+  const numberMatch = normalized.match(/\b(\d{1,2})\b/);
+  if (numberMatch) return Number(numberMatch[1]);
+  if (/\b(um|uma)\b/.test(normalized)) return 1;
+  if (/\b(dois|duas)\b/.test(normalized)) return 2;
+  if (/\btres\b/.test(normalized)) return 3;
+  return 1;
+}
+
+function parseQuotedUnitPrice(message: string) {
+  const priceMatch = message.match(/\bpor\s+R?\$?\s*(\d+(?:[,.]\d{1,2})?)\b/i);
+  if (!priceMatch) return undefined;
+  const parsed = Number(priceMatch[1].replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function extractProductSaleClientName(message: string) {
+  const match = message.match(/\b(?:para|pra|pro)\s+(.+?)(?:,|\.|\s+(?:ele|ela)\s+pagou|\s+pagou|\s+no\s+|\s+na\s+|$)/i);
+  return match?.[1] ? cleanClientName(match[1]) : "";
+}
+
+function extractProductNameFromSaleMessage(message: string) {
+  const match = message.match(/\b(?:vendi|vendeu|venda|vender)\s+(?:(?:um|uma|uns|umas|\d+)\s+)?(.+?)\s+(?:para|pra|pro)\b/i);
+  if (!match?.[1]) return "";
+  const productName = cleanClientName(match[1]);
+  return productName ? productName.charAt(0).toUpperCase() + productName.slice(1) : "";
+}
+
 function cleanClientName(value: string) {
   return value
     .replace(/[.,;:!?]+$/g, "")
@@ -313,12 +383,53 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
   };
 }
 
+function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
+  const normalized = normalizeMatchText(input.message);
+  const hasSaleVerb = /\b(vendi|vendeu|venda|vender|registrar venda)\b/.test(normalized);
+  if (!hasSaleVerb) return null;
+
+  const productName = findProductName(input.message, input.context) || extractProductNameFromSaleMessage(input.message);
+  const clientName = extractProductSaleClientName(input.message);
+  const paymentMethod = findPaymentMethodName(input.message, input.context);
+  const quantity = parseProductQuantity(input.message);
+  const quotedUnitPrice = parseQuotedUnitPrice(input.message);
+  const missingFields = [
+    clientName ? "" : "clientName",
+    productName ? "" : "productName",
+    Number.isInteger(quantity) && quantity > 0 ? "" : "quantity",
+    paymentMethod ? "" : "paymentMethod",
+  ].filter(Boolean);
+
+  if (!productName && !clientName && !paymentMethod) return null;
+
+  return {
+    ok: true,
+    mode: "preview_only",
+    intent: "sell_product",
+    confidence: missingFields.length ? 0.62 : 0.84,
+    summary: missingFields.length
+      ? "Previa de venda de produto incompleta. Revise os campos faltantes."
+      : `Venda de ${quantity} ${productName} para ${clientName} com pagamento ${paymentMethod}.`,
+    draft: {
+      clientName,
+      productName,
+      quantity,
+      paymentMethod,
+      ...(quotedUnitPrice !== undefined ? { quotedUnitPrice } : {}),
+    },
+    missingFields,
+    warnings: missingFields.length ? ["Comando incompleto para registrar venda de produto."] : [],
+    allowedNextActions: [],
+    executed: false,
+  };
+}
+
 function normalizeResult(value: unknown): OwnerCommandParseResult {
   const parsed = ownerCommandResponseSchema.parse(value);
   return {
     ok: true,
     mode: "preview_only",
-    intent: parsed.intent,
+    intent: parsed.intent === "product_sale" ? "sell_product" : parsed.intent,
     confidence: Number(parsed.confidence.toFixed(2)),
     summary: parsed.summary,
     draft: parsed.draft,
@@ -373,6 +484,8 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
       }
       return normalizeResult(JSON.parse(stripJsonFence(text)));
     } catch (error) {
+      const productSale = deterministicProductSaleParse(input);
+      if (productSale) return productSale;
       const deterministic = deterministicScheduleParse(input);
       if (deterministic) return deterministic;
       if (error instanceof Error && error.message.startsWith("IA ")) throw error;

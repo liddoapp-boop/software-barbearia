@@ -872,6 +872,7 @@ export function createApp() {
 
   const ownerCommandIntentSchema = z.enum([
     "checkout_service",
+    "sell_product",
     "product_sale",
     "schedule_appointment",
     "cancel_appointment",
@@ -890,11 +891,22 @@ export function createApp() {
     notes?: string;
   };
 
+  type OwnerCommandProductSaleDraft = {
+    clientName: string;
+    productName: string;
+    quantity: number;
+    paymentMethod: string;
+    quotedUnitPrice?: number;
+    notes?: string;
+  };
+
+  type OwnerCommandDraft = OwnerCommandScheduleDraft | OwnerCommandProductSaleDraft;
+
   type OwnerCommandConfirmationPayload = {
     unitId?: string;
     actorId?: string;
     intent?: string;
-    draft?: OwnerCommandScheduleDraft;
+    draft?: OwnerCommandDraft;
     exp?: number;
   };
 
@@ -952,6 +964,22 @@ export function createApp() {
     return [];
   }
 
+  function getDraftNumber(draft: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = draft[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim()) {
+        const raw = value.trim();
+        const normalized = raw.includes(",")
+          ? raw.replace(/\./g, "").replace(",", ".")
+          : raw;
+        const parsed = Number(normalized);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    return undefined;
+  }
+
   function normalizeOwnerScheduleDraft(rawDraft: Record<string, unknown>) {
     const startsAt = getDraftString(rawDraft, ["startsAt", "startAt", "datetime", "dateTime"]);
     const startsAtDate = startsAt ? new Date(startsAt) : null;
@@ -1001,11 +1029,54 @@ export function createApp() {
     };
   }
 
+  function normalizeOwnerProductSaleDraft(rawDraft: Record<string, unknown>) {
+    const quantity = getDraftNumber(rawDraft, ["quantity", "qty", "quantidade"]) ?? 1;
+    const quotedUnitPrice = getDraftNumber(rawDraft, [
+      "quotedUnitPrice",
+      "unitPrice",
+      "price",
+      "valorUnitario",
+      "valor",
+      "total",
+    ]);
+    const draft: Partial<OwnerCommandProductSaleDraft> = {
+      clientName: getDraftString(rawDraft, ["clientName", "client", "cliente"]),
+      productName: getDraftString(rawDraft, ["productName", "product", "produto"]),
+      quantity,
+      paymentMethod: getDraftString(rawDraft, ["paymentMethod", "payment", "metodoPagamento", "pagamento"]),
+      quotedUnitPrice,
+      notes: getDraftString(rawDraft, ["notes", "observations", "observacoes"]),
+    };
+
+    const missingFields: string[] = [];
+    if (!draft.clientName) missingFields.push("clientName");
+    if (!draft.productName) missingFields.push("productName");
+    if (!Number.isInteger(draft.quantity) || Number(draft.quantity) < 1 || Number(draft.quantity) > 99) {
+      missingFields.push("quantity");
+    }
+    if (!draft.paymentMethod) missingFields.push("paymentMethod");
+    if (draft.quotedUnitPrice !== undefined && (!Number.isFinite(draft.quotedUnitPrice) || draft.quotedUnitPrice < 0)) {
+      missingFields.push("quotedUnitPrice");
+    }
+
+    return {
+      draft: {
+        clientName: draft.clientName ?? "",
+        productName: draft.productName ?? "",
+        quantity: Number.isInteger(draft.quantity) ? Number(draft.quantity) : 0,
+        paymentMethod: draft.paymentMethod ?? "",
+        quotedUnitPrice: draft.quotedUnitPrice,
+        notes: draft.notes || undefined,
+      },
+      missingFields: Array.from(new Set(missingFields)),
+    };
+  }
+
   function buildOwnerCommandConfirmationToken(input: {
     unitId: string;
     actorId?: string;
     intent: OwnerCommandIntent;
-    draft: OwnerCommandScheduleDraft;
+    draft: OwnerCommandDraft;
   }) {
     const payload = {
       unitId: input.unitId,
@@ -1022,7 +1093,7 @@ export function createApp() {
     unitId: string;
     actorId?: string;
     intent: OwnerCommandIntent;
-    draft: OwnerCommandScheduleDraft;
+    draft: OwnerCommandDraft;
   }) {
     const token = String(input.token ?? "").trim();
     if (!token) throw new Error("Confirmacao invalida. Gere uma nova previa antes de executar.");
@@ -1181,6 +1252,103 @@ export function createApp() {
     };
     memoryStore.clients.push(created);
     return created.id;
+  }
+
+  async function resolveOwnerCommandProductSale(input: {
+    unitId: string;
+    draft: OwnerCommandProductSaleDraft;
+  }) {
+    const [catalog, paymentMethods] = await Promise.all([
+      operations.getCatalog({ unitId: input.unitId }),
+      backend === "prisma"
+        ? prisma.paymentMethod.findMany({
+            where: { unitId: input.unitId, isActive: true },
+            select: { name: true },
+          })
+        : Promise.resolve(
+            memoryStore.businessPaymentMethods
+              .filter((item) => item.unitId === input.unitId && item.isActive)
+              .map((item) => ({ name: item.name })),
+          ),
+    ]);
+    const clients = catalog.clients as unknown as Array<Record<string, unknown>>;
+    const products = catalog.products as unknown as Array<Record<string, unknown>>;
+    const missingFields: string[] = [];
+    const warnings: string[] = [];
+
+    const client = findUniqueByName(
+      clients,
+      (item) => item.fullName ?? item.name,
+      input.draft.clientName,
+    );
+    if (!client) warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+
+    const product = findUniqueByName(products, (item) => item.name, input.draft.productName);
+    if (!product) {
+      missingFields.push("productName");
+      warnings.push(`Produto nao encontrado ou ambiguo: ${input.draft.productName}.`);
+    }
+
+    const quantity = Math.trunc(Number(input.draft.quantity));
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      missingFields.push("quantity");
+      warnings.push("Quantidade invalida para venda de produto.");
+    }
+
+    const paymentMethod = findUniqueByName(paymentMethods, (item) => item.name, input.draft.paymentMethod);
+    if (!paymentMethod) {
+      missingFields.push("paymentMethod");
+      warnings.push(`Metodo de pagamento nao encontrado ou inativo: ${input.draft.paymentMethod}.`);
+    }
+
+    const stockQty = Number(product?.stockQty ?? product?.quantity ?? 0);
+    if (product && quantity > 0 && stockQty < quantity) {
+      missingFields.push("quantity");
+      warnings.push("Estoque insuficiente para venda de produto.");
+    }
+
+    const officialUnitPrice = Number(product?.salePrice ?? 0);
+    if (product && input.draft.quotedUnitPrice !== undefined) {
+      const quoted = Number(input.draft.quotedUnitPrice);
+      if (!Number.isFinite(quoted) || quoted < 0) {
+        missingFields.push("quotedUnitPrice");
+        warnings.push("Valor informado invalido.");
+      } else if (Math.abs(quoted - officialUnitPrice) >= 0.01) {
+        warnings.push(
+          `Valor informado (${quoted.toFixed(2)}) diverge do preco oficial (${officialUnitPrice.toFixed(2)}). A venda usara o preco oficial.`,
+        );
+      }
+    }
+
+    return {
+      missingFields: Array.from(new Set(missingFields)),
+      warnings,
+      sale: product && paymentMethod && quantity > 0 && stockQty >= quantity
+        ? {
+            clientId: client ? String(client.id ?? "") : "",
+            clientName: String(client?.fullName ?? client?.name ?? input.draft.clientName),
+            productId: String(product.id ?? ""),
+            productName: String(product.name ?? input.draft.productName),
+            quantity,
+            paymentMethod: String(paymentMethod.name ?? input.draft.paymentMethod),
+            unitPrice: officialUnitPrice,
+            total: Number((officialUnitPrice * quantity).toFixed(2)),
+            stockQty,
+          }
+        : null,
+    };
+  }
+
+  function buildOwnerCommandExecutionIdempotencyKey(input: {
+    intent: OwnerCommandIntent;
+    token?: string;
+  }) {
+    const digest = crypto
+      .createHash("sha256")
+      .update(String(input.token ?? ""))
+      .digest("base64url")
+      .slice(0, 64);
+    return `ai-owner-${input.intent}-${digest}`;
   }
 
   const app = Fastify({
@@ -1455,6 +1623,7 @@ export function createApp() {
     unitId: z.string().min(1),
     professionalId: z.string().min(1).optional(),
     clientId: z.string().min(1).optional(),
+    paymentMethod: z.string().trim().min(1).max(80).optional(),
     soldAt: z.string().datetime(),
     items: z.array(
       z.object({
@@ -2488,6 +2657,7 @@ export function createApp() {
       action: string;
       entity: string;
       entityId?: string;
+      idempotencyKey?: string;
       before?: Record<string, unknown>;
       after?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
@@ -2508,7 +2678,7 @@ export function createApp() {
       route: routePattern(request),
       method: request.method.toUpperCase(),
       requestId: req.correlationId ?? crypto.randomUUID(),
-      idempotencyKey: getIdempotencyKey(request, bodyIdempotencyKey),
+      idempotencyKey: payload.idempotencyKey ?? getIdempotencyKey(request, bodyIdempotencyKey),
       before: payload.before,
       after: payload.after,
       metadata: payload.metadata,
@@ -3748,6 +3918,7 @@ export function createApp() {
       unitId: body.unitId,
       clientId: body.clientId,
       professionalId: body.professionalId,
+      paymentMethod: body.paymentMethod,
       soldAt: new Date(body.soldAt),
       items: body.items,
       idempotencyKey,
@@ -5234,6 +5405,28 @@ export function createApp() {
         });
         response.confirmationMessage = "Confirmar criacao deste agendamento?";
       }
+    } else if (parsed.intent === "sell_product") {
+      const normalized = normalizeOwnerProductSaleDraft(parsed.draft);
+      const resolved = normalized.missingFields.length
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], sale: null }
+        : await resolveOwnerCommandProductSale({ unitId, draft: normalized.draft });
+      const missingFields = Array.from(
+        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
+      );
+      response.draft = normalized.draft;
+      response.missingFields = missingFields;
+      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
+      if (resolved.sale) response.sale = resolved.sale;
+      if (!missingFields.length && resolved.sale) {
+        response.allowedNextActions = ["confirm_execute"];
+        response.confirmationToken = buildOwnerCommandConfirmationToken({
+          unitId,
+          actorId: req.auth?.userId,
+          intent: parsed.intent,
+          draft: normalized.draft,
+        });
+        response.confirmationMessage = "Confirmar venda de produto?";
+      }
     } else {
       response.executionMessage = unsupportedOwnerCommandExecutionMessage;
     }
@@ -5242,18 +5435,115 @@ export function createApp() {
     };
   });
 
-  app.post("/ai/owner-command/confirm", async (request) => {
+  app.post("/ai/owner-command/confirm", async (request, reply) => {
     const body = ownerCommandConfirmSchema.parse(request.body);
     const req = request as RequestWithAuth;
     const unitId = getAuthenticatedOwnerUnitId(request);
     await assertOwnerCommandUnitExists(unitId);
-    if (body.intent !== "schedule_appointment") {
+    if (body.intent !== "schedule_appointment" && body.intent !== "sell_product") {
       return {
         ok: true,
         mode: "preview_only",
         intent: body.intent,
         executed: false,
         message: unsupportedOwnerCommandExecutionMessage,
+      };
+    }
+
+    if (!body.confirmationToken && body.intent === "sell_product") {
+      return reply.status(401).send({
+        ok: false,
+        mode: "confirmation_required",
+        intent: body.intent,
+        executed: false,
+        message: "Confirmacao obrigatoria. Gere uma nova previa antes de executar.",
+      });
+    }
+
+    if (body.intent === "sell_product") {
+      const normalized = normalizeOwnerProductSaleDraft(body.draft);
+      if (normalized.missingFields.length) {
+        return {
+          ok: false,
+          mode: "confirmation_required",
+          intent: body.intent,
+          executed: false,
+          missingFields: normalized.missingFields,
+          message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
+        };
+      }
+      verifyOwnerCommandConfirmationToken({
+        token: body.confirmationToken,
+        unitId,
+        actorId: req.auth?.userId,
+        intent: body.intent,
+        draft: normalized.draft,
+      });
+      const resolved = await resolveOwnerCommandProductSale({ unitId, draft: normalized.draft });
+      if (resolved.missingFields.length || !resolved.sale) {
+        return {
+          ok: false,
+          mode: "confirmation_required",
+          intent: body.intent,
+          executed: false,
+          missingFields: resolved.missingFields,
+          warnings: resolved.warnings,
+          message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
+        };
+      }
+
+      const clientId = resolved.sale.clientId || await ensureOwnerCommandClient({
+        unitId,
+        clientName: resolved.sale.clientName,
+      });
+      const idempotencyKey = buildOwnerCommandExecutionIdempotencyKey({
+        intent: body.intent,
+        token: body.confirmationToken,
+      });
+      const saleResult = await operations.registerProductSale({
+        unitId,
+        clientId,
+        soldAt: new Date(),
+        items: [{ productId: resolved.sale.productId, quantity: resolved.sale.quantity }],
+        paymentMethod: resolved.sale.paymentMethod,
+        idempotencyKey,
+        idempotencyPayloadHash: getIdempotencyPayloadHash({
+          route: "/ai/owner-command/confirm:sell_product",
+          unitId,
+          intent: body.intent,
+          draft: normalized.draft,
+        }),
+        audit: transactionalAuditContext(request),
+      });
+      await recordAudit(request, {
+        unitId: saleResult.sale.unitId,
+        action: "AI_OWNER_COMMAND_PRODUCT_SALE_CREATED",
+        entity: "product_sale",
+        entityId: saleResult.sale.id,
+        idempotencyKey,
+        after: {
+          origin: "atendente_ia",
+          productId: resolved.sale.productId,
+          productName: resolved.sale.productName,
+          quantity: resolved.sale.quantity,
+          paymentMethod: resolved.sale.paymentMethod,
+          clientId,
+          grossAmount: saleResult.sale.grossAmount,
+        },
+        metadata: {
+          humanConfirmed: true,
+          intent: body.intent,
+        },
+      });
+      return {
+        ok: true,
+        mode: "executed_after_confirmation",
+        intent: body.intent,
+        executed: true,
+        message: "Venda de produto registrada com sucesso.",
+        sale: saleResult.sale,
+        revenue: saleResult.revenue,
+        stockMovements: saleResult.stockMovements,
       };
     }
 

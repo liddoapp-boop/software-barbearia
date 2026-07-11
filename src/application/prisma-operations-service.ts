@@ -4130,6 +4130,7 @@ export class PrismaOperationsService {
     appointmentId?: string;
     professionalId?: string;
     clientId?: string;
+    paymentMethod?: string;
     soldAt: Date;
     items: Array<{
       productId: string;
@@ -4199,6 +4200,7 @@ export class PrismaOperationsService {
       products,
       professional,
     });
+    result.revenue.paymentMethod = String(input.paymentMethod ?? "").trim() || result.revenue.paymentMethod || "NAO_INFORMADO";
 
     try {
       await this.prisma.$transaction(async (tx) => {

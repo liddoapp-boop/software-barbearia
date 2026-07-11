@@ -145,6 +145,52 @@ async function countState(app: FastifyInstance, token: string, unitId = "unit-01
   };
 }
 
+async function countCommercialState(app: FastifyInstance, token: string, unitId = "unit-01") {
+  const [appointments, inventory, financial, sales, audit] = await Promise.all([
+    app.inject({
+      method: "GET",
+      url: `/appointments?unitId=${unitId}`,
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    app.inject({
+      method: "GET",
+      url: `/inventory?unitId=${unitId}`,
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    app.inject({
+      method: "GET",
+      url: `/financial/entries?unitId=${unitId}&start=2026-01-01T00:00:00.000Z&end=2026-12-31T23:59:59.999Z`,
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    app.inject({
+      method: "GET",
+      url: `/sales/products?unitId=${unitId}&start=2026-01-01T00:00:00.000Z&end=2026-12-31T23:59:59.999Z&limit=500`,
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    app.inject({
+      method: "GET",
+      url: `/audit/events?unitId=${unitId}&limit=500`,
+      headers: { authorization: `Bearer ${token}` },
+    }),
+  ]);
+  expect(appointments.statusCode).toBe(200);
+  expect(inventory.statusCode).toBe(200);
+  expect(financial.statusCode).toBe(200);
+  expect(sales.statusCode).toBe(200);
+  expect(audit.statusCode).toBe(200);
+  const products = inventory.json().products as Array<{ id: string; quantity?: number; stockQty?: number }>;
+  return {
+    appointments: appointments.json().appointments.length,
+    stockTotal: products.reduce((acc, item) => acc + Number(item.quantity ?? item.stockQty ?? 0), 0),
+    pomadaStock: Number(products.find((item) => item.id === "prd-pomada")?.quantity ?? products.find((item) => item.id === "prd-pomada")?.stockQty ?? 0),
+    financialEntries: financial.json().entries.length,
+    sales: sales.json().sales.length,
+    aiSaleAudits: (audit.json().events as Array<{ action: string }>).filter(
+      (event) => event.action === "AI_OWNER_COMMAND_PRODUCT_SALE_CREATED",
+    ).length,
+  };
+}
+
 function getOwnerCommandPrompt(fetchMock: ReturnType<typeof vi.fn>) {
   const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
   const requestBody = JSON.parse(String(init.body)) as {
@@ -665,6 +711,316 @@ describe("Atendente IA owner-only", () => {
     expect(after.financialEntries).toBe(before.financialEntries);
   });
 
+  it("owner confirma venda de produto com estoque, financeiro e auditoria pelo fluxo oficial", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockGeminiResponse("sell_product", {
+        summary: "Venda de Pomada para Lucas no Pix.",
+        draft: {
+          clientName: "Lucas",
+          productName: "Pomada",
+          quantity: 1,
+          paymentMethod: "Pix",
+        },
+      }),
+    );
+    const app = createApp();
+    const token = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+    const before = await countCommercialState(app, token);
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/parse",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        unitId: "unit-02",
+        message: "Vendi uma pomada para o Lucas, ele pagou no Pix.",
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      intent: "sell_product",
+      executed: false,
+      allowedNextActions: ["confirm_execute"],
+      missingFields: [],
+      sale: {
+        clientName: "Lucas",
+        productId: "prd-pomada",
+        productName: "Pomada Matte",
+        quantity: 1,
+        paymentMethod: "Pix",
+        unitPrice: 59,
+        total: 59,
+      },
+      confirmationMessage: "Confirmar venda de produto?",
+    });
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/confirm",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        unitId: "unit-02",
+        intent: "sell_product",
+        draft: { ...preview.json().draft, unitId: "unit-02" },
+        confirmationToken: preview.json().confirmationToken,
+      },
+    });
+
+    expect(confirm.statusCode).toBe(200);
+    expect(confirm.json()).toMatchObject({
+      ok: true,
+      mode: "executed_after_confirmation",
+      intent: "sell_product",
+      executed: true,
+      message: "Venda de produto registrada com sucesso.",
+      sale: {
+        unitId: "unit-01",
+        grossAmount: 59,
+        items: [{ productId: "prd-pomada", quantity: 1, unitPrice: 59 }],
+      },
+      revenue: {
+        amount: 59,
+        paymentMethod: "Pix",
+        referenceType: "PRODUCT_SALE",
+      },
+    });
+
+    const after = await countCommercialState(app, token);
+    expect(after.sales).toBe(before.sales + 1);
+    expect(after.stockTotal).toBe(before.stockTotal - 1);
+    expect(after.pomadaStock).toBe(before.pomadaStock - 1);
+    expect(after.financialEntries).toBe(before.financialEntries + 1);
+    expect(after.appointments).toBe(before.appointments);
+    expect(after.aiSaleAudits).toBe(before.aiSaleAudits + 1);
+  });
+
+  it("gera previa deterministica de venda de produto quando a IA varia o JSON", async () => {
+    vi.stubGlobal("fetch", mockGeminiInvalidJsonResponse());
+    const app = createApp();
+    const token = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/parse",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        unitId: "unit-01",
+        message: "Vendi uma pomada para CLIENTE TESTE IA VENDA PRODUTO, ele pagou no Pix.",
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      intent: "sell_product",
+      executed: false,
+      allowedNextActions: ["confirm_execute"],
+      draft: {
+        clientName: "CLIENTE TESTE IA VENDA PRODUTO",
+        productName: "Pomada",
+        quantity: 1,
+        paymentMethod: "Pix",
+      },
+      sale: {
+        productId: "prd-pomada",
+        productName: "Pomada Matte",
+        quantity: 1,
+        paymentMethod: "Pix",
+      },
+    });
+  });
+
+  it("retorna 401 ao confirmar venda sem token de confirmacao", async () => {
+    const app = createApp();
+    const token = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+    const before = await countCommercialState(app, token);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/confirm",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        intent: "sell_product",
+        draft: {
+          clientName: "Lucas",
+          productName: "Pomada",
+          quantity: 1,
+          paymentMethod: "Pix",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ ok: false, executed: false });
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("bloqueia previa de venda com produto inexistente, estoque insuficiente, pagamento invalido ou quantidade invalida", async () => {
+    const cases = [
+      {
+        draft: { clientName: "Lucas", productName: "Produto Fantasma", quantity: 1, paymentMethod: "Pix" },
+        missing: "productName",
+      },
+      {
+        draft: { clientName: "Lucas", productName: "Pomada", quantity: 99, paymentMethod: "Pix" },
+        missing: "quantity",
+      },
+      {
+        draft: { clientName: "Lucas", productName: "Pomada", quantity: 1, paymentMethod: "Bitcoin" },
+        missing: "paymentMethod",
+      },
+      {
+        draft: { clientName: "Lucas", productName: "Pomada", quantity: 0, paymentMethod: "Pix" },
+        missing: "quantity",
+      },
+    ];
+
+    for (const item of cases) {
+      vi.stubGlobal(
+        "fetch",
+        mockGeminiResponse("sell_product", {
+          draft: item.draft,
+        }),
+      );
+      const app = createApp();
+      const token = await loginAs(app, {
+        email: "owner@barbearia.local",
+        password: "owner123",
+        activeUnitId: "unit-01",
+      });
+      const before = await countCommercialState(app, token);
+
+      const preview = await app.inject({
+        method: "POST",
+        url: "/ai/owner-command/parse",
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          unitId: "unit-01",
+          message: "Vendi uma pomada para o Lucas, ele pagou no Pix.",
+        },
+      });
+
+      expect(preview.statusCode).toBe(200);
+      expect(preview.json().intent).toBe("sell_product");
+      expect(preview.json().allowedNextActions).toEqual([]);
+      expect(preview.json().confirmationToken).toBeUndefined();
+      expect(preview.json().missingFields).toContain(item.missing);
+      await expect(countCommercialState(app, token)).resolves.toEqual(before);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("avisa divergencia de preco e confirma usando preco oficial", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockGeminiResponse("sell_product", {
+        draft: {
+          clientName: "Lucas",
+          productName: "Pomada",
+          quantity: 1,
+          paymentMethod: "Pix",
+          quotedUnitPrice: 7.5,
+        },
+      }),
+    );
+    const app = createApp();
+    const token = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/parse",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        unitId: "unit-01",
+        message: "Vendi uma pomada para o Lucas por 7,50 no Pix.",
+      },
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().allowedNextActions).toEqual(["confirm_execute"]);
+    expect(preview.json().warnings.join(" ")).toContain("preco oficial");
+    expect(preview.json().sale.total).toBe(59);
+  });
+
+  it("duplo clique na confirmacao de venda nao duplica venda, estoque, financeiro ou auditoria", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockGeminiResponse("sell_product", {
+        draft: {
+          clientName: "Lucas",
+          productName: "Pomada",
+          quantity: 1,
+          paymentMethod: "Pix",
+        },
+      }),
+    );
+    const app = createApp();
+    const token = await loginAs(app, {
+      email: "owner@barbearia.local",
+      password: "owner123",
+      activeUnitId: "unit-01",
+    });
+    const before = await countCommercialState(app, token);
+    const preview = await app.inject({
+      method: "POST",
+      url: "/ai/owner-command/parse",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        unitId: "unit-01",
+        message: "Vendi uma pomada para o Lucas, ele pagou no Pix.",
+      },
+    });
+    expect(preview.statusCode).toBe(200);
+    const payload = {
+      intent: "sell_product",
+      draft: preview.json().draft,
+      confirmationToken: preview.json().confirmationToken,
+    };
+
+    const [first, second] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/ai/owner-command/confirm",
+        headers: { authorization: `Bearer ${token}` },
+        payload,
+      }),
+      app.inject({
+        method: "POST",
+        url: "/ai/owner-command/confirm",
+        headers: { authorization: `Bearer ${token}` },
+        payload,
+      }),
+    ]);
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().sale.id).toBe(first.json().sale.id);
+    const after = await countCommercialState(app, token);
+    expect(after.sales).toBe(before.sales + 1);
+    expect(after.stockTotal).toBe(before.stockTotal - 1);
+    expect(after.financialEntries).toBe(before.financialEntries + 1);
+    expect(after.appointments).toBe(before.appointments);
+    expect(after.aiSaleAudits).toBe(before.aiSaleAudits + 1);
+  });
+
   it("mantem outras intencoes apenas como previa na confirmacao", async () => {
     const app = createApp();
     const token = await loginAs(app, {
@@ -680,8 +1036,8 @@ describe("Atendente IA owner-only", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: {
         unitId: "unit-01",
-        intent: "product_sale",
-        draft: { clientName: "Lucas", products: ["Pomada"] },
+        intent: "checkout_service",
+        draft: { clientName: "Lucas", services: ["Corte"] },
       },
     });
 
@@ -689,7 +1045,7 @@ describe("Atendente IA owner-only", () => {
     expect(response.json()).toMatchObject({
       ok: true,
       mode: "preview_only",
-      intent: "product_sale",
+      intent: "checkout_service",
       executed: false,
       message: "Execucao desta acao sera liberada em uma proxima etapa.",
     });

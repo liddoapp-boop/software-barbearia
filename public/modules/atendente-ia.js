@@ -24,6 +24,7 @@ function formatValue(value) {
 function intentLabel(intent = "") {
   const labels = {
     checkout_service: "Atendimento / checkout",
+    sell_product: "Venda de produto",
     product_sale: "Venda de produto",
     schedule_appointment: "Agendamento",
     cancel_appointment: "Cancelamento",
@@ -35,11 +36,66 @@ function intentLabel(intent = "") {
 
 export function canConfirmAtendenteIa(payload = {}) {
   return Boolean(
-    payload?.intent === "schedule_appointment" &&
+    (payload?.intent === "schedule_appointment" || payload?.intent === "sell_product") &&
       Array.isArray(payload.allowedNextActions) &&
       payload.allowedNextActions.includes("confirm_execute") &&
       payload.confirmationToken,
   );
+}
+
+function renderSalePreview(payload = {}) {
+  const sale = payload.sale && typeof payload.sale === "object" ? payload.sale : {};
+  const draft = payload.draft && typeof payload.draft === "object" ? payload.draft : {};
+  const productName = sale.productName || draft.productName || "-";
+  const quantity = sale.quantity || draft.quantity || "-";
+  const clientName = sale.clientName || draft.clientName || "-";
+  const paymentMethod = sale.paymentMethod || draft.paymentMethod || "-";
+  const unitPrice = sale.unitPrice ?? draft.quotedUnitPrice;
+  const total = sale.total ?? (Number(unitPrice) * Number(quantity));
+  return `
+    <section class="catalog-list">
+      <article class="catalog-row">
+        <div class="catalog-row-main">
+          <div class="catalog-row-copy">
+            <strong>${escapeHtml(productName)}</strong>
+            <span>Produto</span>
+          </div>
+        </div>
+      </article>
+      <article class="catalog-row">
+        <div class="catalog-row-main">
+          <div class="catalog-row-copy">
+            <strong>${escapeHtml(String(quantity))}</strong>
+            <span>Quantidade</span>
+          </div>
+        </div>
+      </article>
+      <article class="catalog-row">
+        <div class="catalog-row-main">
+          <div class="catalog-row-copy">
+            <strong>${escapeHtml(clientName)}</strong>
+            <span>Cliente</span>
+          </div>
+        </div>
+      </article>
+      <article class="catalog-row">
+        <div class="catalog-row-main">
+          <div class="catalog-row-copy">
+            <strong>${escapeHtml(paymentMethod)}</strong>
+            <span>Pagamento</span>
+          </div>
+        </div>
+      </article>
+      <article class="catalog-row">
+        <div class="catalog-row-main">
+          <div class="catalog-row-copy">
+            <strong>${escapeHtml(money(total) || "-")}</strong>
+            <span>Valor oficial da venda</span>
+          </div>
+        </div>
+      </article>
+    </section>
+  `;
 }
 
 export function renderAtendenteIaShell() {
@@ -106,22 +162,26 @@ export function renderAtendenteIaPreview(payload = {}) {
       <div><dt>Executado</dt><dd>${payload.executed === false ? "Nao" : "Nao"}</dd></div>
     </div>
     <div class="owner-flow-summary">${escapeHtml(payload.summary || "Previa sem resumo.")}</div>
-    <section class="catalog-list">
-      ${
-        draftRows.length
-          ? draftRows.map(([key, value]) => `
-              <article class="catalog-row">
-                <div class="catalog-row-main">
-                  <div class="catalog-row-copy">
-                    <strong>${escapeHtml(key)}</strong>
-                    <span>${escapeHtml(formatValue(value))}</span>
-                  </div>
-                </div>
-              </article>
-            `).join("")
-          : `<p class="ds-text-muted">Nenhum campo estruturado identificado.</p>`
-      }
-    </section>
+    ${
+      payload.intent === "sell_product"
+        ? renderSalePreview(payload)
+        : `<section class="catalog-list">
+            ${
+              draftRows.length
+                ? draftRows.map(([key, value]) => `
+                    <article class="catalog-row">
+                      <div class="catalog-row-main">
+                        <div class="catalog-row-copy">
+                          <strong>${escapeHtml(key)}</strong>
+                          <span>${escapeHtml(formatValue(value))}</span>
+                        </div>
+                      </div>
+                    </article>
+                  `).join("")
+                : `<p class="ds-text-muted">Nenhum campo estruturado identificado.</p>`
+            }
+          </section>`
+    }
     ${
       missing.length
         ? `<div class="panel-message panel-message-warning">Campos faltantes: ${escapeHtml(missing.join(", "))}</div>`

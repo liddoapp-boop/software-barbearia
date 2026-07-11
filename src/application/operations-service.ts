@@ -2912,6 +2912,7 @@ export class OperationsService {
     appointmentId?: string;
     professionalId?: string;
     clientId?: string;
+    paymentMethod?: string;
     soldAt: Date;
     items: Array<{
       productId: string;
@@ -2970,7 +2971,7 @@ export class OperationsService {
 
     result.revenue.professionalId = sale.professionalId;
     result.revenue.customerId = sale.clientId;
-    result.revenue.paymentMethod = result.revenue.paymentMethod ?? "NAO_INFORMADO";
+    result.revenue.paymentMethod = String(input.paymentMethod ?? "").trim() || result.revenue.paymentMethod || "NAO_INFORMADO";
     result.revenue.updatedAt = input.soldAt;
 
     this.startMemoryIdempotency(scope);

@@ -10782,10 +10782,13 @@ function initAtendenteIaSection() {
   function updateConfirmState(payload = null) {
     currentPreview = payload;
     const canConfirm = canConfirmAtendenteIa(payload);
-    if (confirmBtn) confirmBtn.disabled = !canConfirm;
+    if (confirmBtn) {
+      confirmBtn.disabled = !canConfirm;
+      confirmBtn.textContent = payload?.intent === "sell_product" ? "Confirmar venda" : "Confirmar acao";
+    }
     if (executionHint) {
       executionHint.textContent = canConfirm
-        ? "Confirmar criacao deste agendamento?"
+        ? payload?.confirmationMessage || (payload?.intent === "sell_product" ? "Confirmar venda de produto?" : "Confirmar criacao deste agendamento?")
         : payload?.executionMessage || "A execucao segura sera habilitada somente quando houver uma previa valida.";
     }
   }

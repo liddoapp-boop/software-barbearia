@@ -68,12 +68,40 @@ describe("frontend Atendente IA", () => {
     expect(canConfirmAtendenteIa(payload)).toBe(true);
   });
 
-  it("mantem checkout e venda como proxima etapa", async () => {
+  it("renderiza confirmacao para venda de produto valida", async () => {
     const { canConfirmAtendenteIa, renderAtendenteIaPreview } = await loadAtendenteIa();
     const payload = {
-      intent: "product_sale",
+      intent: "sell_product",
       summary: "Venda de produto para Lucas.",
-      draft: { clientName: "Lucas", products: ["Pomada"] },
+      draft: { clientName: "Lucas", productName: "Pomada", quantity: 1, paymentMethod: "Pix" },
+      sale: {
+        clientName: "Lucas",
+        productName: "Pomada Matte",
+        quantity: 1,
+        paymentMethod: "Pix",
+        unitPrice: 59,
+        total: 59,
+      },
+      allowedNextActions: ["confirm_execute"],
+      confirmationToken: "token-assinado",
+      confirmationMessage: "Confirmar venda de produto?",
+      executed: false,
+    };
+    const html = renderAtendenteIaPreview(payload);
+
+    expect(html).toContain("Pomada Matte");
+    expect(html).toContain("Lucas");
+    expect(html).toContain("Pix");
+    expect(html).toContain("Confirmar venda de produto?");
+    expect(canConfirmAtendenteIa(payload)).toBe(true);
+  });
+
+  it("mantem checkout como proxima etapa", async () => {
+    const { canConfirmAtendenteIa, renderAtendenteIaPreview } = await loadAtendenteIa();
+    const payload = {
+      intent: "checkout_service",
+      summary: "Checkout de servico para Lucas.",
+      draft: { clientName: "Lucas", services: ["Corte"] },
       executionMessage: "Execucao desta acao sera liberada em uma proxima etapa.",
       executed: false,
     };
