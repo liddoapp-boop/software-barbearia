@@ -18,10 +18,11 @@ export async function sendWhatsAppMessage(phone: string, text: string): Promise<
   if (!EVOLUTION_URL || !EVOLUTION_KEY) return;
 
   const number = formatPhone(phone);
+  const payload = JSON.stringify({ number, text });
   const res = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
-    body: JSON.stringify({ number, text }),
+    headers: { "Content-Type": "application/json; charset=utf-8", apikey: EVOLUTION_KEY },
+    body: Buffer.from(payload, "utf8"),
   });
 
   if (!res.ok) {
