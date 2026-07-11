@@ -27,6 +27,16 @@ export const MENU_GROUPS = [
   },
 ];
 
+export function isAiAssistantPanelEnabled() {
+  const value = globalThis?.AI_ASSISTANT_PANEL_ENABLED;
+  return value === true || String(value || "").trim().toLowerCase() === "true";
+}
+
+function filterAiAssistantPanel(modules) {
+  if (isAiAssistantPanelEnabled()) return modules;
+  return modules.filter((module) => (typeof module === "string" ? module : module.id) !== "atendente-ia");
+}
+
 export const HIDDEN_OWNER_MODULES = [
   "profissionais",
   "comissoes",
@@ -70,7 +80,8 @@ export function getDefaultModuleForRole(role) {
 }
 
 export function getAllowedModulesForRole(role) {
-  return ROLE_ACCESS[normalizeRole(role)];
+  const allowed = ROLE_ACCESS[normalizeRole(role)];
+  return normalizeRole(role) === "owner" ? filterAiAssistantPanel(allowed) : allowed;
 }
 
 export function filterMenuGroupsByRole(groups, role) {

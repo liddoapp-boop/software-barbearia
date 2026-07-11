@@ -1,8 +1,5 @@
 import nodemailer from "nodemailer";
 
-const EVOLUTION_URL = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
-const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY ?? "";
-const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
 const GMAIL_USER = process.env.GMAIL_USER ?? "";
 const GMAIL_PASSWORD = process.env.GMAIL_APP_PASSWORD ?? "";
 const BARBER_NAME = process.env.BARBER_NAME ?? "Barbearia";
@@ -15,13 +12,16 @@ function formatPhone(phone: string): string {
 }
 
 export async function sendWhatsAppMessage(phone: string, text: string): Promise<void> {
-  if (!EVOLUTION_URL || !EVOLUTION_KEY) return;
+  const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
+  const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
+  const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
+  if (!evolutionUrl || !evolutionKey) return;
 
   const number = formatPhone(phone);
   const payload = JSON.stringify({ number, text });
-  const res = await fetch(`${EVOLUTION_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+  const res = await fetch(`${evolutionUrl}/message/sendText/${evolutionInstance}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8", apikey: EVOLUTION_KEY },
+    headers: { "Content-Type": "application/json; charset=utf-8", apikey: evolutionKey },
     body: Buffer.from(payload, "utf8"),
   });
 
@@ -35,11 +35,14 @@ export async function getWhatsAppConnectionState(): Promise<{
   state: "open" | "close" | "connecting";
   qrcode?: string;
 }> {
-  if (!EVOLUTION_URL || !EVOLUTION_KEY) return { state: "close" };
+  const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
+  const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
+  const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
+  if (!evolutionUrl || !evolutionKey) return { state: "close" };
 
   const res = await fetch(
-    `${EVOLUTION_URL}/instance/connectionState/${EVOLUTION_INSTANCE}`,
-    { headers: { apikey: EVOLUTION_KEY } },
+    `${evolutionUrl}/instance/connectionState/${evolutionInstance}`,
+    { headers: { apikey: evolutionKey } },
   );
 
   if (!res.ok) return { state: "close" };
@@ -54,10 +57,13 @@ export async function getWhatsAppConnectionState(): Promise<{
 }
 
 export async function connectWhatsApp(): Promise<{ qrcode?: string; pairingCode?: string }> {
-  if (!EVOLUTION_URL || !EVOLUTION_KEY) throw new Error("Evolution API nao configurada");
+  const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
+  const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
+  const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
+  if (!evolutionUrl || !evolutionKey) throw new Error("Evolution API nao configurada");
 
-  const res = await fetch(`${EVOLUTION_URL}/instance/connect/${EVOLUTION_INSTANCE}`, {
-    headers: { apikey: EVOLUTION_KEY },
+  const res = await fetch(`${evolutionUrl}/instance/connect/${evolutionInstance}`, {
+    headers: { apikey: evolutionKey },
   });
 
   if (!res.ok) {
@@ -77,11 +83,14 @@ export async function connectWhatsApp(): Promise<{ qrcode?: string; pairingCode?
 }
 
 export async function disconnectWhatsApp(): Promise<void> {
-  if (!EVOLUTION_URL || !EVOLUTION_KEY) return;
+  const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
+  const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
+  const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
+  if (!evolutionUrl || !evolutionKey) return;
 
-  await fetch(`${EVOLUTION_URL}/instance/logout/${EVOLUTION_INSTANCE}`, {
+  await fetch(`${evolutionUrl}/instance/logout/${evolutionInstance}`, {
     method: "DELETE",
-    headers: { apikey: EVOLUTION_KEY },
+    headers: { apikey: evolutionKey },
   });
 }
 

@@ -22,7 +22,9 @@ services:
       CACHE_REDIS_URI: redis://redis:6379/6
       CACHE_REDIS_PREFIX_KEY: barbearia_evolution_local
       CACHE_LOCAL_ENABLED: "false"
-      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_ERRORS: "true"
       RABBITMQ_ENABLED: "false"
       SQS_ENABLED: "false"
       WEBSOCKET_ENABLED: "false"

@@ -7,7 +7,10 @@ import { z } from "zod";
 import { OperationsService } from "../application/operations-service";
 import { PrismaOperationsService } from "../application/prisma-operations-service";
 import { createGeminiRetentionScorerFromEnv } from "../application/gemini-retention-scoring";
-import { createGeminiOwnerCommandParserFromEnv } from "../application/owner-command-ai";
+import {
+  createGeminiOwnerCommandParserFromEnv,
+  OwnerCommandParseResult,
+} from "../application/owner-command-ai";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
@@ -340,6 +343,7 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   }
   if (route === "/auth/login" || route === "/auth/firebase") return { isPublic: true };
   if (route === "/integrations/billing/webhooks/:provider") return { isPublic: true };
+  if (route === "/webhooks/evolution/whatsapp") return { isPublic: true };
   if (route === "/whatsapp/status" || route === "/whatsapp/connect" || route === "/whatsapp/disconnect") {
     return { isPublic: false, roles: ["owner"] };
   }
@@ -1349,6 +1353,457 @@ export function createApp() {
       .digest("base64url")
       .slice(0, 64);
     return `ai-owner-${input.intent}-${digest}`;
+  }
+
+  type OwnerCommandPreviewResponse = OwnerCommandParseResult & {
+    sale?: Record<string, unknown>;
+    confirmationToken?: string;
+    confirmationMessage?: string;
+    executionMessage?: string;
+  };
+
+  type AiWhatsappPendingCommand = {
+    id: string;
+    code: string;
+    phone: string;
+    unitId: string;
+    actorId: string;
+    intent: OwnerCommandIntent;
+    draft: OwnerCommandDraft;
+    confirmationToken: string;
+    expiresAt: number;
+    used: boolean;
+  };
+
+  const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
+  const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
+
+  function getAiWhatsappTtlMs() {
+    const configured = Number(process.env.AI_WHATSAPP_PENDING_TTL_MS ?? 10 * 60 * 1000);
+    return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60 * 1000;
+  }
+
+  function normalizePhoneDigits(value: unknown) {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    if (!digits) return "";
+    return digits.startsWith("55") ? digits : `55${digits}`;
+  }
+
+  function maskPhone(value: unknown) {
+    const digits = normalizePhoneDigits(value);
+    if (digits.length <= 4) return "****";
+    return `${"*".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+  }
+
+  function safeHeaderValue(value: string | string[] | undefined) {
+    return Array.isArray(value) ? value[0] : value;
+  }
+
+  function isAiWhatsappEnabled() {
+    return String(process.env.AI_WHATSAPP_ENABLED ?? "").trim().toLowerCase() === "true";
+  }
+
+  function validateEvolutionWebhookSecret(request: FastifyRequest) {
+    const secret = String(process.env.EVOLUTION_WEBHOOK_SECRET ?? "").trim();
+    if (!isAiWhatsappEnabled() || !secret) return false;
+    const headerSecret =
+      safeHeaderValue(request.headers["x-evolution-webhook-secret"]) ??
+      safeHeaderValue(request.headers["x-webhook-secret"]);
+    const authorization = safeHeaderValue(request.headers.authorization);
+    const bearerSecret = authorization?.toLowerCase().startsWith("bearer ")
+      ? authorization.slice(7).trim()
+      : undefined;
+    const incoming = String(headerSecret ?? bearerSecret ?? "").trim();
+    if (!incoming) return false;
+    const expected = Buffer.from(secret);
+    const received = Buffer.from(incoming);
+    return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+  }
+
+  function getRecordValue(record: Record<string, unknown> | null, path: string[]) {
+    let current: unknown = record;
+    for (const key of path) {
+      if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+      current = (current as Record<string, unknown>)[key];
+    }
+    return current;
+  }
+
+  function getFirstString(record: Record<string, unknown> | null, paths: string[][]) {
+    for (const path of paths) {
+      const value = getRecordValue(record, path);
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return "";
+  }
+
+  function extractEvolutionWhatsappMessage(payload: unknown) {
+    const body = asRecord(payload);
+    const data = asRecord(body?.data);
+    const key = asRecord(data?.key);
+    const message = asRecord(data?.message);
+    const instance = getFirstString(body, [["instance"], ["instanceName"], ["data", "instance"], ["data", "instanceName"]]);
+    const remoteJid = getFirstString(body, [["data", "key", "remoteJid"], ["key", "remoteJid"], ["remoteJid"]]);
+    const pushName = getFirstString(body, [["data", "pushName"], ["pushName"]]);
+    const text = getFirstString(body, [
+      ["data", "message", "conversation"],
+      ["data", "message", "extendedTextMessage", "text"],
+      ["data", "message", "ephemeralMessage", "message", "conversation"],
+      ["message", "conversation"],
+      ["text"],
+    ]);
+    const fromMe = Boolean(key?.fromMe ?? data?.fromMe ?? body?.fromMe);
+    const isGroup =
+      remoteJid.endsWith("@g.us") ||
+      Boolean(data?.isGroup) ||
+      Boolean(body?.isGroup);
+    const phone = normalizePhoneDigits(
+      getFirstString(body, [
+        ["data", "key", "participant"],
+        ["data", "sender"],
+        ["sender"],
+        ["from"],
+      ]) || remoteJid.split("@")[0],
+    );
+
+    return {
+      instance,
+      phone,
+      maskedPhone: maskPhone(phone),
+      remoteJid,
+      pushName,
+      text,
+      fromMe,
+      isGroup,
+      hasMessage: Boolean(message) || Boolean(text),
+    };
+  }
+
+  function pruneAiWhatsappPendingCommands() {
+    const now = Date.now();
+    for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
+      if (pending.expiresAt <= now || pending.used) aiWhatsappPendingCommands.delete(key);
+    }
+  }
+
+  function generateAiWhatsappCode() {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const code = String(crypto.randomInt(1000, 10000));
+      if (!Array.from(aiWhatsappPendingCommands.values()).some((item) => item.code === code && !item.used)) {
+        return code;
+      }
+    }
+    return String(crypto.randomInt(1000, 10000));
+  }
+
+  function buildAiWhatsappPendingKey(phone: string, code: string) {
+    return `${normalizePhoneDigits(phone)}:${code}`;
+  }
+
+  function formatCurrencyBR(value: unknown) {
+    const amount = Number(value ?? 0);
+    return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function formatAiWhatsappPreview(preview: OwnerCommandPreviewResponse, code: string) {
+    const lines = ["Entendi o seguinte:"];
+    if (preview.intent === "sell_product") {
+      const sale = preview.sale ?? {};
+      const draft = preview.draft as Record<string, unknown>;
+      lines.push(
+        `Cliente: ${String(sale.clientName ?? draft.clientName ?? "-")}`,
+        `Produto: ${String(sale.productName ?? draft.productName ?? "-")}`,
+        `Quantidade: ${String(sale.quantity ?? draft.quantity ?? "-")}`,
+        `Pagamento: ${String(sale.paymentMethod ?? draft.paymentMethod ?? "-")}`,
+        `Valor: ${formatCurrencyBR(sale.total)}`,
+      );
+    } else if (preview.intent === "schedule_appointment") {
+      const draft = preview.draft as Record<string, unknown>;
+      lines.push(
+        `Cliente: ${String(draft.clientName ?? "-")}`,
+        `Servico: ${Array.isArray(draft.serviceNames) ? draft.serviceNames.join(", ") : "-"}`,
+        `Data: ${String(draft.date ?? "-")}`,
+        `Horario: ${String(draft.time ?? "-")}`,
+      );
+      if (draft.professionalName) lines.push(`Profissional: ${String(draft.professionalName)}`);
+    } else {
+      lines.push(preview.summary || unsupportedOwnerCommandExecutionMessage);
+    }
+    const warnings = Array.isArray(preview.warnings) ? preview.warnings.filter(Boolean) : [];
+    if (warnings.length) lines.push("", `Avisos: ${warnings.join(" ")}`);
+    lines.push("", `Para confirmar, responda: CONFIRMAR ${code}`, "Para cancelar, responda: CANCELAR");
+    return lines.join("\n");
+  }
+
+  async function parseOwnerCommandPreview(input: {
+    unitId: string;
+    actorId?: string;
+    message: string;
+    screenContext?: string;
+  }): Promise<OwnerCommandPreviewResponse> {
+    await assertOwnerCommandUnitExists(input.unitId);
+    if (!ownerCommandParser) {
+      throw new Error("IA indisponivel: configure GEMINI_API_KEY no ambiente local seguro.");
+    }
+    const context = await getOwnerCommandContext({
+      unitId: input.unitId,
+      screenContext: input.screenContext,
+    });
+    const parsed = await ownerCommandParser.parse({
+      message: input.message,
+      context,
+    });
+    const response: OwnerCommandPreviewResponse = {
+      ...parsed,
+      ok: true,
+      mode: "preview_only",
+      executed: false,
+      allowedNextActions: [],
+    };
+    if (parsed.intent === "schedule_appointment") {
+      const normalized = normalizeOwnerScheduleDraft(parsed.draft);
+      const resolved = normalized.missingFields.length
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], schedule: null }
+        : await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft });
+      const missingFields = Array.from(
+        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
+      );
+      response.draft = normalized.draft;
+      response.missingFields = missingFields;
+      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
+      if (!missingFields.length && resolved.schedule) {
+        response.allowedNextActions = ["confirm_execute"];
+        response.confirmationToken = buildOwnerCommandConfirmationToken({
+          unitId: input.unitId,
+          actorId: input.actorId,
+          intent: parsed.intent,
+          draft: normalized.draft,
+        });
+        response.confirmationMessage = "Confirmar criacao deste agendamento?";
+      }
+    } else if (parsed.intent === "sell_product") {
+      const normalized = normalizeOwnerProductSaleDraft(parsed.draft);
+      const resolved = normalized.missingFields.length
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], sale: null }
+        : await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft });
+      const missingFields = Array.from(
+        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
+      );
+      response.draft = normalized.draft;
+      response.missingFields = missingFields;
+      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
+      if (resolved.sale) response.sale = resolved.sale;
+      if (!missingFields.length && resolved.sale) {
+        response.allowedNextActions = ["confirm_execute"];
+        response.confirmationToken = buildOwnerCommandConfirmationToken({
+          unitId: input.unitId,
+          actorId: input.actorId,
+          intent: parsed.intent,
+          draft: normalized.draft,
+        });
+        response.confirmationMessage = "Confirmar venda de produto?";
+      }
+    } else {
+      response.executionMessage = unsupportedOwnerCommandExecutionMessage;
+    }
+    return response;
+  }
+
+  async function executeOwnerCommand(input: {
+    request: FastifyRequest;
+    unitId: string;
+    actorId?: string;
+    actorLabel?: string;
+    intent: OwnerCommandIntent;
+    draft: Record<string, unknown>;
+    confirmationToken?: string;
+    idempotencyPrefix?: string;
+  }) {
+    if (input.intent !== "schedule_appointment" && input.intent !== "sell_product") {
+      return {
+        ok: true,
+        mode: "preview_only",
+        intent: input.intent,
+        executed: false,
+        message: unsupportedOwnerCommandExecutionMessage,
+      };
+    }
+
+    if (!input.confirmationToken && input.intent === "sell_product") {
+      return {
+        statusCode: 401,
+        body: {
+          ok: false,
+          mode: "confirmation_required",
+          intent: input.intent,
+          executed: false,
+          message: "Confirmacao obrigatoria. Gere uma nova previa antes de executar.",
+        },
+      };
+    }
+
+    if (input.intent === "sell_product") {
+      const normalized = normalizeOwnerProductSaleDraft(input.draft);
+      if (normalized.missingFields.length) {
+        return {
+          ok: false,
+          mode: "confirmation_required",
+          intent: input.intent,
+          executed: false,
+          missingFields: normalized.missingFields,
+          message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
+        };
+      }
+      verifyOwnerCommandConfirmationToken({
+        token: input.confirmationToken,
+        unitId: input.unitId,
+        actorId: input.actorId,
+        intent: input.intent,
+        draft: normalized.draft,
+      });
+      const resolved = await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft });
+      if (resolved.missingFields.length || !resolved.sale) {
+        return {
+          ok: false,
+          mode: "confirmation_required",
+          intent: input.intent,
+          executed: false,
+          missingFields: resolved.missingFields,
+          warnings: resolved.warnings,
+          message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
+        };
+      }
+
+      const clientId = resolved.sale.clientId || await ensureOwnerCommandClient({
+        unitId: input.unitId,
+        clientName: resolved.sale.clientName,
+      });
+      const idempotencyKey = `${input.idempotencyPrefix ?? ""}${buildOwnerCommandExecutionIdempotencyKey({
+        intent: input.intent,
+        token: input.confirmationToken,
+      })}`;
+      const saleResult = await operations.registerProductSale({
+        unitId: input.unitId,
+        clientId,
+        soldAt: new Date(),
+        items: [{ productId: resolved.sale.productId, quantity: resolved.sale.quantity }],
+        paymentMethod: resolved.sale.paymentMethod,
+        idempotencyKey,
+        idempotencyPayloadHash: getIdempotencyPayloadHash({
+          route: routePattern(input.request),
+          unitId: input.unitId,
+          intent: input.intent,
+          draft: normalized.draft,
+        }),
+        audit: transactionalAuditContext(input.request),
+      });
+      await recordAudit(input.request, {
+        unitId: saleResult.sale.unitId,
+        action: "AI_OWNER_COMMAND_PRODUCT_SALE_CREATED",
+        entity: "product_sale",
+        entityId: saleResult.sale.id,
+        idempotencyKey,
+        after: {
+          origin: "atendente_ia",
+          productId: resolved.sale.productId,
+          productName: resolved.sale.productName,
+          quantity: resolved.sale.quantity,
+          paymentMethod: resolved.sale.paymentMethod,
+          clientId,
+          grossAmount: saleResult.sale.grossAmount,
+        },
+        metadata: {
+          humanConfirmed: true,
+          intent: input.intent,
+          channel: input.idempotencyPrefix ? "whatsapp" : "panel",
+        },
+      });
+      return {
+        ok: true,
+        mode: "executed_after_confirmation",
+        intent: input.intent,
+        executed: true,
+        message: "Venda de produto registrada com sucesso.",
+        sale: saleResult.sale,
+        revenue: saleResult.revenue,
+        stockMovements: saleResult.stockMovements,
+      };
+    }
+
+    const normalized = normalizeOwnerScheduleDraft(input.draft);
+    if (normalized.missingFields.length) {
+      return {
+        ok: false,
+        mode: "confirmation_required",
+        intent: input.intent,
+        executed: false,
+        missingFields: normalized.missingFields,
+        message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
+      };
+    }
+    verifyOwnerCommandConfirmationToken({
+      token: input.confirmationToken,
+      unitId: input.unitId,
+      actorId: input.actorId,
+      intent: input.intent,
+      draft: normalized.draft,
+    });
+    const resolved = await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft });
+    if (resolved.missingFields.length || !resolved.schedule) {
+      return {
+        ok: false,
+        mode: "confirmation_required",
+        intent: input.intent,
+        executed: false,
+        missingFields: resolved.missingFields,
+        warnings: resolved.warnings,
+        message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
+      };
+    }
+
+    const clientId = resolved.schedule.clientId || await ensureOwnerCommandClient({
+      unitId: input.unitId,
+      clientName: resolved.schedule.clientName,
+    });
+    const appointment = await operations.schedule({
+      unitId: input.unitId,
+      clientId,
+      professionalId: resolved.schedule.professionalId,
+      serviceIds: resolved.schedule.serviceIds,
+      startsAt: resolved.schedule.startsAt,
+      notes: normalized.draft.notes
+        ? `Atendente IA - ${normalized.draft.notes}`
+        : "Atendente IA - confirmado pelo owner",
+      changedBy: input.actorLabel ?? "owner",
+    });
+    await recordAudit(input.request, {
+      unitId: appointment.unitId,
+      action: "AI_OWNER_COMMAND_APPOINTMENT_CREATED",
+      entity: "appointment",
+      entityId: appointment.id,
+      after: {
+        origin: "atendente_ia",
+        startsAt: appointment.startsAt.toISOString(),
+        professionalId: appointment.professionalId,
+        clientId: appointment.clientId,
+        serviceId: appointment.serviceId,
+        serviceIds: resolved.schedule.serviceIds,
+      },
+      metadata: {
+        humanConfirmed: true,
+        intent: input.intent,
+        channel: input.idempotencyPrefix ? "whatsapp" : "panel",
+      },
+    });
+    return {
+      ok: true,
+      mode: "executed_after_confirmation",
+      intent: input.intent,
+      executed: true,
+      message: "Agendamento criado com sucesso.",
+      appointment,
+    };
   }
 
   const app = Fastify({
@@ -5365,74 +5820,12 @@ export function createApp() {
     const body = ownerCommandParseSchema.parse(request.body);
     const req = request as RequestWithAuth;
     const unitId = getAuthenticatedOwnerUnitId(request);
-    await assertOwnerCommandUnitExists(unitId);
-    if (!ownerCommandParser) {
-      throw new Error("IA indisponivel: configure GEMINI_API_KEY no ambiente local seguro.");
-    }
-    const context = await getOwnerCommandContext({
+    return await parseOwnerCommandPreview({
       unitId,
       screenContext: body.screenContext,
-    });
-    const parsed = await ownerCommandParser.parse({
       message: body.message,
-      context,
+      actorId: req.auth?.userId,
     });
-    const response: Record<string, unknown> = {
-      ...parsed,
-      ok: true,
-      mode: "preview_only",
-      executed: false,
-      allowedNextActions: [],
-    };
-    if (parsed.intent === "schedule_appointment") {
-      const normalized = normalizeOwnerScheduleDraft(parsed.draft);
-      const resolved = normalized.missingFields.length
-        ? { missingFields: normalized.missingFields, warnings: [] as string[], schedule: null }
-        : await resolveOwnerCommandSchedule({ unitId, draft: normalized.draft });
-      const missingFields = Array.from(
-        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
-      );
-      response.draft = normalized.draft;
-      response.missingFields = missingFields;
-      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
-      if (!missingFields.length && resolved.schedule) {
-        response.allowedNextActions = ["confirm_execute"];
-        response.confirmationToken = buildOwnerCommandConfirmationToken({
-          unitId,
-          actorId: req.auth?.userId,
-          intent: parsed.intent,
-          draft: normalized.draft,
-        });
-        response.confirmationMessage = "Confirmar criacao deste agendamento?";
-      }
-    } else if (parsed.intent === "sell_product") {
-      const normalized = normalizeOwnerProductSaleDraft(parsed.draft);
-      const resolved = normalized.missingFields.length
-        ? { missingFields: normalized.missingFields, warnings: [] as string[], sale: null }
-        : await resolveOwnerCommandProductSale({ unitId, draft: normalized.draft });
-      const missingFields = Array.from(
-        new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
-      );
-      response.draft = normalized.draft;
-      response.missingFields = missingFields;
-      response.warnings = Array.from(new Set([...(parsed.warnings ?? []), ...resolved.warnings]));
-      if (resolved.sale) response.sale = resolved.sale;
-      if (!missingFields.length && resolved.sale) {
-        response.allowedNextActions = ["confirm_execute"];
-        response.confirmationToken = buildOwnerCommandConfirmationToken({
-          unitId,
-          actorId: req.auth?.userId,
-          intent: parsed.intent,
-          draft: normalized.draft,
-        });
-        response.confirmationMessage = "Confirmar venda de produto?";
-      }
-    } else {
-      response.executionMessage = unsupportedOwnerCommandExecutionMessage;
-    }
-    return {
-      ...response,
-    };
   });
 
   app.post("/ai/owner-command/confirm", async (request, reply) => {
@@ -5440,185 +5833,202 @@ export function createApp() {
     const req = request as RequestWithAuth;
     const unitId = getAuthenticatedOwnerUnitId(request);
     await assertOwnerCommandUnitExists(unitId);
-    if (body.intent !== "schedule_appointment" && body.intent !== "sell_product") {
-      return {
-        ok: true,
-        mode: "preview_only",
-        intent: body.intent,
-        executed: false,
-        message: unsupportedOwnerCommandExecutionMessage,
-      };
-    }
-
-    if (!body.confirmationToken && body.intent === "sell_product") {
-      return reply.status(401).send({
-        ok: false,
-        mode: "confirmation_required",
-        intent: body.intent,
-        executed: false,
-        message: "Confirmacao obrigatoria. Gere uma nova previa antes de executar.",
-      });
-    }
-
-    if (body.intent === "sell_product") {
-      const normalized = normalizeOwnerProductSaleDraft(body.draft);
-      if (normalized.missingFields.length) {
-        return {
-          ok: false,
-          mode: "confirmation_required",
-          intent: body.intent,
-          executed: false,
-          missingFields: normalized.missingFields,
-          message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
-        };
-      }
-      verifyOwnerCommandConfirmationToken({
-        token: body.confirmationToken,
-        unitId,
-        actorId: req.auth?.userId,
-        intent: body.intent,
-        draft: normalized.draft,
-      });
-      const resolved = await resolveOwnerCommandProductSale({ unitId, draft: normalized.draft });
-      if (resolved.missingFields.length || !resolved.sale) {
-        return {
-          ok: false,
-          mode: "confirmation_required",
-          intent: body.intent,
-          executed: false,
-          missingFields: resolved.missingFields,
-          warnings: resolved.warnings,
-          message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
-        };
-      }
-
-      const clientId = resolved.sale.clientId || await ensureOwnerCommandClient({
-        unitId,
-        clientName: resolved.sale.clientName,
-      });
-      const idempotencyKey = buildOwnerCommandExecutionIdempotencyKey({
-        intent: body.intent,
-        token: body.confirmationToken,
-      });
-      const saleResult = await operations.registerProductSale({
-        unitId,
-        clientId,
-        soldAt: new Date(),
-        items: [{ productId: resolved.sale.productId, quantity: resolved.sale.quantity }],
-        paymentMethod: resolved.sale.paymentMethod,
-        idempotencyKey,
-        idempotencyPayloadHash: getIdempotencyPayloadHash({
-          route: "/ai/owner-command/confirm:sell_product",
-          unitId,
-          intent: body.intent,
-          draft: normalized.draft,
-        }),
-        audit: transactionalAuditContext(request),
-      });
-      await recordAudit(request, {
-        unitId: saleResult.sale.unitId,
-        action: "AI_OWNER_COMMAND_PRODUCT_SALE_CREATED",
-        entity: "product_sale",
-        entityId: saleResult.sale.id,
-        idempotencyKey,
-        after: {
-          origin: "atendente_ia",
-          productId: resolved.sale.productId,
-          productName: resolved.sale.productName,
-          quantity: resolved.sale.quantity,
-          paymentMethod: resolved.sale.paymentMethod,
-          clientId,
-          grossAmount: saleResult.sale.grossAmount,
-        },
-        metadata: {
-          humanConfirmed: true,
-          intent: body.intent,
-        },
-      });
-      return {
-        ok: true,
-        mode: "executed_after_confirmation",
-        intent: body.intent,
-        executed: true,
-        message: "Venda de produto registrada com sucesso.",
-        sale: saleResult.sale,
-        revenue: saleResult.revenue,
-        stockMovements: saleResult.stockMovements,
-      };
-    }
-
-    const normalized = normalizeOwnerScheduleDraft(body.draft);
-    if (normalized.missingFields.length) {
-      return {
-        ok: false,
-        mode: "confirmation_required",
-        intent: body.intent,
-        executed: false,
-        missingFields: normalized.missingFields,
-        message: "Nao foi possivel executar. Revise os campos faltantes antes de confirmar.",
-      };
-    }
-    verifyOwnerCommandConfirmationToken({
-      token: body.confirmationToken,
+    const result = await executeOwnerCommand({
+      request,
       unitId,
       actorId: req.auth?.userId,
+      actorLabel: req.auth?.email || req.auth?.userId || "owner",
       intent: body.intent,
-      draft: normalized.draft,
+      draft: body.draft,
+      confirmationToken: body.confirmationToken,
     });
-    const resolved = await resolveOwnerCommandSchedule({ unitId, draft: normalized.draft });
-    if (resolved.missingFields.length || !resolved.schedule) {
-      return {
-        ok: false,
-        mode: "confirmation_required",
-        intent: body.intent,
-        executed: false,
-        missingFields: resolved.missingFields,
-        warnings: resolved.warnings,
-        message: "Nao foi possivel executar. Revise a previa antes de confirmar.",
-      };
+    if (asRecord(result)?.statusCode) {
+      const statusCode = Number(asRecord(result)?.statusCode);
+      return reply.status(statusCode).send(asRecord(result)?.body);
+    }
+    return result;
+  });
+
+  app.post("/webhooks/evolution/whatsapp", async (request, reply) => {
+    if (!validateEvolutionWebhookSecret(request)) {
+      app.log.warn({ event: "ai.whatsapp.rejected", reason: "invalid_secret" });
+      return reply.status(401).send({ ok: false });
     }
 
-    const clientId = resolved.schedule.clientId || await ensureOwnerCommandClient({
+    const message = extractEvolutionWhatsappMessage(request.body);
+    const expectedInstance = String(process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber").trim();
+    const ownerPhone = normalizePhoneDigits(process.env.AI_WHATSAPP_OWNER_PHONE);
+    const unitId = String(process.env.AI_WHATSAPP_UNIT_ID ?? process.env.PUBLIC_BOOKING_UNIT_ID ?? "unit-01").trim();
+    const actorId = "ai-whatsapp-owner";
+
+    if (message.instance && expectedInstance && message.instance !== expectedInstance) {
+      app.log.warn({ event: "ai.whatsapp.rejected", reason: "wrong_instance", phone: message.maskedPhone });
+      return { ok: true, ignored: true };
+    }
+    if (message.isGroup) {
+      app.log.info({ event: "ai.whatsapp.ignored", reason: "group", phone: message.maskedPhone });
+      return { ok: true, ignored: true };
+    }
+    if (message.fromMe) {
+      app.log.info({ event: "ai.whatsapp.ignored", reason: "from_me", phone: message.maskedPhone });
+      return { ok: true, ignored: true };
+    }
+    if (!ownerPhone || message.phone !== ownerPhone) {
+      app.log.warn({ event: "ai.whatsapp.rejected", reason: "unauthorized_phone", phone: message.maskedPhone });
+      await recordAudit(request, {
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: { reason: "unauthorized_phone", phone: message.maskedPhone },
+      });
+      return { ok: true, ignored: true };
+    }
+    if (!message.text) {
+      app.log.info({ event: "ai.whatsapp.ignored", reason: "empty_text", phone: message.maskedPhone });
+      return { ok: true, ignored: true };
+    }
+
+    pruneAiWhatsappPendingCommands();
+    const normalizedText = message.text.trim();
+    const confirmMatch = normalizedText.match(/^CONFIRMAR\s+(\d{4})$/i);
+    if (/^CANCELAR$/i.test(normalizedText)) {
+      let cancelled = false;
+      for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
+        if (pending.phone === message.phone && !pending.used && pending.expiresAt > Date.now()) {
+          pending.used = true;
+          aiWhatsappPendingCommands.delete(key);
+          cancelled = true;
+        }
+      }
+      await recordAudit(request, {
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_CANCELLED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: { cancelled, phone: message.maskedPhone },
+      });
+      await sendWhatsAppMessage(message.phone, "Acao cancelada. Nada foi alterado.");
+      return { ok: true, cancelled };
+    }
+
+    if (confirmMatch) {
+      const code = confirmMatch[1];
+      const pendingKey = buildAiWhatsappPendingKey(message.phone, code);
+      const pending = aiWhatsappPendingCommands.get(pendingKey);
+      if (!pending || pending.used || pending.expiresAt <= Date.now()) {
+        await recordAudit(request, {
+          unitId,
+          action: "AI_WHATSAPP_COMMAND_REJECTED",
+          entity: "ai_whatsapp_command",
+          entityId: message.maskedPhone,
+          after: { reason: "missing_or_expired_confirmation", phone: message.maskedPhone },
+        });
+        await sendWhatsAppMessage(message.phone, "Essa acao ja foi confirmada ou expirou.");
+        return { ok: true, executed: false };
+      }
+      pending.used = true;
+      aiWhatsappPendingCommands.delete(pendingKey);
+      const execution = await executeOwnerCommand({
+        request,
+        unitId: pending.unitId,
+        actorId: pending.actorId,
+        actorLabel: "owner-whatsapp",
+        intent: pending.intent,
+        draft: pending.draft,
+        confirmationToken: pending.confirmationToken,
+        idempotencyPrefix: "whatsapp-",
+      });
+      const executionRecord = asRecord(execution);
+      const executed = executionRecord?.executed === true;
+      await recordAudit(request, {
+        unitId: pending.unitId,
+        action: executed ? "AI_WHATSAPP_COMMAND_CONFIRMED" : "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: pending.id,
+        after: {
+          intent: pending.intent,
+          executed,
+          phone: message.maskedPhone,
+        },
+      });
+      await sendWhatsAppMessage(
+        message.phone,
+        executed
+          ? String(executionRecord?.message ?? "Acao confirmada com sucesso.")
+          : String(executionRecord?.message ?? "Nao foi possivel confirmar essa acao."),
+      );
+      return { ok: true, executed };
+    }
+
+    let preview: OwnerCommandPreviewResponse;
+    try {
+      preview = await parseOwnerCommandPreview({
+        unitId,
+        actorId,
+        message: message.text,
+        screenContext: "whatsapp",
+      });
+    } catch {
+      app.log.warn({ event: "ai.whatsapp.rejected", reason: "parser_unavailable", phone: message.maskedPhone });
+      await recordAudit(request, {
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: { reason: "parser_unavailable", phone: message.maskedPhone },
+      });
+      await sendWhatsAppMessage(
+        message.phone,
+        "Nao consegui processar sua mensagem agora. Tente novamente em instantes.",
+      );
+      return { ok: true, executed: false, unavailable: true };
+    }
+    if (!aiWhatsappAllowedIntents.has(preview.intent) || !preview.confirmationToken || !preview.allowedNextActions.includes("confirm_execute")) {
+      await recordAudit(request, {
+        unitId,
+        action: "AI_WHATSAPP_COMMAND_REJECTED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: {
+          reason: "unsupported_or_incomplete_intent",
+          intent: preview.intent,
+          missingFields: preview.missingFields,
+          phone: message.maskedPhone,
+        },
+      });
+      await sendWhatsAppMessage(message.phone, preview.executionMessage ?? "Nao consegui montar uma previa segura para confirmar.");
+      return { ok: true, executed: false, intent: preview.intent };
+    }
+
+    const code = generateAiWhatsappCode();
+    const pending: AiWhatsappPendingCommand = {
+      id: crypto.randomUUID(),
+      code,
+      phone: message.phone,
       unitId,
-      clientName: resolved.schedule.clientName,
-    });
-    const appointment = await operations.schedule({
-      unitId,
-      clientId,
-      professionalId: resolved.schedule.professionalId,
-      serviceIds: resolved.schedule.serviceIds,
-      startsAt: resolved.schedule.startsAt,
-      notes: normalized.draft.notes
-        ? `Atendente IA - ${normalized.draft.notes}`
-        : "Atendente IA - confirmado pelo owner",
-      changedBy: req.auth?.email || req.auth?.userId || "owner",
-    });
-    await recordAudit(request, {
-      unitId: appointment.unitId,
-      action: "AI_OWNER_COMMAND_APPOINTMENT_CREATED",
-      entity: "appointment",
-      entityId: appointment.id,
-      after: {
-        origin: "atendente_ia",
-        startsAt: appointment.startsAt.toISOString(),
-        professionalId: appointment.professionalId,
-        clientId: appointment.clientId,
-        serviceId: appointment.serviceId,
-        serviceIds: resolved.schedule.serviceIds,
-      },
-      metadata: {
-        humanConfirmed: true,
-        intent: body.intent,
-      },
-    });
-    return {
-      ok: true,
-      mode: "executed_after_confirmation",
-      intent: body.intent,
-      executed: true,
-      message: "Agendamento criado com sucesso.",
-      appointment,
+      actorId,
+      intent: preview.intent,
+      draft: preview.draft as OwnerCommandDraft,
+      confirmationToken: preview.confirmationToken,
+      expiresAt: Date.now() + getAiWhatsappTtlMs(),
+      used: false,
     };
+    aiWhatsappPendingCommands.set(buildAiWhatsappPendingKey(message.phone, code), pending);
+    await recordAudit(request, {
+      unitId,
+      action: "AI_WHATSAPP_COMMAND_PARSED",
+      entity: "ai_whatsapp_command",
+      entityId: pending.id,
+      after: {
+        intent: preview.intent,
+        expiresAt: new Date(pending.expiresAt).toISOString(),
+        phone: message.maskedPhone,
+        missingFields: preview.missingFields,
+      },
+    });
+    await sendWhatsAppMessage(message.phone, formatAiWhatsappPreview(preview, code));
+    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false };
   });
 
   app.post("/integrations/webhooks/outbound/test", async (request) => {

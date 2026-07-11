@@ -329,13 +329,13 @@ function extractClientName(message: string, serviceName?: string) {
     if (serviceBeforeMatch?.[1]) return cleanClientName(serviceBeforeMatch[1]);
   }
 
-  const clientBeforeDate = new RegExp(`^(?:agenda|agende|marca|marque|marcar)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
+  const clientBeforeDate = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
   const clientBeforeDateMatch = message.match(clientBeforeDate);
   if (clientBeforeDateMatch?.[1]) return cleanClientName(clientBeforeDateMatch[1]);
 
   if (serviceName) {
     const servicePattern = escapeRegex(serviceName);
-    const clientBeforeService = new RegExp(`^(?:agenda|agende|marca|marque|marcar)\\s+(.+?)\\s+(?:para|pra|pro)\\s+${servicePattern}\\b`, "i");
+    const clientBeforeService = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?:para|pra|pro)\\s+${servicePattern}\\b`, "i");
     const clientBeforeServiceMatch = message.match(clientBeforeService);
     if (clientBeforeServiceMatch?.[1]) return cleanClientName(clientBeforeServiceMatch[1]);
   }
@@ -344,7 +344,7 @@ function extractClientName(message: string, serviceName?: string) {
 
 function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
   const normalized = normalizeMatchText(input.message);
-  const hasScheduleVerb = /\b(agenda|agende|marca|marque|marcar)\b/.test(normalized);
+  const hasScheduleVerb = /\b(agenda|agende|agendar|marca|marque|marcar)\b/.test(normalized);
   if (!hasScheduleVerb) return null;
 
   const serviceName = findServiceName(input.message, input.context);
