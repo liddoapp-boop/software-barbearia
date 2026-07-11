@@ -69,3 +69,62 @@ Data: 2026-07-10 20:59:42 -03:00
 4. Fazer exatamente um envio direto para numero de teste autorizado.
 5. Somente depois, avaliar booking controlado com cliente explicitamente de teste.
 6. Decidir se o modulo WhatsApp deve voltar a ser visivel para owner ou se o acesso deve seguir por ferramenta/admin local.
+
+## Atualizacao Macro 239.3 - Renovacao e conexao concluida
+
+Data: 2026-07-10 21:24:32 -03:00
+
+### Estado inicial
+
+- Branch: `main`, com 1 commit local seguro pendente de push da macro anterior.
+- Worktree inicial da macro 239.3: limpa.
+- Containers Evolution locais rodando: API, Postgres e Redis.
+- API Evolution local respondeu `HTTP 200`, versao `2.3.7`.
+- Servidor piloto respondeu `/health` com `HTTP 200`.
+- `/whatsapp/status` owner-only respondeu `HTTP 200`.
+- Estado inicial da instancia: `close`.
+
+### Sessao anterior
+
+- A sessao anterior nao precisou ser removida.
+- A instancia `geovane-local` estava presente e nao estava mais presa em `connecting`.
+- Nenhum volume Docker foi apagado.
+- Nenhum reset, migration, seed ou deploy foi executado.
+
+### QR Code renovado
+
+- QR Code novo gerado via rota owner-only `/whatsapp/connect`.
+- QR Code salvo somente em arquivo temporario fora do repositorio.
+- QR Code exibido para scan com numero de teste autorizado.
+- Apos polling, a instancia chegou a `open`.
+
+### Conexao
+
+- Estado final apos scan: `open`.
+- Numero conectado mascarado: `5519***18`.
+- Status apos envio direto: `open`.
+
+### Envio direto controlado
+
+- Envio direto executado exatamente uma vez.
+- Destinatario: numero de teste conectado, registrado apenas como `5519***18`.
+- Mensagem enviada: `Teste interno Liddo Barber: integracao WhatsApp local conectada com sucesso.`
+- API da Evolution respondeu `HTTP 201` com identificador de mensagem presente.
+- Recebimento no celular: pendente de confirmacao humana visual.
+- Envio via booking nao foi executado.
+- Nenhum agendamento foi criado.
+
+### Logs e seguranca
+
+- Logs recentes nao mostraram API key.
+- Logs recentes nao mostraram payload de QR.
+- Logs recentes nao mostraram o texto da mensagem de teste.
+- Logs locais da Evolution registraram identificador completo do numero conectado; esse dado nao foi versionado, mas deve ser tratado como sensivel na operacao.
+- Nenhum segredo foi versionado.
+
+### Proximos passos
+
+1. Confirmar visualmente no celular de teste se a mensagem chegou.
+2. Manter proibido envio via booking ate a confirmacao humana do recebimento.
+3. Se confirmado, planejar um teste de booking controlado com cliente explicitamente de teste e telefone autorizado.
+4. Avaliar reducao/sanitizacao dos logs locais da Evolution antes de qualquer validacao mais ampla.
