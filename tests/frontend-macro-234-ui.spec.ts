@@ -29,7 +29,7 @@ describe("Macro 234 - release candidate owner-only", () => {
     const menu = await import(pathToFileURL(`${process.cwd()}/public/components/menu-config.js`).href);
     const visible = menu.MENU_GROUPS.flatMap((group: any) => group.modules.map((module: any) => module.id));
 
-    expect(visible).toEqual(["agenda", "clientes", "financeiro", "estoque", "configuracoes", "servicos", "auditoria"]);
+    expect(visible).toEqual(["agenda", "clientes", "financeiro", "estoque", "atendente-ia", "configuracoes", "servicos", "auditoria"]);
     expect(visible).not.toEqual(expect.arrayContaining(["dashboard", "operacao", "profissionais", "comissoes", "metas", "fidelizacao", "automacoes", "relatorios", "whatsapp", "agendamento-link"]));
     expect(menu.MOBILE_TABS.map((tab: any) => tab.moduleId)).toEqual(["agenda", "clientes", null]);
     expect(menu.MOBILE_TABS.map((tab: any) => tab.label)).not.toContain("Hoje");

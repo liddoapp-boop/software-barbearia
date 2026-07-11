@@ -141,6 +141,12 @@ import {
   renderAuditLoading,
 } from "./modules/auditoria.js";
 import {
+  renderAtendenteIaError,
+  renderAtendenteIaLoading,
+  renderAtendenteIaPreview,
+  renderAtendenteIaShell,
+} from "./modules/atendente-ia.js";
+import {
   exportReportCsv,
   renderReportsData,
   renderReportsError,
@@ -1014,6 +1020,7 @@ const sectionsByModule = {
   fidelizacao: document.getElementById("fidelizacaoSection"),
   automacoes: document.getElementById("automacoesSection"),
   metas: metasSection,
+  "atendente-ia": document.getElementById("atendenteIaSection"),
   configuracoes: document.getElementById("settingsSection"),
   relatorios: document.getElementById("reportsSection"),
   whatsapp: document.getElementById("whatsappSection"),
@@ -1307,6 +1314,7 @@ let ownerFlowState = {
   scrollY: 0,
   idempotencyKey: "",
 };
+let atendenteIaMounted = false;
 let inServiceServicesState = {
   appointment: null,
   selectedServices: [],
@@ -2237,6 +2245,9 @@ function applySectionVisibility() {
     }
     if (state.activeModule === "agendamento-link") {
       initBookingLinkSection();
+    }
+    if (state.activeModule === "atendente-ia") {
+      initAtendenteIaSection();
     }
     syncMobileOperationActions();
     return;
@@ -10750,6 +10761,59 @@ function initWhatsAppSection() {
   whatsappMounted = true;
   const mount = document.getElementById("whatsappMount");
   if (mount) renderWhatsAppSection(mount, { getToken: () => localStorage.getItem("authToken") });
+}
+
+function initAtendenteIaSection() {
+  if (atendenteIaMounted) return;
+  atendenteIaMounted = true;
+  const mount = document.getElementById("atendenteIaMount");
+  if (!mount) return;
+  mount.innerHTML = renderAtendenteIaShell();
+
+  const messageInput = document.getElementById("aiOwnerMessage");
+  const interpretBtn = document.getElementById("aiOwnerInterpretBtn");
+  const preview = document.getElementById("aiOwnerPreview");
+  const feedback = document.getElementById("aiOwnerFeedback");
+
+  mount.querySelectorAll("[data-ai-suggestion]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!messageInput) return;
+      messageInput.value = button.getAttribute("data-ai-suggestion") || "";
+      messageInput.focus();
+    });
+  });
+
+  interpretBtn?.addEventListener("click", async () => {
+    const message = String(messageInput?.value || "").trim();
+    if (!message) {
+      if (feedback) feedback.innerHTML = renderAtendenteIaError("Digite uma mensagem para interpretar.");
+      return;
+    }
+    if (feedback) feedback.innerHTML = "";
+    if (preview) preview.innerHTML = renderAtendenteIaLoading();
+    interpretBtn.disabled = true;
+    try {
+      const response = await apiFetch(`${API}/ai/owner-command/parse`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          unitId,
+          message,
+          screenContext: state.activeModule,
+        }),
+        timeoutMs: 20000,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "IA indisponivel no momento.");
+      }
+      if (preview) preview.innerHTML = renderAtendenteIaPreview(payload);
+    } catch (error) {
+      if (preview) preview.innerHTML = renderAtendenteIaError(error?.message || "Falha ao interpretar mensagem.");
+    } finally {
+      interpretBtn.disabled = false;
+    }
+  });
 }
 
 function initBookingLinkSection() {

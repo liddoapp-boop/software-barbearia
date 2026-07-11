@@ -108,6 +108,7 @@ import {
   normalizeIdempotencyKey,
   toJsonValue,
 } from "./idempotency";
+import { RetentionAiScorer } from "./gemini-retention-scoring";
 
 type MemoryIdempotencyRecord = {
   unitId: string;
@@ -197,6 +198,7 @@ export class OperationsService {
   constructor(
     private readonly store: InMemoryStore,
     private readonly engine = new BarbershopEngine(),
+    private readonly retentionAiScorer?: RetentionAiScorer | null,
   ) {}
 
   private idempotencyScope(input: {
@@ -6948,29 +6950,32 @@ export class OperationsService {
     };
   }
 
-  recalculateRetentionScoring(input: {
+  async recalculateRetentionScoring(input: {
     unitId: string;
     scoredAt: Date;
     modelVersion?: string;
   }) {
     const scoredAt = input.scoredAt;
     const modelVersion = input.modelVersion ?? "heuristic-v1";
+    const aiScorer = input.modelVersion ? null : this.retentionAiScorer;
     const snapshots = [];
 
     for (const client of this.store.clients) {
-      const snapshot = this.buildRetentionScoreSnapshot(
+      const snapshot = await this.buildRetentionScoreSnapshot(
         input.unitId,
         client.id,
         scoredAt,
         modelVersion,
+        aiScorer,
       );
       this.store.retentionScoreSnapshots.push(snapshot);
       this.syncRetentionCaseFromScore(snapshot);
       snapshots.push(snapshot);
     }
 
+    const versions = Array.from(new Set(snapshots.map((item) => item.modelVersion)));
     return {
-      modelVersion,
+      modelVersion: versions.length === 1 ? versions[0] : "mixed",
       processedClients: snapshots.length,
       snapshots: snapshots.map((item) => ({
         ...item,
@@ -9378,11 +9383,12 @@ export class OperationsService {
     return map;
   }
 
-  private buildRetentionScoreSnapshot(
+  private async buildRetentionScoreSnapshot(
     unitId: string,
     clientId: string,
     scoredAt: Date,
     modelVersion: string,
+    aiScorer?: RetentionAiScorer | null,
   ) {
     const completedAppointments = this.store.appointments
       .filter(
@@ -9414,7 +9420,7 @@ export class OperationsService {
     if (visits90d <= 1) reasons.push("Baixa frequencia de visitas nos ultimos 90 dias");
     if (!reasons.length) reasons.push("Padrao de recorrencia saudavel");
 
-    return {
+    const snapshot = {
       id: crypto.randomUUID(),
       unitId,
       clientId,
@@ -9424,6 +9430,28 @@ export class OperationsService {
       reasons,
       modelVersion,
       scoredAt,
+    };
+
+    const aiScore = await aiScorer?.score({
+      unitId,
+      clientId,
+      scoredAt,
+      daysWithoutReturn,
+      visits90d,
+      heuristicRiskScore: snapshot.riskScore,
+      heuristicRiskLevel: snapshot.riskLevel,
+      heuristicReturnProbability: snapshot.returnProbability,
+      heuristicReasons: snapshot.reasons,
+    });
+    if (!aiScore) return snapshot;
+
+    return {
+      ...snapshot,
+      riskScore: aiScore.riskScore,
+      riskLevel: aiScore.riskLevel,
+      returnProbability: aiScore.returnProbability,
+      reasons: aiScore.reasons,
+      modelVersion: aiScore.modelVersion,
     };
   }
 

@@ -106,6 +106,7 @@ import {
   TransactionalAuditContext,
   writePrismaAuditEvent,
 } from "./audit-service";
+import { RetentionAiScorer } from "./gemini-retention-scoring";
 
 function asNumber(value: Prisma.Decimal | number | null | undefined): number {
   if (value == null) return 0;
@@ -253,6 +254,7 @@ export class PrismaOperationsService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly engine = new BarbershopEngine(),
+    private readonly retentionAiScorer?: RetentionAiScorer | null,
   ) {}
 
   private buildIdempotencyScope(input: {
@@ -9699,6 +9701,7 @@ export class PrismaOperationsService {
     modelVersion?: string;
   }) {
     const modelVersion = input.modelVersion ?? "heuristic-v1";
+    const aiScorer = input.modelVersion ? null : this.retentionAiScorer;
     const clients = await this.prisma.client.findMany({
       select: { id: true },
     });
@@ -9710,6 +9713,7 @@ export class PrismaOperationsService {
         client.id,
         input.scoredAt,
         modelVersion,
+        aiScorer,
       );
       await this.prisma.retentionScoreSnapshot.create({
         data: {
@@ -9728,8 +9732,9 @@ export class PrismaOperationsService {
       snapshots.push(snapshot);
     }
 
+    const versions = Array.from(new Set(snapshots.map((item) => item.modelVersion)));
     return {
-      modelVersion,
+      modelVersion: versions.length === 1 ? versions[0] : "mixed",
       processedClients: snapshots.length,
       snapshots: snapshots.map((item) => ({
         ...item,
@@ -12707,6 +12712,7 @@ export class PrismaOperationsService {
     clientId: string,
     scoredAt: Date,
     modelVersion: string,
+    aiScorer?: RetentionAiScorer | null,
   ) {
     const appointments = await this.prisma.appointment.findMany({
       where: {
@@ -12739,7 +12745,7 @@ export class PrismaOperationsService {
     if (visits90d <= 1) reasons.push("Baixa frequencia de visitas nos ultimos 90 dias");
     if (!reasons.length) reasons.push("Padrao de recorrencia saudavel");
 
-    return {
+    const snapshot = {
       id: crypto.randomUUID(),
       unitId,
       clientId,
@@ -12749,6 +12755,28 @@ export class PrismaOperationsService {
       reasons,
       modelVersion,
       scoredAt,
+    };
+
+    const aiScore = await aiScorer?.score({
+      unitId,
+      clientId,
+      scoredAt,
+      daysWithoutReturn,
+      visits90d,
+      heuristicRiskScore: snapshot.riskScore,
+      heuristicRiskLevel: snapshot.riskLevel,
+      heuristicReturnProbability: snapshot.returnProbability,
+      heuristicReasons: snapshot.reasons,
+    });
+    if (!aiScore) return snapshot;
+
+    return {
+      ...snapshot,
+      riskScore: aiScore.riskScore,
+      riskLevel: aiScore.riskLevel,
+      returnProbability: aiScore.returnProbability,
+      reasons: aiScore.reasons,
+      modelVersion: aiScore.modelVersion,
     };
   }
 

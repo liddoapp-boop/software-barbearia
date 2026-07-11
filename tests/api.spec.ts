@@ -5574,7 +5574,8 @@ describe("API MVP", () => {
     expect(uiSource).toContain("normalizeClientRecord");
     expect(uiSource).toContain("isSuspiciousStoredText");
     expect(uiSource).toContain("autocompleteMap");
-    expect(uiSource).toContain("Informe um e-mail válido ou deixe o campo em branco.");
+    expect(uiSource).toContain("function sanitizeEmailValue");
+    expect(uiSource).toContain("function isValidEmail");
     expect(uiSource).not.toContain("const _se = getClient().email");
     expect(uiSource).not.toContain("const _sp = getClient().phone");
   });

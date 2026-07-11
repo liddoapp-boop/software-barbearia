@@ -19,6 +19,7 @@ export const MENU_GROUPS = [
     id: "administracao",
     label: "Administracao",
     modules: [
+      { id: "atendente-ia", label: "Atendente IA" },
       { id: "configuracoes", label: "Configuracoes" },
       { id: "servicos", label: "Servicos" },
       { id: "auditoria", label: "Auditoria" },
@@ -44,6 +45,7 @@ export const ROLE_ACCESS = {
     "clientes",
     "financeiro",
     "estoque",
+    "atendente-ia",
     "configuracoes",
     "servicos",
     "auditoria",
@@ -95,6 +97,7 @@ export const MOBILE_TABS = [
 export const SECONDARY_MODULE_IDS = [
   "estoque",
   "financeiro",
+  "atendente-ia",
   "configuracoes",
   "servicos",
   "auditoria",

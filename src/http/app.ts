@@ -6,6 +6,8 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { OperationsService } from "../application/operations-service";
 import { PrismaOperationsService } from "../application/prisma-operations-service";
+import { createGeminiRetentionScorerFromEnv } from "../application/gemini-retention-scoring";
+import { createGeminiOwnerCommandParserFromEnv } from "../application/owner-command-ai";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, ReportExportType } from "../domain/types";
@@ -317,6 +319,9 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/integrations/billing/webhooks/:provider") return { isPublic: true };
   if (route === "/whatsapp/status" || route === "/whatsapp/connect" || route === "/whatsapp/disconnect") {
     return { isPublic: false, roles: ["owner"] };
+  }
+  if (route === "/ai/owner-command/parse") {
+    return { isPublic: false, roles: ["owner"], unitSource: "body" };
   }
   if (route === "/auth/me") {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"] };
@@ -715,10 +720,12 @@ export function createApp() {
       process.env.HTTP_LOG_ENABLED ??
         (process.env.NODE_ENV === "test" ? "false" : "true"),
     ).toLowerCase() === "true";
+  const retentionAiScorer = createGeminiRetentionScorerFromEnv();
+  const ownerCommandParser = createGeminiOwnerCommandParserFromEnv();
   const operations =
     backend === "prisma"
-      ? new PrismaOperationsService(prisma)
-      : new OperationsService(memoryStore);
+      ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
+      : new OperationsService(memoryStore, undefined, retentionAiScorer);
 
   const buildAppointmentBlockEvents = (blocks: Array<{
     id: string;
@@ -767,6 +774,55 @@ export function createApp() {
       .filter((block) => (!input.start ? true : block.endsAt >= input.start))
       .filter((block) => (!input.end ? true : block.startsAt <= input.end))
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  };
+
+  const getOwnerCommandContext = async (input: {
+    unitId: string;
+    screenContext?: string;
+  }) => {
+    const [catalog, paymentMethods, unit] = await Promise.all([
+      operations.getCatalog({ unitId: input.unitId }),
+      backend === "prisma"
+        ? prisma.paymentMethod.findMany({
+            where: { unitId: input.unitId, isActive: true },
+            select: { name: true, isDefault: true },
+            orderBy: { name: "asc" },
+          })
+        : Promise.resolve(
+            memoryStore.businessPaymentMethods
+              .filter((item) => item.unitId === input.unitId && item.isActive)
+              .map((item) => ({ name: item.name, isDefault: item.isDefault })),
+          ),
+      backend === "prisma"
+        ? prisma.unit.findUnique({
+            where: { id: input.unitId },
+            select: { timezone: true },
+          })
+        : Promise.resolve(memoryStore.units.find((item) => item.id === input.unitId) ?? null),
+    ]);
+
+    return {
+      unitId: input.unitId,
+      screenContext: input.screenContext,
+      now: new Date(),
+      timezone: unit?.timezone ?? "America/Sao_Paulo",
+      services: (catalog.services as unknown as Array<Record<string, unknown>>).map((item) => ({
+        name: String(item.name ?? ""),
+        category: typeof item.category === "string" ? item.category : null,
+        price: Number(item.price ?? 0),
+        durationMin: Number(item.durationMin ?? 0),
+      })),
+      products: (catalog.products as unknown as Array<Record<string, unknown>>).map((item) => ({
+        name: String(item.name ?? ""),
+        category: typeof item.category === "string" ? item.category : null,
+        salePrice: Number(item.salePrice ?? 0),
+        stockQty: Number(item.stockQty ?? item.quantity ?? 0),
+      })),
+      paymentMethods,
+      professionals: (catalog.professionals as unknown as Array<Record<string, unknown>>).map((item) => ({
+        name: String(item.name ?? ""),
+      })),
+    };
   };
 
   const app = Fastify({
@@ -1651,6 +1707,12 @@ export function createApp() {
 
   const retentionScoringClientQuerySchema = z.object({
     unitId: z.string().min(1),
+  });
+
+  const ownerCommandParseSchema = z.object({
+    unitId: z.string().min(1),
+    message: z.string().trim().min(3).max(1000),
+    screenContext: z.string().trim().min(1).max(80).optional(),
   });
 
   const integrationWebhookOutboundTestSchema = z.object({
@@ -4761,6 +4823,27 @@ export function createApp() {
       unitId: query.unitId,
       clientId: params.clientId,
     });
+  });
+
+  app.post("/ai/owner-command/parse", async (request) => {
+    const body = ownerCommandParseSchema.parse(request.body);
+    if (!ownerCommandParser) {
+      throw new Error("IA indisponivel: configure GEMINI_API_KEY no ambiente local seguro.");
+    }
+    const context = await getOwnerCommandContext({
+      unitId: body.unitId,
+      screenContext: body.screenContext,
+    });
+    const parsed = await ownerCommandParser.parse({
+      message: body.message,
+      context,
+    });
+    return {
+      ...parsed,
+      ok: true,
+      mode: "preview_only",
+      executed: false,
+    };
   });
 
   app.post("/integrations/webhooks/outbound/test", async (request) => {
