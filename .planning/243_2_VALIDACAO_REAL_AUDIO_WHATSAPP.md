@@ -159,3 +159,49 @@ Após a tentativa, a consulta somente de leitura continua com 0 vendas, 0
 financeiros, 0 agendamentos e 0 checkouts relacionados; Pomada permanece com
 estoque 8. A auditoria contém somente metadados seguros, sem segredo, número
 completo, áudio bruto, base64 ou URL sensível.
+
+## Diagnostico do ultimo audio apos timeout de 20 s
+
+O ultimo evento real de audio foi inspecionado somente por logs e auditoria
+sanitizados. O identificador do evento permaneceu mascarado. A cadeia confirmou:
+
+- o webhook recebeu audio OGG/Opus, com 5 segundos; a midia foi baixada somente
+  em memoria, com 14.310 bytes, e enviada ao provider com MIME `audio/ogg`;
+- o backend realmente carregou timeout de 20.000 ms: o inicio da transcricao e
+  a falha ficaram separados por aproximadamente 20.012 ms;
+- Gemini foi chamado, mas a requisicao foi abortada pelo timeout local antes de
+  existir resposta HTTP. Portanto nao houve status HTTP, 429, 4xx, 5xx, erro de
+  JSON ou transcript; o parser nao recebeu texto;
+- o caminho que gerou a resposta segura foi
+  `audio_transcription_timeout`, antes do parser. O circuit breaker nao abriu:
+  ele somente conta respostas HTTP 429, inexistentes neste evento.
+
+A configuracao local foi elevada de forma controlada para 30.000 ms. O codigo
+agora limita o timeout configuravel a 5.000--30.000 ms e registra, sem conteudo
+do audio nem transcript, o timeout efetivo, se o provider foi chamado, a
+duracao da chamada, o MIME normalizado e o status HTTP quando ele existir. O
+backend local foi reiniciado e respondeu `200` em `/health`; a nova inicializacao
+registrou somente configuracao segura.
+
+Consulta somente de leitura desde o horario do evento: 0 vendas, 0 lancamentos
+financeiros, 0 agendamentos e 0 checkouts criados; o estoque de Pomada permanece
+8. Nenhum audio novo foi enviado e nenhuma venda ou agendamento foi confirmado.
+
+Testes desta correcao: `npx vitest run tests/ai-whatsapp-audio.spec.ts` (12
+aprovados), `npx vitest run tests/ai-whatsapp-webhook.spec.ts` (16 aprovados),
+`npm run build` e `git diff --check` aprovados.
+
+## Tentativa controlada com timeout de 30 s
+
+O backend foi confirmado saudavel e com timeout efetivo de 30.000 ms. Foi feita
+uma janela unica de observacao de 35 segundos, sem originar audio pelo backend.
+Nenhum evento novo de audio chegou ao webhook nesse intervalo. Nao existe sessao
+de navegador disponivel neste ambiente para enviar uma mensagem de voz a partir
+do numero autorizado; por isso a validacao real permanece pendente do envio
+manual desse audio curto pelo aparelho autorizado.
+
+Nao houve chamada Gemini, transcript, previa, `CANCELAR` ou confirmacao nesta
+tentativa. Os contadores antes e depois permaneceram iguais (vendas 2,
+lancamentos financeiros 2, agendamentos 5 e checkouts 0), e Pomada permaneceu
+com estoque 8. Esses valores sao somente a linha de base do banco piloto, nao
+representam criacao durante a observacao.

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
+import { getGeminiAudioTranscriptionTimeoutMsFromEnv } from "../src/application/audio-transcription";
 
 const originalEnv = { ...process.env };
 const audioBytes = "AQIDBA==";
@@ -110,6 +111,15 @@ describe("audio do atendente IA via WhatsApp", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     process.env = { ...originalEnv };
+  });
+
+  it("limita o timeout Gemini configuravel a uma faixa segura", () => {
+    delete process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS;
+    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(20_000);
+    process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "100";
+    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(5_000);
+    process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "40000";
+    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(30_000);
   });
 
   it("reconhece audio, baixa em memoria, transcreve e gera somente previa de venda", async () => {
@@ -258,6 +268,25 @@ describe("audio do atendente IA via WhatsApp", () => {
       expect(sentTexts(fetchMock).at(-1)).toContain("Nao consegui entender o audio");
       vi.unstubAllGlobals();
     }
+  });
+
+  it("abre o circuito apenas apos dois 429 e registra que a terceira chamada nao chegou ao Gemini", async () => {
+    process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
+    process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
+    const fetchMock = mockTransport({ realStatus: 429 });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    for (const id of ["rate-limit-1", "rate-limit-2"]) {
+      await postWebhook(app, audioPayload({ data: { key: { id, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+    }
+    const blocked = await postWebhook(app, audioPayload({ data: { key: { id: "rate-limit-3", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+
+    expect(blocked.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: "audio_transcription_circuit_open" });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1beta/interactions"))).toHaveLength(2);
+    const events = await audits(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED" && event.afterJson?.reason === "audio_transcription_circuit_open" && event.afterJson?.providerCalled === false)).toBe(true);
   });
 
   it("responde sem baixar midia quando a feature flag esta desligada", async () => {

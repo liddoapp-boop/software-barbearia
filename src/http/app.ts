@@ -15,6 +15,7 @@ import {
 import {
   AudioTranscriptionError,
   createAudioTranscriptionServiceFromEnv,
+  getGeminiAudioTranscriptionTimeoutMsFromEnv,
   isAudioTranscriptionEnabledFromEnv,
 } from "../application/audio-transcription";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
@@ -1972,6 +1973,12 @@ export function createApp() {
           level: process.env.LOG_LEVEL ?? "info",
         }
       : false,
+  });
+  app.log.info({
+    event: "ai.whatsapp.audio.transcription.configured",
+    enabled: audioTranscriptionEnabled,
+    serviceAvailable: Boolean(audioTranscriptionService),
+    timeoutMs: getGeminiAudioTranscriptionTimeoutMsFromEnv(),
   });
 
   app.register(cors, { origin: corsOrigin });
@@ -6164,7 +6171,12 @@ export function createApp() {
         action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_STARTED",
         entity: "ai_whatsapp_audio",
         entityId: audioEntityId,
-        after: { mimetype: message.audio.mimetype, size: audioBytes.length, phone: message.maskedPhone },
+        after: {
+          mimetype: message.audio.mimetype,
+          size: audioBytes.length,
+          timeoutMs: getGeminiAudioTranscriptionTimeoutMsFromEnv(),
+          phone: message.maskedPhone,
+        },
       });
       if (!audioTranscriptionService) {
         await safeAudit({
@@ -6189,16 +6201,31 @@ export function createApp() {
           action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_COMPLETED",
           entity: "ai_whatsapp_audio",
           entityId: audioEntityId,
-          after: { provider: transcription.provider, confidence: transcription.confidence ?? null, phone: message.maskedPhone },
+          after: {
+            provider: transcription.provider,
+            confidence: transcription.confidence ?? null,
+            normalizedMimetype: transcription.normalizedMimetype ?? null,
+            providerCalled: transcription.diagnostics?.providerCalled ?? null,
+            durationMs: transcription.diagnostics?.durationMs ?? null,
+            httpStatus: transcription.diagnostics?.httpStatus ?? null,
+            phone: message.maskedPhone,
+          },
         });
       } catch (error) {
         const reason = error instanceof AudioTranscriptionError ? error.reason : "audio_transcription_failed";
+        const diagnostics = error instanceof AudioTranscriptionError ? error.diagnostics : null;
         await safeAudit({
           unitId,
           action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED",
           entity: "ai_whatsapp_audio",
           entityId: audioEntityId,
-          after: { reason, phone: message.maskedPhone },
+          after: {
+            reason,
+            providerCalled: diagnostics?.providerCalled ?? null,
+            durationMs: diagnostics?.durationMs ?? null,
+            httpStatus: diagnostics?.httpStatus ?? null,
+            phone: message.maskedPhone,
+          },
         });
         const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"));
         return { ok: true, executed: false, audio: true, reason, responseDelivered };

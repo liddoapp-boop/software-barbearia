@@ -8,10 +8,21 @@ export type AudioTranscriptionFailureReason =
   | "audio_transcription_no_speech"
   | "audio_transcription_failed";
 
+export const DEFAULT_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 20_000;
+export const MIN_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 5_000;
+export const MAX_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 30_000;
+
+export type AudioTranscriptionDiagnostics = {
+  providerCalled: boolean;
+  durationMs: number;
+  httpStatus?: number;
+};
+
 export class AudioTranscriptionError extends Error {
   constructor(
     public readonly reason: AudioTranscriptionFailureReason,
     message = "Nao foi possivel transcrever o audio.",
+    public readonly diagnostics: AudioTranscriptionDiagnostics = { providerCalled: false, durationMs: 0 },
   ) {
     super(message);
     this.name = "AudioTranscriptionError";
@@ -22,6 +33,8 @@ export type AudioTranscriptionResult = {
   transcript: string;
   provider: string;
   confidence?: number;
+  diagnostics?: AudioTranscriptionDiagnostics;
+  normalizedMimetype?: string;
 };
 
 export interface AudioTranscriptionService {
@@ -35,6 +48,15 @@ function isEnabled(value: unknown) {
 function getPositiveInteger(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
+}
+
+export function getGeminiAudioTranscriptionTimeoutMsFromEnv() {
+  const parsed = Number(process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS);
+  if (!Number.isFinite(parsed)) return DEFAULT_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS;
+  return Math.min(
+    MAX_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS,
+    Math.max(MIN_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS, Math.trunc(parsed)),
+  );
 }
 
 function normalizeGeminiAudioMimetype(mimetype: string) {
@@ -106,9 +128,12 @@ export class GeminiAudioTranscriptionService implements AudioTranscriptionServic
     if (!input.audio.length || !input.mimetype.trim()) throw new AudioTranscriptionError("audio_transcription_failed");
     if (Date.now() < this.circuitOpenUntil) throw new AudioTranscriptionError("audio_transcription_circuit_open");
     const mimetype = normalizeGeminiAudioMimetype(input.mimetype);
+    const startedAt = Date.now();
+    let providerCalled = false;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
+      providerCalled = true;
       const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": this.apiKey },
@@ -124,18 +149,32 @@ export class GeminiAudioTranscriptionService implements AudioTranscriptionServic
       if (!response.ok) {
         const reason = response.status === 429 ? "audio_transcription_429" : response.status >= 500 ? "audio_transcription_5xx" : "audio_transcription_failed";
         if (reason === "audio_transcription_429") this.registerRateLimit(Date.now());
-        throw new AudioTranscriptionError(reason);
+        throw new AudioTranscriptionError(reason, undefined, {
+          providerCalled,
+          durationMs: Date.now() - startedAt,
+          httpStatus: response.status,
+        });
       }
       const transcript = extractTranscript(await response.json()).slice(0, 1000);
       if (!transcript) throw new AudioTranscriptionError("audio_transcription_empty");
       if (/^\[\s*(?:sem fala|no speech)\s*\]$/i.test(transcript)) {
         throw new AudioTranscriptionError("audio_transcription_no_speech");
       }
-      return { transcript, provider: `gemini:${this.model}` };
+      return {
+        transcript,
+        provider: `gemini:${this.model}`,
+        normalizedMimetype: mimetype,
+        diagnostics: { providerCalled, durationMs: Date.now() - startedAt, httpStatus: response.status },
+      };
     } catch (error) {
-      if (error instanceof AudioTranscriptionError) throw error;
-      if (error instanceof Error && error.name === "AbortError") throw new AudioTranscriptionError("audio_transcription_timeout");
-      throw new AudioTranscriptionError("audio_transcription_failed");
+      const diagnostics = {
+        providerCalled,
+        durationMs: Date.now() - startedAt,
+        ...(error instanceof AudioTranscriptionError ? error.diagnostics.httpStatus === undefined ? {} : { httpStatus: error.diagnostics.httpStatus } : {}),
+      };
+      if (error instanceof AudioTranscriptionError) throw new AudioTranscriptionError(error.reason, error.message, diagnostics);
+      if (error instanceof Error && error.name === "AbortError") throw new AudioTranscriptionError("audio_transcription_timeout", undefined, diagnostics);
+      throw new AudioTranscriptionError("audio_transcription_failed", undefined, diagnostics);
     } finally {
       clearTimeout(timeout);
     }
@@ -171,7 +210,7 @@ export function createAudioTranscriptionServiceFromEnv(): AudioTranscriptionServ
   return new GeminiAudioTranscriptionService(
     apiKey,
     String(process.env.AI_AUDIO_TRANSCRIPTION_MODEL ?? "gemini-3.5-flash").trim() || "gemini-3.5-flash",
-    getPositiveInteger(process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS, 8000),
+    getGeminiAudioTranscriptionTimeoutMsFromEnv(),
     getPositiveInteger(process.env.AI_AUDIO_TRANSCRIPTION_CIRCUIT_429_THRESHOLD, 2),
     getPositiveInteger(process.env.AI_AUDIO_TRANSCRIPTION_CIRCUIT_COOLDOWN_MS, 60_000),
   );
