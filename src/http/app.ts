@@ -12,6 +12,10 @@ import {
   OwnerCommandParserError,
   OwnerCommandParseResult,
 } from "../application/owner-command-ai";
+import {
+  AudioTranscriptionError,
+  createAudioTranscriptionServiceFromEnv,
+} from "../application/audio-transcription";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
@@ -753,6 +757,7 @@ export function createApp() {
     ).toLowerCase() === "true";
   const retentionAiScorer = createGeminiRetentionScorerFromEnv();
   const ownerCommandParser = createGeminiOwnerCommandParserFromEnv();
+  const audioTranscriptionService = createAudioTranscriptionServiceFromEnv();
   const operations =
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
@@ -1376,7 +1381,23 @@ export function createApp() {
     used: boolean;
   };
 
+  type EvolutionWhatsappAudio = {
+    mimetype: string;
+    declaredSize?: number;
+    durationSeconds?: number;
+    messageId: string;
+    source: Record<string, unknown>;
+  };
+
+  class EvolutionAudioError extends Error {
+    constructor(public readonly reason: "missing_media" | "invalid_media" | "media_too_large" | "media_too_long" | "download_failed" | "download_timeout") {
+      super(reason);
+      this.name = "EvolutionAudioError";
+    }
+  }
+
   const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
+  const aiWhatsappProcessedAudioMessages = new Map<string, number>();
   const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
 
   function getAiWhatsappTtlMs() {
@@ -1439,6 +1460,89 @@ export function createApp() {
     return "";
   }
 
+  function getFirstFiniteNumber(record: Record<string, unknown> | null, paths: string[][]) {
+    for (const path of paths) {
+      const value = getRecordValue(record, path);
+      const parsed = typeof value === "number" ? value : Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    }
+    return undefined;
+  }
+
+  function isSupportedWhatsappAudioMimetype(mimetype: string) {
+    return /^(audio\/(?:ogg|opus|mpeg|mp3|mp4|m4a|aac|webm|wav|x-wav))(?:;|$)/i.test(mimetype.trim());
+  }
+
+  function getAiWhatsappAudioMaxBytes() {
+    const configured = Number(process.env.AI_WHATSAPP_AUDIO_MAX_BYTES ?? 8 * 1024 * 1024);
+    return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 8 * 1024 * 1024;
+  }
+
+  function getAiWhatsappAudioMaxDurationSeconds() {
+    const configured = Number(process.env.AI_WHATSAPP_AUDIO_MAX_DURATION_SECONDS ?? 120);
+    return Number.isFinite(configured) && configured > 0 ? configured : 120;
+  }
+
+  function getAiWhatsappAudioDownloadTimeoutMs() {
+    const configured = Number(process.env.AI_WHATSAPP_AUDIO_DOWNLOAD_TIMEOUT_MS ?? 8000);
+    return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 8000;
+  }
+
+  function buildAiWhatsappAudioReplayKey(phone: string, messageId: string) {
+    return crypto.createHash("sha256").update(`${normalizePhoneDigits(phone)}:${messageId}`).digest("base64url");
+  }
+
+  async function downloadEvolutionWhatsappAudio(input: { instance: string; audio: EvolutionWhatsappAudio }) {
+    if (!input.instance || !input.audio.messageId || !input.audio.source) {
+      throw new EvolutionAudioError("missing_media");
+    }
+    if (!isSupportedWhatsappAudioMimetype(input.audio.mimetype)) {
+      throw new EvolutionAudioError("invalid_media");
+    }
+    if ((input.audio.declaredSize ?? 0) > getAiWhatsappAudioMaxBytes()) {
+      throw new EvolutionAudioError("media_too_large");
+    }
+    if ((input.audio.durationSeconds ?? 0) > getAiWhatsappAudioMaxDurationSeconds()) {
+      throw new EvolutionAudioError("media_too_long");
+    }
+
+    const baseUrl = String(process.env.EVOLUTION_API_URL ?? "").replace(/\/+$/, "");
+    const apiKey = String(process.env.EVOLUTION_API_KEY ?? "").trim();
+    if (!baseUrl || !apiKey) throw new EvolutionAudioError("download_failed");
+    const configuredUrl = String(process.env.EVOLUTION_MEDIA_DOWNLOAD_URL ?? "").trim();
+    const url = configuredUrl || `${baseUrl}/chat/getBase64FromMediaMessage/${encodeURIComponent(input.instance)}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), getAiWhatsappAudioDownloadTimeoutMs());
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: apiKey },
+        body: JSON.stringify({ message: input.audio.source, convertToMp4: false }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new EvolutionAudioError("download_failed");
+      const maxEncodedBytes = Math.ceil((getAiWhatsappAudioMaxBytes() * 4) / 3) + 4;
+      const contentLength = Number(response.headers?.get("content-length") ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > maxEncodedBytes) throw new EvolutionAudioError("media_too_large");
+      const payload = asRecord(await response.json());
+      const encoded = getFirstString(payload, [["base64"], ["data", "base64"], ["media", "base64"]])
+        .replace(/^data:[^;]+;base64,/i, "")
+        .replace(/\s/g, "");
+      if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new EvolutionAudioError("download_failed");
+      if (encoded.length > maxEncodedBytes) throw new EvolutionAudioError("media_too_large");
+      const audio = Buffer.from(encoded, "base64");
+      if (!audio.length) throw new EvolutionAudioError("download_failed");
+      if (audio.length > getAiWhatsappAudioMaxBytes()) throw new EvolutionAudioError("media_too_large");
+      return audio;
+    } catch (error) {
+      if (error instanceof EvolutionAudioError) throw error;
+      if (error instanceof Error && error.name === "AbortError") throw new EvolutionAudioError("download_timeout");
+      throw new EvolutionAudioError("download_failed");
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function extractEvolutionWhatsappMessage(payload: unknown) {
     const body = asRecord(payload);
     const data = asRecord(body?.data);
@@ -1454,6 +1558,28 @@ export function createApp() {
       ["message", "conversation"],
       ["text"],
     ]);
+    const explicitAudioCandidate =
+      asRecord(getRecordValue(body, ["data", "message", "audioMessage"])) ??
+      asRecord(getRecordValue(body, ["data", "message", "pttMessage"])) ??
+      asRecord(getRecordValue(body, ["message", "audioMessage"]));
+    const mediaCandidate =
+      asRecord(getRecordValue(body, ["data", "message", "mediaMessage"])) ??
+      asRecord(getRecordValue(body, ["message", "mediaMessage"]));
+    const messageType = getFirstString(body, [["data", "messageType"], ["messageType"], ["data", "type"], ["type"]]);
+    const typedAudioCandidate = /audio|ptt|voice/i.test(messageType) ? message : null;
+    const audioCandidate = explicitAudioCandidate ?? mediaCandidate ?? typedAudioCandidate;
+    const audioMimetype = getFirstString(audioCandidate, [["mimetype"], ["mimeType"], ["media", "mimetype"]]);
+    const isAudio = Boolean(explicitAudioCandidate) ||
+      (Boolean(audioCandidate) && (isSupportedWhatsappAudioMimetype(audioMimetype) || /audio|ptt|voice|media/i.test(messageType)));
+    const audio = isAudio
+      ? {
+          mimetype: audioMimetype.toLowerCase(),
+          declaredSize: getFirstFiniteNumber(audioCandidate, [["fileLength"], ["fileSize"], ["size"], ["media", "fileLength"]]),
+          durationSeconds: getFirstFiniteNumber(audioCandidate, [["seconds"], ["duration"], ["durationSeconds"], ["media", "seconds"]]),
+          messageId: getFirstString(body, [["data", "key", "id"], ["data", "key", "messageId"], ["messageId"], ["id"]]),
+          source: data ?? {},
+        }
+      : undefined;
     const fromMe = Boolean(key?.fromMe ?? data?.fromMe ?? body?.fromMe);
     const isGroup =
       remoteJid.endsWith("@g.us") ||
@@ -1475,9 +1601,10 @@ export function createApp() {
       remoteJid,
       pushName,
       text,
+      audio,
       fromMe,
       isGroup,
-      hasMessage: Boolean(message) || Boolean(text),
+      hasMessage: Boolean(message) || Boolean(text) || Boolean(audio),
     };
   }
 
@@ -1485,6 +1612,9 @@ export function createApp() {
     const now = Date.now();
     for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
       if (pending.expiresAt <= now || pending.used) aiWhatsappPendingCommands.delete(key);
+    }
+    for (const [key, expiresAt] of aiWhatsappProcessedAudioMessages.entries()) {
+      if (expiresAt <= now) aiWhatsappProcessedAudioMessages.delete(key);
     }
   }
 
@@ -1547,6 +1677,17 @@ export function createApp() {
 
   function formatAiWhatsappTemporaryFailure() {
     return "Nao consegui processar essa mensagem agora. Tente novamente em instantes ou envie no formato: Agendar corte para NOME dia DATA as HORARIO.";
+  }
+
+  function formatAiWhatsappAudioFailure(kind: "processing" | "transcription") {
+    return kind === "processing"
+      ? "Recebi um audio, mas nao consegui processar. Tente enviar novamente ou mande em texto."
+      : "Nao consegui entender o audio com seguranca. Envie novamente ou mande em texto neste formato: Agendar corte para Joao dia 14/07/2026 as 11:00.";
+  }
+
+  function formatAiWhatsappAudioPreview(transcript: string, preview: OwnerCommandPreviewResponse, code: string) {
+    const safeTranscript = transcript.replace(/[\r\n\t]+/g, " ").trim().slice(0, 300);
+    return `Entendi o audio como: '${safeTranscript}'\nConfira a previa abaixo.\n\n${formatAiWhatsappPreview(preview, code)}`;
   }
 
   async function parseOwnerCommandPreview(input: {
@@ -5928,7 +6069,7 @@ export function createApp() {
       });
       return { ok: true, ignored: true };
     }
-    if (!message.text) {
+    if (!message.text && !message.audio) {
       app.log.info({ event: "ai.whatsapp.ignored", reason: "empty_text", phone: message.maskedPhone });
       await safeAudit({
         unitId,
@@ -5943,7 +6084,112 @@ export function createApp() {
 
     try {
     pruneAiWhatsappPendingCommands();
-    const normalizedText = message.text.trim();
+    let commandText = message.text;
+    let audioTranscript = "";
+    if (message.audio) {
+      const audioEntityId = message.audio.messageId
+        ? buildAiWhatsappAudioReplayKey(message.phone, message.audio.messageId).slice(0, 32)
+        : message.maskedPhone;
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_AUDIO_RECEIVED",
+        entity: "ai_whatsapp_audio",
+        entityId: audioEntityId,
+        after: {
+          mimetype: message.audio.mimetype || "unknown",
+          declaredSize: message.audio.declaredSize ?? null,
+          durationSeconds: message.audio.durationSeconds ?? null,
+          phone: message.maskedPhone,
+        },
+      });
+      if (!message.audio.messageId) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_REJECTED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { reason: "missing_media", phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"));
+        return { ok: true, executed: false, audio: true, reason: "missing_media", responseDelivered };
+      }
+      const replayKey = buildAiWhatsappAudioReplayKey(message.phone, message.audio.messageId);
+      if (aiWhatsappProcessedAudioMessages.has(replayKey)) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_REPLAY_IGNORED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { phone: message.maskedPhone },
+        });
+        return { ok: true, replay: true, executed: false };
+      }
+      let audioBytes: Buffer;
+      try {
+        audioBytes = await downloadEvolutionWhatsappAudio({
+          instance: message.instance || expectedInstance,
+          audio: message.audio,
+        });
+      } catch (error) {
+        const reason = error instanceof EvolutionAudioError ? error.reason : "download_failed";
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_REJECTED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { reason, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"));
+        return { ok: true, executed: false, audio: true, reason, responseDelivered };
+      }
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_STARTED",
+        entity: "ai_whatsapp_audio",
+        entityId: audioEntityId,
+        after: { mimetype: message.audio.mimetype, size: audioBytes.length, phone: message.maskedPhone },
+      });
+      if (!audioTranscriptionService) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { reason: "audio_transcription_unavailable", phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"));
+        return { ok: true, executed: false, audio: true, reason: "audio_transcription_unavailable", responseDelivered };
+      }
+      try {
+        const transcription = await audioTranscriptionService.transcribe({
+          audio: audioBytes,
+          mimetype: message.audio.mimetype,
+        });
+        audioTranscript = transcription.transcript.trim().slice(0, 1000);
+        if (!audioTranscript) throw new AudioTranscriptionError("audio_transcription_empty");
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_COMPLETED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { provider: transcription.provider, confidence: transcription.confidence ?? null, phone: message.maskedPhone },
+        });
+      } catch (error) {
+        const reason = error instanceof AudioTranscriptionError ? error.reason : "audio_transcription_failed";
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { reason, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"));
+        return { ok: true, executed: false, audio: true, reason, responseDelivered };
+      }
+      aiWhatsappProcessedAudioMessages.set(replayKey, Date.now() + getAiWhatsappTtlMs());
+      commandText = audioTranscript;
+    }
+    const normalizedText = commandText.trim();
     const confirmMatch = normalizedText.match(/^CONFIRMAR\s+(\d{4})$/i);
     if (/^CANCELAR$/i.test(normalizedText)) {
       let cancelled = false;
@@ -6018,7 +6264,7 @@ export function createApp() {
       preview = await parseOwnerCommandPreview({
         unitId,
         actorId,
-        message: message.text,
+        message: commandText,
         screenContext: "whatsapp",
       });
     } catch (error) {
@@ -6089,8 +6335,10 @@ export function createApp() {
         missingFields: preview.missingFields,
       },
     });
-    const responseDelivered = await safeSend(formatAiWhatsappPreview(preview, code));
-    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, responseDelivered };
+    const responseDelivered = await safeSend(
+      audioTranscript ? formatAiWhatsappAudioPreview(audioTranscript, preview, code) : formatAiWhatsappPreview(preview, code),
+    );
+    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, audio: Boolean(audioTranscript), responseDelivered };
     } catch {
       app.log.error({ event: "ai.whatsapp.unexpected_failure", phone: message.maskedPhone });
       await safeAudit({
