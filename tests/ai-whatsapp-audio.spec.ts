@@ -27,13 +27,28 @@ function textPayload(text: string) {
   };
 }
 
-function mockTransport(input: { downloadOk?: boolean; sendOk?: boolean } = {}) {
+function mockTransport(input: {
+  downloadOk?: boolean;
+  sendOk?: boolean;
+  realTranscript?: string;
+  realStatus?: number;
+  realTimeout?: boolean;
+} = {}) {
   return vi.fn(async (url: string) => {
     if (String(url).includes("/message/sendText/")) return { ok: input.sendOk !== false, status: input.sendOk === false ? 503 : 200, text: async () => "" };
     if (String(url).includes("/chat/getBase64FromMediaMessage/")) {
       return input.downloadOk === false
         ? { ok: false, status: 503, text: async () => "" }
         : { ok: true, json: async () => ({ base64: audioBytes }) };
+    }
+    if (String(url).includes("/v1beta/interactions")) {
+      if (input.realTimeout) {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        throw error;
+      }
+      if (input.realStatus) return { ok: false, status: input.realStatus, text: async () => "" };
+      return { ok: true, json: async () => ({ output_text: input.realTranscript === undefined ? "Vendi uma pomada para CLIENTE TESTE IA AUDIO, ele pagou no Pix." : input.realTranscript }) };
     }
     return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "{" }] } }] }) };
   });
@@ -69,13 +84,14 @@ async function audits(app: FastifyInstance, token: string) {
     url: "/audit/events?unitId=unit-01&limit=500",
     headers: { authorization: `Bearer ${token}` },
   });
-  return response.json().events as Array<{ action: string }>;
+  return response.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>;
 }
 
 describe("audio do atendente IA via WhatsApp", () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     process.env.DATA_BACKEND = "memory";
+    process.env.NODE_ENV = "test";
     process.env.AUTH_ENFORCED = "true";
     process.env.GEMINI_API_KEY = "fake-gemini-key-for-test";
     process.env.GEMINI_MODEL = "gemini-test";
@@ -86,7 +102,8 @@ describe("audio do atendente IA via WhatsApp", () => {
     process.env.EVOLUTION_API_URL = "http://evolution.local";
     process.env.EVOLUTION_API_KEY = "test-evolution-key";
     process.env.EVOLUTION_INSTANCE_NAME = "test-instance";
-    process.env.AI_WHATSAPP_AUDIO_TRANSCRIPTION_MODE = "mock";
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
+    process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "mock";
     process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Vendi uma pomada para CLIENTE TESTE IA AUDIO, ele pagou no Pix.";
   });
 
@@ -202,5 +219,57 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(serializedAudit).not.toContain(audioBytes);
     expect(serializedAudit).not.toContain("test-evolution-key");
     expect(serializedAudit).not.toContain(ownerPhone);
+  });
+
+  it("mantem a transcricao real Gemini isolada do mock e gera a previa textual", async () => {
+    process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
+    process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Vendi uma pomada para CLIENTE DO MOCK, ele pagou no Pix.";
+    const fetchMock = mockTransport({ realTranscript: "Agendar corte para CLIENTE TRANSCRITO REAL dia 14/07/2026 as 11:00" });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, audioPayload());
+
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("CLIENTE TRANSCRITO REAL");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/v1beta/interactions"))).toBe(true);
+    const interactionCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/v1beta/interactions")) as [string, RequestInit?] | undefined;
+    const interactionBody = JSON.parse(String(interactionCall?.[1]?.body ?? ""));
+    expect(interactionBody.input[1]).toMatchObject({ type: "audio", mime_type: "audio/ogg" });
+  });
+
+  it("trata 429, 5xx, timeout e resposta vazia do provider real sem executar", async () => {
+    const scenarios = [
+      { name: "rate", transport: { realStatus: 429 }, reason: "audio_transcription_429" },
+      { name: "server", transport: { realStatus: 503 }, reason: "audio_transcription_5xx" },
+      { name: "timeout", transport: { realTimeout: true }, reason: "audio_transcription_timeout" },
+      { name: "empty", transport: { realTranscript: "" }, reason: "audio_transcription_empty" },
+    ];
+    for (const scenario of scenarios) {
+      process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
+      process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
+      const fetchMock = mockTransport(scenario.transport);
+      vi.stubGlobal("fetch", fetchMock);
+      const app = createApp();
+      const response = await postWebhook(app, audioPayload({ data: { key: { id: `real-${scenario.name}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+
+      expect(response.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: scenario.reason });
+      expect(sentTexts(fetchMock).at(-1)).toContain("Nao consegui entender o audio");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("responde sem baixar midia quando a feature flag esta desligada", async () => {
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "false";
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, audioPayload());
+
+    expect(response.json()).toMatchObject({ ok: true, audio: true, disabled: true, executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("transcricao ainda nao esta ativa");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("getBase64FromMediaMessage"))).toBe(false);
   });
 });

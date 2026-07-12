@@ -15,6 +15,7 @@ import {
 import {
   AudioTranscriptionError,
   createAudioTranscriptionServiceFromEnv,
+  isAudioTranscriptionEnabledFromEnv,
 } from "../application/audio-transcription";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
@@ -758,6 +759,7 @@ export function createApp() {
   const retentionAiScorer = createGeminiRetentionScorerFromEnv();
   const ownerCommandParser = createGeminiOwnerCommandParserFromEnv();
   const audioTranscriptionService = createAudioTranscriptionServiceFromEnv();
+  const audioTranscriptionEnabled = isAudioTranscriptionEnabledFromEnv();
   const operations =
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
@@ -1474,12 +1476,12 @@ export function createApp() {
   }
 
   function getAiWhatsappAudioMaxBytes() {
-    const configured = Number(process.env.AI_WHATSAPP_AUDIO_MAX_BYTES ?? 8 * 1024 * 1024);
+    const configured = Number(process.env.AI_AUDIO_MAX_BYTES ?? process.env.AI_WHATSAPP_AUDIO_MAX_BYTES ?? 8 * 1024 * 1024);
     return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 8 * 1024 * 1024;
   }
 
   function getAiWhatsappAudioMaxDurationSeconds() {
-    const configured = Number(process.env.AI_WHATSAPP_AUDIO_MAX_DURATION_SECONDS ?? 120);
+    const configured = Number(process.env.AI_AUDIO_MAX_DURATION_SECONDS ?? process.env.AI_WHATSAPP_AUDIO_MAX_DURATION_SECONDS ?? 120);
     return Number.isFinite(configured) && configured > 0 ? configured : 120;
   }
 
@@ -1683,6 +1685,10 @@ export function createApp() {
     return kind === "processing"
       ? "Recebi um audio, mas nao consegui processar. Tente enviar novamente ou mande em texto."
       : "Nao consegui entender o audio com seguranca. Envie novamente ou mande em texto neste formato: Agendar corte para Joao dia 14/07/2026 as 11:00.";
+  }
+
+  function formatAiWhatsappAudioDisabled() {
+    return "Recebi seu audio, mas a transcricao ainda nao esta ativa. Envie o comando em texto.";
   }
 
   function formatAiWhatsappAudioPreview(transcript: string, preview: OwnerCommandPreviewResponse, code: string) {
@@ -6102,6 +6108,17 @@ export function createApp() {
           phone: message.maskedPhone,
         },
       });
+      if (!audioTranscriptionEnabled) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_AUDIO_TRANSCRIPTION_DISABLED",
+          entity: "ai_whatsapp_audio",
+          entityId: audioEntityId,
+          after: { reason: "feature_disabled", phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(formatAiWhatsappAudioDisabled());
+        return { ok: true, executed: false, audio: true, disabled: true, responseDelivered };
+      }
       if (!message.audio.messageId) {
         await safeAudit({
           unitId,
