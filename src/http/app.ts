@@ -18,6 +18,11 @@ import {
   getGeminiAudioTranscriptionTimeoutMsFromEnv,
   isAudioTranscriptionEnabledFromEnv,
 } from "../application/audio-transcription";
+import {
+  AiWhatsappEntityKind,
+  isAiWhatsappResolvedEntityStatus,
+  resolveAiWhatsappEntity,
+} from "../application/whatsapp-entity-resolution";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
@@ -1157,9 +1162,23 @@ export function createApp() {
     return partial.length === 1 ? partial[0] : null;
   }
 
+  function resolveWhatsappEntity<T extends Record<string, unknown>>(input: {
+    entity: AiWhatsappEntityKind;
+    rows: T[];
+    getName: (item: T) => unknown;
+    name: string;
+    allowAliases?: boolean;
+  }) {
+    return resolveAiWhatsappEntity({
+      ...input,
+      aliases: input.allowAliases === false ? [] : undefined,
+    });
+  }
+
   async function resolveOwnerCommandSchedule(input: {
     unitId: string;
     draft: OwnerCommandScheduleDraft;
+    strictWhatsappEntities?: boolean;
   }) {
     const catalog = await operations.getCatalog({ unitId: input.unitId });
     const clients = catalog.clients as unknown as Array<Record<string, unknown>>;
@@ -1168,18 +1187,29 @@ export function createApp() {
     const missingFields: string[] = [];
     const warnings: string[] = [];
 
-    const client = findUniqueByName(
+    const whatsappClient = input.strictWhatsappEntities
+      ? resolveWhatsappEntity({ entity: "client", rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName, allowAliases: false })
+      : null;
+    const client = input.strictWhatsappEntities ? whatsappClient?.match ?? null : findUniqueByName(
       clients,
       (item) => item.fullName ?? item.name,
       input.draft.clientName,
     );
-    if (!client) warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+    if (input.strictWhatsappEntities && whatsappClient && whatsappClient.status !== "NOT_FOUND" && !isAiWhatsappResolvedEntityStatus(whatsappClient.status)) {
+      missingFields.push("clientName");
+      warnings.push("Cliente nao encontrado com seguranca. Informe o nome exato.");
+    } else if (!client) {
+      warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+    }
 
     const serviceIds = input.draft.serviceNames
       .map((name) => {
-        const service = findUniqueByName(services, (item) => item.name, name);
-        if (!service) {
-          warnings.push(`Servico nao encontrado ou ambiguo: ${name}.`);
+        const whatsappService = input.strictWhatsappEntities
+          ? resolveWhatsappEntity({ entity: "service", rows: services, getName: (item) => item.name, name })
+          : null;
+        const service = input.strictWhatsappEntities ? whatsappService?.match ?? null : findUniqueByName(services, (item) => item.name, name);
+        if (!service || (whatsappService && !isAiWhatsappResolvedEntityStatus(whatsappService.status))) {
+          warnings.push("Servico nao encontrado, ambiguo ou sem alias autorizado. Informe o nome exato.");
           return "";
         }
         return String(service.id ?? "");
@@ -1187,15 +1217,18 @@ export function createApp() {
       .filter(Boolean);
     if (serviceIds.length !== input.draft.serviceNames.length) missingFields.push("serviceNames");
 
-    let professional = input.draft.professionalName
-      ? findUniqueByName(professionals, (item) => item.name, input.draft.professionalName)
+    const whatsappProfessional = input.strictWhatsappEntities && input.draft.professionalName
+      ? resolveWhatsappEntity({ entity: "professional", rows: professionals, getName: (item) => item.name, name: input.draft.professionalName, allowAliases: false })
       : null;
-    if (!professional && professionals.length === 1) {
+    let professional = input.draft.professionalName
+      ? input.strictWhatsappEntities ? whatsappProfessional?.match ?? null : findUniqueByName(professionals, (item) => item.name, input.draft.professionalName)
+      : null;
+    if (!professional && !input.draft.professionalName && professionals.length === 1) {
       professional = professionals[0];
     }
-    if (!professional) {
+    if (!professional || (whatsappProfessional && !isAiWhatsappResolvedEntityStatus(whatsappProfessional.status))) {
       missingFields.push("professionalName");
-      warnings.push("Profissional nao encontrado ou ambiguo.");
+      warnings.push("Profissional nao encontrado ou ambiguo. Informe o nome exato.");
     }
 
     const startsAt = new Date(`${input.draft.date}T${input.draft.time}:00.000-03:00`);
@@ -1229,10 +1262,23 @@ export function createApp() {
       .map((item) => ({ id: item.id, fullName: item.fullName }));
   }
 
-  async function ensureOwnerCommandClient(input: { unitId: string; clientName: string }) {
+  async function ensureOwnerCommandClient(input: { unitId: string; clientName: string; strictWhatsappEntities?: boolean }) {
     const normalizedName = normalizeMatchText(input.clientName);
     if (!normalizedName) throw new Error("Cliente obrigatorio para confirmar agendamento.");
     const clients = await getOwnerCommandClients(input.unitId);
+    if (input.strictWhatsappEntities) {
+      const resolved = resolveWhatsappEntity({
+        entity: "client",
+        rows: clients,
+        getName: (item) => item.fullName,
+        name: input.clientName,
+        allowAliases: false,
+      });
+      if (isAiWhatsappResolvedEntityStatus(resolved.status) && resolved.match) return resolved.match.id;
+      if (resolved.status !== "NOT_FOUND") {
+        throw new Error("Cliente nao encontrado com seguranca. Gere uma nova previa.");
+      }
+    }
     const exact = clients.filter((item) => normalizeMatchText(item.fullName) === normalizedName);
     if (exact.length === 1) return exact[0].id;
     if (exact.length > 1) throw new Error("Cliente ambiguo. Revise a previa antes de confirmar.");
@@ -1270,6 +1316,7 @@ export function createApp() {
   async function resolveOwnerCommandProductSale(input: {
     unitId: string;
     draft: OwnerCommandProductSaleDraft;
+    strictWhatsappEntities?: boolean;
   }) {
     const [catalog, paymentMethods] = await Promise.all([
       operations.getCatalog({ unitId: input.unitId }),
@@ -1289,17 +1336,28 @@ export function createApp() {
     const missingFields: string[] = [];
     const warnings: string[] = [];
 
-    const client = findUniqueByName(
+    const whatsappClient = input.strictWhatsappEntities
+      ? resolveWhatsappEntity({ entity: "client", rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName, allowAliases: false })
+      : null;
+    const client = input.strictWhatsappEntities ? whatsappClient?.match ?? null : findUniqueByName(
       clients,
       (item) => item.fullName ?? item.name,
       input.draft.clientName,
     );
-    if (!client) warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+    if (input.strictWhatsappEntities && whatsappClient && whatsappClient.status !== "NOT_FOUND" && !isAiWhatsappResolvedEntityStatus(whatsappClient.status)) {
+      missingFields.push("clientName");
+      warnings.push("Cliente nao encontrado com seguranca. Informe o nome exato.");
+    } else if (!client) {
+      warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
+    }
 
-    const product = findUniqueByName(products, (item) => item.name, input.draft.productName);
-    if (!product) {
+    const whatsappProduct = input.strictWhatsappEntities
+      ? resolveWhatsappEntity({ entity: "product", rows: products, getName: (item) => item.name, name: input.draft.productName })
+      : null;
+    const product = input.strictWhatsappEntities ? whatsappProduct?.match ?? null : findUniqueByName(products, (item) => item.name, input.draft.productName);
+    if (!product || (whatsappProduct && !isAiWhatsappResolvedEntityStatus(whatsappProduct.status))) {
       missingFields.push("productName");
-      warnings.push(`Produto nao encontrado ou ambiguo: ${input.draft.productName}.`);
+      warnings.push("Produto nao encontrado, ambiguo ou sem alias autorizado. Informe o nome exato.");
     }
 
     const quantity = Math.trunc(Number(input.draft.quantity));
@@ -1308,10 +1366,13 @@ export function createApp() {
       warnings.push("Quantidade invalida para venda de produto.");
     }
 
-    const paymentMethod = findUniqueByName(paymentMethods, (item) => item.name, input.draft.paymentMethod);
-    if (!paymentMethod) {
+    const whatsappPayment = input.strictWhatsappEntities
+      ? resolveWhatsappEntity({ entity: "payment", rows: paymentMethods, getName: (item) => item.name, name: input.draft.paymentMethod })
+      : null;
+    const paymentMethod = input.strictWhatsappEntities ? whatsappPayment?.match ?? null : findUniqueByName(paymentMethods, (item) => item.name, input.draft.paymentMethod);
+    if (!paymentMethod || (whatsappPayment && !isAiWhatsappResolvedEntityStatus(whatsappPayment.status))) {
       missingFields.push("paymentMethod");
-      warnings.push(`Metodo de pagamento nao encontrado ou inativo: ${input.draft.paymentMethod}.`);
+      warnings.push("Metodo de pagamento nao encontrado, ambiguo ou sem alias autorizado.");
     }
 
     const stockQty = Number(product?.stockQty ?? product?.quantity ?? 0);
@@ -1697,6 +1758,26 @@ export function createApp() {
     return `Entendi o audio como: '${safeTranscript}'\nConfira a previa abaixo.\n\n${formatAiWhatsappPreview(preview, code)}`;
   }
 
+  function formatAiWhatsappEntityClarification(preview: OwnerCommandPreviewResponse) {
+    const labels: Record<string, string> = {
+      clientName: "cliente",
+      productName: "produto",
+      serviceNames: "servico",
+      professionalName: "profissional",
+      paymentMethod: "forma de pagamento",
+    };
+    const fields = (preview.missingFields ?? [])
+      .map((field) => labels[field])
+      .filter((field): field is string => Boolean(field));
+    if (!fields.length) return formatAiWhatsappGuidance();
+    const onlyPeople = (preview.missingFields ?? []).every(
+      (field) => field === "clientName" || field === "professionalName",
+    );
+    return onlyPeople
+      ? `Preciso confirmar ${fields.join(", ")} com seguranca. Informe o nome exato.`
+      : `Preciso confirmar ${fields.join(", ")} com seguranca. Informe o nome exato ou um alias autorizado.`;
+  }
+
   async function parseOwnerCommandPreview(input: {
     unitId: string;
     actorId?: string;
@@ -1726,7 +1807,7 @@ export function createApp() {
       const normalized = normalizeOwnerScheduleDraft(parsed.draft);
       const resolved = normalized.missingFields.length
         ? { missingFields: normalized.missingFields, warnings: [] as string[], schedule: null }
-        : await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft });
+        : await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: input.screenContext === "whatsapp" });
       const missingFields = Array.from(
         new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
       );
@@ -1747,7 +1828,7 @@ export function createApp() {
       const normalized = normalizeOwnerProductSaleDraft(parsed.draft);
       const resolved = normalized.missingFields.length
         ? { missingFields: normalized.missingFields, warnings: [] as string[], sale: null }
-        : await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft });
+        : await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: input.screenContext === "whatsapp" });
       const missingFields = Array.from(
         new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
       );
@@ -1823,7 +1904,7 @@ export function createApp() {
         intent: input.intent,
         draft: normalized.draft,
       });
-      const resolved = await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft });
+      const resolved = await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: Boolean(input.idempotencyPrefix) });
       if (resolved.missingFields.length || !resolved.sale) {
         return {
           ok: false,
@@ -1839,6 +1920,7 @@ export function createApp() {
       const clientId = resolved.sale.clientId || await ensureOwnerCommandClient({
         unitId: input.unitId,
         clientName: resolved.sale.clientName,
+        strictWhatsappEntities: Boolean(input.idempotencyPrefix),
       });
       const idempotencyKey = `${input.idempotencyPrefix ?? ""}${buildOwnerCommandExecutionIdempotencyKey({
         intent: input.intent,
@@ -1910,7 +1992,7 @@ export function createApp() {
       intent: input.intent,
       draft: normalized.draft,
     });
-    const resolved = await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft });
+    const resolved = await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: Boolean(input.idempotencyPrefix) });
     if (resolved.missingFields.length || !resolved.schedule) {
       return {
         ok: false,
@@ -1926,6 +2008,7 @@ export function createApp() {
     const clientId = resolved.schedule.clientId || await ensureOwnerCommandClient({
       unitId: input.unitId,
       clientName: resolved.schedule.clientName,
+      strictWhatsappEntities: Boolean(input.idempotencyPrefix),
     });
     const appointment = await operations.schedule({
       unitId: input.unitId,
@@ -6342,7 +6425,9 @@ export function createApp() {
         },
       });
       const responseDelivered = await safeSend(
-        preview.intent === "unknown" ? formatAiWhatsappGuidance() : preview.executionMessage ?? formatAiWhatsappGuidance(),
+        preview.intent === "unknown"
+          ? formatAiWhatsappGuidance()
+          : preview.executionMessage ?? formatAiWhatsappEntityClarification(preview),
       );
       return { ok: true, executed: false, intent: preview.intent, responseDelivered };
     }

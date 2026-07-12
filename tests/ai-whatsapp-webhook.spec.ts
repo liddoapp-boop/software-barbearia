@@ -272,6 +272,86 @@ describe("Atendente IA WhatsApp-first", () => {
     });
   });
 
+  it("resolve alias explicito de produto sem executar antes da confirmacao", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
+      clientName: "CLIENTE TESTE IA WPP",
+      productName: "Pomada",
+      quantity: 1,
+      paymentMethod: "Pix",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para CLIENTE TESTE IA WPP, ele pagou no Pix."));
+
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Produto: Pomada Matte");
+    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
+  });
+
+  it("bloqueia produto parcial sem alias e nao cria pendencia executavel", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
+      clientName: "CLIENTE TESTE IA WPP",
+      productName: "Oleo",
+      quantity: 1,
+      paymentMethod: "Pix",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi um oleo para CLIENTE TESTE IA WPP, ele pagou no Pix."));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("produto");
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("bloqueia cliente e profissional parciais no WhatsApp", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("schedule_appointment", {
+      clientName: "Joao",
+      serviceNames: ["Corte masculino"],
+      professionalName: "Geovane",
+      date: "2026-12-15",
+      time: "10:00",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Agende corte para Joao."));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("nome exato");
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("resolve alias explicito de servico sem alterar o fluxo do painel", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("schedule_appointment", {
+      clientName: "CLIENTE TESTE IA WPP",
+      serviceNames: ["Corte masculino"],
+      date: "2026-12-15",
+      time: "10:00",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload("Agende corte masculino para CLIENTE TESTE IA WPP."));
+
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+  });
+
   it("texto de agendamento gera previa e nao executa", async () => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
