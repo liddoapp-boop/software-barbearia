@@ -205,3 +205,30 @@ tentativa. Os contadores antes e depois permaneceram iguais (vendas 2,
 lancamentos financeiros 2, agendamentos 5 e checkouts 0), e Pomada permaneceu
 com estoque 8. Esses valores sao somente a linha de base do banco piloto, nao
 representam criacao durante a observacao.
+
+## Fechamento: validacao real apos correcao do extrator
+
+O novo audio humano controlado chegou ao webhook e foi processado sem expor
+conteudo. A auditoria confirmou audio OGG/Opus, download somente em memoria,
+transcricao concluida pelo Gemini em aproximadamente 9.048 ms com HTTP 200 e
+fingerprint estrutural de `steps`: uma etapa `thought` e uma etapa
+`model_output`, com uma parte textual. O texto nao foi registrado.
+
+O comando foi interpretado como `sell_product`; o parser Gemini textual sofreu
+timeout, mas o fallback controlado classificou a intencao e permitiu gerar a
+previa. A previa foi recebida no WhatsApp e o owner respondeu somente
+`CANCELAR`. A auditoria registrou `AI_WHATSAPP_COMMAND_CANCELLED` com
+cancelamento confirmado. Nao houve auditoria de confirmacao comercial.
+
+Snapshot antes/depois da janela controlada: vendas 2 -> 2, financeiro 2 -> 2,
+agendamentos 5 -> 5, checkouts 0 -> 0 e Pomada 8 -> 8. As auditorias WhatsApp
+foram de 44 para 50, correspondendo aos seis eventos tecnicos: audio recebido,
+transcricao iniciada, transcricao concluida, fallback usado, comando interpretado
+e comando cancelado. Nenhuma venda, lancamento financeiro, agendamento, checkout
+ou baixa de estoque foi criada.
+
+Decisao final: **APROVADO COM RESSALVAS**. As ressalvas sao a transcricao
+incorreta do nome do cliente observada pelo operador e o timeout do parser Gemini
+textual, compensado pelo fallback controlado. A confirmacao humana obrigatoria e
+o cancelamento preservaram a seguranca do fluxo. A melhoria de fidelidade de
+nomes e a robustez do parser textual ficam fora desta macro.

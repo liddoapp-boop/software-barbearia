@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
-import { getGeminiAudioTranscriptionTimeoutMsFromEnv } from "../src/application/audio-transcription";
+import {
+  AudioTranscriptionError,
+  createAudioTranscriptionResponseFingerprint,
+  extractTranscript,
+  GeminiAudioTranscriptionService,
+  getGeminiAudioTranscriptionTimeoutMsFromEnv,
+} from "../src/application/audio-transcription";
 
 const originalEnv = { ...process.env };
 const audioBytes = "AQIDBA==";
@@ -32,6 +38,7 @@ function mockTransport(input: {
   downloadOk?: boolean;
   sendOk?: boolean;
   realTranscript?: string;
+  realPayload?: unknown;
   realStatus?: number;
   realTimeout?: boolean;
 } = {}) {
@@ -49,7 +56,11 @@ function mockTransport(input: {
         throw error;
       }
       if (input.realStatus) return { ok: false, status: input.realStatus, text: async () => "" };
-      return { ok: true, json: async () => ({ output_text: input.realTranscript === undefined ? "Vendi uma pomada para CLIENTE TESTE IA AUDIO, ele pagou no Pix." : input.realTranscript }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => input.realPayload ?? { output_text: input.realTranscript === undefined ? "Vendi uma pomada para CLIENTE TESTE IA AUDIO, ele pagou no Pix." : input.realTranscript },
+      };
     }
     return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "{" }] } }] }) };
   });
@@ -87,6 +98,60 @@ async function audits(app: FastifyInstance, token: string) {
   });
   return response.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>;
 }
+
+describe("extrator de respostas Gemini Interactions", () => {
+  it.each([
+    ["output_text", { output_text: "  texto direto  " }, "texto direto"],
+    ["outputs legado", { outputs: [{ type: "text", text: "texto outputs" }] }, "texto outputs"],
+    ["steps model_output", { steps: [{ type: "model_output", content: [{ type: "text", text: "texto steps" }] }] }, "texto steps"],
+    ["multiplas partes", { steps: [{ type: "model_output", content: [{ type: "text", text: "primeira" }, { type: "text", text: "segunda" }] }] }, "primeira segunda"],
+    ["etapas nao textuais", { steps: [{ type: "thought", content: [{ type: "text", text: "ignorar" }] }, { type: "model_output", content: [{ type: "audio" }, { type: "text", text: "saida" }] }] }, "saida"],
+    ["candidates legado", { candidates: [{ content: { parts: [{ text: "texto candidates" }] } }] }, "texto candidates"],
+    ["formatos misturados respeitam prioridade", { output_text: "prioritario", outputs: [{ text: "nao usar" }], steps: [{ type: "model_output", content: [{ type: "text", text: "nao usar" }] }] }, "prioritario"],
+    ["payload vazio", {}, ""],
+    ["texto apenas espacos", { output_text: "   ", outputs: [{ text: "\t" }] }, ""],
+    ["tipos invalidos", { output_text: {}, outputs: "invalid", steps: [{ type: "model_output", content: [{ type: "text", text: {} }] }], candidates: [null] }, ""],
+  ])("extrai com seguranca %s", (_name, payload, expected) => {
+    expect(() => extractTranscript(payload)).not.toThrow();
+    expect(extractTranscript(payload)).toBe(expected);
+  });
+
+  it("gera fingerprint estrutural sem texto ou conteudo sensivel", () => {
+    const fingerprint = createAudioTranscriptionResponseFingerprint({
+      output_text: "TRANSCRICAO QUE NAO DEVE SER AUDITADA",
+      outputs: [{ type: "text", text: "tambem nao registrar" }],
+      steps: [{ type: "model_output", content: [{ type: "text", text: "nao registrar" }, { type: "audio" }] }],
+    }, "correlation-test-001");
+
+    expect(fingerprint).toEqual({
+      topLevelKeys: ["output_text", "outputs", "steps"],
+      outputsCount: 1,
+      stepsCount: 1,
+      stepTypes: ["model_output"],
+      contentPartTypes: ["text", "audio"],
+      hasOutputText: true,
+      correlationId: "correlation-test-001",
+    });
+    expect(JSON.stringify(fingerprint)).not.toContain("TRANSCRICAO");
+    expect(JSON.stringify(fingerprint)).not.toContain("nao registrar");
+  });
+
+  it("preserva status HTTP e fingerprint quando a resposta valida nao possui texto", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ steps: [{ type: "model_output", content: [{ type: "audio" }] }] }) })));
+    const service = new GeminiAudioTranscriptionService("fake-key", "gemini-test", 1_000, 2, 60_000);
+
+    try {
+      await service.transcribe({ audio: Buffer.from([1]), mimetype: "audio/ogg", correlationId: "correlation-empty-001" });
+      throw new Error("Era esperada falha de transcricao vazia.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AudioTranscriptionError);
+      const transcriptionError = error as AudioTranscriptionError;
+      expect(transcriptionError.reason).toBe("audio_transcription_empty");
+      expect(transcriptionError.diagnostics).toMatchObject({ providerCalled: true, httpStatus: 200 });
+      expect(transcriptionError.diagnostics.responseFingerprint).toMatchObject({ stepsCount: 1, correlationId: "correlation-empty-001" });
+    }
+  });
+});
 
 describe("audio do atendente IA via WhatsApp", () => {
   beforeEach(() => {
@@ -235,9 +300,15 @@ describe("audio do atendente IA via WhatsApp", () => {
     process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
     process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
     process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Vendi uma pomada para CLIENTE DO MOCK, ele pagou no Pix.";
-    const fetchMock = mockTransport({ realTranscript: "Agendar corte para CLIENTE TRANSCRITO REAL dia 14/07/2026 as 11:00" });
+    const fetchMock = mockTransport({
+      realPayload: {
+        steps: [{ type: "model_output", content: [{ type: "text", text: "Agendar corte para CLIENTE TRANSCRITO REAL dia 14/07/2026 as 11:00" }] }],
+      },
+    });
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
+    const token = await loginOwner(app);
+    const before = await app.inject({ method: "GET", url: "/sales/products?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
 
     const response = await postWebhook(app, audioPayload());
 
@@ -247,6 +318,11 @@ describe("audio do atendente IA via WhatsApp", () => {
     const interactionCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/v1beta/interactions")) as [string, RequestInit?] | undefined;
     const interactionBody = JSON.parse(String(interactionCall?.[1]?.body ?? ""));
     expect(interactionBody.input[1]).toMatchObject({ type: "audio", mime_type: "audio/ogg" });
+    const events = await audits(app, token);
+    const completed = events.find((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_COMPLETED");
+    expect(completed?.afterJson).toMatchObject({ httpStatus: 200, responseFingerprint: { stepsCount: 1, stepTypes: ["model_output"] } });
+    const after = await app.inject({ method: "GET", url: "/sales/products?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+    expect((after.json().sales as unknown[]).length).toBe((before.json().sales as unknown[]).length);
   });
 
   it("trata 429, 5xx, timeout e resposta vazia do provider real sem executar", async () => {

@@ -6193,6 +6193,7 @@ export function createApp() {
         const transcription = await audioTranscriptionService.transcribe({
           audio: audioBytes,
           mimetype: message.audio.mimetype,
+          correlationId: request.id,
         });
         audioTranscript = transcription.transcript.trim().slice(0, 1000);
         if (!audioTranscript) throw new AudioTranscriptionError("audio_transcription_empty");
@@ -6208,6 +6209,7 @@ export function createApp() {
             providerCalled: transcription.diagnostics?.providerCalled ?? null,
             durationMs: transcription.diagnostics?.durationMs ?? null,
             httpStatus: transcription.diagnostics?.httpStatus ?? null,
+            responseFingerprint: transcription.diagnostics?.responseFingerprint ?? null,
             phone: message.maskedPhone,
           },
         });
@@ -6224,6 +6226,7 @@ export function createApp() {
             providerCalled: diagnostics?.providerCalled ?? null,
             durationMs: diagnostics?.durationMs ?? null,
             httpStatus: diagnostics?.httpStatus ?? null,
+            responseFingerprint: diagnostics?.responseFingerprint ?? null,
             phone: message.maskedPhone,
           },
         });
