@@ -200,11 +200,21 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(sentTexts(fetchMock).at(-1)).toContain("CONFIRMAR");
     const events = await audits(app, token);
     expect(events.map((event) => event.action)).toEqual(expect.arrayContaining([
+      "AI_WHATSAPP_PIPELINE_RECEIVED",
       "AI_WHATSAPP_AUDIO_RECEIVED",
+      "AI_WHATSAPP_AUDIO_MEDIA_DOWNLOADED",
       "AI_WHATSAPP_AUDIO_TRANSCRIPTION_STARTED",
       "AI_WHATSAPP_AUDIO_TRANSCRIPTION_COMPLETED",
+      "AI_WHATSAPP_PARSER_STARTED",
+      "AI_WHATSAPP_BOUNDARY_EVALUATED",
+      "AI_WHATSAPP_ENTITY_RESOLUTION_COMPLETED",
+      "AI_WHATSAPP_PARSER_COMPLETED",
+      "AI_WHATSAPP_FINAL_DECISION",
       "AI_WHATSAPP_COMMAND_PARSED",
     ]));
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT ?? "");
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_STARTED" && typeof event.afterJson?.textFingerprint === "string")).toBe(true);
   });
 
   it("texto transcrito de agendamento usa a mesma previa textual", async () => {

@@ -132,6 +132,12 @@ function sentWhatsAppTexts(fetchMock: ReturnType<typeof vi.fn>) {
     });
 }
 
+function sentWhatsAppTargets(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls
+    .filter(([url]) => String(url).includes("/message/sendText/"))
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body ?? "{}")).number as string);
+}
+
 function lastConfirmationCode(fetchMock: ReturnType<typeof vi.fn>) {
   const text = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
   return text.match(/CONFIRMAR\s+(\d{4})/)?.[1] ?? "";
@@ -225,6 +231,58 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(sentWhatsAppTexts(fetchMock)).toEqual([]);
   });
 
+  it("autoriza payload LID sanitizado pelo remoteJidAlt e responde ao telefone real", async () => {
+    process.env.AI_WHATSAPP_OWNER_PHONE = "5511999999452";
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para CLIENTE TESTE IA WPP, ele pagou no Pix.", "5511999999452", {
+      data: {
+        key: {
+          remoteJid: "999999999999744@lid",
+          remoteJidAlt: "5511999999452@s.whatsapp.net",
+          fromMe: false,
+        },
+        message: { conversation: "Vendi uma pomada para CLIENTE TESTE IA WPP, ele pagou no Pix." },
+      },
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
+    expect(sentWhatsAppTargets(fetchMock).at(-1)).toBe("5511999999452");
+    const events = await auditEvents(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PIPELINE_RECEIVED" && typeof event.afterJson?.correlationId === "string")).toBe(true);
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
+  });
+
+  it("nunca autoriza owner pelos digitos do LID", async () => {
+    process.env.AI_WHATSAPP_OWNER_PHONE = "55999999999999744";
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para Lucas no Pix.", "55999999999999744", {
+      data: {
+        key: {
+          remoteJid: "999999999999744@lid",
+          remoteJidAlt: "5511999999452@s.whatsapp.net",
+          fromMe: false,
+        },
+        message: { conversation: "Vendi uma pomada para Lucas no Pix." },
+      },
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, ignored: true });
+    expect(sentWhatsAppTexts(fetchMock)).toEqual([]);
+  });
+
   it("ignora mensagem de grupo", async () => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
@@ -266,10 +324,62 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Para confirmar, responda: CONFIRMAR");
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(0);
     await expect(countCommercialState(app, token)).resolves.toEqual({
       ...before,
       parsedAudits: before.parsedAudits + 1,
     });
+  });
+
+  it("comando incompleto chama Gemini, completa apenas o campo ausente e gera previa", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
+      clientName: "CLIENTE TESTE IA WPP",
+      productName: "Pomada",
+      quantity: 1,
+      paymentMethod: "Pix",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para CLIENTE TESTE IA WPP."));
+
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(1);
+    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+  });
+
+  it("timeout Gemini com comando incompleto pede esclarecimento sem codigo", async () => {
+    const fetchMock = mockGeminiTimeoutAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para CLIENTE TESTE IA WPP."));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    const events = await auditEvents(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "deterministic_after_gemini_failure" && event.afterJson?.status === "TIMEOUT")).toBe(true);
+  });
+
+  it("delimita fala natural sem associar cliente parcial nem criar previa executavel", async () => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
+      clientName: "Joao",
+      productName: "Pomada",
+      quantity: 1,
+      paymentMethod: "Pix",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao e ele pagou no Pix."));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("nome exato");
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
   });
 
   it("resolve alias explicito de produto sem executar antes da confirmacao", async () => {
@@ -421,7 +531,7 @@ describe("Atendente IA WhatsApp-first", () => {
     }
   });
 
-  it("429 repetido abre circuito, usa fallback e nao insiste no Gemini", async () => {
+  it("429 repetido abre circuito e comando deterministico completo nao insiste no Gemini", async () => {
     const fetchMock = mockGeminiUnavailableAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -435,7 +545,8 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(fallback.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment" });
     expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(2);
     const events = await auditEvents(app, token);
-    expect(events.some((event) => event.action === "AI_WHATSAPP_FALLBACK_USED" && event.afterJson?.reason === "gemini_circuit_open")).toBe(true);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_FALLBACK_USED")).toBe(false);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "deterministic")).toBe(true);
   });
 
   it("comando desconhecido recebe orientacao de formato e auditoria sem numero completo", async () => {

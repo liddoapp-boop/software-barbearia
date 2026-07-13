@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  AI_WHATSAPP_ENTITY_ALIASES,
+  normalizeAiWhatsappEntityText,
+} from "./whatsapp-entity-resolution";
 
 export type OwnerCommandContext = {
   unitId: string;
@@ -41,7 +45,9 @@ export type OwnerCommandParseResult = {
 export type OwnerCommandFallbackReason =
   | "gemini_429"
   | "gemini_5xx"
+  | "gemini_http_error"
   | "gemini_timeout"
+  | "gemini_empty_response"
   | "gemini_invalid_json"
   | "gemini_invalid_schema"
   | "gemini_circuit_open"
@@ -51,15 +57,34 @@ export class OwnerCommandParserError extends Error {
   constructor(
     readonly reason: OwnerCommandFallbackReason,
     message: string,
+    readonly httpStatus?: number,
   ) {
     super(message);
     this.name = "OwnerCommandParserError";
   }
 }
 
+export type OwnerCommandParserStatus =
+  | "PARSED_COMPLETE"
+  | "PARSED_INCOMPLETE"
+  | "AMBIGUOUS"
+  | "UNSUPPORTED"
+  | "TIMEOUT"
+  | "PROVIDER_ERROR"
+  | "INVALID_RESPONSE";
+
+export type OwnerCommandParserAttempt = {
+  status: OwnerCommandParserStatus;
+  result?: OwnerCommandParseResult;
+  durationMs: number;
+  httpStatus?: number;
+  failureCode?: OwnerCommandFallbackReason;
+};
+
 export interface OwnerCommandParser {
   readonly modelVersion: string;
   parse(input: OwnerCommandParseInput): Promise<OwnerCommandParseResult>;
+  parseGemini(input: OwnerCommandParseInput): Promise<OwnerCommandParserAttempt>;
 }
 
 const ownerCommandResponseSchema = z.object({
@@ -297,11 +322,21 @@ function findProductName(message: string, context: OwnerCommandContext) {
 
 function findPaymentMethodName(message: string, context: OwnerCommandContext) {
   const normalized = ` ${normalizeMatchText(message)} `;
-  return context.paymentMethods
+  const exact = context.paymentMethods
     .map((method) => method.name)
     .filter(Boolean)
     .sort((a, b) => normalizeMatchText(b).length - normalizeMatchText(a).length)
     .find((name) => normalized.includes(` ${normalizeMatchText(name)} `));
+  if (exact) return exact;
+  const aliases = AI_WHATSAPP_ENTITY_ALIASES.filter(
+    (alias) => alias.entity === "payment" && normalized.includes(` ${normalizeAiWhatsappEntityText(alias.alias)} `),
+  );
+  if (aliases.length !== 1) return undefined;
+  const target = normalizeAiWhatsappEntityText(aliases[0].canonicalName);
+  const matchingMethods = context.paymentMethods.filter(
+    (method) => normalizeAiWhatsappEntityText(method.name) === target,
+  );
+  return matchingMethods.length === 1 ? matchingMethods[0].name : undefined;
 }
 
 function parseProductQuantity(message: string) {
@@ -322,8 +357,8 @@ function parseQuotedUnitPrice(message: string) {
 }
 
 function extractProductSaleClientName(message: string) {
-  const match = message.match(/\b(?:para|pra|pro)\s+(.+?)(?:,|\.|\s+(?:ele|ela)\s+pagou|\s+pagou|\s+no\s+|\s+na\s+|$)/i);
-  return match?.[1] ? cleanClientName(match[1]) : "";
+  const match = message.match(/\b(?:para|pra|pro)\s+(.+?)(?=[,.;]|$)/i);
+  return match?.[1] ? delimitOperationEntity(match[1]) : "";
 }
 
 function extractProductNameFromSaleMessage(message: string) {
@@ -340,24 +375,38 @@ function cleanClientName(value: string) {
     .trim();
 }
 
+const operationEntityBoundary = /\s+(?:(?:e\s+|a[ií]\s+)?(?:ele|ela)\s+pagou\b|(?:e\s+|a[ií]\s+)?pagou\s+(?:no|na|em)\b|(?:e\s+|a[ií]\s+)?foi\s+(?:no|na|em)\b|pagamento\s+(?:no|na|em)\b|com\s+pagamento\s+(?:no|na|em)\b|recebi\s+em\b|e\s+marcou\b|para\s+amanh[ãa]\b|com\s+o\s+profissional\b)/i;
+
+export function getOwnerCommandBoundaryObservation(message: string) {
+  const candidate = message.match(/\b(?:para|pra|pro)\s+(.+?)(?=[,.;]|$)/i)?.[1] ?? "";
+  return {
+    result: candidate && operationEntityBoundary.test(candidate) ? "BOUNDARY_MATCHED" : "BOUNDARY_NOT_MATCHED",
+  };
+}
+
+function delimitOperationEntity(value: string) {
+  const match = operationEntityBoundary.exec(value);
+  return cleanClientName(match ? value.slice(0, match.index) : value);
+}
+
 function extractClientName(message: string, serviceName?: string) {
   const dateMarker = "(?:amanh[ãa]|hoje|na\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|no\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|dia\\s+\\d{1,2}\\/\\d{1,2}|[àa]s\\s*\\d{1,2})";
   if (serviceName) {
     const servicePattern = escapeRegex(serviceName);
     const serviceBeforeClient = new RegExp(`\\b${servicePattern}\\b\\s+(?:para|pra|pro)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
     const serviceBeforeMatch = message.match(serviceBeforeClient);
-    if (serviceBeforeMatch?.[1]) return cleanClientName(serviceBeforeMatch[1]);
+    if (serviceBeforeMatch?.[1]) return delimitOperationEntity(serviceBeforeMatch[1]);
   }
 
   const clientBeforeDate = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
   const clientBeforeDateMatch = message.match(clientBeforeDate);
-  if (clientBeforeDateMatch?.[1]) return cleanClientName(clientBeforeDateMatch[1]);
+  if (clientBeforeDateMatch?.[1]) return delimitOperationEntity(clientBeforeDateMatch[1]);
 
   if (serviceName) {
     const servicePattern = escapeRegex(serviceName);
     const clientBeforeService = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?:para|pra|pro)\\s+${servicePattern}\\b`, "i");
     const clientBeforeServiceMatch = message.match(clientBeforeService);
-    if (clientBeforeServiceMatch?.[1]) return cleanClientName(clientBeforeServiceMatch[1]);
+    if (clientBeforeServiceMatch?.[1]) return delimitOperationEntity(clientBeforeServiceMatch[1]);
   }
   return "";
 }
@@ -444,6 +493,10 @@ function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerComm
   };
 }
 
+export function parseDeterministicOwnerCommand(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
+  return deterministicProductSaleParse(input) ?? deterministicScheduleParse(input);
+}
+
 function normalizeResult(value: unknown): OwnerCommandParseResult {
   const parsed = ownerCommandResponseSchema.parse(value);
   return {
@@ -488,10 +541,8 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
   }
 
   private fallbackOrThrow(input: OwnerCommandParseInput, reason: OwnerCommandFallbackReason) {
-    const productSale = deterministicProductSaleParse(input);
-    if (productSale) return { ...productSale, fallbackReason: reason };
-    const schedule = deterministicScheduleParse(input);
-    if (schedule) return { ...schedule, fallbackReason: reason };
+    const deterministic = parseDeterministicOwnerCommand(input);
+    if (deterministic) return { ...deterministic, fallbackReason: reason };
     throw new OwnerCommandParserError(
       reason,
       reason === "gemini_invalid_json" || reason === "gemini_invalid_schema" || reason === "parser_error"
@@ -500,9 +551,10 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
     );
   }
 
-  async parse(input: OwnerCommandParseInput): Promise<OwnerCommandParseResult> {
+  async parseGemini(input: OwnerCommandParseInput): Promise<OwnerCommandParserAttempt> {
+    const startedAt = Date.now();
     if (Date.now() < this.circuitOpenUntil) {
-      return this.fallbackOrThrow(input, "gemini_circuit_open");
+      return { status: "PROVIDER_ERROR", durationMs: 0, failureCode: "gemini_circuit_open" };
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -523,9 +575,9 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
         },
       );
       if (!response.ok) {
-        const reason = response.status === 429 ? "gemini_429" : response.status >= 500 ? "gemini_5xx" : "parser_error";
+        const reason = response.status === 429 ? "gemini_429" : response.status >= 500 ? "gemini_5xx" : "gemini_http_error";
         if (reason === "gemini_429") this.registerRateLimit(Date.now());
-        throw new OwnerCommandParserError(reason, "IA indisponivel no momento. Tente novamente em instantes.");
+        return { status: "PROVIDER_ERROR", durationMs: Date.now() - startedAt, httpStatus: response.status, failureCode: reason };
       }
 
       const payload = (await response.json()) as GeminiGenerateContentResponse;
@@ -534,26 +586,38 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
         .join("")
         .trim();
       if (!text) {
-        throw new Error("IA retornou uma resposta vazia.");
+        return { status: "INVALID_RESPONSE", durationMs: Date.now() - startedAt, httpStatus: response.status, failureCode: "gemini_empty_response" };
       }
       try {
-        return normalizeResult(JSON.parse(stripJsonFence(text)));
+        const result = normalizeResult(JSON.parse(stripJsonFence(text)));
+        const status = result.intent === "unknown"
+          ? "UNSUPPORTED"
+          : result.missingFields.length
+            ? "PARSED_INCOMPLETE"
+            : "PARSED_COMPLETE";
+        return { status, result, durationMs: Date.now() - startedAt, httpStatus: response.status };
       } catch (error) {
-        throw new OwnerCommandParserError(
-          error instanceof z.ZodError ? "gemini_invalid_schema" : "gemini_invalid_json",
-          "IA nao conseguiu interpretar a mensagem com seguranca.",
-        );
+        return {
+          status: "INVALID_RESPONSE",
+          durationMs: Date.now() - startedAt,
+          httpStatus: response.status,
+          failureCode: error instanceof z.ZodError ? "gemini_invalid_schema" : "gemini_invalid_json",
+        };
       }
     } catch (error) {
-      const reason = error instanceof OwnerCommandParserError
-        ? error.reason
-        : error instanceof Error && error.name === "AbortError"
-          ? "gemini_timeout"
-          : "parser_error";
-      return this.fallbackOrThrow(input, reason);
+      if (error instanceof Error && error.name === "AbortError") {
+        return { status: "TIMEOUT", durationMs: Date.now() - startedAt, failureCode: "gemini_timeout" };
+      }
+      return { status: "PROVIDER_ERROR", durationMs: Date.now() - startedAt, failureCode: "parser_error" };
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async parse(input: OwnerCommandParseInput): Promise<OwnerCommandParseResult> {
+    const attempt = await this.parseGemini(input);
+    if (attempt.result) return attempt.result;
+    return this.fallbackOrThrow(input, attempt.failureCode ?? "parser_error");
   }
 }
 
