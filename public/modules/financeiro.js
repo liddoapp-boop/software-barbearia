@@ -255,8 +255,32 @@ function renderTransactionActions(item = {}) {
   `;
 }
 
+function formatProductItemsSummary(item = {}) {
+  const productItems = Array.isArray(item.productItems)
+    ? item.productItems.filter(
+        (productItem) =>
+          String(productItem?.productName ?? "").trim() &&
+          Number.isFinite(Number(productItem?.quantity)) &&
+          Number(productItem.quantity) > 0,
+      )
+    : [];
+
+  if (productItems.length === 1) {
+    const [productItem] = productItems;
+    return `${String(productItem.productName).trim()} — qtd. ${Number(productItem.quantity)}`;
+  }
+
+  return productItems
+    .map(
+      (productItem) =>
+        `${String(productItem.productName).trim()} x${Number(productItem.quantity)}`,
+    )
+    .join(", ");
+}
+
 function renderTransactionRow(item = {}) {
   const expense = isExpense(item);
+  const productItemsSummary = formatProductItemsSummary(item);
   return `
     <article class="fn-row ${expense ? "fn-row-expense" : "fn-row-income"}">
       <div class="fn-row-main" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}">
@@ -266,7 +290,11 @@ function renderTransactionRow(item = {}) {
         </div>
         <div class="fn-row-copy">
           <strong>${escapeHtml(item.description || originLabel(item))}</strong>
-          <span>${escapeHtml(originLabel(item))} · ${escapeHtml(item.category || "Sem categoria")}</span>
+          <span>${
+            productItemsSummary
+              ? escapeHtml(productItemsSummary)
+              : `${escapeHtml(originLabel(item))} · ${escapeHtml(item.category || "Sem categoria")}`
+          }</span>
           <small>${escapeHtml(item.paymentMethod || "Metodo nao informado")}</small>
         </div>
         <div class="fn-row-value">
@@ -455,6 +483,7 @@ export function renderFinancialEntryDrawer(elements, item = {}) {
   if (!elements.drawerHost || !item?.id) return;
 
   const expense = isExpense(item);
+  const productItemsSummary = formatProductItemsSummary(item);
   const summary = `
     <dl class="op-summary-grid">
       <div><dt>Tipo</dt><dd>${escapeHtml(typeLabel(item.type))}</dd></div>
@@ -463,6 +492,11 @@ export function renderFinancialEntryDrawer(elements, item = {}) {
       <div><dt>Origem</dt><dd>${escapeHtml(originLabel(item))}</dd></div>
       <div><dt>Categoria</dt><dd>${escapeHtml(item.category || "-")}</dd></div>
       <div><dt>Metodo</dt><dd>${escapeHtml(item.paymentMethod || "-")}</dd></div>
+      ${
+        productItemsSummary
+          ? `<div><dt>Produtos</dt><dd>${escapeHtml(productItemsSummary)}</dd></div>`
+          : ""
+      }
       <div><dt>Descricao</dt><dd>${escapeHtml(item.description || "-")}</dd></div>
       <div><dt>Observacao</dt><dd>${escapeHtml(item.notes || "-")}</dd></div>
     </dl>

@@ -6636,7 +6636,15 @@ export class PrismaOperationsService {
     const customerIds = Array.from(
       new Set(rows.map((item) => item.customerId).filter((item): item is string => Boolean(item))),
     );
-    const [professionals, customers] = await Promise.all([
+    const productSaleIds = Array.from(
+      new Set(
+        rows
+          .filter((item) => item.referenceType === "PRODUCT_SALE")
+          .map((item) => item.referenceId)
+          .filter((item): item is string => Boolean(item)),
+      ),
+    );
+    const [professionals, customers, productSales] = await Promise.all([
       professionalIds.length
         ? this.prisma.professional.findMany({
             where: { id: { in: professionalIds }, businessId: input.unitId },
@@ -6649,9 +6657,37 @@ export class PrismaOperationsService {
             select: { id: true, fullName: true },
           })
         : Promise.resolve([]),
+      productSaleIds.length
+        ? this.prisma.productSale.findMany({
+            where: { id: { in: productSaleIds }, unitId: input.unitId },
+            select: {
+              id: true,
+              items: {
+                select: {
+                  quantity: true,
+                  product: { select: { id: true, name: true } },
+                },
+              },
+            },
+          })
+        : Promise.resolve([]),
     ]);
     const professionalsById = new Map(professionals.map((item) => [item.id, item.name]));
     const customersById = new Map(customers.map((item) => [item.id, item.fullName]));
+    const productItemsBySaleId = new Map(
+      productSales.map((sale) => [
+        sale.id,
+        sale.items
+          .map((item) => ({
+            productId: item.product.id,
+            productName: item.product.name,
+            quantity: item.quantity,
+          }))
+          .sort((a, b) =>
+            a.productName.localeCompare(b.productName, "pt-BR", { sensitivity: "base" }),
+          ),
+      ]),
+    );
 
     const transactions = rows.map((row) => ({
       id: row.id,
@@ -6664,6 +6700,10 @@ export class PrismaOperationsService {
       source: normalizeTransactionSource(row.source),
       appointmentId: row.referenceType === "APPOINTMENT" ? row.referenceId ?? null : null,
       productSaleId: row.referenceType === "PRODUCT_SALE" ? row.referenceId ?? null : null,
+      productItems:
+        row.referenceType === "PRODUCT_SALE" && row.referenceId
+          ? productItemsBySaleId.get(row.referenceId) ?? []
+          : [],
       commissionId: row.referenceType === "COMMISSION" ? row.referenceId ?? null : null,
       professionalId: row.professionalId ?? null,
       professionalName: row.professionalId ? professionalsById.get(row.professionalId) ?? null : null,

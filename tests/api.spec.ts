@@ -1321,6 +1321,7 @@ describe("API MVP", () => {
         soldAt: "2026-04-23T15:00:00.000Z",
         professionalId: "pro-01",
         clientId: "cli-01",
+        paymentMethod: "PIX",
         items: [
           { productId: "prd-pomada", quantity: 2 },
           { productId: "prd-oleo-barba", quantity: 1 },
@@ -1344,6 +1345,25 @@ describe("API MVP", () => {
     const oleo = stockBody.recentMovements.find((item: { productId: string }) => item.productId === "prd-oleo-barba");
     expect(pomada).toBeTruthy();
     expect(oleo).toBeTruthy();
+
+    const transactions = await app.inject({
+      method: "GET",
+      url: "/financial/transactions?unitId=unit-01&start=2026-04-23T00:00:00.000Z&end=2026-04-23T23:59:59.999Z",
+    });
+    const productEntry = transactions
+      .json()
+      .transactions.find((item: { referenceType: string }) => item.referenceType === "PRODUCT_SALE");
+    expect(productEntry).toMatchObject({
+      productSaleId: body.sale.id,
+      paymentMethod: "PIX",
+    });
+    expect(productEntry.productItems).toEqual(
+      expect.arrayContaining([
+        { productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 },
+        { productId: "prd-oleo-barba", productName: "Oleo para Barba", quantity: 1 },
+      ]),
+    );
+    expect(productEntry.productItems).toHaveLength(2);
   });
 
   it("finaliza atendimento com checkout unificado (servico + produto + financeiro + comissao + cliente)", async () => {
@@ -1531,6 +1551,7 @@ describe("API MVP", () => {
       professionalId: "pro-01",
       clientId: "cli-01",
       soldAt: "2026-04-23T15:00:00.000Z",
+      paymentMethod: "PIX",
       items: [{ productId: "prd-pomada", quantity: 2 }],
     };
     const sale = await app.inject({
@@ -1649,6 +1670,12 @@ describe("API MVP", () => {
       .transactions.filter((item: { description: string }) => item.description === "Receita idempotente");
     expect(productSaleEntries).toHaveLength(1);
     expect(manualEntries).toHaveLength(1);
+    expect(productSaleEntries[0]).toMatchObject({
+      productSaleId: sale.json().sale.id,
+      paymentMethod: "PIX",
+      productItems: [{ productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 }],
+    });
+    expect(manualEntries[0].productItems).toEqual([]);
   });
 
   it("mantem /financial/manual-entry idempotente e rejeita payload divergente", async () => {
@@ -1849,6 +1876,7 @@ describe("API MVP", () => {
         professionalId: "pro-01",
         clientId: "cli-01",
         soldAt: "2026-04-27T14:00:00.000Z",
+        paymentMethod: "PIX",
         items: [{ productId: "prd-pomada", quantity: 2 }],
       },
     });
@@ -1936,9 +1964,20 @@ describe("API MVP", () => {
     const rows = transactions.json().transactions as Array<{
       type: string;
       source: string;
+      referenceType: string;
+      productItems: Array<{ productId: string; productName: string; quantity: number }>;
     }>;
-    expect(rows.filter((item) => item.type === "INCOME" && item.source === "PRODUCT")).toHaveLength(1);
-    expect(rows.filter((item) => item.type === "EXPENSE" && item.source === "REFUND")).toHaveLength(1);
+    const productRows = rows.filter((item) => item.type === "INCOME" && item.source === "PRODUCT");
+    const refundRows = rows.filter((item) => item.type === "EXPENSE" && item.source === "REFUND");
+    expect(productRows).toHaveLength(1);
+    expect(refundRows).toHaveLength(1);
+    expect(productRows[0].productItems).toEqual([
+      { productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 },
+    ]);
+    expect(refundRows[0]).toMatchObject({
+      referenceType: "PRODUCT_SALE_REFUND",
+      productItems: [],
+    });
     expect(transactions.json().summary.income).toBe(118);
     expect(transactions.json().summary.expense).toBe(59);
 

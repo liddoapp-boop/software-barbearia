@@ -4068,6 +4068,26 @@ export class OperationsService {
     const customerId = String(input.customerId ?? "").trim();
     const search = String(input.search ?? "").trim().toLowerCase();
 
+    const productItemsBySaleId = new Map(
+      this.store.productSales
+        .filter((sale) => sale.unitId === input.unitId)
+        .map((sale) => [
+          sale.id,
+          sale.items
+            .map((saleItem) => {
+              const product = this.store.products.find((item) => item.id === saleItem.productId);
+              return {
+                productId: saleItem.productId,
+                productName: product?.name ?? "Produto",
+                quantity: saleItem.quantity,
+              };
+            })
+            .sort((a, b) =>
+              a.productName.localeCompare(b.productName, "pt-BR", { sensitivity: "base" }),
+            ),
+        ]),
+    );
+
     const transactions = this.store.financialEntries
       .filter((item) => {
         if (item.unitId !== input.unitId) return false;
@@ -4110,6 +4130,10 @@ export class OperationsService {
           appointmentId: item.referenceType === "APPOINTMENT" ? item.referenceId ?? null : null,
           productSaleId:
             item.referenceType === "PRODUCT_SALE" ? item.referenceId ?? null : null,
+          productItems:
+            item.referenceType === "PRODUCT_SALE" && item.referenceId
+              ? productItemsBySaleId.get(item.referenceId) ?? []
+              : [],
           commissionId: item.referenceType === "COMMISSION" ? item.referenceId ?? null : null,
           professionalId: item.professionalId ?? null,
           professionalName: professional?.name ?? null,

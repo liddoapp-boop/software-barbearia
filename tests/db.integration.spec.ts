@@ -402,6 +402,7 @@ async function createProductSale(app: FastifyInstance, scenario: DbScenario, ide
       clientId: scenario.clientId,
       professionalId: scenario.professionalId,
       soldAt: "2026-05-10T15:00:00.000Z",
+      paymentMethod: "PIX",
       items: [{ productId: scenario.productId, quantity: 1 }],
     },
   });
@@ -424,6 +425,29 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
 
   afterAll(async () => {
     await prisma.$disconnect();
+  });
+
+  it("projeta produto e quantidade no financeiro de venda persistida", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const saleId = await createProductSale(app, scenario, uniqueId("sale-financial-products"));
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/financial/transactions?unitId=${scenario.unitId}&start=2026-05-10T00:00:00.000Z&end=2026-05-10T23:59:59.999Z`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const productEntry = response
+      .json()
+      .transactions.find((item: { referenceType: string }) => item.referenceType === "PRODUCT_SALE");
+    expect(productEntry).toMatchObject({
+      productSaleId: saleId,
+      paymentMethod: "PIX",
+      productItems: [
+        { productId: scenario.productId, productName: "Pomada DB", quantity: 1 },
+      ],
+    });
   });
 
   it("grava AppointmentServiceItem no dual-write Prisma de criacao", async () => {
