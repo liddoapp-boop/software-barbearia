@@ -517,51 +517,51 @@ model AppointmentBlock {
 }
 
 model AppointmentCheckout {
-  id               String         @id
-  unitId           String
-  appointmentId    String         @unique
-  status           CheckoutStatus @default(OPEN)
-  totalAmount      Decimal        @db.Decimal(10, 2)
-  serviceAmount    Decimal        @db.Decimal(10, 2)
-  productAmount    Decimal        @default(0) @db.Decimal(10, 2)
-  paidAmount        Decimal        @default(0) @db.Decimal(10, 2)
-  changeAmount      Decimal        @default(0) @db.Decimal(10, 2)
-  openedAt         DateTime
-  paidAt           DateTime?
-  changedBy        String
-  idempotencyKey   String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  unit             Unit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  appointment      Appointment    @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
-  payments         CheckoutPayment[]
+  id             String            @id
+  unitId         String
+  appointmentId  String            @unique
+  status         CheckoutStatus    @default(OPEN)
+  totalAmount    Decimal           @db.Decimal(10, 2)
+  serviceAmount  Decimal           @db.Decimal(10, 2)
+  productAmount  Decimal           @default(0) @db.Decimal(10, 2)
+  paidAmount     Decimal           @default(0) @db.Decimal(10, 2)
+  changeAmount   Decimal           @default(0) @db.Decimal(10, 2)
+  openedAt       DateTime
+  paidAt         DateTime?
+  changedBy      String
+  idempotencyKey String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  unit           Unit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  appointment    Appointment       @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  payments       CheckoutPayment[]
 
   @@unique([unitId, idempotencyKey])
   @@index([unitId, status, openedAt])
 }
 
 model CheckoutPayment {
-  id                 String                @id
-  unitId             String
-  checkoutId         String
-  method             CheckoutPaymentMethod
-  amount             Decimal               @db.Decimal(10, 2)
-  receivedAmount     Decimal?              @db.Decimal(10, 2)
-  changeAmount       Decimal               @default(0) @db.Decimal(10, 2)
-  paidAt             DateTime
-  responsible        String
-  reference          String?
-  status             CheckoutPaymentStatus @default(CONFIRMED)
-  failureReason      String?
-  reversedPaymentId  String?
-  reversalReason     String?
-  idempotencyKey     String?
-  financialEntryId   String?
-  createdAt          DateTime              @default(now())
-  unit               Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  checkout           AppointmentCheckout   @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
-  reversedPayment    CheckoutPayment?      @relation("CheckoutPaymentReversal", fields: [reversedPaymentId], references: [id], onDelete: SetNull)
-  reversals          CheckoutPayment[]     @relation("CheckoutPaymentReversal")
+  id                String                @id
+  unitId            String
+  checkoutId        String
+  method            CheckoutPaymentMethod
+  amount            Decimal               @db.Decimal(10, 2)
+  receivedAmount    Decimal?              @db.Decimal(10, 2)
+  changeAmount      Decimal               @default(0) @db.Decimal(10, 2)
+  paidAt            DateTime
+  responsible       String
+  reference         String?
+  status            CheckoutPaymentStatus @default(CONFIRMED)
+  failureReason     String?
+  reversedPaymentId String?
+  reversalReason    String?
+  idempotencyKey    String?
+  financialEntryId  String?
+  createdAt         DateTime              @default(now())
+  unit              Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  checkout          AppointmentCheckout   @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
+  reversedPayment   CheckoutPayment?      @relation("CheckoutPaymentReversal", fields: [reversedPaymentId], references: [id], onDelete: SetNull)
+  reversals         CheckoutPayment[]     @relation("CheckoutPaymentReversal")
 
   @@unique([unitId, idempotencyKey])
   @@index([checkoutId, status])
@@ -569,21 +569,21 @@ model CheckoutPayment {
 }
 
 model StockInventoryCount {
-  id              String                    @id
-  unitId          String
-  productId       String
-  expectedQty     Int
-  countedQty      Int
-  differenceQty   Int
-  reason          String
-  responsible     String
-  countedAt       DateTime
-  status          StockInventoryCountStatus @default(RECORDED)
-  movementId      String?
-  idempotencyKey  String?
-  createdAt       DateTime                  @default(now())
-  unit            Unit                      @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  product         Product                   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id             String                    @id
+  unitId         String
+  productId      String
+  expectedQty    Int
+  countedQty     Int
+  differenceQty  Int
+  reason         String
+  responsible    String
+  countedAt      DateTime
+  status         StockInventoryCountStatus @default(RECORDED)
+  movementId     String?
+  idempotencyKey String?
+  createdAt      DateTime                  @default(now())
+  unit           Unit                      @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  product        Product                   @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, idempotencyKey])
   @@index([unitId, countedAt])
@@ -591,34 +591,34 @@ model StockInventoryCount {
 }
 
 model DailyClosing {
-  id                  String             @id
-  unitId              String
-  businessDate        DateTime
-  status              DailyClosingStatus @default(CLOSED)
-  cashExpected        Decimal            @default(0) @db.Decimal(10, 2)
-  pixExpected         Decimal            @default(0) @db.Decimal(10, 2)
-  debitExpected       Decimal            @default(0) @db.Decimal(10, 2)
-  creditExpected      Decimal            @default(0) @db.Decimal(10, 2)
-  servicesTotal       Decimal            @default(0) @db.Decimal(10, 2)
-  productsTotal       Decimal            @default(0) @db.Decimal(10, 2)
-  expensesTotal       Decimal            @default(0) @db.Decimal(10, 2)
-  correctionsTotal    Decimal            @default(0) @db.Decimal(10, 2)
-  expectedTotal       Decimal            @default(0) @db.Decimal(10, 2)
-  informedCash        Decimal?           @db.Decimal(10, 2)
-  informedPix         Decimal?           @db.Decimal(10, 2)
-  informedDebit       Decimal?           @db.Decimal(10, 2)
-  informedCredit      Decimal?           @db.Decimal(10, 2)
-  divergence          Decimal            @default(0) @db.Decimal(10, 2)
-  notes               String?
-  responsible         String
-  closedAt            DateTime
-  reopenedAt          DateTime?
-  reopenedBy          String?
-  reopenReason        String?
-  idempotencyKey      String?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  unit                Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  id               String             @id
+  unitId           String
+  businessDate     DateTime
+  status           DailyClosingStatus @default(CLOSED)
+  cashExpected     Decimal            @default(0) @db.Decimal(10, 2)
+  pixExpected      Decimal            @default(0) @db.Decimal(10, 2)
+  debitExpected    Decimal            @default(0) @db.Decimal(10, 2)
+  creditExpected   Decimal            @default(0) @db.Decimal(10, 2)
+  servicesTotal    Decimal            @default(0) @db.Decimal(10, 2)
+  productsTotal    Decimal            @default(0) @db.Decimal(10, 2)
+  expensesTotal    Decimal            @default(0) @db.Decimal(10, 2)
+  correctionsTotal Decimal            @default(0) @db.Decimal(10, 2)
+  expectedTotal    Decimal            @default(0) @db.Decimal(10, 2)
+  informedCash     Decimal?           @db.Decimal(10, 2)
+  informedPix      Decimal?           @db.Decimal(10, 2)
+  informedDebit    Decimal?           @db.Decimal(10, 2)
+  informedCredit   Decimal?           @db.Decimal(10, 2)
+  divergence       Decimal            @default(0) @db.Decimal(10, 2)
+  notes            String?
+  responsible      String
+  closedAt         DateTime
+  reopenedAt       DateTime?
+  reopenedBy       String?
+  reopenReason     String?
+  idempotencyKey   String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  unit             Unit               @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, businessDate])
   @@unique([unitId, idempotencyKey])
