@@ -12,6 +12,7 @@ import {
   OwnerCommandParserError,
   OwnerCommandParserStatus,
   OwnerCommandParseResult,
+  getDeterministicDateRecognitionType,
   getOwnerCommandBoundaryObservation,
   parseDeterministicOwnerCommand,
 } from "../application/owner-command-ai";
@@ -1465,6 +1466,7 @@ export function createApp() {
       geminiDurationMs?: number;
       httpStatus?: number;
       failureCode?: string;
+      dateRecognitionType?: string;
       presentFields: string[];
       missingFields: string[];
       correlationId?: string;
@@ -1964,15 +1966,19 @@ export function createApp() {
         presentFields: getOwnerCommandPresentFields(preview.draft),
         missingFields: preview.missingFields,
         correlationId: input.correlationId,
+        dateRecognitionType: preview.intent === "schedule_appointment"
+          ? getDeterministicDateRecognitionType(input.message, context.now, context.timezone)
+          : undefined,
       },
     });
 
     if (deterministic) {
       const deterministicPreview = await resolveParsedOwnerCommandPreview(input, deterministic);
-      if (deterministicPreview.allowedNextActions.includes("confirm_execute")) {
+      const deterministicStatus = getOwnerCommandPreviewStatus(deterministicPreview);
+      if (deterministicPreview.allowedNextActions.includes("confirm_execute") || deterministicStatus === "AMBIGUOUS") {
         return withDiagnostics(deterministicPreview, {
           strategy: "deterministic",
-          status: "PARSED_COMPLETE",
+          status: deterministicStatus,
           deterministicDurationMs,
         });
       }

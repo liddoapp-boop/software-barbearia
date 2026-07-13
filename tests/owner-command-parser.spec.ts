@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GeminiOwnerCommandParser,
+  getDeterministicDateRecognitionType,
+  getGeminiOwnerCommandTimeoutMsFromEnv,
   OwnerCommandContext,
   parseDeterministicOwnerCommand,
 } from "../src/application/owner-command-ai";
@@ -20,6 +22,21 @@ function parser(timeoutMs = 20) {
 }
 
 describe("parser textual Gemini tipado", () => {
+  it("usa timeout textual padrao de 15 segundos e respeita configuracao valida", () => {
+    const previous = process.env.GEMINI_TIMEOUT_MS;
+    try {
+      delete process.env.GEMINI_TIMEOUT_MS;
+      expect(getGeminiOwnerCommandTimeoutMsFromEnv()).toBe(15_000);
+      process.env.GEMINI_TIMEOUT_MS = "12000";
+      expect(getGeminiOwnerCommandTimeoutMsFromEnv()).toBe(12_000);
+      process.env.GEMINI_TIMEOUT_MS = "invalido";
+      expect(getGeminiOwnerCommandTimeoutMsFromEnv()).toBe(15_000);
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_TIMEOUT_MS;
+      else process.env.GEMINI_TIMEOUT_MS = previous;
+    }
+  });
+
   it("reconhece venda e agendamento completos deterministicamente", () => {
     expect(parseDeterministicOwnerCommand({ context, message: "Vendi uma pomada para Cliente Teste, ele pagou no Pix." })).toMatchObject({
       intent: "sell_product",
@@ -28,6 +45,113 @@ describe("parser textual Gemini tipado", () => {
     expect(parseDeterministicOwnerCommand({ context, message: "Agendar Corte para Cliente Teste amanha as 10h" })).toMatchObject({
       intent: "schedule_appointment",
       missingFields: [],
+    });
+  });
+
+  it.each([
+    ["Agendar Corte Premium para Cliente Teste dia 14/07/2026 as 11:00", "numeric_slash"],
+    ["Agendar Corte Premium para Cliente Teste 14 de julho de 2026 as 11:00", "month_name"],
+    ["Agendar Corte Premium para Cliente Teste dia 14 de julho de 2026 as 11:00", "month_name"],
+    ["Agendar Corte Premium para Cliente Teste quatorze de julho de dois mil e vinte e seis as 11:00", "fully_spoken"],
+    ["Agendar Corte Premium para Cliente Teste dia quatorze do sete de dois mil e vinte e seis as 11:00", "spoken_numeric_month"],
+    ["Agendar Corte Premium para Cliente Teste quatorze do sete de vinte e seis as 11:00", "spoken_numeric_month"],
+  ])("normaliza data falada sem depender do Gemini: %s", (message, recognitionType) => {
+    expect(parseDeterministicOwnerCommand({ context, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "Cliente Teste",
+        date: "2026-07-14",
+        time: "11:00",
+      },
+      missingFields: [],
+    });
+    expect(getDeterministicDateRecognitionType(message, context.now, context.timezone)).toBe(recognitionType);
+  });
+
+  it.each([
+    "Agendar Corte Premium para Cliente Teste dia 31/02/2026 as 11:00",
+    "Agendar Corte Premium para Cliente Teste dia trinta e um de fevereiro de dois mil e vinte e seis as 11:00",
+  ])("rejeita data de calendario invalida: %s", (message) => {
+    expect(parseDeterministicOwnerCommand({ context, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "", time: "11:00" },
+      missingFields: expect.arrayContaining(["date"]),
+    });
+    expect(getDeterministicDateRecognitionType(message, context.now, context.timezone)).toBeUndefined();
+  });
+
+  it.each([
+    ["11:30", "11:30"],
+    ["11h30", "11:30"],
+    ["onze e trinta", "11:30"],
+    ["onze horas e trinta", "11:30"],
+    ["onze e meia", "11:30"],
+    ["às onze e meia", "11:30"],
+    ["às nove", "09:00"],
+    ["nove da manha", "09:00"],
+    ["duas da tarde", "14:00"],
+    ["às duas da tarde", "14:00"],
+    ["sete da noite", "19:00"],
+    ["meio-dia", "12:00"],
+    ["meia-noite", "00:00"],
+    ["quinze para as quatorze", "13:45"],
+    ["dez para as onze", "10:50"],
+  ])("normaliza horario cotidiano sem depender do Gemini: %s", (spokenTime, expectedTime) => {
+    expect(parseDeterministicOwnerCommand({
+      context,
+      message: `Agendar Corte Premium para Cliente Teste dia 14/07/2026 ${spokenTime}`,
+    })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "2026-07-14", time: expectedTime },
+      missingFields: [],
+    });
+  });
+
+  it("reconhece a frase real completa com data e horario totalmente falados", () => {
+    const message = "Agendar corte para cliente teste confirmar agenda dia quatorze de julho de dois mil e vinte e seis às onze e trinta";
+    expect(parseDeterministicOwnerCommand({ context, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "cliente teste confirmar agenda",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-07-14",
+        time: "11:30",
+      },
+      missingFields: [],
+    });
+    expect(getDeterministicDateRecognitionType(message, context.now, context.timezone)).toBe("fully_spoken");
+  });
+
+  it("pede esclarecimento para quinze para as duas sem regra segura de expediente", () => {
+    expect(parseDeterministicOwnerCommand({
+      context,
+      message: "Agendar Corte Premium para Cliente Teste dia 14/07/2026 quinze para as duas",
+    })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "2026-07-14", time: "" },
+      missingFields: expect.arrayContaining(["time"]),
+      warnings: [expect.stringMatching(/ambiguo/i)],
+    });
+  });
+
+  it.each([
+    "Agendar Corte Premium para Cliente Teste dia 14/07/2026 as 24:00",
+    "Agendar Corte Premium para Cliente Teste dia 14/07/2026 as onze e sessenta",
+  ])("rejeita horario invalido: %s", (message) => {
+    expect(parseDeterministicOwnerCommand({ context, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "2026-07-14", time: "" },
+      missingFields: expect.arrayContaining(["time"]),
+      warnings: [expect.stringMatching(/invalido/i)],
+    });
+  });
+
+  it("mantem data ausente como campo faltante", () => {
+    expect(parseDeterministicOwnerCommand({ context, message: "Agendar Corte Premium para Cliente Teste as 11:00" })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "", time: "11:00" },
+      missingFields: expect.arrayContaining(["date"]),
     });
   });
 
@@ -88,6 +212,13 @@ describe("parser textual Gemini tipado", () => {
     await expect(parser().parse({ context, message: "Vendi uma pomada para Cliente Teste, ele pagou no Pix." })).resolves.toMatchObject({
       intent: "sell_product",
       fallbackReason: "gemini_timeout",
+    });
+    await expect(parser().parse({ context, message: "Agendar Corte Premium para Cliente Teste as 11:00" })).resolves.toMatchObject({
+      intent: "schedule_appointment",
+      draft: { date: "", time: "11:00" },
+      missingFields: expect.arrayContaining(["date"]),
+      fallbackReason: "gemini_timeout",
+      executed: false,
     });
     vi.unstubAllGlobals();
   });

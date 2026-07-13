@@ -214,6 +214,121 @@ function addLocalDays(parts: { year: number; month: number; day: number }, days:
   };
 }
 
+export type DeterministicDateRecognitionType =
+  | "relative"
+  | "weekday"
+  | "numeric_slash"
+  | "month_name"
+  | "fully_spoken"
+  | "spoken_numeric_month";
+
+type DeterministicDateRecognition = {
+  date: string;
+  type: DeterministicDateRecognitionType;
+};
+
+const portugueseNumberValues = new Map<string, number>([
+  ["zero", 0],
+  ["um", 1],
+  ["uma", 1],
+  ["dois", 2],
+  ["duas", 2],
+  ["tres", 3],
+  ["quatro", 4],
+  ["cinco", 5],
+  ["seis", 6],
+  ["sete", 7],
+  ["oito", 8],
+  ["nove", 9],
+  ["dez", 10],
+  ["onze", 11],
+  ["doze", 12],
+  ["treze", 13],
+  ["quatorze", 14],
+  ["catorze", 14],
+  ["quinze", 15],
+  ["dezesseis", 16],
+  ["dezasseis", 16],
+  ["dezessete", 17],
+  ["dezassete", 17],
+  ["dezoito", 18],
+  ["dezenove", 19],
+  ["vinte", 20],
+  ["trinta", 30],
+  ["quarenta", 40],
+  ["cinquenta", 50],
+  ["sessenta", 60],
+  ["setenta", 70],
+  ["oitenta", 80],
+  ["noventa", 90],
+  ["cem", 100],
+  ["cento", 100],
+  ["duzentos", 200],
+  ["trezentos", 300],
+  ["quatrocentos", 400],
+  ["quinhentos", 500],
+  ["seiscentos", 600],
+  ["setecentos", 700],
+  ["oitocentos", 800],
+  ["novecentos", 900],
+]);
+
+const portugueseMonths = new Map<string, number>([
+  ["janeiro", 1],
+  ["fevereiro", 2],
+  ["marco", 3],
+  ["abril", 4],
+  ["maio", 5],
+  ["junho", 6],
+  ["julho", 7],
+  ["agosto", 8],
+  ["setembro", 9],
+  ["outubro", 10],
+  ["novembro", 11],
+  ["dezembro", 12],
+]);
+
+const spokenDayPattern = "(?:\\d{1,2}|(?:um|dois|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezasseis|dezessete|dezassete|dezoito|dezenove)|vinte(?:\\s+e\\s+(?:um|dois|tres|quatro|cinco|seis|sete|oito|nove))?|trinta(?:\\s+e\\s+um)?)";
+const spokenMonthPattern = "(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|um|dois|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|\\d{1,2})";
+const spokenClockNumberPattern = "(?:zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezasseis|dezessete|dezassete|dezoito|dezenove|vinte(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|trinta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|quarenta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|cinquenta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|sessenta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|setenta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|oitenta(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|noventa(?:\\s+e\\s+(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove))?|\\d{1,2})";
+const spokenYearPattern = `(?:\\d{2,4}|${spokenClockNumberPattern}\\s+mil(?:\\s+(?:e\\s+)?${spokenClockNumberPattern})?|${spokenClockNumberPattern})`;
+const naturalTimeStartPattern = `(?:(?:as|a)\\s+|${spokenClockNumberPattern}\\s+para\\s+as?\\s+|meio\\s+dia\\b|meia\\s+noite\\b|${spokenClockNumberPattern}\\s+(?:horas?\\b|e\\s+(?:meia|${spokenClockNumberPattern})\\b|da\\s+(?:manha|tarde|noite)\\b))`;
+
+function parsePortugueseCardinal(value: string) {
+  const normalized = normalizeMatchText(value);
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  const tokens = normalized.split(/\s+/).filter((token) => token && token !== "e");
+  if (!tokens.length) return null;
+  let total = 0;
+  let current = 0;
+  for (const token of tokens) {
+    if (token === "mil") {
+      total += (current || 1) * 1000;
+      current = 0;
+      continue;
+    }
+    const number = portugueseNumberValues.get(token);
+    if (number === undefined) return null;
+    current += number;
+  }
+  return total + current;
+}
+
+function isValidCalendarDate(parts: { year: number; month: number; day: number }) {
+  if (parts.year < 1 || parts.month < 1 || parts.month > 12 || parts.day < 1 || parts.day > 31) return false;
+  const candidate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12, 0, 0));
+  return candidate.getUTCFullYear() === parts.year
+    && candidate.getUTCMonth() + 1 === parts.month
+    && candidate.getUTCDate() === parts.day;
+}
+
+function buildDateRecognition(
+  parts: { year: number; month: number; day: number },
+  type: DeterministicDateRecognitionType,
+): DeterministicDateRecognition | null {
+  return isValidCalendarDate(parts) ? { date: formatLocalDate(parts), type } : null;
+}
+
 function resolveWeekdayDate(message: string, now: Date, timezone: string) {
   const weekdays = new Map([
     ["domingo", 0],
@@ -238,32 +353,145 @@ function resolveWeekdayDate(message: string, now: Date, timezone: string) {
   return formatLocalDate(addLocalDays(today, diff));
 }
 
-function parseDeterministicDate(message: string, now: Date, timezone: string) {
+function recognizeDeterministicDate(message: string, now: Date, timezone: string): DeterministicDateRecognition | null {
   const normalized = normalizeMatchText(message);
   const today = getDatePartsInTimezone(now, timezone);
-  if (normalized.includes("amanha")) return formatLocalDate(addLocalDays(today, 1));
-  if (normalized.includes("hoje")) return formatLocalDate(today);
+  if (normalized.includes("amanha")) return { date: formatLocalDate(addLocalDays(today, 1)), type: "relative" };
+  if (normalized.includes("hoje")) return { date: formatLocalDate(today), type: "relative" };
   const slashDate = message.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
   if (slashDate) {
     const day = Number(slashDate[1]);
     const month = Number(slashDate[2]);
     const rawYear = slashDate[3] ? Number(slashDate[3]) : today.year;
     const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) return formatLocalDate({ year, month, day });
+    return buildDateRecognition({ year, month, day }, "numeric_slash");
   }
-  return resolveWeekdayDate(message, now, timezone);
+
+  const spokenDate = normalized.match(new RegExp(
+    `\\b(?:dia\\s+)?(${spokenDayPattern})\\s+(?:de|do)\\s+(${spokenMonthPattern})(?:\\s+(?:de|do)\\s+(${spokenYearPattern}))?(?=\\s+${naturalTimeStartPattern}|$)`,
+  ));
+  if (spokenDate) {
+    const day = parsePortugueseCardinal(spokenDate[1]);
+    const month = portugueseMonths.get(spokenDate[2]) ?? parsePortugueseCardinal(spokenDate[2]);
+    const parsedYear = spokenDate[3] ? parsePortugueseCardinal(spokenDate[3]) : today.year;
+    const year = parsedYear !== null && parsedYear < 100 ? 2000 + parsedYear : parsedYear;
+    if (day !== null && month !== null && year !== null) {
+      const dayIsSpoken = !/^\d+$/.test(spokenDate[1]);
+      const monthIsSpokenName = portugueseMonths.has(spokenDate[2]);
+      const yearIsSpoken = Boolean(spokenDate[3] && !/^\d+$/.test(spokenDate[3]));
+      const type: DeterministicDateRecognitionType = !monthIsSpokenName
+        ? "spoken_numeric_month"
+        : dayIsSpoken || yearIsSpoken
+          ? "fully_spoken"
+          : "month_name";
+      return buildDateRecognition({ year, month, day }, type);
+    }
+  }
+
+  const weekdayDate = resolveWeekdayDate(message, now, timezone);
+  return weekdayDate ? { date: weekdayDate, type: "weekday" } : null;
 }
 
-function parseDeterministicTime(message: string) {
-  const match = message
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .match(/\b(?:as|a)\s*(\d{1,2})(?:\s*(?:h|:)\s*(\d{2})?)?\b/i);
-  if (!match) return "";
-  const hour = Number(match[1]);
-  const minute = match[2] ? Number(match[2]) : 0;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+function parseDeterministicDate(message: string, now: Date, timezone: string) {
+  return recognizeDeterministicDate(message, now, timezone)?.date ?? "";
+}
+
+export function getDeterministicDateRecognitionType(message: string, now: Date, timezone: string) {
+  return recognizeDeterministicDate(message, now, timezone)?.type;
+}
+
+type DeterministicTimeRecognition = {
+  time: string;
+  ambiguous?: boolean;
+  invalid?: boolean;
+};
+
+function buildTimeRecognition(hour: number | null, minute: number | null): DeterministicTimeRecognition {
+  if (hour === null || minute === null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return { time: "", invalid: true };
+  }
+  return { time: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}` };
+}
+
+function resolveHourForPeriod(hour: number | null, period?: string) {
+  if (hour === null || hour < 0 || hour > 23) return null;
+  if (!period) return hour;
+  if (hour > 12) return hour;
+  if (period === "manha") return hour === 12 ? 0 : hour;
+  if (period === "tarde") return hour === 12 ? 12 : hour + 12;
+  if (period === "noite") return hour === 12 ? 0 : hour + 12;
+  return null;
+}
+
+function parseSpokenMinute(value?: string) {
+  if (!value) return 0;
+  return value === "meia" ? 30 : parsePortugueseCardinal(value);
+}
+
+function recognizeDeterministicTime(message: string): DeterministicTimeRecognition | null {
+  const accentless = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const normalized = normalizeMatchText(message);
+
+  const numericClock = accentless.match(/\b(?:as?\s*)?(\d{1,2})\s*(?::|h)\s*(\d{1,2})\b/i);
+  if (numericClock) return buildTimeRecognition(Number(numericClock[1]), Number(numericClock[2]));
+  const numericHour = accentless.match(/\b(?:as|a)\s+(\d{1,2})(?:\s*h(?:oras?)?)?\b/i);
+  if (numericHour) return buildTimeRecognition(Number(numericHour[1]), 0);
+
+  if (/\bmeio\s+dia\b/.test(normalized)) return { time: "12:00" };
+  if (/\bmeia\s+noite\b/.test(normalized)) return { time: "00:00" };
+
+  const subtractive = normalized.match(new RegExp(
+    `\\b(${spokenClockNumberPattern})\\s+para\\s+as?\\s+(${spokenClockNumberPattern})(?:\\s+da\\s+(manha|tarde|noite))?\\b`,
+  ));
+  if (subtractive) {
+    const minute = parsePortugueseCardinal(subtractive[1]);
+    const rawTargetHour = parsePortugueseCardinal(subtractive[2]);
+    if (minute === null || minute <= 0 || minute > 59 || rawTargetHour === null || rawTargetHour < 0 || rawTargetHour > 23) {
+      return { time: "", invalid: true };
+    }
+    if (!subtractive[3] && rawTargetHour >= 1 && rawTargetHour <= 6) {
+      return { time: "", ambiguous: true };
+    }
+    const targetHour = resolveHourForPeriod(rawTargetHour, subtractive[3]);
+    if (targetHour === null) return { time: "", invalid: true };
+    const minutesFromMidnight = (targetHour * 60 - minute + 24 * 60) % (24 * 60);
+    return buildTimeRecognition(Math.floor(minutesFromMidnight / 60), minutesFromMidnight % 60);
+  }
+
+  const explicit = normalized.match(new RegExp(
+    `\\b(?:as|a)\\s+(${spokenClockNumberPattern})(?:\\s+horas?)?(?:\\s+e\\s+(meia|${spokenClockNumberPattern}))?(?:\\s+da\\s+(manha|tarde|noite))?\\b`,
+  ));
+  if (explicit) {
+    const hour = resolveHourForPeriod(parsePortugueseCardinal(explicit[1]), explicit[3]);
+    return buildTimeRecognition(hour, parseSpokenMinute(explicit[2]));
+  }
+
+  const withHours = normalized.match(new RegExp(
+    `\\b(${spokenClockNumberPattern})\\s+horas?(?:\\s+e\\s+(meia|${spokenClockNumberPattern}))?(?:\\s+da\\s+(manha|tarde|noite))?\\b`,
+  ));
+  if (withHours) {
+    const hour = resolveHourForPeriod(parsePortugueseCardinal(withHours[1]), withHours[3]);
+    return buildTimeRecognition(hour, parseSpokenMinute(withHours[2]));
+  }
+
+  const withPeriod = normalized.match(new RegExp(
+    `\\b(${spokenClockNumberPattern})\\s+da\\s+(manha|tarde|noite)\\b`,
+  ));
+  if (withPeriod) {
+    return buildTimeRecognition(resolveHourForPeriod(parsePortugueseCardinal(withPeriod[1]), withPeriod[2]), 0);
+  }
+
+  const informalMatches = Array.from(normalized.matchAll(new RegExp(
+    `\\b(${spokenClockNumberPattern})\\s+e\\s+(meia|${spokenClockNumberPattern})\\b`,
+    "g",
+  )));
+  for (const informal of informalMatches.reverse()) {
+    const hour = parsePortugueseCardinal(informal[1]);
+    if (hour !== null && hour >= 0 && hour <= 12) {
+      return buildTimeRecognition(hour, parseSpokenMinute(informal[2]));
+    }
+  }
+  return null;
 }
 
 function findServiceName(message: string, context: OwnerCommandContext) {
@@ -390,7 +618,7 @@ function delimitOperationEntity(value: string) {
 }
 
 function extractClientName(message: string, serviceName?: string) {
-  const dateMarker = "(?:amanh[ãa]|hoje|na\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|no\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|dia\\s+\\d{1,2}\\/\\d{1,2}|[àa]s\\s*\\d{1,2})";
+  const dateMarker = `(?:amanh[ãa]|hoje|na\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|no\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|dia\\s+\\d{1,2}\\/\\d{1,2}|(?:dia\\s+)?${spokenDayPattern}\\s+(?:de|do)\\s+${spokenMonthPattern}|[àa]s\\s*\\d{1,2})`;
   if (serviceName) {
     const servicePattern = escapeRegex(serviceName);
     const serviceBeforeClient = new RegExp(`\\b${servicePattern}\\b\\s+(?:para|pra|pro)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
@@ -419,7 +647,8 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
   const serviceName = findServiceName(input.message, input.context);
   const clientName = extractClientName(input.message, serviceName);
   const date = parseDeterministicDate(input.message, input.context.now, input.context.timezone || "America/Sao_Paulo");
-  const time = parseDeterministicTime(input.message);
+  const timeRecognition = recognizeDeterministicTime(input.message);
+  const time = timeRecognition?.time ?? "";
   const professionalName = input.context.professionals.length === 1 ? input.context.professionals[0]?.name : undefined;
   const missingFields = [
     clientName ? "" : "clientName",
@@ -446,7 +675,13 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
       time,
     },
     missingFields,
-    warnings: missingFields.length ? ["Comando incompleto para criar agendamento."] : [],
+    warnings: timeRecognition?.ambiguous
+      ? ["Horario ambiguo: informe se e de manha, de tarde ou de noite."]
+      : timeRecognition?.invalid
+        ? ["Horario invalido: informe uma hora entre 0 e 23 e minutos entre 0 e 59."]
+        : missingFields.length
+          ? ["Comando incompleto para criar agendamento."]
+          : [],
     allowedNextActions: [],
     executed: false,
   };
@@ -522,7 +757,7 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
-    private readonly timeoutMs = 8000,
+    private readonly timeoutMs = 15_000,
     private readonly rateLimitThreshold = 2,
     private readonly circuitCooldownMs = 60_000,
   ) {
@@ -621,17 +856,21 @@ export class GeminiOwnerCommandParser implements OwnerCommandParser {
   }
 }
 
+export function getGeminiOwnerCommandTimeoutMsFromEnv() {
+  const configured = Number(process.env.GEMINI_TIMEOUT_MS ?? 15_000);
+  return Number.isFinite(configured) && configured > 0 ? configured : 15_000;
+}
+
 export function createGeminiOwnerCommandParserFromEnv(): OwnerCommandParser | null {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) return null;
   const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
-  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS ?? 8000);
   const rateLimitThreshold = Number(process.env.GEMINI_CIRCUIT_429_THRESHOLD ?? 2);
   const circuitCooldownMs = Number(process.env.GEMINI_CIRCUIT_COOLDOWN_MS ?? 60_000);
   return new GeminiOwnerCommandParser(
     apiKey,
     model,
-    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000,
+    getGeminiOwnerCommandTimeoutMsFromEnv(),
     Number.isFinite(rateLimitThreshold) && rateLimitThreshold > 0 ? Math.trunc(rateLimitThreshold) : 2,
     Number.isFinite(circuitCooldownMs) && circuitCooldownMs > 0 ? circuitCooldownMs : 60_000,
   );

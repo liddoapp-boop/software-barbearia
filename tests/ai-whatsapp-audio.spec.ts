@@ -220,15 +220,21 @@ describe("audio do atendente IA via WhatsApp", () => {
   });
 
   it("texto transcrito de agendamento usa a mesma previa textual", async () => {
-    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Agendar corte para CLIENTE TESTE IA AUDIO dia 14/07/2026 as 11:00";
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Agendar corte para CLIENTE TESTE IA AUDIO dia quatorze do sete de vinte e seis as onze e trinta";
     const fetchMock = mockTransport();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
+    const token = await loginOwner(app);
 
     const response = await postWebhook(app, audioPayload());
 
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
-    expect(sentTexts(fetchMock).at(-1)).toContain("Horario: 11:00");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Data: 2026-07-14");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Horario: 11:30");
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/") && !String(url).includes("/chat/getBase64FromMediaMessage/")).length).toBe(0);
+    const events = await audits(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.dateRecognitionType === "spoken_numeric_month")).toBe(true);
+    expect(JSON.stringify(events)).not.toContain(process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT);
   });
 
   it("so executa a venda transcrita apos CONFIRMAR usando o fluxo oficial", async () => {

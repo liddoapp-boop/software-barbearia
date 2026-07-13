@@ -499,6 +499,48 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(preview).toContain("Horario: 11:00");
   });
 
+  it("gera previa deterministica com data e horario totalmente falados e audita somente o tipo", async () => {
+    const message = "Agendar corte para cliente teste confirmar agenda dia quatorze de julho de dois mil e vinte e seis às onze e trinta";
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    const response = await postWebhook(app, evolutionPayload(message));
+
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    const preview = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
+    expect(preview).toContain("Cliente: cliente teste confirmar agenda");
+    expect(preview).toContain("Servico: Corte");
+    expect(preview).toContain("Data: 2026-07-14");
+    expect(preview).toContain("Horario: 11:30");
+    expect(preview).toContain("Profissional: Geovane Borges");
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(0);
+    const events = await auditEvents(app, token);
+    const observed = events.find((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED");
+    expect(observed?.afterJson).toMatchObject({ strategy: "deterministic", dateRecognitionType: "fully_spoken" });
+    expect(JSON.stringify(events)).not.toContain(message);
+  });
+
+  it("pede esclarecimento para horario realmente ambiguo sem chamar Gemini", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+
+    const response = await postWebhook(
+      app,
+      evolutionPayload("Agendar corte para CLIENTE TESTE IA WPP AGENDAMENTO dia 14/07/2026 quinze para as duas"),
+    );
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(0);
+    const events = await auditEvents(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.status === "AMBIGUOUS")).toBe(true);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_FAILED" || event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(false);
+  });
+
   it("responde com seguranca quando a IA esta indisponivel, sem executar nada", async () => {
     const fetchMock = mockGeminiUnavailableAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
