@@ -427,6 +427,134 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     await prisma.$disconnect();
   });
 
+  it("atualiza profissional e reconcilia TeamMember sem duplicacao", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+
+    const inactive = await app.inject({
+      method: "PATCH",
+      url: `/professionals/${scenario.professionalId}`,
+      headers: { "x-correlation-id": uniqueId("professional-update-audit") },
+      payload: {
+        unitId: scenario.unitId,
+        name: "Profissional Atualizado",
+        phone: "11987654321",
+        email: "atualizado@barbearia.test",
+        active: false,
+      },
+    });
+
+    expect(inactive.statusCode).toBe(200);
+    expect(inactive.json().professional).toMatchObject({
+      id: scenario.professionalId,
+      name: "Profissional Atualizado",
+      active: false,
+    });
+    await expect(
+      prisma.professional.findUniqueOrThrow({ where: { id: scenario.professionalId } }),
+    ).resolves.toMatchObject({
+      businessId: scenario.unitId,
+      name: "Profissional Atualizado",
+      active: false,
+    });
+    await expect(
+      prisma.teamMember.findUniqueOrThrow({ where: { id: scenario.professionalId } }),
+    ).resolves.toMatchObject({
+      unitId: scenario.unitId,
+      name: "Profissional Atualizado",
+      phone: "11987654321",
+      email: "atualizado@barbearia.test",
+      isActive: false,
+      role: "PROFESSIONAL",
+      accessProfile: "profissional",
+    });
+
+    const active = await app.inject({
+      method: "PATCH",
+      url: `/professionals/${scenario.professionalId}`,
+      payload: {
+        unitId: scenario.unitId,
+        phone: "11999990000",
+        active: true,
+      },
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.json().professional.active).toBe(true);
+    expect(
+      await prisma.teamMember.findMany({ where: { id: scenario.professionalId } }),
+    ).toEqual([
+      expect.objectContaining({
+        unitId: scenario.unitId,
+        name: "Profissional Atualizado",
+        phone: "11999990000",
+        email: "atualizado@barbearia.test",
+        isActive: true,
+      }),
+    ]);
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          unitId: scenario.unitId,
+          action: "PROFESSIONAL_UPDATED",
+          entity: "professional",
+          entityId: scenario.professionalId,
+        },
+      }),
+    ).toBe(2);
+
+    await app.close();
+  });
+
+  it("retorna 404 ao atualizar profissional inexistente", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/professionals/${uniqueId("professional-missing")}`,
+      payload: {
+        unitId: scenario.unitId,
+        name: "Profissional Inexistente",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error).toBe("Profissional nao encontrado");
+    await app.close();
+  });
+
+  it("bloqueia updateProfessional de outra unidade sem alterar ou vincular dados", async () => {
+    const app = createApp();
+    const target = await createScenario();
+    const otherTenant = await createScenario();
+    const original = await prisma.professional.findUniqueOrThrow({
+      where: { id: target.professionalId },
+    });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/professionals/${target.professionalId}`,
+      payload: {
+        unitId: otherTenant.unitId,
+        name: "Alteracao Indevida",
+        phone: "11000000000",
+        email: "indevido@barbearia.test",
+        active: false,
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error).toBe("Profissional nao encontrado");
+    await expect(
+      prisma.professional.findUniqueOrThrow({ where: { id: target.professionalId } }),
+    ).resolves.toMatchObject({
+      businessId: target.unitId,
+      name: original.name,
+      active: original.active,
+    });
+    expect(await prisma.teamMember.count({ where: { id: target.professionalId } })).toBe(0);
+    await app.close();
+  });
+
   it("projeta produto e quantidade no financeiro de venda persistida", async () => {
     const app = createApp();
     const scenario = await createScenario();

@@ -446,6 +446,9 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/appointments/:id/checkout") {
     return { isPublic: false, roles: ["owner", "recepcao"] };
   }
+  if (route === "/appointments/:id/refund") {
+    return { isPublic: false, roles: ["owner", "recepcao"], unitSource: "body" };
+  }
   if (
     route === "/appointments/walk-in" ||
     route === "/appointments/fitting" ||

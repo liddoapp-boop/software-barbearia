@@ -8153,7 +8153,69 @@ export class PrismaOperationsService {
     email?: string;
     active?: boolean;
   }) {
-    throw new Error("updateProfessional not implemented for Prisma");
+    let nextName: string | undefined;
+    if (input.name !== undefined) {
+      nextName = String(input.name).trim();
+      if (nextName.length < 2) throw new Error("Nome deve ter ao menos 2 caracteres");
+    }
+
+    return await this.prisma.$transaction(async (tx) => {
+      const current = await tx.professional.findFirst({
+        where: { id: input.id, businessId: input.unitId },
+        select: { id: true, name: true, active: true },
+      });
+      if (!current) throw new Error("Profissional nao encontrado");
+
+      const existingMember = await tx.teamMember.findUnique({
+        where: { id: current.id },
+        select: { id: true, unitId: true },
+      });
+      if (existingMember && existingMember.unitId !== input.unitId) {
+        throw new Error("Unidade nao autorizada");
+      }
+
+      const professional = await tx.professional.update({
+        where: { id: current.id },
+        data: {
+          name: nextName,
+          active: input.active,
+        },
+      });
+
+      const memberData = {
+        name: nextName,
+        phone: input.phone !== undefined ? String(input.phone).trim() || null : undefined,
+        email: input.email !== undefined ? String(input.email).trim() || null : undefined,
+        isActive: input.active,
+      };
+      if (existingMember) {
+        await tx.teamMember.update({
+          where: { id: existingMember.id },
+          data: memberData,
+        });
+      } else {
+        await tx.teamMember.create({
+          data: {
+            id: professional.id,
+            unitId: input.unitId,
+            name: professional.name,
+            role: "PROFESSIONAL",
+            accessProfile: "profissional",
+            email: input.email !== undefined ? String(input.email).trim() || null : null,
+            phone: input.phone !== undefined ? String(input.phone).trim() || null : null,
+            isActive: professional.active,
+          },
+        });
+      }
+
+      return {
+        professional: {
+          id: professional.id,
+          name: professional.name,
+          active: professional.active,
+        },
+      };
+    });
   }
 
   async createProfessional(input: {
