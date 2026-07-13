@@ -5,12 +5,14 @@ Este diretório preserva a memória operacional do Software Barbearia. Documento
 ## Estado atual
 
 - Atualizado em: 2026-07-13.
-- Macro atual: `244.3 - Documentação final e manifesto de entrega local`.
-- Decisão: **PRONTO PARA DEPLOY FUTURO CONTROLADO**.
+- Macro atual: `245.1 - Auditoria pós-correção P1 e preparação RC local`.
+- Decisão: **APROVADO COM RESSALVAS COMO RC LOCAL**.
 - Produção real: **não executada**.
-- Baseline funcional anterior ao commit documental: `159159bccbfb3d2634b19fe287a583ca3d16a373`.
+- HEAD aprovado: `93557ed369ee07e97941a81211c8219b909da7ba`.
+- `v1.0.0-rc.1` foi bloqueada por dois P1, corrigidos pela Macro 245.1: RBAC de estorno de atendimento e `updateProfessional` Prisma.
 - Banco piloto: resetado e validado no estado canônico pós-login.
 - Gate final local: aprovado, incluindo validação técnica e manual.
+- Auditoria pós-correção: sem P0/P1 confirmado no escopo local; a futura `v1.0.0-rc.2` permanece apenas RC local.
 
 Fonte de verdade para retomada:
 
@@ -52,6 +54,13 @@ Detalhes do reset: [244_2A_RESET_OFICIAL_GEOVANE_PILOT.md](./244_2A_RESET_OFICIA
 ## Pendência principal
 
 O fluxo real de venda por WhatsApp com `CONFIRMAR` foi aprovado. O fluxo real de agendamento com `CONFIRMAR <codigo>` ainda precisa ser validado quando existir uma sessão autenticada capaz de enviar pelo owner final mascarado `452`. Parser, data, horário, áudio simulado e prévia estão cobertos; a pendência é operacional.
+
+## Ressalvas do RC local
+
+- Não há rate limiting HTTP global.
+- O compose local da Evolution ainda usa imagens `latest`.
+- A CSP ainda contém `unsafe-inline`.
+- A validação visual humana não foi repetida na auditoria RC.2.
 
 ## Próxima etapa
 

@@ -8,10 +8,22 @@ Data: 2026-07-13
 
 Esta decisão consolida o ambiente local e não declara produção real. Nenhuma VPS, domínio, proxy, certificado, banco remoto ou processo de produção foi criado ou alterado.
 
+## Atualização RC.2 — Macro 245.1
+
+Status atual: `APROVADO COM RESSALVAS COMO RC LOCAL`.
+
+- A tag `v1.0.0-rc.1` permaneceu no commit `3eb4c82e90dc43cacd557311f140ec0475ac43fa`, mas foi bloqueada pela auditoria final que identificou dois P1.
+- A Macro 245.1 corrigiu o RBAC do estorno de atendimento: somente owner e recepção podem estornar; profissional, anônimo e outro tenant são bloqueados.
+- A Macro 245.1 implementou `updateProfessional` no backend Prisma, com tenant guard, sincronização de nome/telefone/e-mail/status no `TeamMember`, sem duplicação e com auditoria `PROFESSIONAL_UPDATED` preservada.
+- A auditoria pós-correção aprovou o HEAD `93557ed369ee07e97941a81211c8219b909da7ba`, sem P0/P1 confirmado no escopo local auditado.
+
+Esta aprovação prepara uma futura tag `v1.0.0-rc.2`, mas não autoriza produção real, deploy, migration remota ou alteração do banco piloto.
+
 ## Baseline versionado
 
 - Branch: `main`.
 - HEAD funcional recebido pela Macro 244.3: `159159bccbfb3d2634b19fe287a583ca3d16a373`.
+- HEAD aprovado na auditoria pós-correção da Macro 245.1: `93557ed369ee07e97941a81211c8219b909da7ba`.
 - Descrição: `feat: detalhar produtos no financeiro`.
 - O commit documental da Macro 244.3 é posterior a esse baseline e deve ser identificado no relatório de fechamento.
 - `.env`, `.env.pilot.local`, dumps, sessões, logs e credenciais permanecem fora do Git.
@@ -73,7 +85,7 @@ Portanto, o estado estabilizado pós-login é `TeamMember=1`. Esse registro repr
 ## Testes consolidados
 
 - `npx prisma validate`: aprovado no gate pós-reset.
-- `npm run test:db`: aprovado no banco isolado `barbearia_test`, 39 testes aprovados.
+- `npm run test:db`: aprovado no banco isolado `barbearia_test`, 42 testes aprovados na auditoria pós-correção.
 - `npm run build`: aprovado no gate pós-reset e reexecutado na Macro 244.3.
 - `npm test`: aprovado no gate pós-reset e reexecutado na Macro 244.3.
 - `git diff --check`: aprovado no gate pós-reset e reexecutado antes do commit documental.
@@ -112,6 +124,10 @@ O reset oficial exige dump PostgreSQL não vazio reconhecido por `pg_restore --l
 - Confirmações WhatsApp pendentes ficam em memória e expiram; restart as remove.
 - O fluxo real de `CONFIRMAR` para agendamento WhatsApp ainda não tem evidência com a sessão owner final `452`.
 - A carga de configurações cria o `TeamMember` owner quando ausente; essa materialização em uma leitura é comportamento conhecido e canônico no estado estabilizado.
+- Não há rate limiting HTTP global; os controles atuais são específicos dos fluxos de IA/áudio.
+- O compose local da Evolution usa imagens com tag `latest`, o que reduz reprodutibilidade do ambiente.
+- A CSP ainda admite `unsafe-inline` e CDNs externos; o baseline mantém `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'self'`, `nosniff` e política de referrer.
+- A validação visual humana não foi repetida na auditoria RC.2.
 
 ## Pendências para futura VPS
 

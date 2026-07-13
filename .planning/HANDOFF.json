@@ -1,11 +1,11 @@
 {
-  "version": "2.0",
-  "timestamp": "2026-07-13T18:13:13Z",
-  "phase": "244.3",
-  "phase_name": "Documentacao final e manifesto de entrega local",
+  "version": "2.1",
+  "timestamp": "2026-07-13T19:29:06Z",
+  "phase": "245.1",
+  "phase_name": "Auditoria pos-correcao P1 e preparacao RC local",
   "phase_dir": ".planning",
-  "status": "ready_for_future_deploy",
-  "baseline_head": "159159bccbfb3d2634b19fe287a583ca3d16a373",
+  "status": "approved_with_reservations_rc_local",
+  "baseline_head": "93557ed369ee07e97941a81211c8219b909da7ba",
   "production_deployed": false,
   "completed_tasks": [
     {
@@ -31,6 +31,12 @@
       "name": "Gate final local pos-reset",
       "status": "approved",
       "commit": null
+    },
+    {
+      "id": "245.1",
+      "name": "Correcao dos P1 de RBAC de estorno e updateProfessional Prisma",
+      "status": "approved_with_reservations",
+      "commit": "93557ed"
     }
   ],
   "local_state": {
@@ -56,6 +62,16 @@
     {
       "id": "future-vps",
       "name": "Provisionar e validar VPS em macro futura separada",
+      "status": "not_started"
+    },
+    {
+      "id": "http-rate-limiting",
+      "name": "Adicionar rate limiting HTTP global em fase propria",
+      "status": "not_started"
+    },
+    {
+      "id": "evolution-image-pin",
+      "name": "Fixar versoes das imagens Evolution locais",
       "status": "not_started"
     }
   ],
@@ -90,6 +106,11 @@
       "decision": "TEAM_MEMBER_OWNER CANONICO APOS LOGIN",
       "rationale": "A carga de configuracoes materializa um TeamMember OWNER para Geovane quando a unidade ainda nao possui equipe.",
       "phase": "244.3"
+    },
+    {
+      "decision": "RC LOCAL APROVADO COM RESSALVAS",
+      "rationale": "A auditoria pos-correcao da Macro 245.1 aprovou o HEAD 93557ed sem P0/P1 confirmado; permanecem riscos P2/P3 de rate limiting HTTP global, Evolution latest, CSP com unsafe-inline, validacao visual humana nao repetida e CONFIRMAR real de agendamento WhatsApp pendente.",
+      "phase": "245.1"
     }
   ],
   "uncommitted_files": [],
@@ -99,6 +120,6 @@
     "WHATSAPP_IA.md",
     ".planning/235_2_PACOTE_FUTURA_VPS.md"
   ],
-  "next_action": "Aguardar autorizacao para uma macro futura de VPS; antes dela, nao executar deploy, migration remota, WhatsApp real ou alteracao de banco.",
-  "context_notes": "O banco piloto esta no estado canonico pos-reset. A venda real WhatsApp foi validada antes do reset. O agendamento real com CONFIRMAR permanece pendente por falta da sessao remetente final 452. Dumps locais permanecem fora do Git."
+  "next_action": "Aguardar autorizacao explicita para registrar a documentacao final e criar a tag v1.0.0-rc.2; antes de qualquer VPS, nao executar deploy, migration remota, WhatsApp real ou alteracao de banco.",
+  "context_notes": "O banco piloto permanece no estado canonico pos-reset: 0 clientes, agendamentos, vendas e financeiros; estoque total 73. A venda real WhatsApp foi validada antes do reset. O agendamento real com CONFIRMAR permanece pendente por falta da sessao remetente final 452. A auditoria Macro 245.1 corrigiu os dois P1 de rc.1 e aprovou o HEAD 93557ed como RC local com ressalvas. Dumps locais permanecem fora do Git."
 }
