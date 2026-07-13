@@ -10,7 +10,7 @@ export type AudioTranscriptionFailureReason =
 
 export const DEFAULT_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 20_000;
 export const MIN_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 5_000;
-export const MAX_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 30_000;
+export const MAX_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 45_000;
 
 export type AudioTranscriptionDiagnostics = {
   providerCalled: boolean;

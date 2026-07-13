@@ -183,8 +183,10 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(20_000);
     process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "100";
     expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(5_000);
-    process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "40000";
-    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(30_000);
+    process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "45000";
+    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(45_000);
+    process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "60000";
+    expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(45_000);
   });
 
   it("reconhece audio, baixa em memoria, transcreve e gera somente previa de venda", async () => {
