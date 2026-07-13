@@ -1,66 +1,104 @@
 {
-  "version": "1.0",
-  "timestamp": "2026-06-20T02:37:09Z",
-  "phase": "212.1",
-  "phase_name": "Piloto sintetico controlado de agendamento como cliente",
+  "version": "2.0",
+  "timestamp": "2026-07-13T18:13:13Z",
+  "phase": "244.3",
+  "phase_name": "Documentacao final e manifesto de entrega local",
   "phase_dir": ".planning",
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "paused",
+  "status": "ready_for_future_deploy",
+  "baseline_head": "159159bccbfb3d2634b19fe287a583ca3d16a373",
+  "production_deployed": false,
   "completed_tasks": [
     {
-      "id": 209,
-      "name": "Blindagem da Agenda implantada e auditada",
+      "id": "244.1B",
+      "name": "Venda real por WhatsApp com confirmacao humana",
       "status": "done",
-      "commit": "385845a"
+      "commit": "92bfe17"
     },
     {
-      "id": 211,
-      "name": "Validacao acelerada do fluxo operacional principal",
+      "id": "244.2A",
+      "name": "Reset oficial do banco piloto Geovane",
       "status": "done",
-      "commit": "a08fd36"
+      "commit": "86964cf"
     },
     {
-      "id": 212.1,
-      "name": "Piloto sintetico controlado de agendamento como cliente",
+      "id": "244.2C",
+      "name": "Produto e quantidade no financeiro",
       "status": "done",
-      "commit": "1cc25a1"
+      "commit": "159159b"
+    },
+    {
+      "id": "244.2B",
+      "name": "Gate final local pos-reset",
+      "status": "approved",
+      "commit": null
     }
   ],
+  "local_state": {
+    "database": "barbearia_pilot",
+    "clients": 0,
+    "appointments": 0,
+    "sales": 0,
+    "financial_entries": 0,
+    "checkouts": 0,
+    "active_products": 6,
+    "active_services": 5,
+    "stock_total": 73,
+    "team_members_after_authenticated_load": 1,
+    "health_http_status": 200,
+    "manual_gate": "approved"
+  },
   "remaining_tasks": [
     {
-      "id": 212.2,
-      "name": "Piloto assistido owner-only com usuario real",
-      "status": "not_started"
+      "id": "whatsapp-appointment-confirmation",
+      "name": "Validar CONFIRMAR de agendamento real pelo WhatsApp com sessao do owner final 452",
+      "status": "blocked_by_missing_sender_session"
     },
     {
-      "id": 212.3,
-      "name": "Avaliar auditoria explicita para criacao publica de agendamento",
+      "id": "future-vps",
+      "name": "Provisionar e validar VPS em macro futura separada",
       "status": "not_started"
     }
   ],
-  "blockers": [],
+  "blockers": [
+    {
+      "scope": "whatsapp_real_appointment",
+      "cause": "Nao existe sessao autenticada capaz de enviar pelo owner final mascarado 452."
+    }
+  ],
   "human_actions_pending": [
     {
-      "action": "Executar piloto assistido com usuario real",
-      "context": "O fluxo sintetico passou, mas ainda falta observar ergonomia e atritos do fluxo real em balcao.",
+      "action": "Disponibilizar sessao autorizada do owner para a validacao real futura do agendamento WhatsApp.",
+      "blocking": false
+    },
+    {
+      "action": "Autorizar explicitamente uma macro de provisionamento quando houver VPS e politica de backup definidas.",
       "blocking": false
     }
   ],
   "decisions": [
     {
-      "decision": "Sistema classificado como pronto para piloto operacional apos Fase 211.",
-      "rationale": "Build, testes, test:db, smoke readonly e cobertura do fluxo Agenda -> Checkout -> Financeiro -> Auditoria passaram.",
-      "phase": "211"
+      "decision": "PRONTO PARA DEPLOY FUTURO CONTROLADO",
+      "rationale": "Banco piloto resetado, gates tecnico e manual aprovados, build e testes aprovados, estoque canonico e documentacao consolidada.",
+      "phase": "244.3"
     },
     {
-      "decision": "Piloto sintetico de agendamento aprovado com dado de teste rastreavel.",
-      "rationale": "Criou 1 agendamento publico, validou na Agenda owner, cancelou por endpoint seguro, liberou o slot e nao gerou financeiro.",
-      "phase": "212.1"
+      "decision": "PRODUCAO REAL NAO DECLARADA",
+      "rationale": "Nenhuma VPS, dominio, TLS, proxy, banco remoto ou deploy foi executado.",
+      "phase": "244.3"
+    },
+    {
+      "decision": "TEAM_MEMBER_OWNER CANONICO APOS LOGIN",
+      "rationale": "A carga de configuracoes materializa um TeamMember OWNER para Geovane quando a unidade ainda nao possui equipe.",
+      "phase": "244.3"
     }
   ],
   "uncommitted_files": [],
-  "next_action": "Iniciar a proxima etapa com leitura de .planning/211_VALIDACAO_FLUXO_OPERACIONAL.md, .planning/212_PILOTO_SINTETICO_AGENDAMENTO.md e .planning/.continue-here.md; depois planejar piloto assistido owner-only.",
-  "context_notes": "Repositorio limpo e alinhado com origin/main antes da pausa. Ultimo commit funcional/documental antes do handoff: 1cc25a1 docs: registrar piloto sintetico de agendamento. Nao houve migration, seed, alteracao de .env, deploy, restart PM2 ou alteracao manual em banco."
+  "required_reading": [
+    ".planning/244_3_MANIFESTO_ENTREGA_LOCAL.md",
+    "README.md",
+    "WHATSAPP_IA.md",
+    ".planning/235_2_PACOTE_FUTURA_VPS.md"
+  ],
+  "next_action": "Aguardar autorizacao para uma macro futura de VPS; antes dela, nao executar deploy, migration remota, WhatsApp real ou alteracao de banco.",
+  "context_notes": "O banco piloto esta no estado canonico pos-reset. A venda real WhatsApp foi validada antes do reset. O agendamento real com CONFIRMAR permanece pendente por falta da sessao remetente final 452. Dumps locais permanecem fora do Git."
 }

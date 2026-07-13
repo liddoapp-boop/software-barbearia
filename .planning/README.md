@@ -1,100 +1,64 @@
 # Planejamento
 
-Este diretorio e a memoria operacional do projeto Software Barbearia. Use este README como ponto de entrada antes de abrir documentos especificos.
+Este diretório preserva a memória operacional do Software Barbearia. Documentos antigos continuam úteis como histórico, mas não devem ser interpretados isoladamente como estado atual.
 
-## Status do README
-- Atualizado em: 2026-07-08.
-- Estado: pronto como indice e resumo executivo da pasta `.planning`.
-- Fonte de verdade para proximas tarefas: [24_NEXT_PRIORITIES.md](./24_NEXT_PRIORITIES.md).
-- Checklist de validacao manual/producao controlada: [92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md](./92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md).
+## Estado atual
 
-## Decisao estrategica vigente
-O produto foi reorganizado em quatro blocos para simplificar onboarding, uso diario e venda:
-1. Operacao
-2. Gestao
-3. Administracao
-4. Avancado
+- Atualizado em: 2026-07-13.
+- Macro atual: `244.3 - Documentação final e manifesto de entrega local`.
+- Decisão: **PRONTO PARA DEPLOY FUTURO CONTROLADO**.
+- Produção real: **não executada**.
+- Baseline funcional anterior ao commit documental: `159159bccbfb3d2634b19fe287a583ca3d16a373`.
+- Banco piloto: resetado e validado no estado canônico pós-login.
+- Gate final local: aprovado, incluindo validação técnica e manual.
 
-Regra de ouro: se a navegacao parecer cheia ou confusa, a arquitetura deve ser revista antes de adicionar novos modulos no menu principal.
+Fonte de verdade para retomada:
 
-## Gate atual antes de IA/WhatsApp
-Nao implementar IA/WhatsApp mutante antes de concluir e validar os fluxos operacionais criticos.
+1. [244_3_MANIFESTO_ENTREGA_LOCAL.md](./244_3_MANIFESTO_ENTREGA_LOCAL.md)
+2. [HANDOFF.json](./HANDOFF.json)
+3. [.continue-here.md](./.continue-here.md)
+4. [README principal](../README.md)
+5. [WhatsApp e IA](../WHATSAPP_IA.md)
 
-Estado atual:
-- Idempotencia obrigatoria em rotas criticas implementada e validada.
-- Checkout unificado de atendimento implementado.
-- Devolucoes/estornos rastreaveis implementados.
-- Financeiro profissional com lancamentos automaticos protegidos e reversoes rastreaveis implementado.
-- Auditoria persistente append-only implementada.
-- Auditoria transacional para fluxos financeiros criticos implementada no backend Prisma.
-- Historico operacional de vendas de produto implementado.
-- Tenant guard aprofundado em rotas de produto/estoque/venda/devolucao implementado.
-- Checklist de validacao manual e producao controlada criado, ainda pendente de execucao completa.
+## Estado canônico local
 
-Referencia oficial do gate:
-- [50_AUDITORIA_PRE_IA_WHATSAPP.md](./50_AUDITORIA_PRE_IA_WHATSAPP.md)
-- [79_ROADMAP_PROFISSIONALIZACAO.md](./79_ROADMAP_PROFISSIONALIZACAO.md)
-- [92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md](./92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md)
+- 0 clientes, agendamentos, vendas, financeiros e checkouts.
+- 6 produtos ativos e estoque total 73.
+- 5 serviços ativos.
+- Owner e profissional Geovane ativos.
+- `TeamMember=1` após a primeira carga autenticada de configurações; é o owner canônico de equipe, não dado residual.
+- Backend health HTTP 200.
+- Login, dashboard, agenda, financeiro, estoque e menu validados manualmente.
 
-## Documentos ativos principais
+Detalhes do reset: [244_2A_RESET_OFICIAL_GEOVANE_PILOT.md](./244_2A_RESET_OFICIAL_GEOVANE_PILOT.md).
 
-### Execucao e proximas prioridades
-- [24_NEXT_PRIORITIES.md](./24_NEXT_PRIORITIES.md)
-- [23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md](./23_IMPLEMENTATION_LOG_FASE_MATURIDADE.md)
-- [92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md](./92_VALIDACAO_MANUAL_PRODUCAO_CONTROLADA.md)
+## Documentos recentes ativos
 
-### Auditorias, riscos e roadmap
-- [50_AUDITORIA_PRE_IA_WHATSAPP.md](./50_AUDITORIA_PRE_IA_WHATSAPP.md)
-- [70_AUDITORIA_CAIXA_PRETA.md](./70_AUDITORIA_CAIXA_PRETA.md)
-- [78_RISCOS_CRITICOS_ATUAIS.md](./78_RISCOS_CRITICOS_ATUAIS.md)
-- [79_ROADMAP_PROFISSIONALIZACAO.md](./79_ROADMAP_PROFISSIONALIZACAO.md)
-- [81_AUDITORIA_POS_IDEMPOTENCIA.md](./81_AUDITORIA_POS_IDEMPOTENCIA.md)
+### Entrega, banco e financeiro
 
-### Fluxos, dados e rastreabilidade
-- [51_CHECKOUT_UNIFICADO.md](./51_CHECKOUT_UNIFICADO.md)
-- [71_MODELO_DE_DADOS_E_IDS.md](./71_MODELO_DE_DADOS_E_IDS.md)
-- [72_RASTREABILIDADE_DOS_FLUXOS.md](./72_RASTREABILIDADE_DOS_FLUXOS.md)
-- [73_POLITICA_ESTOQUE.md](./73_POLITICA_ESTOQUE.md)
-- [74_POLITICA_FINANCEIRA.md](./74_POLITICA_FINANCEIRA.md)
-- [75_DEVOLUCOES_E_ESTORNOS.md](./75_DEVOLUCOES_E_ESTORNOS.md)
-- [76_AUDITORIA_E_LOGS.md](./76_AUDITORIA_E_LOGS.md)
-- [77_PERMISSOES_E_SEGURANCA.md](./77_PERMISSOES_E_SEGURANCA.md)
+- [244_3_MANIFESTO_ENTREGA_LOCAL.md](./244_3_MANIFESTO_ENTREGA_LOCAL.md)
+- [244_2A_RESET_OFICIAL_GEOVANE_PILOT.md](./244_2A_RESET_OFICIAL_GEOVANE_PILOT.md)
+- [244_2C_FINANCEIRO_PRODUTO_QUANTIDADE.md](./244_2C_FINANCEIRO_PRODUTO_QUANTIDADE.md)
+- [238_MODO_LOCAL_PILOTO.md](./238_MODO_LOCAL_PILOTO.md)
+- [235_2_PACOTE_FUTURA_VPS.md](./235_2_PACOTE_FUTURA_VPS.md)
 
-### Implementacoes recentes
-- [80_IMPLEMENTACAO_IDEMPOTENCIA_E_CONSTRAINTS.md](./80_IMPLEMENTACAO_IDEMPOTENCIA_E_CONSTRAINTS.md)
-- [82_IDEMPOTENCIA_OBRIGATORIA.md](./82_IDEMPOTENCIA_OBRIGATORIA.md)
-- [83_FINANCEIRO_AUDITORIA_PLANO.md](./83_FINANCEIRO_AUDITORIA_PLANO.md)
-- [84_COMISSAO_DESPESA_RECONCILIAVEL.md](./84_COMISSAO_DESPESA_RECONCILIAVEL.md)
-- [85_ESTORNOS_DEVOLUCOES_RASTREAVEIS.md](./85_ESTORNOS_DEVOLUCOES_RASTREAVEIS.md)
-- [86_AUDITORIA_PERSISTENTE_APPEND_ONLY.md](./86_AUDITORIA_PERSISTENTE_APPEND_ONLY.md)
-- [87_VALIDACAO_POSTGRES_ROBUSTEZ.md](./87_VALIDACAO_POSTGRES_ROBUSTEZ.md)
-- [88_USUARIOS_PERSISTENTES_PERMISSOES.md](./88_USUARIOS_PERSISTENTES_PERMISSOES.md)
-- [89_FRONTEND_FLUXOS_CRITICOS.md](./89_FRONTEND_FLUXOS_CRITICOS.md)
-- [90_TENANT_GUARD_HISTORICO_VENDAS.md](./90_TENANT_GUARD_HISTORICO_VENDAS.md)
-- [91_OUTBOX_AUDITORIA_TRANSACIONAL.md](./91_OUTBOX_AUDITORIA_TRANSACIONAL.md)
+### WhatsApp e IA
 
-### UX/UI e produto
-- [48_REORGANIZACAO_MENUS_E_PRODUTO.md](./48_REORGANIZACAO_MENUS_E_PRODUTO.md)
-- [60_UI_UX_REFACTOR.md](./60_UI_UX_REFACTOR.md)
+- [242_ATENDENTE_IA_WHATSAPP_FIRST.md](./242_ATENDENTE_IA_WHATSAPP_FIRST.md)
+- [243_3_5_IDENTIDADE_LID_AUDIO_CANCELAMENTO_SEGURO.md](./243_3_5_IDENTIDADE_LID_AUDIO_CANCELAMENTO_SEGURO.md)
+- [244_1B_CONFIRMAR_CONTROLADO_VENDA_WHATSAPP.md](./244_1B_CONFIRMAR_CONTROLADO_VENDA_WHATSAPP.md)
+- [244_1C_3_DATA_HORARIO_NATURAL_WHATSAPP.md](./244_1C_3_DATA_HORARIO_NATURAL_WHATSAPP.md)
 
-## Documentos base e historicos
-Os documentos `01` a `22` registram a visao inicial, arquitetura, modulo a modulo, endpoints, entidades, permissoes, testes e observabilidade.
+## Pendência principal
 
-Eles ainda sao uteis para contexto, mas podem estar desatualizados diante das fases `80` a `92`. Para decisao atual, priorize:
-- documentos mais recentes;
-- implementation log;
-- next priorities;
-- checklist de validacao manual.
+O fluxo real de venda por WhatsApp com `CONFIRMAR` foi aprovado. O fluxo real de agendamento com `CONFIRMAR <codigo>` ainda precisa ser validado quando existir uma sessão autenticada capaz de enviar pelo owner final mascarado `452`. Parser, data, horário, áudio simulado e prévia estão cobertos; a pendência é operacional.
 
-## Estado tecnico resumido
-- Backend suporta `DATA_BACKEND=memory` para desenvolvimento rapido e `DATA_BACKEND=prisma` para validacao robusta.
-- Rotas criticas exigem `idempotencyKey`.
-- Fluxos financeiros automaticos devem ser revertidos por estorno/devolucao, nao por edicao/destruicao direta.
-- Auditoria deve preservar actor, role, rota, metodo, requestId, idempotencyKey e metadados relevantes.
-- Em Prisma, fluxos financeiros criticos gravam auditoria dentro da mesma transacao de negocio.
-- A SPA ainda usa `unit-01` como baseline operacional; seguranca real deve vir do backend/token.
+## Próxima etapa
 
-## Proxima acao recomendada
-Macro 235.1 - Preparacao segura do banco e dos dados do piloto.
+Planejar a VPS apenas em nova macro e com autorização explícita. A aprovação local não autoriza provisionamento, deploy, migration remota, restore, configuração de Evolution ou qualquer escrita em ambiente externo.
 
-Comecar por backup verificado, validacao de migrations, dry-run de saneamento dos dados e smoke no banco preparado. O fechamento da Macro 234 esta registrado em [234_FECHAMENTO_RELEASE_CANDIDATE.md](./234_FECHAMENTO_RELEASE_CANDIDATE.md): o codigo foi aprovado como Release Candidate, mas o piloto continua bloqueado ate o banco principal e os dados serem preparados de forma controlada.
+Antes de liberar um alvo futuro, seguir [235_2_PACOTE_FUTURA_VPS.md](./235_2_PACOTE_FUTURA_VPS.md) e exigir `.env` próprio, backup externo, restore testado, migrations conferidas, processo gerenciado, proxy, TLS, firewall, health, smoke readonly e aceite visual.
+
+## Histórico
+
+Os documentos das fases anteriores registram decisões válidas em seu contexto, inclusive estados como “piloto bloqueado” ou “pronto para piloto”. Essas classificações foram superadas pelo reset e pelo gate final da Macro 244.2. Para decisões atuais, prevalecem o manifesto 244.3 e os handoffs atualizados.

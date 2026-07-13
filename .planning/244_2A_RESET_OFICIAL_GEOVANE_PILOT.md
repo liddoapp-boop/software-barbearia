@@ -62,6 +62,20 @@ O script valida o dump com `pg_restore --list`, registra no terminal o caminho a
 - 0 contagens ou outros movimentos operacionais de estoque;
 - 0 dados de demonstracao.
 
+## Estado estabilizado depois do primeiro login
+
+O reset transacional deixa `TeamMember=0`. Esse contador muda de forma esperada na primeira carga autenticada de configuracoes: `getSettingsOverview` chama `ensureTeamMembers` e cria o cadastro essencial de equipe do owner quando a unidade ainda nao possui membros.
+
+Depois dessa carga, o estado canonico e:
+
+- `TeamMember=1`;
+- nome `Geovane Borges`;
+- `role=OWNER`;
+- `accessProfile=owner`;
+- ativo e vinculado a `unit-geovane-borges`.
+
+Esse registro e distinto do `Professional` usado na agenda e nos servicos. Ele nao representa cliente, agendamento, venda, financeiro, checkout ou dado de demonstracao residual.
+
 ## Riscos e recuperacao
 
 O reset real e destrutivo e nao possui desfazer. Um caminho incorreto, um backup antigo ou um dump que nao corresponda ao estado desejado pode causar perda de dados do piloto. Confirme manualmente banco, host, data, tamanho e SHA-256 do backup antes de usar a flag real. Em caso de erro apos o commit da transacao, pare a aplicacao e restaure o dump validado com o procedimento oficial de restore; nao improvise SQL nem rode seed generico.
