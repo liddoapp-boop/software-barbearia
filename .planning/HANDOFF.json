@@ -1,11 +1,11 @@
 {
-  "version": "2.1",
-  "timestamp": "2026-07-13T19:29:06Z",
-  "phase": "245.1",
-  "phase_name": "Auditoria pos-correcao P1 e preparacao RC local",
+  "version": "2.2",
+  "timestamp": "2026-07-14T03:45:00Z",
+  "phase": "246.5",
+  "phase_name": "Fechamento local definitivo e RC.3",
   "phase_dir": ".planning",
-  "status": "approved_with_reservations_rc_local",
-  "baseline_head": "93557ed369ee07e97941a81211c8219b909da7ba",
+  "status": "ready_for_rc3_publication",
+  "baseline_head": "d6dd0ceac636dd7ee12c5545e16644a441a26638",
   "production_deployed": false,
   "completed_tasks": [
     {
@@ -37,6 +37,12 @@
       "name": "Correcao dos P1 de RBAC de estorno e updateProfessional Prisma",
       "status": "approved_with_reservations",
       "commit": "93557ed"
+    },
+    {
+      "id": "246.5",
+      "name": "Fechamento RC.3: texto estavel e audio experimental",
+      "status": "done",
+      "commit": null
     }
   ],
   "local_state": {
@@ -51,7 +57,10 @@
     "stock_total": 73,
     "team_members_after_authenticated_load": 1,
     "health_http_status": 200,
-    "manual_gate": "approved"
+    "manual_gate": "approved",
+    "whatsapp_text": "functional",
+    "audio_local": "experimental_disabled",
+    "gemini": "optional_no_key_required"
   },
   "remaining_tasks": [
     {
@@ -73,6 +82,11 @@
       "id": "evolution-image-pin",
       "name": "Fixar versoes das imagens Evolution locais",
       "status": "not_started"
+    },
+    {
+      "id": "experimental-audio",
+      "name": "Retomar audio somente com VPS ou nova base humana/modelos adequados",
+      "status": "frozen"
     }
   ],
   "blockers": [
@@ -111,6 +125,11 @@
       "decision": "RC LOCAL APROVADO COM RESSALVAS",
       "rationale": "A auditoria pos-correcao da Macro 245.1 aprovou o HEAD 93557ed sem P0/P1 confirmado; permanecem riscos P2/P3 de rate limiting HTTP global, Evolution latest, CSP com unsafe-inline, validacao visual humana nao repetida e CONFIRMAR real de agendamento WhatsApp pendente.",
       "phase": "245.1"
+    },
+    {
+      "decision": "PROJETO PRONTO — AUDIO EXPERIMENTAL",
+      "rationale": "Texto WhatsApp permanece funcional; Gemini e opcional; ASR local falhou entidades criticas e Qwen local excedeu o gate de latencia. Audio fica desligado por padrao e fora do aceite funcional da RC.3.",
+      "phase": "246.5"
     }
   ],
   "uncommitted_files": [],
@@ -120,6 +139,6 @@
     "WHATSAPP_IA.md",
     ".planning/235_2_PACOTE_FUTURA_VPS.md"
   ],
-  "next_action": "Aguardar autorizacao explicita para registrar a documentacao final e criar a tag v1.0.0-rc.2; antes de qualquer VPS, nao executar deploy, migration remota, WhatsApp real ou alteracao de banco.",
-  "context_notes": "O banco piloto permanece no estado canonico pos-reset: 0 clientes, agendamentos, vendas e financeiros; estoque total 73. A venda real WhatsApp foi validada antes do reset. O agendamento real com CONFIRMAR permanece pendente por falta da sessao remetente final 452. A auditoria Macro 245.1 corrigiu os dois P1 de rc.1 e aprovou o HEAD 93557ed como RC local com ressalvas. Dumps locais permanecem fora do Git."
+  "next_action": "Publicar a RC.3 somente apos todos os gates tecnicos deste fechamento. Depois, congelar o projeto ate VPS, TCC ou correcao P0/P1 autorizada.",
+  "context_notes": "O banco piloto permanece no estado canonico pos-reset: 0 clientes, agendamentos, vendas e financeiros; estoque total 73. WhatsApp textual esta funcional. Gemini e opcional e audio local esta experimental/desligado por padrao; nenhum dos dois e requisito do sistema principal. O agendamento real com CONFIRMAR permanece pendente por falta da sessao remetente final mascarada. Artefatos locais e dumps permanecem fora do Git."
 }

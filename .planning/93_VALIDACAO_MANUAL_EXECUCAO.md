@@ -8,7 +8,7 @@ Status: EXECUCAO PARCIAL COM CORRECAO LOCALIZADA
 Executar a validacao real dos fluxos criticos antes da producao controlada, registrar evidencias, classificar bugs e decidir a proxima etapa.
 
 ## Ambiente usado
-- Maquina local Windows em `C:\Users\joaov\OneDrive\Desktop\Projetos\Software Barbearia`.
+- Maquina local Windows no `<workspace>` do projeto.
 - Node conforme projeto, requisito `>=22`.
 - URL local prevista: `http://localhost:3333/index.html`.
 - API Fastify servindo `public/` com `fastifyStatic` em `/`.

@@ -21,6 +21,77 @@ function parser(timeoutMs = 20) {
   return new GeminiOwnerCommandParser("test-key", "test-model", timeoutMs);
 }
 
+function mockSemanticSchedule(fields: Partial<{
+  clientName: string;
+  serviceNames: string[];
+  professionalName: string;
+  date: string;
+  time: string;
+  confidence: number;
+  missingFields: string[];
+}> = {}) {
+  return vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: JSON.stringify({
+        intent: "schedule_appointment",
+        clientName: "",
+        serviceNames: [],
+        professionalName: "",
+        date: "",
+        time: "",
+        confidence: 0.9,
+        missingFields: [],
+        ...fields,
+      }) }] } }],
+    }),
+  }));
+}
+
+function semanticV2(input: Partial<{
+  intent: "schedule_appointment" | "unknown";
+  intentConfidence: number;
+  clientName: string;
+  clientEvidence: string;
+  clientConfidence: number;
+  serviceName: string;
+  serviceEvidence: string;
+  serviceConfidence: number;
+  date: string;
+  dateEvidence: string;
+  dateConfidence: number;
+  time: string;
+  timeEvidence: string;
+  timeConfidence: number;
+  period: "morning" | "afternoon" | "night" | "unspecified";
+  timeAmbiguous: boolean;
+  timePrecision: "exact" | "approximate" | "unspecified";
+}> = {}) {
+  return {
+    schemaVersion: "1.0",
+    intent: input.intent ?? "schedule_appointment",
+    intentConfidence: input.intentConfidence ?? 0.96,
+    fields: {
+      clientName: { value: input.clientName ?? "João Victor", evidence: input.clientEvidence ?? "João Victor", confidence: input.clientConfidence ?? 0.96 },
+      serviceNames: { values: input.serviceName ? [input.serviceName] : ["Corte"], evidence: input.serviceEvidence ?? "corte", confidence: input.serviceConfidence ?? 0.95 },
+      professionalName: { value: "", evidence: "", confidence: 0 },
+      date: { expression: input.dateEvidence ?? "amanhã", canonical: input.date ?? "2026-07-14", evidence: input.dateEvidence ?? "amanhã", confidence: input.dateConfidence ?? 0.96 },
+      time: { expression: input.timeEvidence ?? "5 da tarde", canonical: input.time ?? "17:00", period: input.period ?? "afternoon", ambiguous: input.timeAmbiguous ?? false, precision: input.timePrecision ?? "exact", evidence: input.timeEvidence ?? "5 da tarde", confidence: input.timeConfidence ?? 0.96 },
+    },
+    ambiguities: input.timeAmbiguous ? [{ field: "time", reason: "Periodo nao informado." }] : [],
+    missingFields: [],
+  };
+}
+
+function mockSemanticV2(response: ReturnType<typeof semanticV2>) {
+  return vi.fn(async (_url?: string, _init?: RequestInit) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(response) }] } }] }),
+  }));
+}
+
 describe("parser textual Gemini tipado", () => {
   it("usa timeout textual padrao de 15 segundos e respeita configuracao valida", () => {
     const previous = process.env.GEMINI_TIMEOUT_MS;
@@ -123,6 +194,67 @@ describe("parser textual Gemini tipado", () => {
     expect(getDeterministicDateRecognitionType(message, context.now, context.timezone)).toBe("fully_spoken");
   });
 
+  it.each([
+    "Agendar um corte para o cliente João Vittor no dia 13/7/2026 às 17h00",
+    "Agendar corte para o cliente João Vittor no dia 13/7/2026 às 17h00",
+    "Agendar o corte para o cliente João Vittor dia 13/7/2026 às 17h00",
+    "Agendar um corte para João Vittor no dia 13/7/2026 às 17h00",
+  ])("interpreta deterministicamente a variacao real de agendamento: %s", (message) => {
+    expect(parseDeterministicOwnerCommand({ context, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "João Vittor",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-07-13",
+        time: "17:00",
+      },
+      missingFields: [],
+    });
+    expect(getDeterministicDateRecognitionType(message, context.now, context.timezone)).toBe("numeric_slash");
+  });
+
+  it("normaliza deterministicamente a transcricao real com hesitacao e periodo", () => {
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    const message = "Marque um corte para o cliente João Vítor, é, amanhã, às 5 da tarde.";
+
+    expect(parseDeterministicOwnerCommand({ context: realContext, message })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "João Vítor",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-07-14",
+        time: "17:00",
+      },
+      missingFields: [],
+      executed: false,
+    });
+  });
+
+  it.each(["é", "eh", "hum", "ahn"])("remove somente a hesitacao terminal '%s' do nome capturado", (hesitation) => {
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    expect(parseDeterministicOwnerCommand({
+      context: realContext,
+      message: `Marque um corte para o cliente João É Vítor, ${hesitation}, amanhã, às 5 da tarde.`,
+    })).toMatchObject({
+      draft: { clientName: "João É Vítor", date: "2026-07-14", time: "17:00" },
+      missingFields: [],
+    });
+  });
+
+  it("mantem horario sem periodo ambiguo", () => {
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    expect(parseDeterministicOwnerCommand({
+      context: realContext,
+      message: "Marque um corte para o cliente João Vítor amanhã às cinco.",
+    })).toMatchObject({
+      draft: { clientName: "João Vítor", date: "2026-07-14", time: "" },
+      missingFields: expect.arrayContaining(["time"]),
+      warnings: [expect.stringMatching(/ambiguo/i)],
+    });
+  });
+
   it("pede esclarecimento para quinze para as duas sem regra segura de expediente", () => {
     expect(parseDeterministicOwnerCommand({
       context,
@@ -153,6 +285,204 @@ describe("parser textual Gemini tipado", () => {
       draft: { date: "", time: "11:00" },
       missingFields: expect.arrayContaining(["date"]),
     });
+  });
+
+  it.each([
+    {
+      message: "Agende um corte para o João dia 13 às 17.",
+      semantic: { clientName: "João", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+      expected: { clientName: "João", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+      missingFields: [],
+    },
+    {
+      message: "Marca o João para cortar o cabelo amanhã às cinco.",
+      semantic: { clientName: "João", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+      expected: { clientName: "João", serviceNames: ["Corte Premium"], date: "2026-07-13", time: "" },
+      missingFields: ["time"],
+    },
+    {
+      message: "Coloca o João na agenda dia treze às cinco da tarde.",
+      semantic: { clientName: "João", serviceNames: [], date: "2026-07-13", time: "17:00" },
+      expected: { clientName: "João", serviceNames: [], date: "2026-07-13", time: "17:00" },
+      missingFields: ["serviceNames"],
+    },
+    {
+      message: "Reserva um horário de corte pro João.",
+      semantic: { clientName: "João", serviceNames: ["Corte"] },
+      expected: { clientName: "João", serviceNames: ["Corte"], date: "", time: "" },
+      missingFields: ["date", "time"],
+    },
+    {
+      message: "Tem como encaixar o João amanhã às 17?",
+      semantic: { clientName: "João", date: "2026-07-13", time: "17:00" },
+      expected: { clientName: "João", serviceNames: [], date: "2026-07-13", time: "17:00" },
+      missingFields: ["serviceNames"],
+    },
+    {
+      message: "Deixa marcado um corte para João Vittor dia 13/7 às 17h.",
+      semantic: { clientName: "João Vittor", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+      expected: { clientName: "João Vittor", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+      missingFields: [],
+    },
+    {
+      message: "João vai cortar com o Geovane às cinco.",
+      semantic: { clientName: "João", serviceNames: ["Corte"], professionalName: "Geovane" },
+      expected: { clientName: "João", serviceNames: ["Corte Premium"], professionalName: "Geovane Borges", date: "", time: "" },
+      missingFields: ["date", "time"],
+    },
+    {
+      message: "Quero marcar um horário para o João.",
+      semantic: { clientName: "João" },
+      expected: { clientName: "João", serviceNames: [], date: "", time: "" },
+      missingFields: ["serviceNames", "date", "time"],
+    },
+  ])("interpreta linguagem natural com grounding: $message", async ({ message, semantic, expected, missingFields }) => {
+    vi.stubGlobal("fetch", mockSemanticSchedule(semantic));
+    const attempt = await parser().parseGemini({ context, message });
+    expect(attempt.result).toMatchObject({
+      intent: "schedule_appointment",
+      draft: expected,
+      missingFields,
+      allowedNextActions: [],
+      executed: false,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("descarta entidades, data e horario que nao estejam ancorados na mensagem", async () => {
+    vi.stubGlobal("fetch", mockSemanticSchedule({
+      clientName: "João Santos",
+      serviceNames: ["Barba"],
+      professionalName: "Profissional Inventado",
+      date: "2026-07-13",
+      time: "17:00",
+    }));
+    const attempt = await parser().parseGemini({ context, message: "Marca um corte para o João." });
+    expect(attempt.result).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "João",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "",
+        time: "",
+      },
+      missingFields: ["date", "time"],
+      allowedNextActions: [],
+      executed: false,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("nao transforma mencao passiva de agenda em acao", async () => {
+    vi.stubGlobal("fetch", mockSemanticSchedule({ clientName: "João", date: "2026-07-13", time: "17:00" }));
+    await expect(parser().parseGemini({ context, message: "A agenda do João está cheia amanhã às 17." })).resolves.toMatchObject({
+      status: "UNSUPPORTED",
+      result: { intent: "unknown", draft: {}, executed: false },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("aceita pedido sem verbo decorado quando a semantica e os dados estao ancorados", async () => {
+    vi.stubGlobal("fetch", mockSemanticSchedule({
+      clientName: "João",
+      serviceNames: ["Corte"],
+      date: "2026-07-13",
+      time: "17:00",
+    }));
+    await expect(parser().parseGemini({
+      context,
+      message: "Dá para deixar o João com um corte amanhã às 17?",
+    })).resolves.toMatchObject({
+      status: "PARSED_COMPLETE",
+      result: {
+        intent: "schedule_appointment",
+        draft: { clientName: "João", serviceNames: ["Corte"], date: "2026-07-13", time: "17:00" },
+        missingFields: [],
+        executed: false,
+      },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("valida a primeira transcricao real com confianca e origem por campo", async () => {
+    const message = "Marque um corte para o cliente João Victor. É amanhã, às 5 da tarde.";
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    const fetchMock = mockSemanticV2(semanticV2({ clientEvidence: "cliente João Victor" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const attempt = await parser().parseGemini({ context: realContext, message });
+
+    expect(attempt).toMatchObject({
+      status: "PARSED_COMPLETE",
+      result: {
+        intent: "schedule_appointment",
+        draft: {
+          clientName: "João Victor",
+          serviceNames: ["Corte Premium"],
+          professionalName: "Geovane Borges",
+          date: "2026-07-14",
+          time: "17:00",
+        },
+        missingFields: [],
+        fieldDiagnostics: {
+          clientName: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
+          serviceNames: { confidence: 0.95, source: "gemini_validated", status: "accepted" },
+          professionalName: { confidence: 1, source: "context_default", status: "accepted" },
+          date: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
+          time: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
+        },
+      },
+    });
+    const request = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body ?? "{}"));
+    expect(request.generationConfig).toMatchObject({ responseMimeType: "application/json" });
+    expect(request.generationConfig.responseJsonSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        canonicalTime: { anyOf: [{ type: "string" }, { type: "null" }] },
+        confidence: { type: "object" },
+      },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    {
+      name: "cliente com introdutor e fragmento",
+      response: semanticV2({ clientName: "cliente João Victor. É", clientEvidence: "cliente João Victor. É" }),
+      field: "clientName",
+      reason: "contains_introducer",
+    },
+    {
+      name: "cliente abaixo do limiar",
+      response: semanticV2({ clientConfidence: 0.62 }),
+      field: "clientName",
+      reason: "low_confidence",
+    },
+    {
+      name: "periodo da tarde perdido",
+      response: semanticV2({ time: "05:00" }),
+      field: "time",
+      reason: "deterministic_semantic_divergence",
+    },
+    {
+      name: "data divergente do texto",
+      response: semanticV2({ date: "2026-07-15" }),
+      field: "date",
+      reason: "deterministic_semantic_divergence",
+    },
+  ])("rejeita campo preenchido mas semanticamente suspeito: $name", async ({ response, field, reason }) => {
+    const message = "Marque um corte para o cliente João Victor. É amanhã, às 5 da tarde.";
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    vi.stubGlobal("fetch", mockSemanticV2(response));
+
+    const attempt = await parser().parseGemini({ context: realContext, message });
+
+    expect(attempt.result?.missingFields).toContain(field);
+    expect(attempt.result?.allowedNextActions).toEqual([]);
+    expect(attempt.result?.fieldDiagnostics?.[field]).toMatchObject({ status: "rejected", reason });
+    vi.unstubAllGlobals();
   });
 
   it.each([

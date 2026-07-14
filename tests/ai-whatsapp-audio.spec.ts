@@ -41,6 +41,8 @@ function mockTransport(input: {
   realPayload?: unknown;
   realStatus?: number;
   realTimeout?: boolean;
+  semanticTimeout?: boolean;
+  semanticResponse?: unknown;
 } = {}) {
   return vi.fn(async (url: string) => {
     if (String(url).includes("/message/sendText/")) return { ok: input.sendOk !== false, status: input.sendOk === false ? 503 : 200, text: async () => "" };
@@ -62,8 +64,80 @@ function mockTransport(input: {
         json: async () => input.realPayload ?? { output_text: input.realTranscript === undefined ? "Vendi uma pomada para CLIENTE TESTE IA AUDIO, ele pagou no Pix." : input.realTranscript },
       };
     }
-    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "{" }] } }] }) };
+    if (input.semanticTimeout) {
+      const error = new Error("aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: input.semanticResponse ? JSON.stringify(input.semanticResponse) : "{" }] } }] }) };
   });
+}
+
+function providerResponse(input: {
+  status?: number;
+  transcript?: string;
+  message?: string;
+  errorStatus?: string;
+  details?: unknown[];
+  retryAfter?: string;
+}) {
+  const status = input.status ?? 200;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name: string) => name.toLowerCase() === "retry-after" ? input.retryAfter ?? null : null,
+    },
+    text: async () => JSON.stringify({
+      error: {
+        code: status,
+        status: input.errorStatus ?? (status === 429 ? "RESOURCE_EXHAUSTED" : "UNKNOWN"),
+        message: input.message ?? "Resource exhausted, please try again later.",
+        details: input.details ?? [],
+      },
+    }),
+    json: async () => ({ output_text: input.transcript ?? "Agendar corte para Maria Teste dia 15/07/2026 as 11:00" }),
+  };
+}
+
+function createFastGeminiAudioService(input: { now?: number; delays?: number[]; random?: number } = {}) {
+  let now = input.now ?? 0;
+  return new GeminiAudioTranscriptionService("fake-key", "gemini-asr-test", 20_000, 2, 60_000, {
+    now: () => now,
+    random: () => input.random ?? 0,
+    sleep: async (delayMs) => {
+      input.delays?.push(delayMs);
+      now += delayMs;
+    },
+  });
+}
+
+function semanticScheduleResponse(input: {
+  clientName: string;
+  clientEvidence: string;
+  serviceEvidence: string;
+  date: string;
+  dateEvidence: string;
+  time: string;
+  timeEvidence: string;
+  period?: "morning" | "afternoon" | "night" | "unspecified";
+  timeAmbiguous?: boolean;
+  timePrecision?: "exact" | "approximate" | "unspecified";
+}) {
+  return {
+    schemaVersion: "1.0",
+    intent: "schedule_appointment",
+    intentConfidence: 0.96,
+    fields: {
+      clientName: { value: input.clientName, evidence: input.clientEvidence, confidence: 0.96 },
+      serviceNames: { values: ["Corte"], evidence: input.serviceEvidence, confidence: 0.95 },
+      professionalName: { value: "", evidence: "", confidence: 0 },
+      date: { expression: input.dateEvidence, canonical: input.date, evidence: input.dateEvidence, confidence: 0.96 },
+      time: { expression: input.timeEvidence, canonical: input.time, period: input.period ?? "unspecified", ambiguous: input.timeAmbiguous ?? false, precision: input.timePrecision ?? "exact", evidence: input.timeEvidence, confidence: 0.96 },
+    },
+    ambiguities: [],
+    missingFields: [],
+  };
 }
 
 function sentTexts(fetchMock: ReturnType<typeof vi.fn>) {
@@ -153,6 +227,100 @@ describe("extrator de respostas Gemini Interactions", () => {
   });
 });
 
+describe("resiliencia do ASR diante de HTTP 429", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("429 -> 200 respeita Retry-After e conserva diagnostico sanitizado", async () => {
+    const delays: number[] = [];
+    const responses = [
+      providerResponse({ status: 429, retryAfter: "2", message: "Resource exhausted; retry. https://sensitive.example/path" }),
+      providerResponse({ transcript: "fala recuperada" }),
+    ];
+    const fetchMock = vi.fn(async () => responses.shift());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createFastGeminiAudioService({ delays }).transcribe({
+      audio: Buffer.from([1]), mimetype: "audio/ogg", correlationId: "retry-429-200",
+    });
+
+    expect(result.transcript).toBe("fala recuperada");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(delays).toEqual([2_000]);
+    expect(result.diagnostics).toMatchObject({
+      httpStatus: 200,
+      attemptCount: 2,
+      recentCallCount: 2,
+      model: "gemini-asr-test",
+      endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+      providerErrorCode: "429",
+      providerErrorStatus: "RESOURCE_EXHAUSTED",
+      providerErrorMessage: "Resource exhausted; retry. [url]",
+      retryAfterMs: 2_000,
+      retryHeaders: { "retry-after": "2" },
+      rateLimitKind: "temporary",
+    });
+  });
+
+  it("429 -> 429 -> 200 usa no maximo dois retries com backoff e jitter", async () => {
+    const delays: number[] = [];
+    const responses = [providerResponse({ status: 429 }), providerResponse({ status: 429 }), providerResponse({ transcript: "terceira tentativa" })];
+    vi.stubGlobal("fetch", vi.fn(async () => responses.shift()));
+
+    const result = await createFastGeminiAudioService({ delays, random: 0.5 }).transcribe({ audio: Buffer.from([1]), mimetype: "audio/ogg" });
+
+    expect(result.transcript).toBe("terceira tentativa");
+    expect(result.diagnostics).toMatchObject({ attemptCount: 3, recentCallCount: 3, rateLimitKind: "temporary" });
+    expect(delays).toEqual([1_500, 3_000]);
+  });
+
+  it("429 persistente encerra depois de tres chamadas", async () => {
+    const delays: number[] = [];
+    const fetchMock = vi.fn(async () => providerResponse({ status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createFastGeminiAudioService({ delays }).transcribe({ audio: Buffer.from([1]), mimetype: "audio/ogg" }))
+      .rejects.toMatchObject({
+        reason: "audio_transcription_429",
+        diagnostics: { attemptCount: 3, recentCallCount: 3, rateLimitKind: "temporary" },
+      });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(delays).toEqual([1_000, 2_000]);
+  });
+
+  it("cota permanente nao faz retry inutil", async () => {
+    const fetchMock = vi.fn(async () => providerResponse({
+      status: 429,
+      message: "You exceeded your current quota, please check your plan and billing details.",
+      details: [{
+        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+        violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }],
+      }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createFastGeminiAudioService().transcribe({ audio: Buffer.from([1]), mimetype: "audio/ogg" }))
+      .rejects.toMatchObject({
+        reason: "audio_transcription_quota_exhausted",
+        diagnostics: { attemptCount: 1, rateLimitKind: "quota_exhausted" },
+      });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("nao ultrapassa o limite total de 45 segundos", async () => {
+    const delays: number[] = [];
+    const fetchMock = vi.fn(async () => providerResponse({ status: 429, retryAfter: "46" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createFastGeminiAudioService({ delays }).transcribe({ audio: Buffer.from([1]), mimetype: "audio/ogg" }))
+      .rejects.toMatchObject({
+        reason: "audio_transcription_timeout",
+        diagnostics: { attemptCount: 1, totalBudgetMs: 45_000, retryAfterMs: 46_000 },
+      });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(delays).toEqual([]);
+  });
+});
+
 describe("audio do atendente IA via WhatsApp", () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -175,6 +343,7 @@ describe("audio do atendente IA via WhatsApp", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
     process.env = { ...originalEnv };
   });
 
@@ -220,7 +389,7 @@ describe("audio do atendente IA via WhatsApp", () => {
   });
 
   it("texto transcrito de agendamento usa a mesma previa textual", async () => {
-    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Agendar corte para CLIENTE TESTE IA AUDIO dia quatorze do sete de vinte e seis as onze e trinta";
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Agendar corte para Maria Teste Audio dia quatorze do sete de vinte e seis as onze e trinta";
     const fetchMock = mockTransport();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -235,6 +404,300 @@ describe("audio do atendente IA via WhatsApp", () => {
     const events = await audits(app, token);
     expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.dateRecognitionType === "spoken_numeric_month")).toBe(true);
     expect(JSON.stringify(events)).not.toContain(process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT);
+  });
+
+  it("frase exata do audio gera uma unica previa deterministica mesmo com tres retries", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT =
+      "Agendar um corte para o cliente João Vittor no dia 13/7/2026 às 17h00";
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const createdClient = await app.inject({
+      method: "POST",
+      url: "/clients",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { unitId: "unit-01", name: "João Vittor", phone: "5511987654321" },
+    });
+    expect(createdClient.statusCode).toBe(200);
+    const before = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    const responses = await Promise.all([
+      postWebhook(app, audioPayload()),
+      postWebhook(app, audioPayload()),
+      postWebhook(app, audioPayload()),
+    ]);
+
+    expect(responses.filter((response) => response.json().mode === "preview_only")).toHaveLength(1);
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente: João Vittor");
+    expect(sentTexts(fetchMock)[0]).toContain("Servico: Corte");
+    expect(sentTexts(fetchMock)[0]).toContain("Data: 2026-07-13");
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 17:00");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/chat/getBase64FromMediaMessage/")).length).toBe(1);
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/") && !String(url).includes("/chat/getBase64FromMediaMessage/")).length).toBe(0);
+
+    const events = await audits(app, token);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_RECEIVED")).toHaveLength(3);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_CLAIMED")).toHaveLength(1);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_DEDUPLICATED")).toHaveLength(2);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")).toHaveLength(1);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")?.afterJson).toMatchObject({ origin: "audio_preview" });
+    expect(events.find((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED")?.afterJson).toMatchObject({
+      strategy: "deterministic",
+      status: "PARSED_COMPLETE",
+      presentFields: ["clientName", "serviceNames", "professionalName", "date", "time"],
+      missingFields: [],
+    });
+    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_STARTED" || event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(false);
+    expect(JSON.stringify(events)).not.toContain(process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT);
+
+    const after = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(after.json().appointments).toHaveLength(before.json().appointments.length);
+  });
+
+  it("normaliza a transcricao real com hesitacao e periodo em uma unica previa", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT =
+      "Marque um corte para o cliente João Victor. É amanhã, às 5 da tarde.";
+    const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+      clientName: "João Victor",
+      clientEvidence: "cliente João Victor",
+      serviceEvidence: "corte",
+      date: "2026-07-14",
+      dateEvidence: "amanhã",
+      time: "17:00",
+      timeEvidence: "5 da tarde",
+      period: "afternoon",
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    const responses = await Promise.all([
+      postWebhook(app, audioPayload()),
+      postWebhook(app, audioPayload()),
+      postWebhook(app, audioPayload()),
+    ]);
+
+    expect(responses.filter((response) => response.json().mode === "preview_only")).toHaveLength(1);
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente: João Victor");
+    expect(sentTexts(fetchMock)[0]).toContain("Servico: Corte");
+    expect(sentTexts(fetchMock)[0]).toContain("Profissional: Geovane Borges");
+    expect(sentTexts(fetchMock)[0]).toContain("Data: 2026-07-14");
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 17:00");
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente novo ou nao encontrado");
+    expect(sentTexts(fetchMock)[0]).toContain("CONFIRMAR");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/chat/getBase64FromMediaMessage/")).length).toBe(1);
+
+    const events = await audits(app, token);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_RECEIVED")).toHaveLength(3);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_CLAIMED")).toHaveLength(1);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_DEDUPLICATED")).toHaveLength(2);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")).toHaveLength(1);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED")?.afterJson).toMatchObject({
+      strategy: "gemini",
+      status: "PARSED_COMPLETE",
+      presentFields: ["clientName", "serviceNames", "professionalName", "date", "time"],
+      missingFields: [],
+    });
+    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(true);
+    const entities = events.find((event) => event.action === "AI_WHATSAPP_ENTITY_RESOLUTION_COMPLETED")?.afterJson?.entities as Array<{ entity: string; result: string }>;
+    expect(entities).toContainEqual(expect.objectContaining({ entity: "client", result: "NOT_FOUND_NEW_CLIENT" }));
+    expect(JSON.stringify(events)).not.toContain(process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT);
+
+    const after = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(after.json().appointments).toHaveLength(before.json().appointments.length);
+  });
+
+  it("interpreta semanticamente a segunda transcricao real com ordem flexivel", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT =
+      "Faça um agendamento de corte para o cliente João Vittor amanhã às 17 horas da tarde.";
+    const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+      clientName: "João Vittor",
+      clientEvidence: "cliente João Vittor",
+      serviceEvidence: "corte",
+      date: "2026-07-14",
+      dateEvidence: "amanhã",
+      time: "17:00",
+      timeEvidence: "17 horas da tarde",
+      period: "afternoon",
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+
+    const response = await postWebhook(app, audioPayload());
+
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente: João Vittor");
+    expect(sentTexts(fetchMock)[0]).toContain("Servico: Corte");
+    expect(sentTexts(fetchMock)[0]).toContain("Data: 2026-07-14");
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 17:00");
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente novo ou nao encontrado");
+    expect(sentTexts(fetchMock)[0]).toContain("Profissional: Geovane Borges");
+    const events = await audits(app, token);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED")?.afterJson).toMatchObject({
+      strategy: "gemini",
+      status: "PARSED_COMPLETE",
+    });
+    const after = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+    expect(after.json().appointments).toHaveLength(before.json().appointments.length);
+  });
+
+  it("preserva campos de horario aproximado e Sim completa o contexto com uma unica previa", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Coloca o Rafael pra cortar amanhã umas quatro da tarde.";
+    const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+      clientName: "Rafael",
+      clientEvidence: "Rafael",
+      serviceEvidence: "cortar",
+      date: "2026-07-14",
+      dateEvidence: "amanhã",
+      time: "16:00",
+      timeEvidence: "umas quatro da tarde",
+      period: "afternoon",
+      timeAmbiguous: true,
+      timePrecision: "approximate",
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const [before, beforeAppointments] = await Promise.all([
+      app.inject({ method: "GET", url: "/catalog?unitId=unit-01", headers: { authorization: `Bearer ${token}` } }),
+      app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } }),
+    ]);
+
+    const question = await postWebhook(app, audioPayload());
+
+    expect(question.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(sentTexts(fetchMock)).toEqual(["Entendi: Rafael, corte, amanhã. Você quer marcar exatamente às 16:00?"]);
+    expect(sentTexts(fetchMock)[0]).not.toContain("Agendar corte para");
+
+    const continuation = await postWebhook(app, textPayload("Sim."));
+
+    expect(continuation.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(sentTexts(fetchMock)).toHaveLength(2);
+    expect(sentTexts(fetchMock)[1]).toContain("Cliente: Rafael");
+    expect(sentTexts(fetchMock)[1]).toContain("Servico: Corte");
+    expect(sentTexts(fetchMock)[1]).toContain("Profissional: Geovane Borges");
+    expect(sentTexts(fetchMock)[1]).toContain("Data: 2026-07-14");
+    expect(sentTexts(fetchMock)[1]).toContain("Horario: 16:00");
+    expect(sentTexts(fetchMock)[1]).toContain("Cliente novo ou nao encontrado");
+    const semanticCalls = fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/") && !String(url).includes("/chat/getBase64FromMediaMessage/"));
+    expect(semanticCalls).toHaveLength(1);
+    const [after, afterAppointments] = await Promise.all([
+      app.inject({ method: "GET", url: "/catalog?unitId=unit-01", headers: { authorization: `Bearer ${token}` } }),
+      app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } }),
+    ]);
+    expect(after.json().clients).toHaveLength(before.json().clients.length);
+    expect(afterAppointments.json().appointments).toHaveLength(beforeAppointments.json().appointments.length);
+    const events = await audits(app, token);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_CONTEXT_STORED" && event.afterJson?.pendingField === "time" && event.afterJson?.proposedValue === "16:00")).toBe(true);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_CONTEXT_COMPLETED" && event.afterJson?.resolvedValue === "16:00")).toBe(true);
+  });
+
+  it("gera previa direta quando a fala informa exatamente as quatro da tarde", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Coloca o Rafael pra cortar amanhã às quatro da tarde.";
+    const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+      clientName: "Rafael", clientEvidence: "Rafael", serviceEvidence: "cortar",
+      date: "2026-07-14", dateEvidence: "amanhã", time: "16:00", timeEvidence: "às quatro da tarde",
+      period: "afternoon", timePrecision: "exact",
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, audioPayload());
+
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 16:00");
+    expect(sentTexts(fetchMock)[0]).not.toContain("Você quer marcar exatamente");
+  });
+
+  it("aceita continuacoes naturais para confirmar ou explicitar o horario proposto", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    for (const continuation of ["Isso.", "às quatro", "16 horas", "quatro da tarde"]) {
+      process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Coloca o Rafael pra cortar amanhã umas quatro da tarde.";
+      const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+        clientName: "Rafael", clientEvidence: "Rafael", serviceEvidence: "cortar",
+        date: "2026-07-14", dateEvidence: "amanhã", time: "16:00", timeEvidence: "umas quatro da tarde",
+        period: "afternoon", timeAmbiguous: true, timePrecision: "approximate",
+      }) });
+      vi.stubGlobal("fetch", fetchMock);
+      const app = createApp();
+
+      await postWebhook(app, audioPayload());
+      const response = await postWebhook(app, textPayload(continuation));
+
+      expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+      expect(sentTexts(fetchMock).at(-1)).toContain("Horario: 16:00");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("timeout do Gemini semantico depois de ASR bem sucedido gera falha temporaria, nao ambiguidade", async () => {
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Coloca o Rafael pra cortar amanhã umas quatro da tarde.";
+    const fetchMock = mockTransport({ semanticTimeout: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, audioPayload());
+
+    expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true, reason: "gemini_timeout" });
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(sentTexts(fetchMock)[0]).toContain("falha temporaria do servico");
+    expect(sentTexts(fetchMock)[0]).not.toContain("Você quer marcar exatamente");
+    expect(sentTexts(fetchMock)[0]).not.toContain("Agendar corte para");
+  });
+
+  it("retry concorrente de horario aproximado envia somente uma pergunta", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Coloca o Rafael pra cortar amanhã umas quatro da tarde.";
+    const fetchMock = mockTransport({ semanticResponse: semanticScheduleResponse({
+      clientName: "Rafael", clientEvidence: "Rafael", serviceEvidence: "cortar",
+      date: "2026-07-14", dateEvidence: "amanhã", time: "16:00", timeEvidence: "umas quatro da tarde",
+      period: "afternoon", timeAmbiguous: true, timePrecision: "approximate",
+    }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const responses = await Promise.all([postWebhook(app, audioPayload()), postWebhook(app, audioPayload()), postWebhook(app, audioPayload())]);
+
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(sentTexts(fetchMock)).toEqual(["Entendi: Rafael, corte, amanhã. Você quer marcar exatamente às 16:00?"]);
   });
 
   it("so executa a venda transcrita apos CONFIRMAR usando o fluxo oficial", async () => {
@@ -267,17 +730,22 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(sentTexts(fetchMock).every((text) => text.includes("Recebi um audio"))).toBe(true);
   });
 
-  it("responde com orientacao controlada para transcricao vazia, erro, 429 e timeout", async () => {
-    for (const failure of ["", "audio_transcription_failed", "audio_transcription_429", "audio_transcription_timeout"]) {
+  it("distingue audio ininteligivel de falha temporaria do provedor", async () => {
+    for (const scenario of [
+      { failure: "", expected: "Nao consegui entender o audio" },
+      { failure: "audio_transcription_failed", expected: "falha temporaria do servico" },
+      { failure: "audio_transcription_429", expected: "falha temporaria do servico" },
+      { failure: "audio_transcription_timeout", expected: "falha temporaria do servico" },
+    ]) {
       process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "";
-      process.env.AI_WHATSAPP_AUDIO_MOCK_FAILURE = failure;
+      process.env.AI_WHATSAPP_AUDIO_MOCK_FAILURE = scenario.failure;
       const fetchMock = mockTransport();
       vi.stubGlobal("fetch", fetchMock);
       const app = createApp();
-      const response = await postWebhook(app, audioPayload({ data: { key: { id: `failure-${failure || "empty"}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+      const response = await postWebhook(app, audioPayload({ data: { key: { id: `failure-${scenario.failure || "empty"}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
 
       expect(response.json()).toMatchObject({ ok: true, audio: true, executed: false });
-      expect(sentTexts(fetchMock).at(-1)).toContain("Nao consegui entender o audio");
+      expect(sentTexts(fetchMock).at(-1)).toContain(scenario.expected);
       vi.unstubAllGlobals();
     }
   });
@@ -320,7 +788,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     process.env.AI_WHATSAPP_AUDIO_MOCK_TRANSCRIPT = "Vendi uma pomada para CLIENTE DO MOCK, ele pagou no Pix.";
     const fetchMock = mockTransport({
       realPayload: {
-        steps: [{ type: "model_output", content: [{ type: "text", text: "Agendar corte para CLIENTE TRANSCRITO REAL dia 14/07/2026 as 11:00" }] }],
+        steps: [{ type: "model_output", content: [{ type: "text", text: "Agendar corte para Maria Transcrita Real dia 14/07/2026 as 11:00" }] }],
       },
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -331,7 +799,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     const response = await postWebhook(app, audioPayload());
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
-    expect(sentTexts(fetchMock).at(-1)).toContain("CLIENTE TRANSCRITO REAL");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Maria Transcrita Real");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/v1beta/interactions"))).toBe(true);
     const interactionCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/v1beta/interactions")) as [string, RequestInit?] | undefined;
     const interactionBody = JSON.parse(String(interactionCall?.[1]?.body ?? ""));
@@ -341,6 +809,124 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(completed?.afterJson).toMatchObject({ httpStatus: 200, responseFingerprint: { stepsCount: 1, stepTypes: ["model_output"] } });
     const after = await app.inject({ method: "GET", url: "/sales/products?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
     expect((after.json().sales as unknown[]).length).toBe((before.json().sales as unknown[]).length);
+  });
+
+  it("429 seguido de 200 continua uma unica vez para a interpretacao semantica", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-13T15:00:00.000Z"));
+    const semantic = semanticScheduleResponse({
+      clientName: "Joao Retry", clientEvidence: "Joao Retry", serviceEvidence: "corte",
+      date: "2026-07-14", dateEvidence: "amanha", time: "17:00", timeEvidence: "cinco da tarde", period: "afternoon",
+    });
+    const baseTransport = mockTransport({ semanticResponse: semantic });
+    let asrCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/v1beta/interactions")) {
+        asrCalls += 1;
+        return asrCalls === 1
+          ? providerResponse({ status: 429, retryAfter: "1", message: "Resource exhausted, please try again later." })
+          : providerResponse({ transcript: "Olha, marque um corte para Joao Retry amanha, cinco da tarde." });
+      }
+      return await baseTransport(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
+    const token = await loginOwner(app);
+    const before = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+
+    const response = await postWebhook(app, audioPayload({ data: { key: { id: "asr-retry-semantic", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(asrCalls).toBe(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes(":generateContent"))).toHaveLength(1);
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    const events = await audits(app, token);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_COMPLETED")?.afterJson).toMatchObject({
+      attemptCount: 2,
+      httpStatus: 200,
+      providerErrorCode: "429",
+      retryAfterMs: 1_000,
+      rateLimitKind: "temporary",
+    });
+    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(true);
+    const after = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+    expect(after.json().appointments).toHaveLength(before.json().appointments.length);
+  });
+
+  it("429 persistente envia somente a resposta final temporaria e nao chama o Gemini semantico", async () => {
+    const baseTransport = mockTransport();
+    const fetchMock = vi.fn(async (url: string) => String(url).includes("/v1beta/interactions")
+      ? providerResponse({ status: 429 })
+      : await baseTransport(url));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
+    const token = await loginOwner(app);
+    const before = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+
+    const response = await postWebhook(app, audioPayload({ data: { key: { id: "asr-429-persistent", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+
+    expect(response.json()).toMatchObject({ ok: true, audio: true, reason: "audio_transcription_429", executed: false });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1beta/interactions"))).toHaveLength(3);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes(":generateContent"))).toHaveLength(0);
+    expect(sentTexts(fetchMock)).toEqual([
+      "Nao consegui transcrever o audio agora por uma falha temporaria do servico. Tente novamente em instantes ou envie a mesma mensagem em texto.",
+    ]);
+    const events = await audits(app, token);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED")?.afterJson).toMatchObject({
+      attemptCount: 3, rateLimitKind: "temporary", recentCallCount: 3,
+    });
+    const after = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
+    expect(after.json().appointments).toHaveLength(before.json().appointments.length);
+  });
+
+  it("cota permanente responde uma vez sem retry nem interpretacao semantica", async () => {
+    const baseTransport = mockTransport();
+    const fetchMock = vi.fn(async (url: string) => String(url).includes("/v1beta/interactions")
+      ? providerResponse({
+          status: 429,
+          message: "Daily quota exhausted.",
+          details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel" }] }],
+        })
+      : await baseTransport(url));
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
+
+    const response = await postWebhook(app, audioPayload({ data: { key: { id: "asr-quota-permanent", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
+
+    expect(response.json()).toMatchObject({ reason: "audio_transcription_quota_exhausted", executed: false });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1beta/interactions"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes(":generateContent"))).toHaveLength(0);
+    expect(sentTexts(fetchMock)).toEqual([
+      "O servico de transcricao esta indisponivel por limite de cota. Envie a mesma mensagem em texto.",
+    ]);
+  });
+
+  it("replay concorrente do mesmo audio cria uma unica sequencia e uma unica resposta", async () => {
+    const baseTransport = mockTransport();
+    let releaseAsr: (() => void) | undefined;
+    const asrStarted = new Promise<void>((resolve) => { releaseAsr = resolve; });
+    let asrCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/v1beta/interactions")) {
+        asrCalls += 1;
+        releaseAsr?.();
+        await Promise.resolve();
+        return providerResponse({ transcript: "Agendar corte para Maria Replay dia 15/07/2026 as 11:00" });
+      }
+      return await baseTransport(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
+
+    const firstPromise = postWebhook(app, audioPayload());
+    await asrStarted;
+    const responses = await Promise.all([firstPromise, postWebhook(app, audioPayload()), postWebhook(app, audioPayload())]);
+
+    expect(responses.filter((response) => response.json().mode === "preview_only")).toHaveLength(1);
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(asrCalls).toBe(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("getBase64FromMediaMessage"))).toHaveLength(1);
+    expect(sentTexts(fetchMock)).toHaveLength(1);
   });
 
   it("trata 429, 5xx, timeout e resposta vazia do provider real sem executar", async () => {
@@ -355,21 +941,23 @@ describe("audio do atendente IA via WhatsApp", () => {
       process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
       const fetchMock = mockTransport(scenario.transport);
       vi.stubGlobal("fetch", fetchMock);
-      const app = createApp();
+      const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
       const response = await postWebhook(app, audioPayload({ data: { key: { id: `real-${scenario.name}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
 
       expect(response.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: scenario.reason });
-      expect(sentTexts(fetchMock).at(-1)).toContain("Nao consegui entender o audio");
+      expect(sentTexts(fetchMock).at(-1)).toContain(
+        scenario.reason === "audio_transcription_empty" ? "Nao consegui entender o audio" : "falha temporaria do servico",
+      );
       vi.unstubAllGlobals();
     }
   });
 
-  it("abre o circuito apenas apos dois 429 e registra que a terceira chamada nao chegou ao Gemini", async () => {
+  it("abre o circuito apenas apos duas sequencias de 429 persistente", async () => {
     process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
     process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "fake-audio-provider-key";
     const fetchMock = mockTransport({ realStatus: 429 });
     vi.stubGlobal("fetch", fetchMock);
-    const app = createApp();
+    const app = createApp({ audioTranscriptionService: createFastGeminiAudioService() });
     const token = await loginOwner(app);
 
     for (const id of ["rate-limit-1", "rate-limit-2"]) {
@@ -378,7 +966,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     const blocked = await postWebhook(app, audioPayload({ data: { key: { id: "rate-limit-3", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false }, message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4 } } } }));
 
     expect(blocked.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: "audio_transcription_circuit_open" });
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1beta/interactions"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1beta/interactions"))).toHaveLength(6);
     const events = await audits(app, token);
     expect(events.some((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED" && event.afterJson?.reason === "audio_transcription_circuit_open" && event.afterJson?.providerCalled === false)).toBe(true);
   });

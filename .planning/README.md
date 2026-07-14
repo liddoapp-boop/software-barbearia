@@ -5,14 +5,14 @@ Este diretório preserva a memória operacional do Software Barbearia. Documento
 ## Estado atual
 
 - Atualizado em: 2026-07-13.
-- Macro atual: `245.1 - Auditoria pós-correção P1 e preparação RC local`.
+- Macro atual: `246.5 - Fechamento local definitivo e RC.3`.
 - Decisão: **APROVADO COM RESSALVAS COMO RC LOCAL**.
 - Produção real: **não executada**.
 - HEAD aprovado: `93557ed369ee07e97941a81211c8219b909da7ba`.
 - `v1.0.0-rc.1` foi bloqueada por dois P1, corrigidos pela Macro 245.1: RBAC de estorno de atendimento e `updateProfessional` Prisma.
 - Banco piloto: resetado e validado no estado canônico pós-login.
 - Gate final local: aprovado, incluindo validação técnica e manual.
-- Auditoria pós-correção: sem P0/P1 confirmado no escopo local; a futura `v1.0.0-rc.2` permanece apenas RC local.
+- RC.3: WhatsApp textual funcional; Gemini opcional; áudio local experimental e desligado por padrão. O áudio não faz parte do aceite funcional.
 
 Fonte de verdade para retomada:
 
@@ -21,6 +21,9 @@ Fonte de verdade para retomada:
 3. [.continue-here.md](./.continue-here.md)
 4. [README principal](../README.md)
 5. [WhatsApp e IA](../WHATSAPP_IA.md)
+6. [Manifesto de entrega local](./244_3_MANIFESTO_ENTREGA_LOCAL.md)
+7. [Fechamento RC.3](../docs/MACRO_246_5_RC3_CLOSURE.md)
+8. [Revisão do worktree RC.3](../docs/MACRO_246_5_WORKTREE_REVIEW.md)
 
 ## Estado canônico local
 
@@ -53,7 +56,7 @@ Detalhes do reset: [244_2A_RESET_OFICIAL_GEOVANE_PILOT.md](./244_2A_RESET_OFICIA
 
 ## Pendência principal
 
-O fluxo real de venda por WhatsApp com `CONFIRMAR` foi aprovado. O fluxo real de agendamento com `CONFIRMAR <codigo>` ainda precisa ser validado quando existir uma sessão autenticada capaz de enviar pelo owner final mascarado `452`. Parser, data, horário, áudio simulado e prévia estão cobertos; a pendência é operacional.
+O fluxo real de venda por WhatsApp com `CONFIRMAR` foi aprovado. O fluxo real de agendamento com `CONFIRMAR <codigo>` ainda precisa ser validado quando existir uma sessão autenticada capaz de enviar pelo owner final mascarado `452`. Parser, data, horário, áudio simulado e prévia estão cobertos; a pendência é operacional. Áudio local segue experimental, desligado por padrão e fora do aceite funcional RC.3.
 
 ## Ressalvas do RC local
 
@@ -64,7 +67,7 @@ O fluxo real de venda por WhatsApp com `CONFIRMAR` foi aprovado. O fluxo real de
 
 ## Próxima etapa
 
-Planejar a VPS apenas em nova macro e com autorização explícita. A aprovação local não autoriza provisionamento, deploy, migration remota, restore, configuração de Evolution ou qualquer escrita em ambiente externo.
+Planejar a VPS apenas em nova macro e com autorização explícita. A aprovação local não autoriza provisionamento, deploy, migration remota, restore, configuração de Evolution ou qualquer escrita em ambiente externo. O projeto permanece congelado até VPS, TCC ou correção P0/P1 autorizada.
 
 Antes de liberar um alvo futuro, seguir [235_2_PACOTE_FUTURA_VPS.md](./235_2_PACOTE_FUTURA_VPS.md) e exigir `.env` próprio, backup externo, restore testado, migrations conferidas, processo gerenciado, proxy, TLS, firewall, health, smoke readonly e aceite visual.
 

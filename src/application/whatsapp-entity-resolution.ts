@@ -8,6 +8,11 @@ export type AiWhatsappEntityResolutionStatus =
   | "AMBIGUOUS"
   | "NOT_FOUND";
 
+export type AiWhatsappClientResolutionStatus =
+  | "EXACT_MATCH"
+  | "NOT_FOUND_NEW_CLIENT"
+  | "AMBIGUOUS_MATCH";
+
 export type AiWhatsappEntityAlias = {
   entity: AiWhatsappEntityKind;
   alias: string;
@@ -93,4 +98,29 @@ export function resolveAiWhatsappEntity<T>(input: {
 
 export function isAiWhatsappResolvedEntityStatus(status: AiWhatsappEntityResolutionStatus) {
   return status === "EXACT_MATCH" || status === "UNIQUE_NORMALIZED_MATCH" || status === "EXPLICIT_ALIAS_MATCH";
+}
+
+export function resolveAiWhatsappClient<T>(input: {
+  name: unknown;
+  rows: readonly T[];
+  getName: (item: T) => unknown;
+}) {
+  const resolved = resolveAiWhatsappEntity({
+    entity: "client",
+    name: input.name,
+    rows: input.rows,
+    getName: input.getName,
+    aliases: [],
+  });
+  const status: AiWhatsappClientResolutionStatus = isAiWhatsappResolvedEntityStatus(resolved.status)
+    ? "EXACT_MATCH"
+    : resolved.status === "NOT_FOUND"
+      ? "NOT_FOUND_NEW_CLIENT"
+      : "AMBIGUOUS_MATCH";
+  return {
+    status,
+    sourceStatus: resolved.status,
+    match: status === "EXACT_MATCH" ? resolved.match : null,
+    candidates: resolved.candidates,
+  };
 }

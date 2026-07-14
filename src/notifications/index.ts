@@ -11,23 +11,47 @@ function formatPhone(phone: string): string {
   return digits.startsWith("55") ? digits : `55${digits}`;
 }
 
+export class WhatsappDeliveryError extends Error {
+  constructor(
+    readonly reason: "configuration" | "timeout" | "http" | "network",
+    readonly httpStatus?: number,
+    readonly durationMs = 0,
+  ) {
+    super(reason);
+    this.name = "WhatsappDeliveryError";
+  }
+}
+
 export async function sendWhatsAppMessage(phone: string, text: string): Promise<void> {
+  const startedAt = Date.now();
   const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
   const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
   const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
-  if (!evolutionUrl || !evolutionKey) return;
+  if (!evolutionUrl || !evolutionKey) throw new WhatsappDeliveryError("configuration", undefined, Date.now() - startedAt);
 
   const number = formatPhone(phone);
   const payload = JSON.stringify({ number, text });
-  const res = await fetch(`${evolutionUrl}/message/sendText/${evolutionInstance}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8", apikey: evolutionKey },
-    body: Buffer.from(payload, "utf8"),
-  });
+  const configuredTimeout = Number(process.env.AI_WHATSAPP_SEND_TIMEOUT_MS ?? 10_000);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.trunc(configuredTimeout) : 10_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(`${evolutionUrl}/message/sendText/${evolutionInstance}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8", apikey: evolutionKey },
+      body: Buffer.from(payload, "utf8"),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new WhatsappDeliveryError(error instanceof Error && error.name === "AbortError" ? "timeout" : "network", undefined, Date.now() - startedAt);
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`WhatsApp error ${res.status}: ${body}`);
+    await res.body?.cancel().catch(() => undefined);
+    throw new WhatsappDeliveryError("http", res.status, Date.now() - startedAt);
   }
 }
 

@@ -19,6 +19,19 @@ Status atual: `APROVADO COM RESSALVAS COMO RC LOCAL`.
 
 Esta aprovação prepara uma futura tag `v1.0.0-rc.2`, mas não autoriza produção real, deploy, migration remota ou alteração do banco piloto.
 
+## Fechamento RC.3 — Macros 245.2–246.5
+
+Decisão: `PROJETO PRONTO — ÁUDIO EXPERIMENTAL`.
+
+- WhatsApp textual permanece funcional, com preview, confirmação, deduplicação, grounding e auditoria sanitizada.
+- Gemini é opcional, nunca requisito de startup, health, agenda, vendas, financeiro ou estoque; quando configurado, está sujeito à cota gratuita.
+- `ASR_PROVIDER` e `SEMANTIC_PROVIDER` possuem defaults seguros. `local_whisper` e `local_llama` somente iniciam por flags explícitas locais.
+- O áudio local não integra o aceite funcional da RC.3: os testes automatizados mostraram erros em nomes e horários críticos; Qwen3-4B local também excedeu o gate de latência semântica.
+- Nenhuma IA paga será usada. A retomada do áudio exige VPS ou nova base humana/modelos adequados em macro própria.
+- Não há P0/P1 conhecido nos fluxos principais auditados. O projeto fica congelado até VPS, TCC ou correção P0/P1 autorizada.
+
+Artefatos de benchmark permanecem fora do Git, em diretórios locais isolados. A remoção é opcional e manual, após encerrar processos locais; não deve ser feita por rotina de release.
+
 ## Baseline versionado
 
 - Branch: `main`.

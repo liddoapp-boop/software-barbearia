@@ -525,7 +525,7 @@ describe("Atendente IA owner-only", () => {
     await expect(countState(app, token)).resolves.toEqual(before);
   });
 
-  it("aceita cliente em maiusculas, serviceName singular e dateTime retornados pela IA", async () => {
+  it("aceita cliente em maiusculas e ignora dateTime divergente retornado pela IA", async () => {
     vi.stubGlobal("fetch", mockGeminiDateTimeResponse());
     const app = createApp();
     const token = await loginAs(app, {
@@ -553,7 +553,7 @@ describe("Atendente IA owner-only", () => {
         clientName: "CLIENTE TESTE IA AGENDAMENTO",
         serviceNames: ["Corte"],
         professionalName: "Geovane Borges",
-        date: "2026-07-12",
+        date: tomorrowDate(),
         time: "10:00",
       },
     });

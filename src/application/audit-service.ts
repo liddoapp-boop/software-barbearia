@@ -45,7 +45,28 @@ export type AuditEventQuery = {
 
 function toPlainJson(input?: AuditJson) {
   if (!input) return undefined;
-  return JSON.parse(JSON.stringify(input)) as AuditJson;
+  const sensitiveKey = /^(?:api.?key|authorization|password|secret|.*token|base64|audio|audioBytes|audioData|transcript|transcription)$/i;
+  const sanitize = (value: unknown, key = "", depth = 0): unknown => {
+    if (depth > 12) return "[truncated]";
+    if (sensitiveKey.test(key)) {
+      if (/transcript/i.test(key) && typeof value === "string") {
+        return {
+          redacted: true,
+          characterCount: value.length,
+          fingerprint: crypto.createHash("sha256").update(value).digest("hex").slice(0, 12),
+        };
+      }
+      return "[redacted]";
+    }
+    if (Array.isArray(value)) return value.slice(0, 100).map((item) => sanitize(item, key, depth + 1));
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .slice(0, 200)
+        .map(([nestedKey, nestedValue]) => [nestedKey, sanitize(nestedValue, nestedKey, depth + 1)]));
+    }
+    return typeof value === "string" ? value.slice(0, 2_000) : value;
+  };
+  return JSON.parse(JSON.stringify(sanitize(input))) as AuditJson;
 }
 
 export function toAuditEvent(input: RecordAuditEventInput): AuditEvent {

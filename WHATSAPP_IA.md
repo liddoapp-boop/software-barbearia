@@ -2,7 +2,7 @@
 
 ## Escopo
 
-O Atendente IA usa a Evolution API como ponte do WhatsApp para o backend. A integração local foi validada para texto e áudio, sempre com prévia obrigatória antes de qualquer venda ou agendamento.
+O Atendente IA usa a Evolution API como ponte do WhatsApp para o backend. O fluxo textual local está funcional e sempre exige prévia antes de qualquer venda ou agendamento. Áudio é experimental e não integra o aceite funcional da RC.3.
 
 Esta documentação descreve o comportamento existente. Ela não declara uma instância de produção nem autoriza novos testes reais de WhatsApp.
 
@@ -25,12 +25,15 @@ Variáveis da integração:
 - `AI_WHATSAPP_OWNER_PHONE`
 - `AI_WHATSAPP_UNIT_ID`
 - `AI_WHATSAPP_PENDING_TTL_MS` opcional
+- `AI_WHATSAPP_WEBHOOK_DEDUP_TTL_MS` opcional; padrao de 7 dias
 
 Valores reais, QR Codes, sessões, chaves e números completos são sensíveis e não devem entrar no Git ou nos logs de evidência.
 
 ## Owner autorizado e identidade LID
 
 Somente o telefone configurado em `AI_WHATSAPP_OWNER_PHONE` pode emitir comandos.
+
+Cada `messageId` (ou `eventId` quando fornecido) e reivindicado antes do processamento. Em Prisma, a reivindicacao usa a restricao unica de `IdempotencyRecord`, portanto retries concorrentes e processos diferentes nao podem enviar uma segunda previa ou mensagem de erro. Falha ao registrar a deduplicacao interrompe o fluxo sem resposta nem mutacao.
 
 A Evolution pode entregar conversas com `remoteJid` terminado em `@lid`. Nesse caso:
 
@@ -43,19 +46,24 @@ Em conversas telefônicas tradicionais, o telefone vem de `remoteJid` com sufixo
 
 ## Texto, áudio e transcrição
 
-Mensagens de texto seguem primeiro o parser determinístico. Gemini é fallback para casos que realmente precisam de interpretação adicional.
+Somente comandos canônicos completos e inequívocos usam o caminho determinístico direto. Linguagem cotidiana, ordem flexível, pontuação inesperada, pausas e hesitações podem seguir para o provedor semântico selecionado por `SEMANTIC_PROVIDER`.
+
+Para agendamentos semânticos, a chamada ao Gemini exige structured output por JSON Schema. Cada campo retorna valor, evidência e confiança individual; data e horário também preservam a expressão original e o período do dia. O backend rejeita baixa confiança, evidência sem grounding, cliente com introdutor/hesitação/fragmento, entidade fora do tenant, data inválida, horário ambíguo e divergência entre interpretação semântica e validação determinística. O determinístico funciona como validador nesse caminho, não como vencedor automático.
+
+Quando a resposta pede esclarecimento, somente campos já aceitos e com diagnóstico confiável ficam em um contexto temporário separado da pendência executável. O turno seguinte pode completar os campos ausentes; valores rejeitados ou ambíguos nunca são herdados. `CANCELAR`, conclusão da prévia ou expiração do TTL removem esse contexto.
 
 Notas de voz:
 
 1. são identificadas e validadas por tipo, tamanho e duração;
 2. a mídia é baixada da Evolution somente para processamento em memória;
-3. a transcrição usa o provider configurado, atualmente compatível com Gemini;
+3. a transcrição usa o provider configurado, com adapters para whisper.cpp local e Gemini opcional;
 4. o texto transcrito percorre o mesmo parser e as mesmas fronteiras de segurança do texto digitado;
 5. falha, timeout, limite, replay ou circuito aberto não executam ação comercial.
 
 Variáveis de áudio/transcrição:
 
 - `AI_AUDIO_TRANSCRIPTION_ENABLED`
+- `ASR_PROVIDER` (`local_whisper` recomendado apenas para experimentação nesta etapa)
 - `AI_AUDIO_TRANSCRIPTION_PROVIDER`
 - `AI_AUDIO_TRANSCRIPTION_API_KEY`
 - `AI_AUDIO_TRANSCRIPTION_MODEL`
@@ -66,6 +74,14 @@ Variáveis de áudio/transcrição:
 - `AI_AUDIO_MAX_DURATION_SECONDS`
 - `AI_WHATSAPP_AUDIO_DOWNLOAD_TIMEOUT_MS` opcional
 - `EVOLUTION_MEDIA_DOWNLOAD_URL` opcional
+
+O adapter `local_whisper` exige `LOCAL_WHISPER_FFMPEG_PATH`, `LOCAL_WHISPER_CLI_PATH`, `LOCAL_WHISPER_MODEL_PATH` e `LOCAL_WHISPER_VAD_MODEL_PATH`. O OGG/Opus é convertido por pipe para WAV mono 16 kHz, sem persistir o áudio, e o processo tem timeout máximo de 20 segundos e concorrência 1. Nesta macro o ASR local permaneceu **desativado por padrão**: o benchmark não preservou nomes e horários críticos com qualidade suficiente. Ele só pode ser ativado explicitamente por flags locais após nova base humana ou VPS adequada.
+
+O adapter semântico `local_llama` usa llama-server somente em `127.0.0.1`, contexto 4096, concorrência 1, structured output estrito e thinking desativado por requisição. Ele exige `LOCAL_LLAMA_URL`, `LOCAL_LLAMA_MODEL` e timeout de no máximo 15 segundos. Como o Qwen3-4B Q4_K_M não atingiu o gate de latência nesta máquina, `SEMANTIC_PROVIDER=deterministic` permanece o default seguro. Gemini requer seleção explícita, é opcional e pode estar sujeito à cota gratuita; nenhuma chave é obrigatória no startup, health ou fluxo textual determinístico. Nenhuma IA paga é utilizada nesta release.
+
+O ASR Gemini trata `429` de capacidade/rate limit como transitório: faz no máximo dois retries na mesma sequência, respeita `Retry-After` ou `google.rpc.RetryInfo`, aplica backoff exponencial com jitter e encerra toda a sequência em até 45 segundos. Cota diária, limite zero ou falha explícita de plano/billing não recebe retry. Nenhuma tentativa intermediária envia mensagem ao WhatsApp; o fluxo envia somente a prévia final após recuperação ou uma única resposta amigável após falha definitiva.
+
+As auditorias de transcrição registram apenas diagnóstico sanitizado: status/código/mensagem do provedor, headers de retry permitidos, classificação temporária ou cota, endpoint, modelo, quantidade de tentativas e chamadas recentes. Corpo bruto, áudio, chave e número completo não são persistidos.
 
 ## Prévia e confirmação humana
 

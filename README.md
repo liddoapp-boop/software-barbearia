@@ -4,7 +4,15 @@ Plataforma local de gestão para a Barbearia Geovane Borges. O projeto reúne op
 
 ## Estado da entrega
 
-O baseline funcional local está **pronto para um deploy futuro controlado**. Isso não significa que exista produção real: nenhuma VPS foi provisionada, nenhum domínio foi publicado e nenhum deploy foi executado nesta entrega.
+O baseline funcional local está **pronto como RC.3 local**. Isso não significa que exista produção real: nenhuma VPS foi provisionada, nenhum domínio foi publicado e nenhum deploy foi executado nesta entrega.
+
+## Status da RC.3
+
+- WhatsApp textual: funcional, com prévia e confirmação obrigatórias.
+- Áudio Gemini: opcional, sujeito à cota gratuita e nunca obrigatório para o sistema.
+- Áudio local: experimental e desligado por padrão; não faz parte do aceite funcional da RC.3.
+- O ASR local preservou latência aceitável, mas não entidades críticas; o Qwen local excedeu o gate semântico de latência. Não há IA paga prevista nesta release.
+- O projeto fica congelado para novas funcionalidades até uma VPS, TCC ou correção P0/P1 autorizada.
 
 O estado consolidado, os gates e as limitações estão no [manifesto da entrega local](.planning/244_3_MANIFESTO_ENTREGA_LOCAL.md).
 
@@ -85,7 +93,7 @@ Variáveis essenciais para o servidor com Prisma:
 | `PUBLIC_BOOKING_UNIT_ID` | Unidade exposta pelo agendamento público. |
 | `CORS_ORIGIN` | Origem permitida; obrigatória e não curinga em produção. |
 
-Integrações opcionais têm variáveis próprias para billing, Firebase, Gmail, Gemini, Evolution e transcrição. Consulte [WhatsApp e IA](WHATSAPP_IA.md) para o conjunto da integração WhatsApp-first.
+Integrações opcionais têm variáveis próprias para billing, Firebase, Gmail, Gemini, Evolution e transcrição. Gemini não é requisito de health, texto ou operações principais. Consulte [WhatsApp e IA](WHATSAPP_IA.md) para o conjunto da integração WhatsApp-first.
 
 ## Scripts principais
 

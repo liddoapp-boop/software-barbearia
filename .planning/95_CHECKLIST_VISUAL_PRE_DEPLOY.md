@@ -11,7 +11,7 @@ Executar e registrar o checklist visual final e o pre-deploy controlado antes de
 Esta fase nao cria feature nova, nao altera regra financeira, nao troca stack, nao executa seed destrutivo, nao publica segredo e nao realiza deploy real sem confirmacao humana.
 
 ## B) Ambiente usado
-- Workspace: `C:\Users\joaov\OneDrive\Desktop\Projetos\Software Barbearia`.
+- Workspace: `<workspace>` do projeto.
 - Sistema: Windows local.
 - Node: `v24.14.1`.
 - Branch: `main`, ahead de `origin/main` por 1 commit no momento da verificacao.

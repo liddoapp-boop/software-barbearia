@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
+import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 
 const originalEnv = { ...process.env };
 
@@ -81,6 +82,97 @@ function mockGeminiIntentAndWhatsapp(
       }),
     };
   });
+}
+
+function mockSemanticScheduleAndWhatsapp(fields: Partial<{
+  clientName: string;
+  serviceNames: string[];
+  professionalName: string;
+  date: string;
+  time: string;
+  confidence: number;
+  missingFields: string[];
+}> = {}) {
+  return vi.fn(async (url: string) => {
+    if (String(url).includes("/message/sendText/")) return { ok: true, text: async () => "" };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: JSON.stringify({
+          intent: "schedule_appointment",
+          clientName: "",
+          serviceNames: [],
+          professionalName: "",
+          date: "",
+          time: "",
+          confidence: 0.9,
+          missingFields: [],
+          ...fields,
+        }) }] } }],
+      }),
+    };
+  });
+}
+
+function mockSemanticV2ScheduleAndWhatsapp(input: {
+  clientName: string;
+  clientEvidence: string;
+  serviceName: string;
+  serviceEvidence: string;
+  date?: string;
+  dateEvidence?: string;
+  time?: string;
+  timeEvidence?: string;
+  timeAmbiguous?: boolean;
+  timePrecision?: "exact" | "approximate" | "unspecified";
+  professionalName?: string;
+  professionalEvidence?: string;
+}) {
+  return vi.fn(async (url: string) => {
+    if (String(url).includes("/message/sendText/")) return { ok: true, text: async () => "" };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        schemaVersion: "1.0",
+        intent: "schedule_appointment",
+        intentConfidence: 0.96,
+        fields: {
+          clientName: { value: input.clientName, evidence: input.clientEvidence, confidence: 0.96 },
+          serviceNames: { values: [input.serviceName], evidence: input.serviceEvidence, confidence: 0.95 },
+          professionalName: input.professionalName
+            ? { value: input.professionalName, evidence: input.professionalEvidence ?? input.professionalName, confidence: 0.96 }
+            : { value: "", evidence: "", confidence: 0 },
+          date: input.date
+            ? { expression: input.dateEvidence, canonical: input.date, evidence: input.dateEvidence, confidence: 0.96 }
+            : { expression: "", canonical: "", evidence: "", confidence: 0 },
+          time: {
+            expression: input.timeEvidence ?? "",
+            canonical: input.time ?? "",
+            period: "unspecified",
+            ambiguous: input.timeAmbiguous === true,
+            precision: input.timePrecision ?? (input.timeAmbiguous ? "unspecified" : "exact"),
+            evidence: input.timeEvidence ?? "",
+            confidence: input.timeAmbiguous ? 0.6 : input.time ? 0.96 : 0,
+          },
+        },
+        ambiguities: input.timeAmbiguous ? [{ field: "time", reason: "Periodo nao informado." }] : [],
+        missingFields: [input.date ? "" : "date", input.time || input.timeAmbiguous ? "" : "time"].filter(Boolean),
+      }) }] } }] }),
+    };
+  });
+}
+
+async function createWhatsappTestClient(app: FastifyInstance, token: string, suffix: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/clients",
+    headers: { authorization: `Bearer ${token}` },
+    payload: { unitId: "unit-01", name: "João Victor", phone: `55119876${suffix.padStart(5, "0")}` },
+  });
+  expect(response.statusCode).toBe(200);
+  return response.json().client as { id: string; fullName?: string; name?: string };
 }
 
 async function loginOwner(app: FastifyInstance) {
@@ -331,6 +423,70 @@ describe("Atendente IA WhatsApp-first", () => {
     });
   });
 
+  it("deduplica tres entregas concorrentes do mesmo eventId e envia uma unica previa", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+    const text = "Vendi uma pomada para CLIENTE TESTE IA WPP, ele pagou no Pix.";
+    const payload = evolutionPayload(text, "5511999999999", {
+      eventId: "duplicate-text-event-001",
+      data: {
+        key: { remoteJid: "5511999999999@s.whatsapp.net", fromMe: false },
+        message: { conversation: text },
+      },
+    });
+
+    const responses = await Promise.all([
+      postWebhook(app, payload),
+      postWebhook(app, payload),
+      postWebhook(app, payload),
+    ]);
+
+    expect(responses.filter((response) => response.json().mode === "preview_only")).toHaveLength(1);
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
+    const events = await auditEvents(app, token);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_RECEIVED")).toHaveLength(3);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_CLAIMED")).toHaveLength(1);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_WEBHOOK_DEDUPLICATED")).toHaveLength(2);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")).toHaveLength(1);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")?.afterJson).toMatchObject({ origin: "text_preview" });
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
+  });
+
+  it("retry da Evolution nao duplica mensagem de erro e preserva estado sem mutacao", async () => {
+    const fetchMock = mockGeminiUnavailableAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+    const payload = evolutionPayload("comando sem suporte", "5511999999999", {
+      data: {
+        key: { id: "duplicate-failure-message-001", remoteJid: "5511999999999@s.whatsapp.net", fromMe: false },
+        message: { conversation: "comando sem suporte" },
+      },
+    });
+
+    const responses = await Promise.all([
+      postWebhook(app, payload),
+      postWebhook(app, payload),
+      postWebhook(app, payload),
+    ]);
+
+    expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
+    expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
+    expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Nao consegui interpretar essa mensagem agora");
+    const events = await auditEvents(app, token);
+    expect(events.filter((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")).toHaveLength(1);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_RESPONSE_SENT")?.afterJson).toMatchObject({ origin: "temporary_parser_failure" });
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
   it("comando incompleto chama Gemini, completa apenas o campo ausente e gera previa", async () => {
     const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
       clientName: "CLIENTE TESTE IA WPP",
@@ -425,7 +581,7 @@ describe("Atendente IA WhatsApp-first", () => {
     await expect(countCommercialState(app, token)).resolves.toEqual(before);
   });
 
-  it("bloqueia cliente e profissional parciais no WhatsApp", async () => {
+  it("nao aceita data e horario inventados pela interpretacao semantica", async () => {
     const fetchMock = mockGeminiIntentAndWhatsapp("schedule_appointment", {
       clientName: "Joao",
       serviceNames: ["Corte masculino"],
@@ -442,34 +598,207 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("nome exato");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Qual dia e horario voce deseja?");
     await expect(countCommercialState(app, token)).resolves.toEqual(before);
   });
 
   it("resolve alias explicito de servico sem alterar o fluxo do painel", async () => {
-    const fetchMock = mockGeminiIntentAndWhatsapp("schedule_appointment", {
-      clientName: "CLIENTE TESTE IA WPP",
-      serviceNames: ["Corte masculino"],
-      date: "2026-12-15",
-      time: "10:00",
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "Maria Nova", clientEvidence: "Maria Nova", serviceName: "Corte masculino", serviceEvidence: "corte masculino",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "10:00", timeEvidence: "as 10h",
     });
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
 
-    const response = await postWebhook(app, evolutionPayload("Agende corte masculino para CLIENTE TESTE IA WPP."));
+    const response = await postWebhook(app, evolutionPayload("Agende corte masculino para Maria Nova dia 15/12/2026 as 10h."));
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
     expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
   });
 
-  it("texto de agendamento gera previa e nao executa", async () => {
-    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+  it("gera previa para cliente novo com catalogo de clientes vazio e nao cria entidade", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "Joao Victor", clientEvidence: "Joao Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "17:00", timeEvidence: "as 17 horas",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const memoryStore = new InMemoryStore();
+    memoryStore.clients = [];
+    const app = createApp({ memoryStore });
+    const token = await loginOwner(app);
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Marque um corte para o cliente Joao Victor no dia 15/12/2026 as 17 horas.",
+    ));
+
+    expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
+    expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Cliente novo ou nao encontrado");
+    expect(memoryStore.clients).toHaveLength(0);
+    expect(memoryStore.appointments).toHaveLength(0);
+    const events = await auditEvents(app, token);
+    const entities = events.find((event) => event.action === "AI_WHATSAPP_ENTITY_RESOLUTION_COMPLETED")?.afterJson?.entities as Array<{ entity: string; result: string }>;
+    expect(entities).toContainEqual(expect.objectContaining({ entity: "client", result: "NOT_FOUND_NEW_CLIENT" }));
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
+  });
+
+  it("pede esclarecimento quando dois clientes sao semelhantes e nao gera previa", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "Joao Victor", clientEvidence: "Joao Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "17:00", timeEvidence: "as 17 horas",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const memoryStore = new InMemoryStore();
+    memoryStore.clients = [
+      { id: "cli-amb-1", businessId: "unit-01", fullName: "Joao Victor Almeida", tags: [] },
+      { id: "cli-amb-2", businessId: "unit-01", fullName: "Joao Victor Souza", tags: [] },
+    ];
+    const app = createApp({ memoryStore });
+    const token = await loginOwner(app);
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Marque um corte para Joao Victor no dia 15/12/2026 as 17 horas.",
+    ));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Para qual cliente?"]);
+    expect(memoryStore.appointments).toHaveLength(0);
+    const events = await auditEvents(app, token);
+    const entities = events.find((event) => event.action === "AI_WHATSAPP_ENTITY_RESOLUTION_COMPLETED")?.afterJson?.entities as Array<{ entity: string; result: string }>;
+    expect(entities).toContainEqual(expect.objectContaining({ entity: "client", result: "AMBIGUOUS_MATCH" }));
+  });
+
+  it("bloqueia servico inexistente sem transformar cliente novo em falha fatal", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "Joao Victor", clientEvidence: "Joao Victor", serviceName: "Tatuagem", serviceEvidence: "tatuagem",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "17:00", timeEvidence: "as 17 horas",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Marque uma tatuagem para Joao Victor no dia 15/12/2026 as 17 horas.",
+    ));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Qual servico voce deseja agendar?"]);
+  });
+
+  it("bloqueia profissional inexistente com pergunta especifica", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "Joao Victor", clientEvidence: "Joao Victor", serviceName: "Corte", serviceEvidence: "corte",
+      professionalName: "Barbeiro Fantasma", professionalEvidence: "Barbeiro Fantasma",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "17:00", timeEvidence: "as 17 horas",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Marque corte para Joao Victor com Barbeiro Fantasma no dia 15/12/2026 as 17 horas.",
+    ));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Com qual profissional?"]);
+  });
+
+  it("gera uma unica previa para linguagem natural completa sem executar", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "10:00", timeEvidence: "às 10h",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    await createWhatsappTestClient(app, token, "101");
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Deixa marcado um corte para João Victor dia 15/12/2026 às 10h.",
+    ));
+
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
+    expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
+    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
+  });
+
+  it.each([
+    {
+      message: "Marca um corte para o CLIENTE TESTE IA WPP.",
+      semantic: { clientName: "CLIENTE TESTE IA WPP", serviceNames: ["Corte"] },
+      expectedReply: "Qual dia e horario voce deseja?",
+    },
+    {
+      message: "Tem como encaixar o CLIENTE TESTE IA WPP amanhã às 17?",
+      semantic: { clientName: "CLIENTE TESTE IA WPP", date: "2026-07-14", time: "17:00" },
+      expectedReply: "Qual servico voce deseja agendar?",
+    },
+    {
+      message: "Quero marcar um horário para o CLIENTE TESTE IA WPP.",
+      semantic: { clientName: "CLIENTE TESTE IA WPP" },
+      expectedReply: "Informe somente: servico, dia, horario.",
+    },
+  ])("pergunta somente os campos ausentes: $message", async ({ message, semantic, expectedReply }) => {
+    const fetchMock = mockSemanticScheduleAndWhatsapp(semantic);
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
     const token = await loginOwner(app);
     const before = await countCommercialState(app, token);
 
-    const response = await postWebhook(app, evolutionPayload("Agenda CLIENTE TESTE IA WPP amanha as 11h para corte."));
+    const response = await postWebhook(app, evolutionPayload(message));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock)).toEqual([expectedReply]);
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("valida disponibilidade deterministicamente e nao cria previa executavel para horario passado", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2020-07-12", dateEvidence: "12/07/2020", time: "10:00", timeEvidence: "às 10h",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    await createWhatsappTestClient(app, token, "102");
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload(
+      "Deixa marcado um corte para João Victor dia 12/07/2020 às 10h.",
+    ));
+
+    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(lastConfirmationCode(fetchMock)).toBe("");
+    expect(sentWhatsAppTexts(fetchMock)).toEqual([
+      "Esse horario nao esta disponivel. Qual outro dia e horario voce deseja?",
+    ]);
+    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+  });
+
+  it("texto de agendamento gera previa e nao executa", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "11:00", timeEvidence: "as 11h",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    await createWhatsappTestClient(app, token, "103");
+    const before = await countCommercialState(app, token);
+
+    const response = await postWebhook(app, evolutionPayload("Agenda João Victor dia 15/12/2026 as 11h para corte."));
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
@@ -487,20 +816,20 @@ describe("Atendente IA WhatsApp-first", () => {
 
     const response = await postWebhook(
       app,
-      evolutionPayload("Agendar corte para CLIENTE TESTE IA WPP AGENDAMENTO dia 14/07/2026 as 11:00"),
+      evolutionPayload("Agendar corte para Maria Teste Agendamento dia 14/07/2026 as 11:00"),
     );
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
     const preview = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
-    expect(preview).toContain("Cliente: CLIENTE TESTE IA WPP AGENDAMENTO");
+    expect(preview).toContain("Cliente: Maria Teste Agendamento");
     expect(preview).toContain("Servico: Corte");
     expect(preview).toContain("Data: 2026-07-14");
     expect(preview).toContain("Horario: 11:00");
   });
 
   it("gera previa deterministica com data e horario totalmente falados e audita somente o tipo", async () => {
-    const message = "Agendar corte para cliente teste confirmar agenda dia quatorze de julho de dois mil e vinte e seis às onze e trinta";
+    const message = "Agendar corte para Maria da Silva dia quatorze de julho de dois mil e vinte e seis às onze e trinta";
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -510,7 +839,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
     const preview = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
-    expect(preview).toContain("Cliente: cliente teste confirmar agenda");
+    expect(preview).toContain("Cliente: Maria da Silva");
     expect(preview).toContain("Servico: Corte");
     expect(preview).toContain("Data: 2026-07-14");
     expect(preview).toContain("Horario: 11:30");
@@ -522,23 +851,27 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(JSON.stringify(events)).not.toContain(message);
   });
 
-  it("pede esclarecimento para horario realmente ambiguo sem chamar Gemini", async () => {
-    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+  it("pede esclarecimento para horario realmente ambiguo depois da interpretacao semantica", async () => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", timeEvidence: "quinze para as duas", timeAmbiguous: true,
+    });
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
     const token = await loginOwner(app);
+    await createWhatsappTestClient(app, token, "104");
 
     const response = await postWebhook(
       app,
-      evolutionPayload("Agendar corte para CLIENTE TESTE IA WPP AGENDAMENTO dia 14/07/2026 quinze para as duas"),
+      evolutionPayload("Marque corte para João Victor dia 15/12/2026 quinze para as duas"),
     );
 
     expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
-    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(0);
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(1);
     const events = await auditEvents(app, token);
     expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.status === "AMBIGUOUS")).toBe(true);
-    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_FAILED" || event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(false);
+    expect(events.some((event) => event.action === "AI_WHATSAPP_GEMINI_COMPLETED")).toBe(true);
   });
 
   it("responde com seguranca quando a IA esta indisponivel, sem executar nada", async () => {
@@ -552,7 +885,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui processar essa mensagem agora");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui interpretar essa mensagem agora");
     await expect(countCommercialState(app, token)).resolves.toEqual(before);
   });
 
@@ -581,7 +914,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     await postWebhook(app, evolutionPayload("PING IA"));
     await postWebhook(app, evolutionPayload("PING IA"));
-    const fallback = await postWebhook(app, evolutionPayload("Agendar corte para CLIENTE TESTE IA dia 15/07/2026 as 11:00"));
+    const fallback = await postWebhook(app, evolutionPayload("Agendar corte para Maria Teste dia 15/07/2026 as 11:00"));
 
     expect(fallback.statusCode).toBe(200);
     expect(fallback.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment" });
@@ -652,13 +985,17 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it("CONFIRMAR codigo executa agendamento pelo fluxo oficial", async () => {
-    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "11:00", timeEvidence: "as 11h",
+    });
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
     const token = await loginOwner(app);
+    const existingClient = await createWhatsappTestClient(app, token, "105");
     const before = await countCommercialState(app, token);
 
-    await postWebhook(app, evolutionPayload("Agenda CLIENTE TESTE IA WPP amanha as 11h para corte."));
+    await postWebhook(app, evolutionPayload("Agenda João Victor dia 15/12/2026 as 11h para corte."));
     const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${lastConfirmationCode(fetchMock)}`));
 
     expect(confirm.statusCode).toBe(200);
@@ -668,6 +1005,12 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(after.sales).toBe(before.sales);
     expect(after.financialEntries).toBe(before.financialEntries);
     expect(after.pomadaStock).toBe(before.pomadaStock);
+    const appointments = await app.inject({
+      method: "GET",
+      url: "/appointments?unitId=unit-01",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(appointments.json().appointments).toContainEqual(expect.objectContaining({ clientId: existingClient.id }));
   });
 
   it("CANCELAR remove previa pendente e nao executa nada", async () => {
@@ -681,7 +1024,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const code = lastConfirmationCode(fetchMock);
     const cancel = await postWebhook(app, evolutionPayload("CANCELAR"));
     const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
-    const newPreview = await postWebhook(app, evolutionPayload("Agendar corte para CLIENTE TESTE IA WPP dia 15/07/2026 as 11:00"));
+    const newPreview = await postWebhook(app, evolutionPayload("Agendar corte para Maria Teste dia 15/07/2026 as 11:00"));
 
     expect(cancel.json()).toMatchObject({ ok: true, cancelled: true });
     expect(confirm.json()).toMatchObject({ ok: true, executed: false });

@@ -1,5 +1,6 @@
 import {
   AiWhatsappEntityAlias,
+  resolveAiWhatsappClient,
   resolveAiWhatsappEntity,
 } from "../src/application/whatsapp-entity-resolution";
 import { describe, expect, it } from "vitest";
@@ -62,6 +63,31 @@ describe("resolucao explicita de entidades para WhatsApp", () => {
   it("nao aceita cliente ou profissional parciais", () => {
     expect(resolve({ entity: "client", name: "Joao", rows: [{ id: "client-joao", name: "Joao Santos" }], aliases: [] })).toMatchObject({ status: "PARTIAL_MATCH", match: null });
     expect(resolve({ entity: "professional", name: "Geovane", rows: [{ id: "pro-geovane", name: "Geovane Borges" }], aliases: [] })).toMatchObject({ status: "PARTIAL_MATCH", match: null });
+  });
+
+  it("separa cliente exato, cliente novo e clientes ambiguos", () => {
+    const exactClient = { id: "client-exact", name: "Joao Victor" };
+    expect(resolveAiWhatsappClient({ name: "Joao Victor", rows: [exactClient], getName: (item) => item.name })).toMatchObject({
+      status: "EXACT_MATCH",
+      match: { id: "client-exact" },
+    });
+    expect(resolveAiWhatsappClient<Entity>({ name: "Joao Victor", rows: [], getName: (item) => item.name })).toMatchObject({
+      status: "NOT_FOUND_NEW_CLIENT",
+      match: null,
+      candidates: [],
+    });
+    expect(resolveAiWhatsappClient({
+      name: "Joao Victor",
+      rows: [
+        { id: "client-a", name: "Joao Victor Almeida" },
+        { id: "client-b", name: "Joao Victor Souza" },
+      ],
+      getName: (item) => item.name,
+    })).toMatchObject({
+      status: "AMBIGUOUS_MATCH",
+      match: null,
+      candidates: [{ id: "client-a" }, { id: "client-b" }],
+    });
   });
 
   it("resolve Pix e cartoes pelos nomes conhecidos ou aliases explicitos", () => {

@@ -8,23 +8,33 @@ import { OperationsService } from "../application/operations-service";
 import { PrismaOperationsService } from "../application/prisma-operations-service";
 import { createGeminiRetentionScorerFromEnv } from "../application/gemini-retention-scoring";
 import {
-  createGeminiOwnerCommandParserFromEnv,
+  createOwnerCommandParserFromEnv,
+  OwnerCommandParser,
   OwnerCommandParserError,
   OwnerCommandParserStatus,
   OwnerCommandParseResult,
   getDeterministicDateRecognitionType,
+  getOwnerCommandClientNameRejectionReason,
   getOwnerCommandBoundaryObservation,
+  parseCanonicalDeterministicOwnerCommand,
   parseDeterministicOwnerCommand,
+  recognizeOwnerCommandTime,
 } from "../application/owner-command-ai";
 import {
   AudioTranscriptionError,
+  AudioTranscriptionService,
   createAudioTranscriptionServiceFromEnv,
+  GEMINI_AUDIO_TRANSCRIPTION_ENDPOINT,
+  getGeminiAudioTranscriptionTotalBudgetMsFromEnv,
   getGeminiAudioTranscriptionTimeoutMsFromEnv,
   isAudioTranscriptionEnabledFromEnv,
 } from "../application/audio-transcription";
+import { AiWhatsappPipelineState, SingleWhatsappResponseGate } from "../application/ai-whatsapp-pipeline";
+import { ProviderAttemptDiagnostic } from "../application/resilient-provider";
 import {
   AiWhatsappEntityKind,
   isAiWhatsappResolvedEntityStatus,
+  resolveAiWhatsappClient,
   resolveAiWhatsappEntity,
 } from "../application/whatsapp-entity-resolution";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
@@ -65,6 +75,7 @@ import {
   getWhatsAppConnectionState,
   connectWhatsApp,
   disconnectWhatsApp,
+  WhatsappDeliveryError,
   buildBookingWhatsApp,
   buildBookingEmailHtml,
 } from "../notifications";
@@ -755,7 +766,7 @@ async function resolveFirebaseUser(
   };
 }
 
-export function createApp() {
+export function createApp(options: { memoryStore?: InMemoryStore; audioTranscriptionService?: AudioTranscriptionService; ownerCommandParser?: OwnerCommandParser | null } = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
   if (process.env.NODE_ENV === "production") {
@@ -763,16 +774,25 @@ export function createApp() {
   }
   const authUsers = loadAuthUsers();
   const corsOrigin = getAllowedCorsOrigins();
-  const memoryStore = new InMemoryStore();
+  const memoryStore = options.memoryStore ?? new InMemoryStore();
   const httpLogEnabled =
     String(
       process.env.HTTP_LOG_ENABLED ??
         (process.env.NODE_ENV === "test" ? "false" : "true"),
     ).toLowerCase() === "true";
   const retentionAiScorer = createGeminiRetentionScorerFromEnv();
-  const ownerCommandParser = createGeminiOwnerCommandParserFromEnv();
-  const audioTranscriptionService = createAudioTranscriptionServiceFromEnv();
+  const ownerCommandParser = options.ownerCommandParser === undefined ? createOwnerCommandParserFromEnv() : options.ownerCommandParser;
+  const audioTranscriptionService = options.audioTranscriptionService ?? createAudioTranscriptionServiceFromEnv();
   const audioTranscriptionEnabled = isAudioTranscriptionEnabledFromEnv();
+  const configuredAsrProvider = String(process.env.ASR_PROVIDER ?? process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER ?? "").trim().toLowerCase();
+  const configuredAsrTimeoutMs = getGeminiAudioTranscriptionTimeoutMsFromEnv();
+  const configuredAsrModel = configuredAsrProvider === "local_whisper"
+    ? path.basename(process.env.LOCAL_WHISPER_MODEL_PATH?.trim() || "ggml-large-v3-turbo-q5_0.bin")
+    : process.env.AI_AUDIO_TRANSCRIPTION_MODEL?.trim() || "gemini-3.5-flash";
+  const configuredAsrEndpoint = configuredAsrProvider === "local_whisper" ? "local_process" : GEMINI_AUDIO_TRANSCRIPTION_ENDPOINT;
+  const configuredAsrTotalBudgetMs = configuredAsrProvider === "local_whisper"
+    ? Math.min(20_000, configuredAsrTimeoutMs)
+    : getGeminiAudioTranscriptionTotalBudgetMsFromEnv();
   const operations =
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
@@ -1194,10 +1214,24 @@ export function createApp() {
     return { entity, result, candidateCount: resolved?.candidates.length ?? 0 };
   }
 
+  function getWhatsappClientResolutionDiagnostic(resolved?: {
+    status: "EXACT_MATCH" | "NOT_FOUND_NEW_CLIENT" | "AMBIGUOUS_MATCH";
+    sourceStatus: string;
+    candidates: unknown[];
+  } | null) {
+    return {
+      entity: "client",
+      result: resolved?.status ?? "NOT_FOUND_NEW_CLIENT",
+      candidateCount: resolved?.candidates.length ?? 0,
+      sourceStatus: resolved?.sourceStatus ?? "NOT_FOUND",
+    };
+  }
+
   async function resolveOwnerCommandSchedule(input: {
     unitId: string;
     draft: OwnerCommandScheduleDraft;
     strictWhatsappEntities?: boolean;
+    allowNewClient?: boolean;
   }) {
     const catalog = await operations.getCatalog({ unitId: input.unitId });
     const clients = catalog.clients as unknown as Array<Record<string, unknown>>;
@@ -1207,16 +1241,19 @@ export function createApp() {
     const warnings: string[] = [];
 
     const whatsappClient = input.strictWhatsappEntities
-      ? resolveWhatsappEntity({ entity: "client", rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName, allowAliases: false })
+      ? resolveAiWhatsappClient({ rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName })
       : null;
     const client = input.strictWhatsappEntities ? whatsappClient?.match ?? null : findUniqueByName(
       clients,
       (item) => item.fullName ?? item.name,
       input.draft.clientName,
     );
-    if (input.strictWhatsappEntities && whatsappClient && whatsappClient.status !== "NOT_FOUND" && !isAiWhatsappResolvedEntityStatus(whatsappClient.status)) {
+    if (input.strictWhatsappEntities && whatsappClient?.status === "AMBIGUOUS_MATCH") {
       missingFields.push("clientName");
-      warnings.push("Cliente nao encontrado com seguranca. Informe o nome exato.");
+      warnings.push("Ha mais de um cliente semelhante. Informe qual cliente correto.");
+    } else if (input.strictWhatsappEntities && whatsappClient?.status === "NOT_FOUND_NEW_CLIENT" && !input.allowNewClient) {
+      missingFields.push("clientName");
+      warnings.push("Nome de cliente novo sem confianca semantica suficiente. Informe somente o nome completo.");
     } else if (!client) {
       warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
     }
@@ -1253,12 +1290,48 @@ export function createApp() {
     const startsAt = new Date(`${input.draft.date}T${input.draft.time}:00.000-03:00`);
     if (Number.isNaN(startsAt.getTime())) missingFields.push("date");
 
+    if (
+      professional
+      && serviceIds.length === input.draft.serviceNames.length
+      && !Number.isNaN(startsAt.getTime())
+    ) {
+      const servicesPreview = await operations.previewAppointmentServices({
+        unitId: input.unitId,
+        serviceIds,
+      });
+      const professionalId = String(professional.id ?? "");
+      const eligibleProfessionalIds = Array.isArray(servicesPreview.eligibleProfessionalIds)
+        ? servicesPreview.eligibleProfessionalIds.map(String)
+        : [];
+      const durationMin = Number(servicesPreview.effectiveDurationMin ?? 0);
+      const endsAt = new Date(startsAt.getTime() + durationMin * 60_000);
+      const bufferAfterMin = await resolvePublicBufferAfterMin(input.unitId);
+      const workingHours = await resolveWorkingHoursForUnit(input.unitId, operations);
+      const busySlots = await getPublicBusySlots(
+        input.unitId,
+        [professionalId],
+        startsAt,
+        endsAt,
+        bufferAfterMin,
+      );
+      const unavailable = startsAt.getTime() <= Date.now()
+        || !Number.isFinite(durationMin)
+        || durationMin <= 0
+        || !eligibleProfessionalIds.includes(professionalId)
+        || !isWithinWorkingHours(startsAt, endsAt, workingHours)
+        || !isProfessionalAvailableFromBusySlots(professionalId, startsAt, endsAt, busySlots, bufferAfterMin);
+      if (unavailable) {
+        missingFields.push("availability");
+        warnings.push("Horario indisponivel para o profissional e os servicos informados.");
+      }
+    }
+
     return {
       missingFields: Array.from(new Set(missingFields)),
       warnings,
       entityResolutionDiagnostics: input.strictWhatsappEntities
         ? [
-            getWhatsappEntityResolutionDiagnostic("client", whatsappClient),
+            getWhatsappClientResolutionDiagnostic(whatsappClient),
             getWhatsappEntityResolutionDiagnostic("professional", whatsappProfessional),
           ]
         : [],
@@ -1292,16 +1365,14 @@ export function createApp() {
     if (!normalizedName) throw new Error("Cliente obrigatorio para confirmar agendamento.");
     const clients = await getOwnerCommandClients(input.unitId);
     if (input.strictWhatsappEntities) {
-      const resolved = resolveWhatsappEntity({
-        entity: "client",
+      const resolved = resolveAiWhatsappClient({
         rows: clients,
         getName: (item) => item.fullName,
         name: input.clientName,
-        allowAliases: false,
       });
-      if (isAiWhatsappResolvedEntityStatus(resolved.status) && resolved.match) return resolved.match.id;
-      if (resolved.status !== "NOT_FOUND") {
-        throw new Error("Cliente nao encontrado com seguranca. Gere uma nova previa.");
+      if (resolved.status === "EXACT_MATCH" && resolved.match) return resolved.match.id;
+      if (resolved.status === "AMBIGUOUS_MATCH") {
+        throw new Error("Cliente ambiguo. Gere uma nova previa com o nome completo.");
       }
     }
     const exact = clients.filter((item) => normalizeMatchText(item.fullName) === normalizedName);
@@ -1362,16 +1433,16 @@ export function createApp() {
     const warnings: string[] = [];
 
     const whatsappClient = input.strictWhatsappEntities
-      ? resolveWhatsappEntity({ entity: "client", rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName, allowAliases: false })
+      ? resolveAiWhatsappClient({ rows: clients, getName: (item) => item.fullName ?? item.name, name: input.draft.clientName })
       : null;
     const client = input.strictWhatsappEntities ? whatsappClient?.match ?? null : findUniqueByName(
       clients,
       (item) => item.fullName ?? item.name,
       input.draft.clientName,
     );
-    if (input.strictWhatsappEntities && whatsappClient && whatsappClient.status !== "NOT_FOUND" && !isAiWhatsappResolvedEntityStatus(whatsappClient.status)) {
+    if (input.strictWhatsappEntities && whatsappClient?.status === "AMBIGUOUS_MATCH") {
       missingFields.push("clientName");
-      warnings.push("Cliente nao encontrado com seguranca. Informe o nome exato.");
+      warnings.push("Ha mais de um cliente semelhante. Informe qual cliente correto.");
     } else if (!client) {
       warnings.push("Cliente novo ou nao encontrado. Ele sera criado somente se o owner confirmar.");
     }
@@ -1424,7 +1495,7 @@ export function createApp() {
       warnings,
       entityResolutionDiagnostics: input.strictWhatsappEntities
         ? [
-            getWhatsappEntityResolutionDiagnostic("client", whatsappClient),
+            getWhatsappClientResolutionDiagnostic(whatsappClient),
             getWhatsappEntityResolutionDiagnostic("product", whatsappProduct),
             getWhatsappEntityResolutionDiagnostic("payment", whatsappPayment),
           ]
@@ -1463,18 +1534,23 @@ export function createApp() {
     confirmationMessage?: string;
     executionMessage?: string;
     parserDiagnostics?: {
-      strategy: "deterministic" | "gemini" | "deterministic_after_gemini_failure";
+      strategy: "deterministic" | "gemini" | "local_llama" | "deterministic_after_gemini_failure" | "deterministic_after_local_llama_failure";
       status: OwnerCommandParserStatus;
       deterministicDurationMs?: number;
       geminiDurationMs?: number;
+      providerDurationMs?: number;
       httpStatus?: number;
       failureCode?: string;
       dateRecognitionType?: string;
       presentFields: string[];
       missingFields: string[];
       correlationId?: string;
+      fieldDiagnostics?: OwnerCommandParseResult["fieldDiagnostics"];
+      providerAttempts?: ProviderAttemptDiagnostic[];
+      model?: string;
+      fallbackUsed?: boolean;
     };
-    entityResolutionDiagnostics?: Array<{ entity: string; result: string; candidateCount: number }>;
+    entityResolutionDiagnostics?: Array<{ entity: string; result: string; candidateCount: number; sourceStatus?: string }>;
   };
 
   type AiWhatsappPendingCommand = {
@@ -1488,6 +1564,18 @@ export function createApp() {
     confirmationToken: string;
     expiresAt: number;
     used: boolean;
+  };
+
+  type AiWhatsappClarificationContext = {
+    unitId: string;
+    phone: string;
+    intent: "schedule_appointment";
+    draft: Record<string, unknown>;
+    fieldDiagnostics?: OwnerCommandParseResult["fieldDiagnostics"];
+    pendingField?: "clientName" | "serviceNames" | "professionalName" | "date" | "time";
+    proposedValue?: string;
+    originCorrelationId: string;
+    expiresAt: number;
   };
 
   type EvolutionWhatsappAudio = {
@@ -1506,12 +1594,18 @@ export function createApp() {
   }
 
   const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
-  const aiWhatsappProcessedAudioMessages = new Map<string, number>();
+  const aiWhatsappClarificationContexts = new Map<string, AiWhatsappClarificationContext>();
+  const aiWhatsappProcessedWebhookMessages = new Map<string, number>();
   const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
 
   function getAiWhatsappTtlMs() {
     const configured = Number(process.env.AI_WHATSAPP_PENDING_TTL_MS ?? 10 * 60 * 1000);
     return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60 * 1000;
+  }
+
+  function getAiWhatsappWebhookDedupTtlMs() {
+    const configured = Number(process.env.AI_WHATSAPP_WEBHOOK_DEDUP_TTL_MS ?? 7 * 24 * 60 * 60 * 1000);
+    return Number.isFinite(configured) && configured > 0 ? configured : 7 * 24 * 60 * 60 * 1000;
   }
 
   function normalizePhoneDigits(value: unknown) {
@@ -1621,6 +1715,19 @@ export function createApp() {
     return crypto.createHash("sha256").update(`${normalizePhoneDigits(phone)}:${messageId}`).digest("base64url");
   }
 
+  function buildAiWhatsappWebhookReplayKey(input: {
+    instance: string;
+    senderPhone: string;
+    messageId: string;
+    eventId: string;
+  }) {
+    const source = input.messageId ? `message:${input.messageId}` : `event:${input.eventId}`;
+    return crypto
+      .createHash("sha256")
+      .update(`${input.instance}:${normalizePhoneDigits(input.senderPhone)}:${source}`)
+      .digest("base64url");
+  }
+
   async function downloadEvolutionWhatsappAudio(input: { instance: string; audio: EvolutionWhatsappAudio }) {
     if (!input.instance || !input.audio.messageId || !input.audio.source) {
       throw new EvolutionAudioError("missing_media");
@@ -1678,6 +1785,8 @@ export function createApp() {
     const message = asRecord(data?.message);
     const identity = extractEvolutionWhatsappIdentity(body);
     const instance = getFirstString(body, [["instance"], ["instanceName"], ["data", "instance"], ["data", "instanceName"]]);
+    const messageId = getFirstString(body, [["data", "key", "id"], ["data", "key", "messageId"], ["messageId"], ["id"]]);
+    const eventId = getFirstString(body, [["eventId"], ["webhookId"], ["data", "eventId"], ["data", "webhookId"]]);
     const pushName = getFirstString(body, [["data", "pushName"], ["pushName"]]);
     const text = getFirstString(body, [
       ["data", "message", "conversation"],
@@ -1704,7 +1813,7 @@ export function createApp() {
           mimetype: audioMimetype.toLowerCase(),
           declaredSize: getFirstFiniteNumber(audioCandidate, [["fileLength"], ["fileSize"], ["size"], ["media", "fileLength"]]),
           durationSeconds: getFirstFiniteNumber(audioCandidate, [["seconds"], ["duration"], ["durationSeconds"], ["media", "seconds"]]),
-          messageId: getFirstString(body, [["data", "key", "id"], ["data", "key", "messageId"], ["messageId"], ["id"]]),
+          messageId,
           source: data ?? {},
         }
       : undefined;
@@ -1715,6 +1824,8 @@ export function createApp() {
 
     return {
       instance,
+      messageId,
+      eventId,
       ...identity,
       maskedPhone: maskPhone(identity.senderPhone),
       pushName,
@@ -1730,8 +1841,41 @@ export function createApp() {
     for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
       if (pending.expiresAt <= now || pending.used) aiWhatsappPendingCommands.delete(key);
     }
-    for (const [key, expiresAt] of aiWhatsappProcessedAudioMessages.entries()) {
-      if (expiresAt <= now) aiWhatsappProcessedAudioMessages.delete(key);
+    for (const [key, expiresAt] of aiWhatsappProcessedWebhookMessages.entries()) {
+      if (expiresAt <= now) aiWhatsappProcessedWebhookMessages.delete(key);
+    }
+    for (const [key, context] of aiWhatsappClarificationContexts.entries()) {
+      if (context.expiresAt <= now) aiWhatsappClarificationContexts.delete(key);
+    }
+  }
+
+  async function claimAiWhatsappWebhook(input: {
+    unitId: string;
+    replayKey: string;
+    payloadHash: string;
+  }) {
+    if (backend !== "prisma") {
+      if (aiWhatsappProcessedWebhookMessages.has(input.replayKey)) return "duplicate" as const;
+      aiWhatsappProcessedWebhookMessages.set(input.replayKey, Date.now() + getAiWhatsappWebhookDedupTtlMs());
+      return "claimed" as const;
+    }
+
+    try {
+      await prisma.idempotencyRecord.create({
+        data: {
+          id: crypto.randomUUID(),
+          unitId: input.unitId,
+          action: "AI_WHATSAPP_WEBHOOK_RESPONSE",
+          idempotencyKey: input.replayKey,
+          payloadHash: input.payloadHash,
+          status: "CLAIMED",
+          expiresAt: new Date(Date.now() + getAiWhatsappWebhookDedupTtlMs()),
+        },
+      });
+      return "claimed" as const;
+    } catch (error) {
+      if (asRecord(error)?.code === "P2002") return "duplicate" as const;
+      throw error;
     }
   }
 
@@ -1793,13 +1937,21 @@ export function createApp() {
   }
 
   function formatAiWhatsappTemporaryFailure() {
-    return "Nao consegui processar essa mensagem agora. Tente novamente em instantes ou envie no formato: Agendar corte para NOME dia DATA as HORARIO.";
+    return "Nao consegui interpretar essa mensagem agora por uma falha temporaria do servico. Tente novamente em instantes.";
   }
 
   function formatAiWhatsappAudioFailure(kind: "processing" | "transcription") {
     return kind === "processing"
       ? "Recebi um audio, mas nao consegui processar. Tente enviar novamente ou mande em texto."
       : "Nao consegui entender o audio com seguranca. Envie novamente ou mande em texto neste formato: Agendar corte para Joao dia 14/07/2026 as 11:00.";
+  }
+
+  function formatAiWhatsappAudioProviderFailure() {
+    return "Nao consegui transcrever o audio agora por uma falha temporaria do servico. Tente novamente em instantes ou envie a mesma mensagem em texto.";
+  }
+
+  function formatAiWhatsappAudioQuotaFailure() {
+    return "O servico de transcricao esta indisponivel por limite de cota. Envie a mesma mensagem em texto.";
   }
 
   function formatAiWhatsappAudioDisabled() {
@@ -1812,17 +1964,51 @@ export function createApp() {
   }
 
   function formatAiWhatsappEntityClarification(preview: OwnerCommandPreviewResponse) {
+    const missing = new Set(preview.missingFields ?? []);
+    if (preview.intent === "schedule_appointment") {
+      if (missing.size === 1 && missing.has("time") && preview.fieldDiagnostics?.time?.reason === "approximate_time") {
+        const clientName = String(preview.draft.clientName ?? "").trim();
+        const services = Array.isArray(preview.draft.serviceNames) ? preview.draft.serviceNames.map(String) : [];
+        const canonicalService = services[0]?.toLocaleLowerCase("pt-BR") ?? "servico";
+        const service = normalizeMatchText(canonicalService).startsWith("corte ") ? "corte" : canonicalService;
+        const expression = preview.fieldDiagnostics?.date?.expression?.trim();
+        const date = normalizeMatchText(expression) === "amanha" ? "amanhã" : expression || String(preview.draft.date ?? "");
+        const proposedTime = preview.fieldDiagnostics.time.proposedValue;
+        return `Entendi: ${clientName}, ${service}, ${date}. Você quer marcar exatamente às ${proposedTime}?`;
+      }
+      if (missing.size === 1 && missing.has("time") && preview.fieldDiagnostics?.time?.status === "ambiguous") {
+        return "Esse horario e de manha, de tarde ou de noite?";
+      }
+      if (missing.size === 2 && missing.has("date") && missing.has("time")) {
+        return "Qual dia e horario voce deseja?";
+      }
+      if (missing.size === 1 && missing.has("date")) return "Qual dia voce deseja?";
+      if (missing.size === 1 && missing.has("time")) return "Qual horario voce deseja?";
+      if (missing.size === 1 && missing.has("serviceNames")) return "Qual servico voce deseja agendar?";
+      if (missing.size === 1 && missing.has("clientName")) return "Para qual cliente?";
+      if (missing.size === 1 && missing.has("professionalName")) return "Com qual profissional?";
+      if (missing.size === 1 && missing.has("availability")) {
+        return "Esse horario nao esta disponivel. Qual outro dia e horario voce deseja?";
+      }
+    }
+
     const labels: Record<string, string> = {
       clientName: "cliente",
       productName: "produto",
       serviceNames: "servico",
       professionalName: "profissional",
       paymentMethod: "forma de pagamento",
+      date: "dia",
+      time: "horario",
+      availability: "outro dia e horario",
     };
     const fields = (preview.missingFields ?? [])
       .map((field) => labels[field])
       .filter((field): field is string => Boolean(field));
     if (!fields.length) return formatAiWhatsappGuidance();
+    if (preview.intent === "schedule_appointment") {
+      return `Informe somente: ${fields.join(", ")}.`;
+    }
     const onlyPeople = (preview.missingFields ?? []).every(
       (field) => field === "clientName" || field === "professionalName",
     );
@@ -1846,7 +2032,103 @@ export function createApp() {
     return typeof value === "number" ? Number.isFinite(value) : typeof value === "string" ? Boolean(value.trim()) : Boolean(value);
   }
 
+  function buildAiWhatsappClarificationKey(unitId: string, phone: string) {
+    return `${unitId}:${normalizePhoneDigits(phone)}`;
+  }
+
+  function resolveApproximateTimeContinuation(
+    message: string,
+    context?: AiWhatsappClarificationContext,
+  ) {
+    if (context?.pendingField !== "time" || !context.proposedValue) return "";
+    const normalized = normalizeMatchText(message);
+    if (/^(?:sim|isso|exato|exatamente|correto|pode ser)$/.test(normalized)) return context.proposedValue;
+    const recognized = recognizeOwnerCommandTime(message);
+    if (recognized?.time) return recognized.time;
+    if (recognized?.ambiguous && recognized.candidateTime) {
+      const [candidateHour, candidateMinute] = recognized.candidateTime.split(":").map(Number);
+      const [proposedHour, proposedMinute] = context.proposedValue.split(":").map(Number);
+      if (candidateMinute === proposedMinute && candidateHour % 12 === proposedHour % 12) {
+        return context.proposedValue;
+      }
+    }
+    return "";
+  }
+
+  function buildApproximateTimeContinuationParseResult(
+    context: AiWhatsappClarificationContext,
+    time: string,
+  ): OwnerCommandParseResult {
+    const draft: Record<string, unknown> = { ...context.draft, time };
+    const fieldDiagnostics = {
+      ...(context.fieldDiagnostics ?? {}),
+      time: {
+        confidence: context.fieldDiagnostics?.time?.confidence ?? 0.9,
+        source: "conversation_context" as const,
+        status: "accepted" as const,
+      },
+    };
+    const missingFields = ["clientName", "serviceNames", "professionalName", "date", "time"]
+      .filter((field) => !isMeaningfulOwnerCommandDraftValue(draft[field]));
+    const acceptedConfidences = Object.values(fieldDiagnostics).filter(Boolean).map((field) => field.confidence);
+    return {
+      ok: true,
+      mode: "preview_only",
+      intent: "schedule_appointment",
+      confidence: acceptedConfidences.length ? Math.min(...acceptedConfidences) : 0.8,
+      summary: missingFields.length
+        ? "Previa de agendamento incompleta. Revise os campos faltantes ou ambiguos."
+        : `Agendamento para ${String(draft.clientName)} em ${String(draft.date)} as ${time}.`,
+      draft,
+      missingFields,
+      warnings: missingFields.length ? ["Comando incompleto para criar agendamento."] : [],
+      allowedNextActions: [],
+      executed: false,
+      fieldDiagnostics,
+      ambiguities: [],
+    };
+  }
+
+  function mergeOwnerCommandConversationContext(
+    parsed: OwnerCommandParseResult,
+    prior?: AiWhatsappClarificationContext,
+  ) {
+    if (!prior || parsed.intent !== "schedule_appointment") return parsed;
+    const draft = { ...parsed.draft };
+    const fieldDiagnostics = { ...(parsed.fieldDiagnostics ?? {}) };
+    const ambiguousFields = new Set((parsed.ambiguities ?? []).map((item) => item.field));
+    for (const field of ["clientName", "serviceNames", "professionalName", "date", "time"]) {
+      const currentDiagnostic = fieldDiagnostics[field];
+      const priorDiagnostic = prior.fieldDiagnostics?.[field];
+      if (ambiguousFields.has(field)
+        || currentDiagnostic?.status === "rejected"
+        || currentDiagnostic?.status === "ambiguous"
+        || isMeaningfulOwnerCommandDraftValue(draft[field])
+        || !isMeaningfulOwnerCommandDraftValue(prior.draft[field])
+        || priorDiagnostic?.status !== "accepted") continue;
+      draft[field] = prior.draft[field];
+      fieldDiagnostics[field] = {
+        confidence: priorDiagnostic.confidence,
+        source: "conversation_context",
+        status: "accepted",
+      };
+    }
+    const missingFields = ["clientName", "serviceNames", "professionalName", "date", "time"]
+      .filter((field) => !isMeaningfulOwnerCommandDraftValue(draft[field]));
+    return {
+      ...parsed,
+      draft,
+      fieldDiagnostics,
+      missingFields,
+      warnings: missingFields.length ? parsed.warnings : [],
+    };
+  }
+
   function mergeOwnerCommandParseResults(deterministic: OwnerCommandParseResult, gemini: OwnerCommandParseResult) {
+    if (deterministic.intent === "schedule_appointment" && gemini.intent === "schedule_appointment") {
+      return gemini;
+    }
+
     const draft = { ...gemini.draft };
     for (const [field, value] of Object.entries(deterministic.draft)) {
       if (isMeaningfulOwnerCommandDraftValue(value)) draft[field] = value;
@@ -1869,9 +2151,22 @@ export function createApp() {
   function getOwnerCommandPreviewStatus(preview: OwnerCommandPreviewResponse): OwnerCommandParserStatus {
     if (preview.intent === "unknown") return "UNSUPPORTED";
     if (preview.missingFields.length) {
-      return preview.warnings.some((warning) => /ambigu|seguranca/i.test(warning)) ? "AMBIGUOUS" : "PARSED_INCOMPLETE";
+      return preview.ambiguities?.length || Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "ambiguous")
+        ? "AMBIGUOUS"
+        : "PARSED_INCOMPLETE";
     }
     return "PARSED_COMPLETE";
+  }
+
+  function isTrustedNewClientDraft(parsed: OwnerCommandParseResult) {
+    const clientName = typeof parsed.draft.clientName === "string" ? parsed.draft.clientName.trim() : "";
+    const diagnostic = parsed.fieldDiagnostics?.clientName;
+    return Boolean(
+      clientName
+      && diagnostic?.status === "accepted"
+      && diagnostic.confidence >= 0.8
+      && !getOwnerCommandClientNameRejectionReason(clientName),
+    );
   }
 
   async function resolveParsedOwnerCommandPreview(input: {
@@ -1889,8 +2184,13 @@ export function createApp() {
     if (parsed.intent === "schedule_appointment") {
       const normalized = normalizeOwnerScheduleDraft(parsed.draft);
       const resolved = normalized.missingFields.length
-        ? { missingFields: normalized.missingFields, warnings: [] as string[], entityResolutionDiagnostics: [] as Array<{ entity: string; result: string; candidateCount: number }>, schedule: null }
-        : await resolveOwnerCommandSchedule({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: input.screenContext === "whatsapp" });
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], entityResolutionDiagnostics: [] as Array<{ entity: string; result: string; candidateCount: number; sourceStatus?: string }>, schedule: null }
+        : await resolveOwnerCommandSchedule({
+            unitId: input.unitId,
+            draft: normalized.draft,
+            strictWhatsappEntities: input.screenContext === "whatsapp",
+            allowNewClient: input.screenContext !== "whatsapp" || isTrustedNewClientDraft(parsed),
+          });
       const missingFields = Array.from(
         new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
       );
@@ -1911,7 +2211,7 @@ export function createApp() {
     } else if (parsed.intent === "sell_product") {
       const normalized = normalizeOwnerProductSaleDraft(parsed.draft);
       const resolved = normalized.missingFields.length
-        ? { missingFields: normalized.missingFields, warnings: [] as string[], entityResolutionDiagnostics: [] as Array<{ entity: string; result: string; candidateCount: number }>, sale: null }
+        ? { missingFields: normalized.missingFields, warnings: [] as string[], entityResolutionDiagnostics: [] as Array<{ entity: string; result: string; candidateCount: number; sourceStatus?: string }>, sale: null }
         : await resolveOwnerCommandProductSale({ unitId: input.unitId, draft: normalized.draft, strictWhatsappEntities: input.screenContext === "whatsapp" });
       const missingFields = Array.from(
         new Set([...(parsed.missingFields ?? []), ...normalized.missingFields, ...resolved.missingFields]),
@@ -1943,13 +2243,14 @@ export function createApp() {
     message: string;
     screenContext?: string;
     correlationId?: string;
+    priorClarificationContext?: AiWhatsappClarificationContext;
   }): Promise<OwnerCommandPreviewResponse> {
     await assertOwnerCommandUnitExists(input.unitId);
     const context = await getOwnerCommandContext({
       unitId: input.unitId,
       screenContext: input.screenContext,
     });
-    const parserInput = { message: input.message, context };
+    const parserInput = { message: input.message, context, correlationId: input.correlationId };
     const isWhatsapp = input.screenContext === "whatsapp";
 
     if (!isWhatsapp) {
@@ -1961,7 +2262,13 @@ export function createApp() {
 
     const deterministicStartedAt = Date.now();
     const deterministic = parseDeterministicOwnerCommand(parserInput);
+    const canonicalDeterministic = parseCanonicalDeterministicOwnerCommand(parserInput);
+    const deterministicFastPath = deterministic?.intent === "schedule_appointment" ? canonicalDeterministic : deterministic;
     const deterministicDurationMs = Date.now() - deterministicStartedAt;
+    const providerStrategy = (attempt: { model?: string }) => attempt.model?.startsWith("local_llama:") ? "local_llama" as const : "gemini" as const;
+    const providerFallbackStrategy = (attempt: { model?: string }) => attempt.model?.startsWith("local_llama:")
+      ? "deterministic_after_local_llama_failure" as const
+      : "deterministic_after_gemini_failure" as const;
     const withDiagnostics = (preview: OwnerCommandPreviewResponse, diagnostics: Omit<NonNullable<OwnerCommandPreviewResponse["parserDiagnostics"]>, "presentFields" | "missingFields" | "correlationId">) => ({
       ...preview,
       parserDiagnostics: {
@@ -1969,14 +2276,15 @@ export function createApp() {
         presentFields: getOwnerCommandPresentFields(preview.draft),
         missingFields: preview.missingFields,
         correlationId: input.correlationId,
+        fieldDiagnostics: preview.fieldDiagnostics,
         dateRecognitionType: preview.intent === "schedule_appointment"
           ? getDeterministicDateRecognitionType(input.message, context.now, context.timezone)
           : undefined,
       },
     });
 
-    if (deterministic) {
-      const deterministicPreview = await resolveParsedOwnerCommandPreview(input, deterministic);
+    if (deterministicFastPath) {
+      const deterministicPreview = await resolveParsedOwnerCommandPreview(input, deterministicFastPath);
       const deterministicStatus = getOwnerCommandPreviewStatus(deterministicPreview);
       if (deterministicPreview.allowedNextActions.includes("confirm_execute") || deterministicStatus === "AMBIGUOUS") {
         return withDiagnostics(deterministicPreview, {
@@ -1995,22 +2303,30 @@ export function createApp() {
       }
       const gemini = await ownerCommandParser.parseGemini(parserInput);
       if (gemini.result) {
-        const preview = await resolveParsedOwnerCommandPreview(input, mergeOwnerCommandParseResults(deterministic, gemini.result));
+        const preview = await resolveParsedOwnerCommandPreview(input, mergeOwnerCommandParseResults(deterministicFastPath, gemini.result));
         return withDiagnostics(preview, {
-          strategy: "gemini",
+          strategy: providerStrategy(gemini),
           status: getOwnerCommandPreviewStatus(preview),
           deterministicDurationMs,
           geminiDurationMs: gemini.durationMs,
+          providerDurationMs: gemini.durationMs,
           httpStatus: gemini.httpStatus,
+          providerAttempts: gemini.attempts,
+          model: gemini.model,
+          fallbackUsed: gemini.fallbackUsed,
         });
       }
       return withDiagnostics({ ...deterministicPreview, fallbackReason: gemini.failureCode }, {
-        strategy: "deterministic_after_gemini_failure",
+        strategy: providerFallbackStrategy(gemini),
         status: gemini.status,
         deterministicDurationMs,
         geminiDurationMs: gemini.durationMs,
+        providerDurationMs: gemini.durationMs,
         httpStatus: gemini.httpStatus,
         failureCode: gemini.failureCode,
+        providerAttempts: gemini.attempts,
+        model: gemini.model,
+        fallbackUsed: gemini.fallbackUsed,
       });
     }
 
@@ -2019,15 +2335,22 @@ export function createApp() {
     }
     const gemini = await ownerCommandParser.parseGemini(parserInput);
     if (!gemini.result) {
-      throw new OwnerCommandParserError(gemini.failureCode ?? "parser_error", "IA indisponivel no momento. Tente novamente em instantes.", gemini.httpStatus);
+      throw new OwnerCommandParserError(gemini.failureCode ?? "parser_error", "IA indisponivel no momento. Tente novamente em instantes.", gemini.httpStatus, gemini.attempts);
     }
-    const preview = await resolveParsedOwnerCommandPreview(input, gemini.result);
+    const preview = await resolveParsedOwnerCommandPreview(
+      input,
+      mergeOwnerCommandConversationContext(gemini.result, input.priorClarificationContext),
+    );
     return withDiagnostics(preview, {
-      strategy: "gemini",
+      strategy: providerStrategy(gemini),
       status: getOwnerCommandPreviewStatus(preview),
       deterministicDurationMs,
       geminiDurationMs: gemini.durationMs,
+      providerDurationMs: gemini.durationMs,
       httpStatus: gemini.httpStatus,
+      providerAttempts: gemini.attempts,
+      model: gemini.model,
+      fallbackUsed: gemini.fallbackUsed,
     });
   }
 
@@ -2240,7 +2563,8 @@ export function createApp() {
     event: "ai.whatsapp.audio.transcription.configured",
     enabled: audioTranscriptionEnabled,
     serviceAvailable: Boolean(audioTranscriptionService),
-    timeoutMs: getGeminiAudioTranscriptionTimeoutMsFromEnv(),
+    provider: configuredAsrProvider || "none",
+    timeoutMs: configuredAsrTimeoutMs,
   });
 
   app.register(cors, { origin: corsOrigin });
@@ -6289,6 +6613,17 @@ export function createApp() {
     const ownerPhone = normalizePhoneDigits(process.env.AI_WHATSAPP_OWNER_PHONE);
     const unitId = String(process.env.AI_WHATSAPP_UNIT_ID ?? process.env.PUBLIC_BOOKING_UNIT_ID ?? "unit-01").trim();
     const actorId = "ai-whatsapp-owner";
+    const correlationId = (request as RequestWithAuth).correlationId ?? request.id;
+    const webhookKeySource = message.messageId ? "message_id" : message.eventId ? "event_id" : "unavailable";
+    const webhookReplayKey = webhookKeySource === "unavailable"
+      ? ""
+      : buildAiWhatsappWebhookReplayKey({
+          instance: message.instance || expectedInstance,
+          senderPhone: message.senderPhone,
+          messageId: message.messageId,
+          eventId: message.eventId,
+        });
+    const webhookEntityId = webhookReplayKey ? webhookReplayKey.slice(0, 32) : message.maskedPhone;
     const safeAudit = async (payload: {
       unitId: string;
       action: string;
@@ -6297,28 +6632,94 @@ export function createApp() {
       after?: Record<string, unknown>;
     }) => {
       try {
-        await recordAudit(request, payload);
+        await recordAudit(request, {
+          ...payload,
+          after: { ...(payload.after ?? {}), correlationId },
+        });
         return true;
       } catch {
         app.log.error({ event: "ai.whatsapp.audit_failed", action: payload.action, phone: message.maskedPhone });
         return false;
       }
     };
-    const safeSend = async (text: string) => {
-      try {
-        await sendWhatsAppMessage(message.replyTarget, text);
-        return true;
-      } catch {
-        app.log.error({ event: "ai.whatsapp.response_failed", phone: message.maskedPhone });
+    const responseGate = new SingleWhatsappResponseGate();
+    let finalState: AiWhatsappPipelineState | undefined;
+    const finalize = async (state: AiWhatsappPipelineState) => {
+      if (finalState) return finalState;
+      finalState = state;
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_FINAL_STATE",
+        entity: "ai_whatsapp_pipeline",
+        entityId: webhookEntityId,
+        after: { state, keySource: webhookKeySource, phone: message.maskedPhone },
+      });
+      return state;
+    };
+    const inferFinalState = (origin: string): AiWhatsappPipelineState => ({
+      guidance_empty_message: "UNKNOWN_INTENT",
+      audio_disabled: "ASR_PERMANENT_FAILURE",
+      audio_processing_failure: "MEDIA_DOWNLOAD_FAILED",
+      audio_transcription_failure: "ASR_PERMANENT_FAILURE",
+      audio_transcription_provider_failure: "ASR_TRANSIENT_FAILURE",
+      audio_transcription_quota_failure: "ASR_PERMANENT_FAILURE",
+      cancellation_result: "CANCELLED",
+      confirmation_expired: "EXECUTION_FAILED",
+      confirmation_result: "CONFIRMED",
+      temporary_parser_failure: "SEMANTIC_TRANSIENT_FAILURE",
+      guidance_parser_failure: "INVALID_STRUCTURED_OUTPUT",
+      guidance_unsupported_intent: "UNKNOWN_INTENT",
+      entity_clarification: "MISSING_FIELDS",
+      audio_preview: "PREVIEW_SENT",
+      text_preview: "PREVIEW_SENT",
+      unexpected_failure: "EXECUTION_FAILED",
+    } as Record<string, AiWhatsappPipelineState>)[origin] ?? "EXECUTION_FAILED";
+    const safeSend = async (text: string, origin: string) => {
+      await finalize(inferFinalState(origin));
+      const outcome = await responseGate.send(async () => await sendWhatsAppMessage(message.replyTarget, text));
+      if (!outcome.attempted) {
+        app.log.error({ event: "ai.whatsapp.duplicate_response_suppressed", origin, phone: message.maskedPhone });
         await safeAudit({
           unitId,
-          action: "AI_WHATSAPP_RESPONSE_FAILED",
-          entity: "ai_whatsapp_command",
-          entityId: message.maskedPhone,
-          after: { reason: "evolution_send_failed", phone: message.maskedPhone },
+          action: "AI_WHATSAPP_RESPONSE_DUPLICATE_SUPPRESSED",
+          entity: "ai_whatsapp_response",
+          entityId: webhookEntityId,
+          after: { origin, keySource: webhookKeySource, phone: message.maskedPhone },
         });
         return false;
       }
+      if (outcome.delivered) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_RESPONSE_SENT",
+          entity: "ai_whatsapp_response",
+          entityId: webhookEntityId,
+          after: {
+            result: "SENT",
+            origin,
+            keySource: webhookKeySource,
+            phone: message.maskedPhone,
+          },
+        });
+        return true;
+      }
+      app.log.error({ event: "ai.whatsapp.response_failed", phone: message.maskedPhone });
+      const deliveryError = outcome.error instanceof WhatsappDeliveryError ? outcome.error : undefined;
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_RESPONSE_FAILED",
+        entity: "ai_whatsapp_response",
+        entityId: webhookEntityId,
+        after: {
+          reason: deliveryError?.reason ?? "evolution_send_failed",
+          httpStatus: deliveryError?.httpStatus ?? null,
+          durationMs: deliveryError?.durationMs ?? null,
+          origin,
+          keySource: webhookKeySource,
+          phone: message.maskedPhone,
+        },
+      });
+      return false;
     };
 
     if (message.instance && expectedInstance && message.instance !== expectedInstance) {
@@ -6342,7 +6743,70 @@ export function createApp() {
         entityId: message.maskedPhone,
         after: { reason: "unauthorized_phone", phone: message.maskedPhone },
       });
+      await finalize("UNAUTHORIZED");
       return { ok: true, ignored: true };
+    }
+
+    await safeAudit({
+      unitId,
+      action: "AI_WHATSAPP_WEBHOOK_RECEIVED",
+      entity: "ai_whatsapp_webhook",
+      entityId: webhookEntityId,
+      after: {
+        result: "RECEIVED",
+        keySource: webhookKeySource,
+        hasAudio: Boolean(message.audio),
+        hasText: Boolean(message.text),
+        phone: message.maskedPhone,
+      },
+    });
+    if (webhookReplayKey) {
+      let claim: "claimed" | "duplicate";
+      try {
+        claim = await claimAiWhatsappWebhook({
+          unitId,
+          replayKey: webhookReplayKey,
+          payloadHash: getIdempotencyPayloadHash(request.body),
+        });
+      } catch {
+        app.log.error({ event: "ai.whatsapp.deduplication_failed", phone: message.maskedPhone });
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_DEDUPLICATION_FAILED",
+          entity: "ai_whatsapp_webhook",
+          entityId: webhookEntityId,
+          after: { result: "SAFE_FAILURE", keySource: webhookKeySource, phone: message.maskedPhone },
+        });
+        await finalize("EXECUTION_FAILED");
+        return { ok: true, executed: false, unavailable: true, reason: "deduplication_unavailable", responseDelivered: false };
+      }
+      if (claim === "duplicate") {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_WEBHOOK_DEDUPLICATED",
+          entity: "ai_whatsapp_webhook",
+          entityId: webhookEntityId,
+          after: { result: "DUPLICATE_IGNORED", keySource: webhookKeySource, phone: message.maskedPhone },
+        });
+        if (message.audio) {
+          await safeAudit({
+            unitId,
+            action: "AI_WHATSAPP_AUDIO_REPLAY_IGNORED",
+            entity: "ai_whatsapp_audio",
+            entityId: webhookEntityId,
+            after: { result: "DUPLICATE_IGNORED", phone: message.maskedPhone },
+          });
+        }
+        await finalize("DUPLICATE");
+        return { ok: true, replay: true, deduplicated: true, executed: false, responseDelivered: false };
+      }
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_WEBHOOK_CLAIMED",
+        entity: "ai_whatsapp_webhook",
+        entityId: webhookEntityId,
+        after: { result: "CLAIMED", keySource: webhookKeySource, phone: message.maskedPhone },
+      });
     }
     if (!message.text && !message.audio) {
       app.log.info({ event: "ai.whatsapp.ignored", reason: "empty_text", phone: message.maskedPhone });
@@ -6353,7 +6817,7 @@ export function createApp() {
         entityId: message.maskedPhone,
         after: { reason: "empty_text", phone: message.maskedPhone },
       });
-      const responseDelivered = await safeSend(formatAiWhatsappGuidance());
+      const responseDelivered = await safeSend(formatAiWhatsappGuidance(), "guidance_empty_message");
       return { ok: true, ignored: true, responseDelivered };
     }
 
@@ -6363,7 +6827,7 @@ export function createApp() {
       entity: "ai_whatsapp_pipeline",
       entityId: message.maskedPhone,
       after: {
-        correlationId: request.id,
+        correlationId,
         stage: "audio_pipeline_received",
         result: "RECEIVED",
         hasAudio: Boolean(message.audio),
@@ -6399,7 +6863,7 @@ export function createApp() {
           entityId: audioEntityId,
           after: { reason: "feature_disabled", phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend(formatAiWhatsappAudioDisabled());
+        const responseDelivered = await safeSend(formatAiWhatsappAudioDisabled(), "audio_disabled");
         return { ok: true, executed: false, audio: true, disabled: true, responseDelivered };
       }
       if (!message.audio.messageId) {
@@ -6410,19 +6874,8 @@ export function createApp() {
           entityId: audioEntityId,
           after: { reason: "missing_media", phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"));
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"), "audio_processing_failure");
         return { ok: true, executed: false, audio: true, reason: "missing_media", responseDelivered };
-      }
-      const replayKey = buildAiWhatsappAudioReplayKey(message.senderPhone, message.audio.messageId);
-      if (aiWhatsappProcessedAudioMessages.has(replayKey)) {
-        await safeAudit({
-          unitId,
-          action: "AI_WHATSAPP_AUDIO_REPLAY_IGNORED",
-          entity: "ai_whatsapp_audio",
-          entityId: audioEntityId,
-          after: { phone: message.maskedPhone },
-        });
-        return { ok: true, replay: true, executed: false };
       }
       let audioBytes: Buffer;
       try {
@@ -6439,7 +6892,7 @@ export function createApp() {
           entityId: audioEntityId,
           after: { reason, phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"));
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"), "audio_processing_failure");
         return { ok: true, executed: false, audio: true, reason, responseDelivered };
       }
       await safeAudit({
@@ -6447,7 +6900,7 @@ export function createApp() {
         action: "AI_WHATSAPP_AUDIO_MEDIA_DOWNLOADED",
         entity: "ai_whatsapp_audio",
         entityId: audioEntityId,
-        after: { correlationId: request.id, stage: "media_download", result: "MEDIA_DOWNLOADED", size: audioBytes.length },
+        after: { correlationId, stage: "media_download", result: "MEDIA_DOWNLOADED", size: audioBytes.length },
       });
       await safeAudit({
         unitId,
@@ -6457,7 +6910,10 @@ export function createApp() {
         after: {
           mimetype: message.audio.mimetype,
           size: audioBytes.length,
-          timeoutMs: getGeminiAudioTranscriptionTimeoutMsFromEnv(),
+          timeoutMs: configuredAsrTimeoutMs,
+          totalBudgetMs: configuredAsrTotalBudgetMs,
+          model: configuredAsrModel,
+          endpoint: configuredAsrEndpoint,
           phone: message.maskedPhone,
         },
       });
@@ -6469,14 +6925,14 @@ export function createApp() {
           entityId: audioEntityId,
           after: { reason: "audio_transcription_unavailable", phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"));
+        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"), "audio_transcription_failure");
         return { ok: true, executed: false, audio: true, reason: "audio_transcription_unavailable", responseDelivered };
       }
       try {
         const transcription = await audioTranscriptionService.transcribe({
           audio: audioBytes,
           mimetype: message.audio.mimetype,
-          correlationId: request.id,
+          correlationId,
         });
         audioTranscript = transcription.transcript.trim().slice(0, 1000);
         if (!audioTranscript) throw new AudioTranscriptionError("audio_transcription_empty");
@@ -6486,16 +6942,30 @@ export function createApp() {
           entity: "ai_whatsapp_audio",
           entityId: audioEntityId,
           after: {
-            correlationId: request.id,
+            correlationId,
             stage: "audio_transcription_completed",
             result: "TRANSCRIPTION_SUCCESS",
             provider: transcription.provider,
+            model: process.env.AI_AUDIO_TRANSCRIPTION_MODEL?.trim() || "gemini-3.5-flash",
             confidence: transcription.confidence ?? null,
             normalizedMimetype: transcription.normalizedMimetype ?? null,
             providerCalled: transcription.diagnostics?.providerCalled ?? null,
             durationMs: transcription.diagnostics?.durationMs ?? null,
             httpStatus: transcription.diagnostics?.httpStatus ?? null,
+            attemptCount: transcription.diagnostics?.attemptCount ?? null,
+            recentCallCount: transcription.diagnostics?.recentCallCount ?? null,
+            recentCallWindowMs: transcription.diagnostics?.recentCallWindowMs ?? null,
+            totalBudgetMs: transcription.diagnostics?.totalBudgetMs ?? null,
+            endpoint: transcription.diagnostics?.endpoint ?? null,
+            providerErrorCode: transcription.diagnostics?.providerErrorCode ?? null,
+            providerErrorStatus: transcription.diagnostics?.providerErrorStatus ?? null,
+            providerErrorMessage: transcription.diagnostics?.providerErrorMessage ?? null,
+            retryAfterMs: transcription.diagnostics?.retryAfterMs ?? null,
+            retryHeaders: transcription.diagnostics?.retryHeaders ?? null,
+            rateLimitKind: transcription.diagnostics?.rateLimitKind ?? null,
             responseFingerprint: transcription.diagnostics?.responseFingerprint ?? null,
+            attempts: transcription.diagnostics?.attempts ?? [],
+            fallbackUsed: transcription.diagnostics?.fallbackUsed ?? false,
             phone: message.maskedPhone,
           },
         });
@@ -6508,21 +6978,55 @@ export function createApp() {
           entity: "ai_whatsapp_audio",
           entityId: audioEntityId,
           after: {
-            correlationId: request.id,
+            correlationId,
             stage: "audio_transcription_failed",
             result: reason === "audio_transcription_empty" ? "TRANSCRIPTION_EMPTY" : "TRANSCRIPTION_FAILED",
             reason,
             providerCalled: diagnostics?.providerCalled ?? null,
             durationMs: diagnostics?.durationMs ?? null,
             httpStatus: diagnostics?.httpStatus ?? null,
+            attemptCount: diagnostics?.attemptCount ?? null,
+            recentCallCount: diagnostics?.recentCallCount ?? null,
+            recentCallWindowMs: diagnostics?.recentCallWindowMs ?? null,
+            totalBudgetMs: diagnostics?.totalBudgetMs ?? null,
+            model: diagnostics?.model ?? null,
+            endpoint: diagnostics?.endpoint ?? null,
+            providerErrorCode: diagnostics?.providerErrorCode ?? null,
+            providerErrorStatus: diagnostics?.providerErrorStatus ?? null,
+            providerErrorMessage: diagnostics?.providerErrorMessage ?? null,
+            retryAfterMs: diagnostics?.retryAfterMs ?? null,
+            retryHeaders: diagnostics?.retryHeaders ?? null,
+            rateLimitKind: diagnostics?.rateLimitKind ?? null,
             responseFingerprint: diagnostics?.responseFingerprint ?? null,
+            attempts: diagnostics?.attempts ?? [],
+            fallbackUsed: diagnostics?.fallbackUsed ?? false,
             phone: message.maskedPhone,
           },
         });
-        const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"));
+        const temporaryProviderFailure = [
+          "audio_transcription_unavailable",
+          "audio_transcription_429",
+          "audio_transcription_5xx",
+          "audio_transcription_timeout",
+          "audio_transcription_circuit_open",
+          "audio_transcription_failed",
+        ].includes(reason);
+        const quotaExhausted = reason === "audio_transcription_quota_exhausted";
+        await finalize(reason === "audio_transcription_empty" || reason === "audio_transcription_no_speech"
+          ? "AUDIO_EMPTY"
+          : quotaExhausted
+            ? "ASR_PERMANENT_FAILURE"
+            : temporaryProviderFailure ? "ASR_TRANSIENT_FAILURE" : "ASR_PERMANENT_FAILURE");
+        const responseDelivered = await safeSend(
+          quotaExhausted
+            ? formatAiWhatsappAudioQuotaFailure()
+            : temporaryProviderFailure ? formatAiWhatsappAudioProviderFailure() : formatAiWhatsappAudioFailure("transcription"),
+          quotaExhausted
+            ? "audio_transcription_quota_failure"
+            : temporaryProviderFailure ? "audio_transcription_provider_failure" : "audio_transcription_failure",
+        );
         return { ok: true, executed: false, audio: true, reason, responseDelivered };
       }
-      aiWhatsappProcessedAudioMessages.set(replayKey, Date.now() + getAiWhatsappTtlMs());
       commandText = audioTranscript;
     }
     await safeAudit({
@@ -6530,7 +7034,7 @@ export function createApp() {
       action: "AI_WHATSAPP_PARSER_STARTED",
       entity: "ai_whatsapp_command",
       entityId: message.maskedPhone,
-      after: { correlationId: request.id, stage: "owner_command_parser_started", ...getAiWhatsappTextObservation(commandText) },
+      after: { correlationId, stage: "owner_command_parser_started", ...getAiWhatsappTextObservation(commandText) },
     });
     const normalizedText = commandText.trim();
     const confirmMatch = normalizedText.match(/^CONFIRMAR\s+(\d{4})$/i);
@@ -6543,6 +7047,8 @@ export function createApp() {
           cancelled = true;
         }
       }
+      const clarificationKey = buildAiWhatsappClarificationKey(unitId, message.senderPhone);
+      if (aiWhatsappClarificationContexts.delete(clarificationKey)) cancelled = true;
       await safeAudit({
         unitId,
         action: "AI_WHATSAPP_COMMAND_CANCELLED",
@@ -6550,7 +7056,7 @@ export function createApp() {
         entityId: message.maskedPhone,
         after: { cancelled, phone: message.maskedPhone },
       });
-      const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.");
+      const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.", "cancellation_result");
       return { ok: true, cancelled, responseDelivered };
     }
 
@@ -6566,7 +7072,7 @@ export function createApp() {
           entityId: message.maskedPhone,
           after: { reason: "missing_or_expired_confirmation", phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend("Essa acao ja foi confirmada ou expirou.");
+        const responseDelivered = await safeSend("Essa acao ja foi confirmada ou expirou.", "confirmation_expired");
         return { ok: true, executed: false, responseDelivered };
       }
       pending.used = true;
@@ -6594,35 +7100,92 @@ export function createApp() {
           phone: message.maskedPhone,
         },
       });
+      await finalize(executed ? "SUCCEEDED" : "EXECUTION_FAILED");
       const responseDelivered = await safeSend(
         executed
           ? String(executionRecord?.message ?? "Acao confirmada com sucesso.")
           : String(executionRecord?.message ?? "Nao foi possivel confirmar essa acao."),
+        "confirmation_result",
       );
       return { ok: true, executed, responseDelivered };
     }
 
+    const clarificationKey = buildAiWhatsappClarificationKey(unitId, message.senderPhone);
+    const priorClarificationContext = aiWhatsappClarificationContexts.get(clarificationKey);
     let preview: OwnerCommandPreviewResponse;
     try {
-      preview = await parseOwnerCommandPreview({
-        unitId,
-        actorId,
-        message: commandText,
-        screenContext: "whatsapp",
-        correlationId: request.id,
-      });
+      const continuationTime = resolveApproximateTimeContinuation(commandText, priorClarificationContext);
+      if (continuationTime && priorClarificationContext) {
+        preview = await resolveParsedOwnerCommandPreview({ unitId, actorId, screenContext: "whatsapp" },
+          buildApproximateTimeContinuationParseResult(priorClarificationContext, continuationTime));
+        preview.parserDiagnostics = {
+          strategy: "deterministic",
+          status: getOwnerCommandPreviewStatus(preview),
+          deterministicDurationMs: 0,
+          presentFields: getOwnerCommandPresentFields(preview.draft),
+          missingFields: preview.missingFields,
+          correlationId,
+          fieldDiagnostics: preview.fieldDiagnostics,
+        };
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_CONTEXT_COMPLETED",
+          entity: "ai_whatsapp_context",
+          entityId: message.maskedPhone,
+          after: {
+            correlationId,
+            originCorrelationId: priorClarificationContext.originCorrelationId,
+            pendingField: priorClarificationContext.pendingField,
+            resolvedValue: continuationTime,
+          },
+        });
+      } else {
+        preview = await parseOwnerCommandPreview({
+          unitId,
+          actorId,
+          message: commandText,
+          screenContext: "whatsapp",
+          correlationId,
+          priorClarificationContext,
+        });
+      }
     } catch (error) {
       const reason = error instanceof OwnerCommandParserError ? error.reason : "parser_error";
-      const temporaryFailure = ["gemini_429", "gemini_5xx", "gemini_timeout", "gemini_circuit_open"].includes(reason);
+      const providerAttempts = error instanceof OwnerCommandParserError ? error.attempts : [];
+      const temporaryFailure = ["gemini_429", "gemini_5xx", "gemini_timeout", "gemini_circuit_open", "gemini_network_error", "local_llama_timeout", "local_llama_unavailable", "local_llama_http_error"].includes(reason);
+      const invalidStructuredOutput = ["gemini_invalid_json", "gemini_invalid_schema", "gemini_empty_response", "local_llama_invalid_json", "local_llama_invalid_schema", "local_llama_empty_response"].includes(reason);
       app.log.warn({ event: "ai.whatsapp.rejected", reason, phone: message.maskedPhone });
       await safeAudit({
         unitId,
         action: "AI_WHATSAPP_AI_FAILURE",
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
-        after: { reason, phone: message.maskedPhone },
+        after: {
+          reason,
+          httpStatus: error instanceof OwnerCommandParserError ? error.httpStatus ?? null : null,
+          providerAttempts,
+          phone: message.maskedPhone,
+        },
       });
-      const responseDelivered = await safeSend(temporaryFailure ? formatAiWhatsappTemporaryFailure() : formatAiWhatsappGuidance());
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_GEMINI_FAILED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: {
+          result: invalidStructuredOutput ? "INVALID_STRUCTURED_OUTPUT" : temporaryFailure ? "TRANSIENT_PROVIDER_FAILURE" : "PERMANENT_PROVIDER_FAILURE",
+          reason,
+          attempts: providerAttempts,
+          phone: message.maskedPhone,
+        },
+      });
+      await finalize(invalidStructuredOutput
+        ? "INVALID_STRUCTURED_OUTPUT"
+        : temporaryFailure ? "SEMANTIC_TRANSIENT_FAILURE" : "SEMANTIC_PERMANENT_FAILURE");
+      const responseDelivered = await safeSend(
+        temporaryFailure ? formatAiWhatsappTemporaryFailure() : formatAiWhatsappGuidance(),
+        temporaryFailure ? "temporary_parser_failure" : "guidance_parser_failure",
+      );
       return { ok: true, executed: false, unavailable: true, reason, responseDelivered };
     }
     if (preview.parserDiagnostics) {
@@ -6640,7 +7203,7 @@ export function createApp() {
       entity: "ai_whatsapp_command",
       entityId: message.maskedPhone,
       after: {
-        correlationId: request.id,
+        correlationId,
         stage: "owner_command_boundary_evaluated",
         ...getOwnerCommandBoundaryObservation(commandText),
       },
@@ -6651,7 +7214,7 @@ export function createApp() {
         action: "AI_WHATSAPP_GEMINI_STARTED",
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
-        after: { correlationId: request.id, stage: "owner_command_gemini_started" },
+        after: { correlationId, stage: "owner_command_gemini_started" },
       });
       await safeAudit({
         unitId,
@@ -6659,11 +7222,45 @@ export function createApp() {
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
         after: {
-          correlationId: request.id,
+          correlationId,
           stage: "owner_command_gemini_completed",
           result: "GEMINI_SUCCESS",
           durationMs: preview.parserDiagnostics.geminiDurationMs ?? null,
           httpStatus: preview.parserDiagnostics.httpStatus ?? null,
+          model: preview.parserDiagnostics.model ?? (process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash"),
+          attempts: preview.parserDiagnostics.providerAttempts ?? [],
+          fallbackUsed: preview.parserDiagnostics.fallbackUsed ?? false,
+        },
+      });
+    } else if (preview.parserDiagnostics?.strategy === "local_llama") {
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_LOCAL_LLAMA_COMPLETED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: {
+          correlationId,
+          stage: "owner_command_local_llama_completed",
+          result: "LOCAL_LLAMA_SUCCESS",
+          durationMs: preview.parserDiagnostics.providerDurationMs ?? null,
+          httpStatus: preview.parserDiagnostics.httpStatus ?? null,
+          model: preview.parserDiagnostics.model ?? null,
+        },
+      });
+    } else if (preview.parserDiagnostics?.failureCode?.startsWith("local_llama_")) {
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_LOCAL_LLAMA_FAILED",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: {
+          correlationId,
+          stage: "owner_command_local_llama_failed",
+          result: preview.parserDiagnostics.failureCode === "local_llama_timeout" ? "LOCAL_LLAMA_TIMEOUT" : "LOCAL_LLAMA_PROVIDER_ERROR",
+          durationMs: preview.parserDiagnostics.providerDurationMs ?? null,
+          httpStatus: preview.parserDiagnostics.httpStatus ?? null,
+          failureCode: preview.parserDiagnostics.failureCode,
+          model: preview.parserDiagnostics.model ?? null,
         },
       });
     } else if (preview.parserDiagnostics?.failureCode?.startsWith("gemini_")) {
@@ -6673,12 +7270,15 @@ export function createApp() {
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
         after: {
-          correlationId: request.id,
+          correlationId,
           stage: "owner_command_gemini_failed",
           result: preview.parserDiagnostics.failureCode === "gemini_timeout" ? "GEMINI_TIMEOUT" : "GEMINI_PROVIDER_ERROR",
           durationMs: preview.parserDiagnostics.geminiDurationMs ?? null,
           httpStatus: preview.parserDiagnostics.httpStatus ?? null,
           failureCode: preview.parserDiagnostics.failureCode,
+          model: preview.parserDiagnostics.model ?? null,
+          attempts: preview.parserDiagnostics.providerAttempts ?? [],
+          fallbackUsed: preview.parserDiagnostics.fallbackUsed ?? false,
         },
       });
     }
@@ -6688,7 +7288,7 @@ export function createApp() {
       entity: "ai_whatsapp_command",
       entityId: message.maskedPhone,
       after: {
-        correlationId: request.id,
+        correlationId,
         stage: "owner_command_parser_completed",
         result: preview.parserDiagnostics?.status ?? "UNSUPPORTED",
         intent: preview.intent,
@@ -6702,19 +7302,51 @@ export function createApp() {
       entity: "ai_whatsapp_command",
       entityId: message.maskedPhone,
       after: {
-        correlationId: request.id,
+        correlationId,
         stage: "owner_command_entity_resolution_completed",
         entities: preview.entityResolutionDiagnostics ?? [],
       },
     });
     if (!aiWhatsappAllowedIntents.has(preview.intent) || !preview.confirmationToken || !preview.allowedNextActions.includes("confirm_execute")) {
+      if (preview.intent === "schedule_appointment"
+        && Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "accepted")) {
+        const pendingField = preview.missingFields.length === 1
+          ? preview.missingFields[0] as AiWhatsappClarificationContext["pendingField"]
+          : undefined;
+        const clarificationContext: AiWhatsappClarificationContext = {
+          unitId,
+          phone: message.senderPhone,
+          intent: "schedule_appointment",
+          draft: { ...preview.draft },
+          fieldDiagnostics: preview.fieldDiagnostics,
+          pendingField,
+          proposedValue: pendingField === "time" ? preview.fieldDiagnostics?.time?.proposedValue : undefined,
+          originCorrelationId: correlationId,
+          expiresAt: Date.now() + getAiWhatsappTtlMs(),
+        };
+        aiWhatsappClarificationContexts.set(clarificationKey, clarificationContext);
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_CONTEXT_STORED",
+          entity: "ai_whatsapp_context",
+          entityId: message.maskedPhone,
+          after: {
+            correlationId,
+            intent: clarificationContext.intent,
+            presentFields: getOwnerCommandPresentFields(clarificationContext.draft),
+            pendingField: clarificationContext.pendingField ?? null,
+            proposedValue: clarificationContext.proposedValue ?? null,
+            expiresAt: new Date(clarificationContext.expiresAt).toISOString(),
+          },
+        });
+      }
       await safeAudit({
         unitId,
         action: "AI_WHATSAPP_FINAL_DECISION",
         entity: "ai_whatsapp_command",
         entityId: message.maskedPhone,
         after: {
-          correlationId: request.id,
+          correlationId,
           stage: "owner_command_final_decision",
           result: preview.intent === "unknown" ? "FINAL_SAFE_FAILURE" : "FINAL_CLARIFICATION",
           reason: preview.intent === "unknown" ? "unsupported_intent" : "incomplete_or_unsafe",
@@ -6732,15 +7364,26 @@ export function createApp() {
           phone: message.maskedPhone,
         },
       });
+      const hasAmbiguity = Boolean(preview.ambiguities?.length)
+        || Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "ambiguous");
+      const hasGroundingFailure = (preview.entityResolutionDiagnostics ?? []).some((entity) =>
+        !["EXACT_MATCH", "NOT_FOUND_NEW_CLIENT", "RESOLVED"].includes(entity.result));
+      await finalize(preview.intent === "unknown"
+        ? "UNKNOWN_INTENT"
+        : hasAmbiguity
+          ? "AMBIGUOUS_FIELDS"
+          : hasGroundingFailure ? "GROUNDING_FAILED" : "MISSING_FIELDS");
       const responseDelivered = await safeSend(
         preview.intent === "unknown"
           ? formatAiWhatsappGuidance()
           : preview.executionMessage ?? formatAiWhatsappEntityClarification(preview),
+        preview.intent === "unknown" ? "guidance_unsupported_intent" : "entity_clarification",
       );
       return { ok: true, executed: false, intent: preview.intent, responseDelivered };
     }
 
     const code = generateAiWhatsappCode();
+    aiWhatsappClarificationContexts.delete(buildAiWhatsappClarificationKey(unitId, message.senderPhone));
     const pending: AiWhatsappPendingCommand = {
       id: crypto.randomUUID(),
       code,
@@ -6760,7 +7403,7 @@ export function createApp() {
       entity: "ai_whatsapp_command",
       entityId: pending.id,
       after: {
-        correlationId: request.id,
+        correlationId,
         stage: "owner_command_final_decision",
         result: "FINAL_PREVIEW",
         reason: "preview_executable",
@@ -6789,6 +7432,7 @@ export function createApp() {
     });
     const responseDelivered = await safeSend(
       audioTranscript ? formatAiWhatsappAudioPreview(audioTranscript, preview, code) : formatAiWhatsappPreview(preview, code),
+      audioTranscript ? "audio_preview" : "text_preview",
     );
     return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, audio: Boolean(audioTranscript), responseDelivered };
     } catch {
@@ -6800,7 +7444,7 @@ export function createApp() {
         entityId: message.maskedPhone,
         after: { reason: "webhook_unexpected_failure", phone: message.maskedPhone },
       });
-      const responseDelivered = await safeSend(formatAiWhatsappTemporaryFailure());
+      const responseDelivered = await safeSend(formatAiWhatsappTemporaryFailure(), "unexpected_failure");
       return { ok: true, executed: false, unavailable: true, reason: "webhook_unexpected_failure", responseDelivered };
     }
   });

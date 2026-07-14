@@ -24,7 +24,7 @@ Esta fase nao implementa feature nova, nao implementa IA/WhatsApp, nao cria modu
 ## C) Ambiente utilizado
 | Item | Status | Resultado |
 | --- | --- | --- |
-| Workspace | PASSOU | `C:\Users\joaov\OneDrive\Desktop\Projetos\Software Barbearia`. |
+| Workspace | PASSOU | `<workspace>` do projeto. |
 | Sistema | PASSOU | Windows local via PowerShell. |
 | Data/hora local | PASSOU | `2026-05-04 23:49:16 -03:00`. |
 | Branch atual | PASSOU | `main`. |
