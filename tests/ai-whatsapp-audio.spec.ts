@@ -839,12 +839,214 @@ describe("audio do atendente IA via WhatsApp", () => {
     const before = await app.inject({ method: "GET", url: "/sales/products?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
 
     await postWebhook(app, audioPayload());
-    const code = (sentTexts(fetchMock).at(-1) ?? "").match(/CONFIRMAR\s+(\d{4})/)?.[1];
-    const confirmed = await postWebhook(app, textPayload(`CONFIRMAR ${code}`));
+    expect(sentTexts(fetchMock).at(-1)).not.toMatch(/CONFIRMAR\s+\d{4}/);
+    const confirmed = await postWebhook(app, textPayload("CONFIRMAR"));
     const after = await app.inject({ method: "GET", url: "/sales/products?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
 
     expect(confirmed.json()).toMatchObject({ ok: true, executed: true });
     expect((after.json().sales as unknown[]).length).toBe((before.json().sales as unknown[]).length + 1);
+  });
+
+  it("audio Pode confirmar usa o mesmo handler e replay nao duplica", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Pode confirmar",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-confirm"));
+    const confirmationAudio = audioPayload({ data: {
+      key: { id: "audio-simple-confirm", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 1 } },
+    } });
+    const confirmation = await postWebhook(app, confirmationAudio);
+    const replay = await postWebhook(app, confirmationAudio);
+
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
+    expect(replay.json()).toMatchObject({ ok: true, replay: true, deduplicated: true, executed: false });
+    expect(store.productSales).toHaveLength(before + 1);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("audio Pode cancelar usa o mesmo handler e invalida a previa", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Pode cancelar",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-cancel"));
+    const cancellation = await postWebhook(app, audioPayload({ data: {
+      key: { id: "audio-simple-cancel", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 1 } },
+    } }));
+    const confirmation = await postWebhook(app, textPayload("CONFIRMAR", "confirm-after-audio-cancel"));
+
+    expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true, executed: false });
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(before);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("audio com confirmacao e novo pedido preserva a previa atual", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Pode confirmar uma venda de 2 Gel no Pix",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-before-new-audio-command"));
+    const response = await postWebhook(app, audioPayload({ data: {
+      key: { id: "audio-confirm-with-new-command", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(response.json()).toMatchObject({ ok: true, pendingPreserved: true, executed: false });
+    expect(store.productSales).toHaveLength(0);
+    expect(sentTexts(fetchMock).at(-1)).toContain("CANCELAR a prévia atual");
+  });
+
+  it("audio com pausa ASR em Cliente Teste Confirmação gera previa e nao confirma", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Marco um corte para o cliente teste, confirmação amanhã, às quatro da tarde",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const clientsBefore = store.clients.length;
+    const appointmentsBefore = store.appointments.length;
+
+    const payload = audioPayload({ data: {
+      key: { id: "audio-client-confirmacao", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 6 } },
+    } });
+    const response = await postWebhook(app, payload);
+    const transcriptionsAfterFirstDelivery = transcribe.mock.calls.length;
+    const replay = await postWebhook(app, payload);
+
+    expect(response.json()).toMatchObject({
+      ok: true,
+      mode: "preview_only",
+      intent: "schedule_appointment",
+      executed: false,
+    });
+    expect(replay.json()).toMatchObject({ ok: true, replay: true, deduplicated: true, executed: false });
+    expect(store.clients).toHaveLength(clientsBefore);
+    expect(store.appointments).toHaveLength(appointmentsBefore);
+    expect(sentTexts(fetchMock)).toHaveLength(1);
+    expect(transcribe).toHaveBeenCalledTimes(transcriptionsAfterFirstDelivery);
+    expect(sentTexts(fetchMock)[0]).toContain("Cliente: Cliente Teste Confirmação");
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 16:00");
+    expect(sentTexts(fetchMock)[0]).not.toContain("confirmada com sucesso");
+  });
+
+  it("audio corrige somente o cliente da previa pelo mesmo orquestrador", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "O nome correto é Carlos Henrique",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const clientsBefore = store.clients.length;
+
+    await postWebhook(app, textPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-client-preview"));
+    const correction = await postWebhook(app, audioPayload({ data: {
+      key: { id: "audio-correction-client", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(correction.json()).toMatchObject({ mode: "preview_only", corrected: true, audio: true, executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("Cliente: Carlos Henrique");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Horario: 11:00");
+    expect(store.clients).toHaveLength(clientsBefore);
+    expect(store.appointments).toHaveLength(0);
+  });
+
+  it("audio corrige horario e preserva os demais campos", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Na verdade é às cinco da tarde",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+
+    await postWebhook(app, textPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-time-preview"));
+    const correction = await postWebhook(app, audioPayload({ data: {
+      key: { id: "audio-correction-time", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(correction.json()).toMatchObject({ mode: "preview_only", corrected: true, audio: true, executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("Cliente: Joao Santos");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Data: 2026-12-15");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Horario: 17:00");
+    expect(store.appointments).toHaveLength(0);
+  });
+
+  it("audio corrige quantidade com pedido de confirmacao, nao executa e replay e deduplicado", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "Troca para cinco e pode confirmar",
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada Matte com pagamento Pix", "audio-correction-quantity-preview"));
+    const payload = audioPayload({ data: {
+      key: { id: "audio-correction-quantity", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } });
+    const correction = await postWebhook(app, payload);
+    const replay = await postWebhook(app, payload);
+
+    expect(correction.json()).toMatchObject({ mode: "preview_only", corrected: true, audio: true, executed: false });
+    expect(replay.json()).toMatchObject({ replay: true, deduplicated: true, executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("Quantidade: 5");
+    expect(sentTexts(fetchMock).filter((text) => text.includes("Atualizei a prévia"))).toHaveLength(1);
+    expect(store.productSales).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.every(([url]) => /getBase64FromMediaMessage|sendText/.test(String(url)))).toBe(true);
   });
 
   it("rejeita media sem dados suficientes, grande ou de mimetype inesperado", async () => {
@@ -1226,10 +1428,11 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(new Set(identities.map((identity) => identity?.actorFingerprint)).size).toBe(1);
     expect(identities.every((identity) => identity?.actorRole === "owner")).toBe(true);
     const parserEvents = events.filter((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED");
-    expect(parserEvents).toHaveLength(2);
+    expect(parserEvents).toHaveLength(1);
     expect(parserEvents.every((event) => event.afterJson?.strategy === "deterministic")).toBe(true);
-    expect(sentTexts(fetchMock).every((text) => text.includes("Horario: 16:00"))).toBe(true);
-    expect(sentTexts(fetchMock).every((text) => text.includes("Profissional: Geovane Borges"))).toBe(true);
+    expect(sentTexts(fetchMock)[0]).toContain("Horario: 16:00");
+    expect(sentTexts(fetchMock)[0]).toContain("Profissional: Geovane Borges");
+    expect(sentTexts(fetchMock)[1]).toContain("CANCELAR a prévia atual");
     const after = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
     expect(after.json().appointments).toHaveLength(before.json().appointments.length);
   });
@@ -1351,7 +1554,8 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(sentTexts(fetchMock)[0]).toContain("Data: 2026-07-15");
     expect(sentTexts(fetchMock)[0]).toContain("Horario: 11:00");
     expect(sentTexts(fetchMock)[0]).toContain("Cliente novo ou não encontrado. Ele será criado somente se o owner confirmar.");
-    expect(sentTexts(fetchMock)[0]).toMatch(/CONFIRMAR \d{4}/);
+    expect(sentTexts(fetchMock)[0]).toContain("Para confirmar, responda: CONFIRMAR");
+    expect(sentTexts(fetchMock)[0]).not.toMatch(/CONFIRMAR\s+\d{4}/);
     expect(transcribe).toHaveBeenCalledTimes(1);
     const events = await audits(app, token);
     expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_FIELD_VALIDATION")?.afterJson)

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
@@ -239,6 +240,13 @@ function lastConfirmationCode(fetchMock: ReturnType<typeof vi.fn>) {
   return text.match(/CONFIRMAR\s+(\d{4})/)?.[1] ?? "";
 }
 
+function expectPreviewWithoutVisibleCode(fetchMock: ReturnType<typeof vi.fn>) {
+  const text = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
+  expect(text).toContain("Para confirmar, responda: CONFIRMAR");
+  expect(text).toContain("Para cancelar, responda: CANCELAR");
+  expect(text).not.toMatch(/CONFIRMAR\s+\d{4}/);
+}
+
 async function countCommercialState(app: FastifyInstance, token: string) {
   const [appointments, inventory, financial, sales, audit] = await Promise.all([
     app.inject({
@@ -310,6 +318,7 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     process.env = { ...originalEnv };
@@ -560,7 +569,7 @@ describe("Atendente IA WhatsApp-first", () => {
       commissions: store.commissionEntries.length,
     }).toEqual(before);
 
-    const confirmation = await postWebhook(app, evolutionPayload(`CONFIRMAR ${lastConfirmationCode(fetchMock)}`));
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
 
     expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
     expect(store.productSales).toHaveLength(before.sales + 1);
@@ -763,7 +772,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
     expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(1);
-    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
   });
 
   it("timeout Gemini com comando incompleto pede esclarecimento sem codigo", async () => {
@@ -816,7 +825,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Produto: Pomada Matte");
-    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
     await expect(countCommercialState(app, token)).resolves.toEqual({
       ...before,
       parsedAudits: before.parsedAudits + 1,
@@ -875,7 +884,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const response = await postWebhook(app, evolutionPayload("Agende corte masculino para Maria Nova dia 15/12/2026 as 10h."));
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
-    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
   });
 
   it("gera previa para cliente novo com catalogo de clientes vazio e nao cria entidade", async () => {
@@ -895,7 +904,7 @@ describe("Atendente IA WhatsApp-first", () => {
     ));
 
     expect(response.json()).toMatchObject({ mode: "preview_only", intent: "schedule_appointment", executed: false });
-    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
     expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Cliente novo ou não encontrado");
     expect(memoryStore.clients).toHaveLength(0);
@@ -937,20 +946,19 @@ describe("Atendente IA WhatsApp-first", () => {
     await postWebhook(app, evolutionPayload(
       "Marca um corte para Maria da Silva dia 15/12/2026 às 10:00.",
     ));
-    const code = lastConfirmationCode(fetchMock);
-    expect(code).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Cliente: Maria da Silva");
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Cliente novo ou não encontrado");
     expect(memoryStore.clients).toHaveLength(0);
     expect(memoryStore.appointments).toHaveLength(0);
 
-    const confirmed = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
     expect(confirmed.json()).toMatchObject({ ok: true, executed: true });
     expect(memoryStore.clients).toHaveLength(1);
     expect(memoryStore.clients[0].fullName).toBe("Maria da Silva");
     expect(memoryStore.appointments).toHaveLength(1);
 
-    const replay = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const replay = await postWebhook(app, evolutionPayload("CONFIRMAR"));
     expect(replay.json()).toMatchObject({ ok: true, executed: false });
     expect(memoryStore.clients).toHaveLength(1);
     expect(memoryStore.appointments).toHaveLength(1);
@@ -1035,7 +1043,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
     expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
-    expect(lastConfirmationCode(fetchMock)).toMatch(/^\d{4}$/);
+    expectPreviewWithoutVisibleCode(fetchMock);
     await expect(countCommercialState(app, token)).resolves.toEqual({
       ...before,
       parsedAudits: before.parsedAudits + 1,
@@ -1389,16 +1397,399 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(after.appointments).toBe(before.appointments);
   });
 
-  it("CONFIRMAR codigo executa venda uma vez pelo fluxo oficial", async () => {
+  it.each([
+    "confirmar",
+    "confirma",
+    "pode confirmar",
+    "confirmado",
+    "sim, pode confirmar",
+    "confirma para mim",
+  ])("confirma a unica previa ativa sem codigo: %s", async (phrase) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const salesBefore = store.productSales.length;
+    const financialBefore = store.financialEntries.length;
+
+    const preview = await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    expect(preview.json()).toMatchObject({ mode: "preview_only", executed: false });
+    expect(store.productSales).toHaveLength(salesBefore);
+    expect(store.financialEntries).toHaveLength(financialBefore);
+    expectPreviewWithoutVisibleCode(fetchMock);
+
+    const confirmation = await postWebhook(app, evolutionPayload(phrase));
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
+    expect(store.productSales).toHaveLength(salesBefore + 1);
+    expect(store.financialEntries).toHaveLength(financialBefore + 1);
+  });
+
+  it.each(["sim", "não", "ok", "beleza"])("nao executa resposta ambigua: %s", async (phrase) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const response = await postWebhook(app, evolutionPayload(phrase));
+
+    expect(response.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(before);
+  });
+
+  it.each([
+    "Marca um corte para Cliente Teste Confirmação amanhã às quatro da tarde",
+    "Marca um corte para Confirmação Silva amanhã às quatro da tarde",
+  ])("nome com confirmacao nao executa nem substitui a previa anterior: %s", async (command) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    store.clients = [];
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const response = await postWebhook(app, evolutionPayload(command));
+
+    expect(response.json()).toMatchObject({
+      ok: true,
+      pendingPreserved: true,
+      executed: false,
+    });
+    expect(store.productSales).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.clients).toHaveLength(0);
+    expect(store.appointments).toHaveLength(0);
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("CANCELAR a prévia atual");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).not.toContain("confirmada com sucesso");
+  });
+
+  it.each([
+    ["O nome correto é Carlos Silva", ["Cliente: Carlos Silva", "Servico: Corte Premium", "Data: 2026-12-15", "Horario: 11:00"]],
+    ["Muda para dia 16/12/2026", ["Cliente: Joao Santos", "Data: 2026-12-16", "Horario: 11:00"]],
+    ["Não é dia 16, é dia 17", ["Cliente: Joao Santos", "Data: 2026-12-17", "Horario: 11:00"]],
+    ["É às doze da tarde", ["Cliente: Joao Santos", "Data: 2026-12-15", "Horario: 12:00"]],
+    ["Troca Corte Premium por Barba Terapia", ["Cliente: Joao Santos", "Servico: Barba Terapia", "Horario: 11:00"]],
+    ["Na verdade é dia 17/12/2026 às uma da tarde", ["Data: 2026-12-17", "Horario: 13:00", "Servico: Corte Premium"]],
+  ])("corrige agendamento preservando campos nao mencionados: %s", async (correction, expectedLines) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    const initial = await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    const updated = await postWebhook(app, evolutionPayload(correction));
+
+    expect(initial.json()).toMatchObject({ mode: "preview_only", executed: false });
+    expect(updated.json()).toMatchObject({ mode: "preview_only", corrected: true, executed: false });
+    const summary = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
+    expect(summary).toContain("Atualizei a prévia. Confira os dados e confirme novamente.");
+    for (const line of expectedLines) expect(summary).toContain(line);
+    expect(store.clients).toHaveLength(2);
+    expect(store.appointments).toHaveLength(0);
+  });
+
+  it("corrige profissional elegivel e bloqueia profissional inelegivel sem perder a previa", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    store.professionals.push({ id: "pro-02", businessId: "unit-01", name: "Outro Barbeiro", active: true, commissionRules: [] });
+    store.serviceProfessionalAssignments.push({ serviceId: "svc-corte", professionalId: "pro-02" });
+    const eligible = await postWebhook(app, evolutionPayload("Coloca com o Outro Barbeiro"));
+    expect(eligible.json()).toMatchObject({ corrected: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Profissional: Outro Barbeiro");
+
+    store.serviceProfessionalAssignments = store.serviceProfessionalAssignments.filter((item) => item.professionalId !== "pro-01");
+    const rejected = await postWebhook(app, evolutionPayload("Coloca com o Geovane Borges"));
+    expect(rejected.json()).toMatchObject({ corrected: false, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("horario nao esta disponivel");
+
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ executed: true });
+    expect(store.appointments).toHaveLength(1);
+    expect(store.appointments[0].professionalId).toBe("pro-02");
+  });
+
+  it("bloqueia horario corrigido indisponivel e preserva a previa anterior", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    const rejected = await postWebhook(app, evolutionPayload("Na verdade é hoje às dez da manhã"));
+    expect(rejected.json()).toMatchObject({ corrected: false, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("horario nao esta disponivel");
+
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ executed: true });
+    expect(store.appointments).toHaveLength(1);
+    expect(store.appointments[0].startsAt.toISOString()).toContain("2026-12-15T14:00:00.000Z");
+  });
+
+  it("cliente novo corrigido aparece no aviso e so e criado apos nova confirmacao", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const clientsBefore = store.clients.length;
+
+    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    const updated = await postWebhook(app, evolutionPayload("O nome correto é Carlos Henrique"));
+    expect(updated.json()).toMatchObject({ corrected: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Cliente novo");
+    expect(store.clients).toHaveLength(clientsBefore);
+
+    await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(store.clients).toHaveLength(clientsBefore + 1);
+    expect(store.clients.at(-1)?.fullName).toBe("Carlos Henrique");
+  });
+
+  it.each([
+    ["O produto é Gel", ["Produto: Gel", "Quantidade: 1", "Pagamento: Pix", "Valor: R$ 25,00"]],
+    ["São duas pomadas, não uma", ["Produto: Pomada Matte", "Quantidade: 2", "Valor: R$ 118,00"]],
+    ["O pagamento é Dinheiro", ["Produto: Pomada Matte", "Quantidade: 1", "Pagamento: Dinheiro"]],
+    ["Vincula ao cliente Carlos Silva", ["Cliente: Carlos Silva", "Produto: Pomada Matte"]],
+  ])("corrige venda e recalcula sem mutacao: %s", async (correction, expectedLines) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    store.products.push({ ...store.products[0], id: "prd-gel", name: "Gel", salePrice: 25, stockQty: 8 });
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const stockBefore = store.products.find((item) => item.id === "prd-pomada")?.stockQty;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte com pagamento Pix"));
+    const updated = await postWebhook(app, evolutionPayload(correction));
+
+    expect(updated.json()).toMatchObject({ mode: "preview_only", corrected: true, executed: false });
+    const summary = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
+    for (const line of expectedLines) expect(summary).toContain(line);
+    expect(store.productSales).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(stockBefore);
+  });
+
+  it("remove cliente da venda e bloqueia quantidade acima do estoque", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte para Joao Santos com pagamento Pix"));
+    const withoutClient = await postWebhook(app, evolutionPayload("Pode deixar sem cliente"));
+    expect(withoutClient.json()).toMatchObject({ corrected: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Cliente: nao vinculado");
+
+    const overStock = await postWebhook(app, evolutionPayload("Troca para 99 unidades"));
+    expect(overStock.json()).toMatchObject({ corrected: false, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("quantidade");
+    expect(store.productSales).toHaveLength(0);
+  });
+
+  it("correcao com confirmacao gira a previa, invalida codigo antigo e exige CONFIRMAR separado", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const randomIntSpy = vi.spyOn(crypto, "randomInt") as unknown as { mockImplementation: (implementation: () => number) => void };
+    let generated = 0;
+    randomIntSpy.mockImplementation(() => generated++ === 0 ? 4321 : 8765);
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte com pagamento Pix"));
+    const corrected = await postWebhook(app, evolutionPayload("Troca para cinco e confirma"));
+    expect(corrected.json()).toMatchObject({ corrected: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("confirme novamente");
+    expect(store.productSales).toHaveLength(0);
+
+    const oldCode = await postWebhook(app, evolutionPayload("CONFIRMAR 4321"));
+    expect(oldCode.json()).toMatchObject({ executed: false });
+    expect(store.productSales).toHaveLength(0);
+
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ executed: true });
+    expect(store.productSales).toHaveLength(1);
+    expect(store.productSales[0].items[0].quantity).toBe(5);
+  });
+
+  it("replay da correcao responde uma vez e CANCELAR limpa a nova previa", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte com pagamento Pix"));
+    const correctionPayload = evolutionPayload("São duas pomadas, não uma", undefined, {
+      data: {
+        key: { id: "preview-correction-001", remoteJid: "5511999999999@s.whatsapp.net", fromMe: false },
+        message: { conversation: "São duas pomadas, não uma" },
+      },
+    });
+    const first = await postWebhook(app, correctionPayload);
+    const replay = await postWebhook(app, correctionPayload);
+    expect(first.json()).toMatchObject({ corrected: true, executed: false });
+    expect(replay.json()).toMatchObject({ replay: true, deduplicated: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).filter((text) => text.includes("Atualizei a prévia"))).toHaveLength(1);
+
+    await postWebhook(app, evolutionPayload("CANCELAR"));
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmation.json()).toMatchObject({ executed: false });
+    expect(store.productSales).toHaveLength(0);
+  });
+
+  it("correcao ambigua preserva a previa e novo pedido completo nao substitui silenciosamente", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte com pagamento Pix"));
+    const ambiguous = await postWebhook(app, evolutionPayload("Muda para cinco"));
+    expect(ambiguous.json()).toMatchObject({ ambiguous: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("produto, a quantidade ou o pagamento");
+
+    const other = await postWebhook(app, evolutionPayload("Agendar Corte Premium para Carlos Silva dia 16/12/2026 as 10:00 com Geovane Borges"));
+    expect(other.json()).toMatchObject({ pendingPreserved: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("CANCELAR a prévia atual");
+
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ executed: true });
+    expect(store.productSales).toHaveLength(1);
+    expect(store.appointments).toHaveLength(0);
+  });
+
+  it("unidade confiavel diferente nao altera a previa existente", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada Matte com pagamento Pix"));
+    process.env.AI_WHATSAPP_UNIT_ID = "unit-02";
+    const foreignCorrection = await postWebhook(app, evolutionPayload("São duas pomadas, não uma"));
+    expect(foreignCorrection.json()).toMatchObject({ executed: false });
+    expect(foreignCorrection.json()).not.toHaveProperty("corrected", true);
+
+    process.env.AI_WHATSAPP_UNIT_ID = "unit-01";
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ executed: true });
+    expect(store.productSales).toHaveLength(1);
+    expect(store.productSales[0].items[0].quantity).toBe(1);
+  });
+
+  it("duas confirmacoes simples repetidas executam somente uma vez", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const first = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    const second = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(first.json()).toMatchObject({ ok: true, executed: true });
+    expect(second.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(before + 1);
+  });
+
+  it.each(["cancelar", "cancela", "pode cancelar"])("cancela a unica previa sem codigo: %s", async (phrase) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const cancellation = await postWebhook(app, evolutionPayload(phrase));
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true, executed: false });
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(before);
+  });
+
+  it("responde de forma segura quando nao ha previa ativa", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+
+    const response = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(response.json()).toMatchObject({ ok: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Não há nenhuma operação aguardando confirmação."]);
+  });
+
+  it("restart invalida a previa mantida somente em memoria", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const appBeforeRestart = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(appBeforeRestart, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    expect(store.productSales).toHaveLength(0);
+    await appBeforeRestart.close();
+
+    const appAfterRestart = createApp({ memoryStore: store, ownerCommandParser: null });
+    const confirmation = await postWebhook(appAfterRestart, evolutionPayload("CONFIRMAR"));
+
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(0);
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Não há nenhuma operação aguardando confirmação.");
+    await appAfterRestart.close();
+  });
+
+  it("mantem a previa ativa quando chega outro comando completo", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    store.clients = [];
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const blocked = await postWebhook(app, evolutionPayload("Agendar corte para Maria da Silva dia 15/12/2026 às 10:00"));
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(blocked.json()).toMatchObject({ pendingPreserved: true, executed: false });
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
+    expect(store.productSales).toHaveLength(1);
+    expect(store.appointments).toHaveLength(0);
+    expect(store.clients).toHaveLength(0);
+  });
+
+  it("bloqueia confirmacao quando a unidade confiavel muda", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    process.env.AI_WHATSAPP_UNIT_ID = "unit-02";
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
+    expect(store.productSales).toHaveLength(before);
+  });
+
+  it("sintaxe antiga CONFIRMAR codigo continua executando uma vez pelo fluxo oficial", async () => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
     const token = await loginOwner(app);
     const before = await countCommercialState(app, token);
 
+    const randomIntSpy = vi.spyOn(crypto, "randomInt") as unknown as {
+      mockImplementation: (implementation: (...args: unknown[]) => number) => unknown;
+    };
+    randomIntSpy.mockImplementation(() => 4321);
     await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos, ele pagou no Pix."));
-    const code = lastConfirmationCode(fetchMock);
-    expect(code).toMatch(/^\d{4}$/);
+    const code = "4321";
+    expectPreviewWithoutVisibleCode(fetchMock);
     const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`, ["55", "11", "99999", "9999"].join(""), {
       unitId: "unit-02",
       data: {
@@ -1421,10 +1812,10 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(duplicate.json()).toMatchObject({ ok: true, executed: false });
     const finalState = await countCommercialState(app, token);
     expect(finalState.sales).toBe(after.sales);
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("ja foi confirmada ou expirou");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Não há nenhuma operação aguardando confirmação.");
   });
 
-  it("CONFIRMAR codigo executa agendamento pelo fluxo oficial", async () => {
+  it("CONFIRMAR sem codigo executa agendamento pelo fluxo oficial", async () => {
     const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
       clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
       date: "2026-12-15", dateEvidence: "15/12/2026", time: "11:00", timeEvidence: "as 11h",
@@ -1436,7 +1827,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const before = await countCommercialState(app, token);
 
     await postWebhook(app, evolutionPayload("Agenda João Victor dia 15/12/2026 as 11h para corte."));
-    const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${lastConfirmationCode(fetchMock)}`));
+    const confirm = await postWebhook(app, evolutionPayload("CONFIRMAR"));
 
     expect(confirm.statusCode).toBe(200);
     expect(confirm.json()).toMatchObject({ ok: true, executed: true });
@@ -1461,9 +1852,8 @@ describe("Atendente IA WhatsApp-first", () => {
     const before = await countCommercialState(app, token);
 
     await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos, ele pagou no Pix."));
-    const code = lastConfirmationCode(fetchMock);
     const cancel = await postWebhook(app, evolutionPayload("CANCELAR"));
-    const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const confirm = await postWebhook(app, evolutionPayload("CONFIRMAR"));
     const newPreview = await postWebhook(app, evolutionPayload("Agendar corte para Maria Teste dia 15/07/2026 as 11:00"));
 
     expect(cancel.json()).toMatchObject({ ok: true, cancelled: true });
@@ -1484,11 +1874,11 @@ describe("Atendente IA WhatsApp-first", () => {
     const before = await countCommercialState(app, token);
 
     await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos, ele pagou no Pix."));
-    const code = lastConfirmationCode(fetchMock);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const confirm = await postWebhook(app, evolutionPayload("CONFIRMAR"));
 
     expect(confirm.json()).toMatchObject({ ok: true, executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("A prévia expirou. Envie o pedido novamente.");
     const after = await countCommercialState(app, token);
     expect(after.sales).toBe(before.sales);
     expect(after.financialEntries).toBe(before.financialEntries);

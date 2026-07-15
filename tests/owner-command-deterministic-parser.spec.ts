@@ -135,6 +135,45 @@ describe("parser deterministico de cliente no agendamento", () => {
     });
   });
 
+  it.each([
+    ["Marca um corte para Cliente Teste Confirmação amanhã às quatro da tarde", "Cliente Teste Confirmação"],
+    ["Marca um corte para Cliente Teste Áudio amanhã às quatro da tarde", "Cliente Teste Áudio"],
+    ["Marca um corte amanhã para Cliente Teste Confirmação às quatro da tarde", "Cliente Teste Confirmação"],
+    ["Marca um corte amanhã para João Vitor às quatro da tarde", "João Vitor"],
+    ["Marca um corte para Confirmação Silva amanhã às quatro da tarde", "Confirmação Silva"],
+  ])("aceita servico, cliente, data e horario sem confundir o nome: %s", (message, clientName) => {
+    expect(parseCanonicalDeterministicOwnerCommand({ message, context })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName,
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-07-15",
+        time: "16:00",
+      },
+      missingFields: [],
+      executed: false,
+    });
+  });
+
+  it("recupera a pausa artificial do ASR dentro de Cliente Teste Confirmação", () => {
+    expect(parseCanonicalDeterministicOwnerCommand({
+      message: "Marco um corte para o cliente teste, confirmação amanhã, às quatro da tarde",
+      context,
+    })).toMatchObject({
+      intent: "schedule_appointment",
+      draft: {
+        clientName: "Cliente Teste Confirmação",
+        serviceNames: ["Corte"],
+        professionalName: "Geovane Borges",
+        date: "2026-07-15",
+        time: "16:00",
+      },
+      missingFields: [],
+      executed: false,
+    });
+  });
+
   it("seleciona o unico profissional habilitado entre dois ativos", () => {
     const eligibleContext: OwnerCommandContext = {
       ...context,

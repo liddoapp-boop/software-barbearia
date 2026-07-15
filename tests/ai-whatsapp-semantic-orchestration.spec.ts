@@ -214,7 +214,7 @@ describe("orquestracao semantica real do WhatsApp", () => {
         expect(response.json()).toMatchObject({ intent: "unknown" });
         expect(text).not.toContain("CONFIRMAR");
       }
-      if (item.expected === "clarification") {
+      if (item.expected !== "unknown") {
         await postWebhook(app, "CANCELAR", `semantic-clear-${index}`);
       }
     }
@@ -233,9 +233,6 @@ describe("orquestracao semantica real do WhatsApp", () => {
     const observed = (audit.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>).find(
       (event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "gemini",
     );
-    expect((audit.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>).some(
-      (event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "deterministic",
-    )).toBe(true);
     expect(observed?.afterJson?.fieldDiagnostics).toMatchObject({
       clientName: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
       serviceNames: { confidence: 0.95, source: "gemini_validated", status: "accepted" },

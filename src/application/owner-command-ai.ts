@@ -856,6 +856,26 @@ function cleanScheduleClientName(value: string) {
     .trim();
 }
 
+function recoverAsrClientLabel(value: string) {
+  // O ASR pode introduzir artigo e uma pausa artificial dentro de um nome
+  // iniciado por "Cliente" (ex.: "o cliente teste, confirmacao"). Limitamos
+  // a recuperacao a esse formato estreito; virgulas em frases gerais continuam
+  // sendo rejeitadas pela barreira canonica.
+  const match = value.trim().match(
+    /^(?:o|a)\s+(cliente)\s+([\p{L}'-]+(?:\s+[\p{L}'-]+)*)\s*,\s*([\p{L}'-]+)$/iu,
+  );
+  if (!match) return "";
+  const connectors = new Set(["da", "das", "de", "do", "dos", "e"]);
+  const suffix = `${match[2]} ${match[3]}`
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => connectors.has(normalizeMatchText(part))
+      ? part.toLocaleLowerCase("pt-BR")
+      : `${part.charAt(0).toLocaleUpperCase("pt-BR")}${part.slice(1).toLocaleLowerCase("pt-BR")}`)
+    .join(" ");
+  return `Cliente ${suffix}`;
+}
+
 const operationEntityBoundary = /\s+(?:(?:e\s+|a[ií]\s+)?(?:ele|ela)\s+pagou\b|(?:e\s+|a[ií]\s+)?pagou\s+(?:no|na|em)\b|(?:e\s+|a[ií]\s+)?foi\s+(?:no|na|em)\b|pagamento\s+(?:no|na|em)\b|com\s+pagamento\b|recebi\s+em\b|e\s+marcou\b|para\s+amanh[ãa]\b|com\s+o\s+profissional\b)/i;
 
 export function getOwnerCommandBoundaryObservation(message: string) {
@@ -894,7 +914,8 @@ function extractClientName(message: string, serviceName?: string) {
   const fieldBoundary = `(?:${dateMarker}|(?:data\\s*)?\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|hor[áa]rio\\b|com\\b)`;
   const cleanCandidate = (value: string) => {
     const beforeNextField = value.split(new RegExp(`\\s+(?=${fieldBoundary})`, "i"))[0] ?? "";
-    const candidate = delimitOperationEntity(beforeNextField, cleanScheduleClientName);
+    const candidate = recoverAsrClientLabel(beforeNextField)
+      || delimitOperationEntity(beforeNextField, cleanScheduleClientName);
     const normalizedCandidate = normalizeMatchText(candidate);
     if (!normalizedCandidate
       || (serviceName && (normalizedCandidate === normalizeMatchText(serviceName) || hasServiceRoot(candidate, serviceName)))) {

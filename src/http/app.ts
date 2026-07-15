@@ -13,6 +13,7 @@ import {
   OwnerCommandParserError,
   OwnerCommandParserStatus,
   OwnerCommandParseResult,
+  OwnerCommandContext,
   getDeterministicDateRecognitionType,
   getOwnerCommandClientNameRejectionReason,
   getOwnerCommandBoundaryObservation,
@@ -1629,6 +1630,16 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     used: boolean;
   };
 
+  type AiWhatsappPreviewCorrection =
+    | {
+        status: "valid";
+        draft: OwnerCommandDraft;
+        changedFields: string[];
+        requestedImmediateConfirmation: boolean;
+      }
+    | { status: "ambiguous"; message: string }
+    | { status: "none" };
+
   type AiWhatsappClarificationContext = {
     unitId: string;
     phone: string;
@@ -1676,6 +1687,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   }
 
   const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
+  const aiWhatsappExpiredPendingScopes = new Map<string, number>();
   const aiWhatsappClarificationContexts = new Map<string, AiWhatsappClarificationContext>();
   const aiWhatsappProcessedWebhookMessages = new Map<string, number>();
   const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
@@ -1967,7 +1979,18 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   function pruneAiWhatsappPendingCommands() {
     const now = Date.now();
     for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
-      if (pending.expiresAt <= now || pending.used) aiWhatsappPendingCommands.delete(key);
+      if (pending.expiresAt <= now) {
+        aiWhatsappExpiredPendingScopes.set(
+          buildAiWhatsappPendingScopeKey(pending.phone, pending.commandContext.unitId, pending.commandContext.actorId),
+          now + getAiWhatsappWebhookDedupTtlMs(),
+        );
+        aiWhatsappPendingCommands.delete(key);
+      } else if (pending.used) {
+        aiWhatsappPendingCommands.delete(key);
+      }
+    }
+    for (const [scope, expiresAt] of aiWhatsappExpiredPendingScopes.entries()) {
+      if (expiresAt <= now) aiWhatsappExpiredPendingScopes.delete(scope);
     }
     for (const [key, expiresAt] of aiWhatsappProcessedWebhookMessages.entries()) {
       if (expiresAt <= now) aiWhatsappProcessedWebhookMessages.delete(key);
@@ -2021,12 +2044,242 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     return `${normalizePhoneDigits(phone)}:${code}`;
   }
 
+  function buildAiWhatsappPendingScopeKey(phone: string, unitId: string, actorId: string) {
+    return `${normalizePhoneDigits(phone)}:${unitId}:${actorId}`;
+  }
+
+  function getAiWhatsappActivePendingCommands(context: AiWhatsappCommandContext, phone: string) {
+    const now = Date.now();
+    return Array.from(aiWhatsappPendingCommands.entries()).filter(([, pending]) =>
+      !pending.used
+      && pending.expiresAt > now
+      && pending.phone === phone
+      && pending.commandContext.unitId === context.unitId
+      && pending.commandContext.actorId === context.actorId
+      && pending.commandContext.origin === "whatsapp_webhook");
+  }
+
+  function replaceAiWhatsappActivePendingCommand(pending: AiWhatsappPendingCommand) {
+    for (const [key, current] of aiWhatsappPendingCommands.entries()) {
+      if (current.phone === pending.phone
+        && current.commandContext.unitId === pending.commandContext.unitId
+        && current.commandContext.actorId === pending.commandContext.actorId) {
+        current.used = true;
+        aiWhatsappPendingCommands.delete(key);
+      }
+    }
+    aiWhatsappExpiredPendingScopes.delete(
+      buildAiWhatsappPendingScopeKey(pending.phone, pending.commandContext.unitId, pending.commandContext.actorId),
+    );
+    aiWhatsappPendingCommands.set(buildAiWhatsappPendingKey(pending.phone, pending.code), pending);
+  }
+
+  function parseAiWhatsappPreviewDecision(value: string): { action: "confirm" | "cancel"; code?: string } | null {
+    const legacyConfirmation = value.trim().match(/^CONFIRMAR\s+(\d{4})$/i);
+    if (legacyConfirmation) return { action: "confirm", code: legacyConfirmation[1] };
+    const normalized = normalizeMatchText(value);
+    if ([
+      "confirmar",
+      "confirma",
+      "pode confirmar",
+      "confirmado",
+      "sim pode confirmar",
+      "confirma para mim",
+    ].includes(normalized)) return { action: "confirm" };
+    if (["cancelar", "cancela", "pode cancelar"].includes(normalized)) return { action: "cancel" };
+    return null;
+  }
+
+  function stripAiWhatsappCorrectionConfirmation(value: string) {
+    const suffix = /(?:\s*[,;]?\s+|\s+e\s+)(?:(?:pode|pode\s+ir\s+e)\s+)?confirma(?:r|do)?(?:\s+(?:ai|aí|para\s+mim))?[.!?]*$/iu;
+    const requestedImmediateConfirmation = suffix.test(value.trim());
+    return {
+      text: requestedImmediateConfirmation ? value.trim().replace(suffix, "").trim() : value.trim(),
+      requestedImmediateConfirmation,
+    };
+  }
+
+  function cleanAiWhatsappCorrectionValue(value: string) {
+    return value
+      .replace(/^[\s,:;-]+|[\s,.!?;:-]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function titleCaseAiWhatsappName(value: string) {
+    const connectors = new Set(["da", "das", "de", "do", "dos", "e"]);
+    return cleanAiWhatsappCorrectionValue(value)
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => connectors.has(normalizeMatchText(part))
+        ? part.toLocaleLowerCase("pt-BR")
+        : `${part.charAt(0).toLocaleUpperCase("pt-BR")}${part.slice(1).toLocaleLowerCase("pt-BR")}`)
+      .join(" ");
+  }
+
+  function parseAiWhatsappCorrectionQuantity(value: string) {
+    const normalized = normalizeMatchText(value);
+    const numberWords = new Map<string, number>([
+      ["um", 1], ["uma", 1], ["dois", 2], ["duas", 2], ["tres", 3], ["quatro", 4],
+      ["cinco", 5], ["seis", 6], ["sete", 7], ["oito", 8], ["nove", 9], ["dez", 10],
+      ["onze", 11], ["doze", 12], ["treze", 13], ["quatorze", 14], ["catorze", 14],
+      ["quinze", 15], ["dezesseis", 16], ["dezessete", 17], ["dezoito", 18], ["dezenove", 19], ["vinte", 20],
+    ]);
+    const explicit = normalized.match(/\b(?:sao|serao|troca(?:r)?\s+para|muda(?:r)?\s+para|quantidade\s+(?:e|para))\s+(\d{1,2}|[a-z]+)\b/);
+    const raw = explicit?.[1];
+    if (!raw) return undefined;
+    const quantity = /^\d+$/.test(raw) ? Number(raw) : numberWords.get(raw);
+    return quantity && quantity >= 1 && quantity <= 99 ? quantity : undefined;
+  }
+
+  function buildAiWhatsappCorrectedDraft(
+    pending: AiWhatsappPendingCommand,
+    message: string,
+    ownerContext: OwnerCommandContext,
+  ): AiWhatsappPreviewCorrection {
+    const stripped = stripAiWhatsappCorrectionConfirmation(message);
+    const text = stripped.text;
+    const normalized = normalizeMatchText(text);
+    const draft = { ...pending.draft } as Record<string, unknown>;
+    const changedFields: string[] = [];
+    const setField = (field: string, value: unknown) => {
+      if (stableJson(draft[field]) === stableJson(value)) return;
+      draft[field] = value;
+      changedFields.push(field);
+    };
+
+    if (pending.intent === "schedule_appointment") {
+      const clientMatch = text.match(/^(?:(?:o\s+)?nome\s+correto\s+(?:é|e)|(?:troca|muda|altera)\s+(?:o\s+)?(?:cliente|nome)\s+(?:para|por))\s+(.+)$/iu);
+      if (clientMatch) {
+        const clientName = titleCaseAiWhatsappName(clientMatch[1]);
+        if (!isValidAiWhatsappShortName(clientName) && !isStructurallyValidNewClientName(clientName)) {
+          return { status: "ambiguous", message: "Qual é o nome correto do cliente?" };
+        }
+        setField("clientName", clientName);
+      }
+
+      const serviceMatch = text.match(/^(?:troca|muda|altera)\s+(?:o\s+)?(?:serviço\s+)?(.+?)\s+(?:por|para)\s+(.+)$/iu)
+        ?? text.match(/^(?:o\s+)?serviço\s+(?:é|para)\s+(.+)$/iu);
+      if (serviceMatch && !clientMatch) {
+        const serviceName = cleanAiWhatsappCorrectionValue(serviceMatch[2] ?? serviceMatch[1]);
+        if (serviceName) setField("serviceNames", [serviceName]);
+      }
+
+      const professionalMatch = text.match(/^(?:coloca|marcar?|agenda)\s+com\s+(?:o\s+|a\s+)?(.+)$/iu)
+        ?? text.match(/^(?:troca|muda|altera)\s+(?:o\s+)?profissional\s+(?:para|por)\s+(?:o\s+|a\s+)?(.+)$/iu)
+        ?? text.match(/^(?:o\s+)?profissional\s+(?:é|para)\s+(.+)$/iu);
+      if (professionalMatch) {
+        const professionalName = titleCaseAiWhatsappName(professionalMatch[1]);
+        if (professionalName) setField("professionalName", professionalName);
+      }
+
+      const correctedSegment = text.match(/^(?:não|nao)\s+é\s+[^,;]+[,;]\s*é\s+(.+)$/iu)?.[1] ?? text;
+      const hasTemporalCue = /^(?:na\s+verdade|é\s+|e\s+|muda|troca|altera|não\s+é|nao\s+e)|\b(?:amanhã|amanha|hoje|sexta|quinta|quarta|terça|terca|segunda|sábado|sabado|domingo|dia\s+\d|às|as\s+\d)/iu.test(text);
+      if (hasTemporalCue) {
+        const dayOnly = normalizeMatchText(correctedSegment).match(/\bdia\s+(\d{1,2})$/);
+        const priorDate = typeof draft.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(draft.date) ? draft.date : "";
+        const preservedMonthDate = dayOnly && priorDate
+          ? `${priorDate.slice(0, 8)}${String(Number(dayOnly[1])).padStart(2, "0")}`
+          : "";
+        const recognizedDate = preservedMonthDate
+          ? { date: preservedMonthDate }
+          : recognizeOwnerCommandDate(correctedSegment, ownerContext.now, ownerContext.timezone);
+        const recognizedTime = recognizeOwnerCommandTime(correctedSegment);
+        if (recognizedTime?.ambiguous && recognizedTime.candidateTime) {
+          const [hour, minute] = recognizedTime.candidateTime.split(":");
+          const alternativeHour = String((Number(hour) + 12) % 24).padStart(2, "0");
+          return { status: "ambiguous", message: `Você quis dizer ${hour}:${minute} ou ${alternativeHour}:${minute}?` };
+        }
+        if (recognizedDate?.date) setField("date", recognizedDate.date);
+        if (recognizedTime?.time) setField("time", recognizedTime.time);
+      }
+
+      if (!changedFields.length && /^(?:troca|muda)\s+(?:o\s+)?[\p{L}'-]+$/iu.test(text)) {
+        return { status: "ambiguous", message: "Qual é o nome correto do cliente?" };
+      }
+      if (!changedFields.length && /^(?:muda|troca)(?:\s+para)?\s+(?:\d+|[\p{L}'-]+)$/iu.test(text)) {
+        return { status: "ambiguous", message: "Você quer alterar a data ou o horário?" };
+      }
+      if (!changedFields.length && /^(?:coloca\s+outro|está\s+errado|esta\s+errado)$/iu.test(text)) {
+        return { status: "ambiguous", message: "Você quer alterar o cliente, serviço, data, horário ou profissional?" };
+      }
+    }
+
+    if (pending.intent === "sell_product") {
+      if (/^(?:pode\s+)?(?:deixa|deixar)(?:\s+a\s+venda)?\s+sem\s+cliente$/iu.test(text)) {
+        setField("clientName", null);
+      }
+      const clientMatch = text.match(/^(?:vincula|vincular|coloca|adiciona)\s+(?:ao\s+|o\s+)?cliente\s+(.+)$/iu)
+        ?? text.match(/^(?:o\s+)?cliente\s+(?:é|e)\s+(.+)$/iu);
+      if (clientMatch) {
+        const clientName = titleCaseAiWhatsappName(clientMatch[1]);
+        if (!isValidAiWhatsappShortName(clientName) && !isStructurallyValidNewClientName(clientName)) {
+          return { status: "ambiguous", message: "Qual é o nome correto do cliente?" };
+        }
+        setField("clientName", clientName);
+      }
+
+      const productMatch = text.match(/^(?:o\s+)?produto\s+(?:é|e|para)\s+(.+)$/iu)
+        ?? text.match(/^(?:troca|muda)\s+(?:o\s+)?produto\s+(?:para|por)\s+(.+)$/iu);
+      if (productMatch) setField("productName", cleanAiWhatsappCorrectionValue(productMatch[1]));
+
+      const paymentMatch = text.match(/^(?:o\s+)?pagamento\s+(?:é|e|para)\s+(.+)$/iu)
+        ?? text.match(/^(?:troca|muda)\s+(?:o\s+)?pagamento\s+(?:para|por)\s+(.+)$/iu);
+      if (paymentMatch) setField("paymentMethod", cleanAiWhatsappCorrectionValue(paymentMatch[1]));
+
+      const quantity = parseAiWhatsappCorrectionQuantity(text);
+      const hasQuantityUnit = /\b(?:unidades?|pomadas?|produtos?|itens?)\b/iu.test(text);
+      if (quantity && (hasQuantityUnit || stripped.requestedImmediateConfirmation)) setField("quantity", quantity);
+
+      if (!changedFields.length && /^(?:muda|troca)(?:\s+para)?\s+(?:\d+|[\p{L}'-]+)$/iu.test(text)) {
+        return { status: "ambiguous", message: "Você quer alterar o produto, a quantidade ou o pagamento?" };
+      }
+      if (!changedFields.length && /^(?:troca\s+o\s+[\p{L}'-]+|coloca\s+outro|está\s+errado|esta\s+errado)$/iu.test(text)) {
+        return { status: "ambiguous", message: "Você quer alterar o cliente, produto, quantidade ou pagamento?" };
+      }
+    }
+
+    return changedFields.length
+      ? {
+          status: "valid",
+          draft: draft as OwnerCommandDraft,
+          changedFields: Array.from(new Set(changedFields)),
+          requestedImmediateConfirmation: stripped.requestedImmediateConfirmation,
+        }
+      : { status: "none" };
+  }
+
+  function buildAiWhatsappCorrectionParseResult(pending: AiWhatsappPendingCommand, correction: Extract<AiWhatsappPreviewCorrection, { status: "valid" }>) {
+    const requiredFields = pending.intent === "schedule_appointment"
+      ? ["clientName", "serviceNames", "professionalName", "date", "time"]
+      : ["productName", "quantity", "paymentMethod"];
+    const fieldDiagnostics: NonNullable<OwnerCommandParseResult["fieldDiagnostics"]> = Object.fromEntries(requiredFields.map((field) => [field, {
+      confidence: correction.changedFields.includes(field) ? 0.99 : 1,
+      source: correction.changedFields.includes(field) ? "conversation_context" as const : "deterministic" as const,
+      status: "accepted" as const,
+    }]));
+    return {
+      ok: true as const,
+      mode: "preview_only" as const,
+      intent: pending.intent,
+      confidence: 0.99,
+      summary: "Prévia atualizada pelo contexto da conversa.",
+      draft: correction.draft,
+      missingFields: [],
+      warnings: [],
+      allowedNextActions: [],
+      executed: false as const,
+      fieldDiagnostics,
+      ambiguities: [],
+    } satisfies OwnerCommandParseResult;
+  }
+
   function formatCurrencyBR(value: unknown) {
     const amount = Number(value ?? 0);
     return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   }
 
-  function formatAiWhatsappPreview(preview: OwnerCommandPreviewResponse, code: string) {
+  function formatAiWhatsappPreview(preview: OwnerCommandPreviewResponse) {
     const lines = ["Entendi o seguinte:"];
     if (preview.intent === "sell_product") {
       const sale = preview.sale ?? {};
@@ -2053,7 +2306,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     }
     const warnings = Array.isArray(preview.warnings) ? preview.warnings.filter(Boolean) : [];
     if (warnings.length) lines.push("", `Avisos: ${warnings.join(" ")}`);
-    lines.push("", `Para confirmar, responda: CONFIRMAR ${code}`, "Para cancelar, responda: CANCELAR");
+    lines.push("", "Para confirmar, responda: CONFIRMAR", "Para cancelar, responda: CANCELAR");
     return lines.join("\n");
   }
 
@@ -2087,9 +2340,9 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     return "O processamento de áudio não está disponível nesta versão. Envie seu pedido em texto.";
   }
 
-  function formatAiWhatsappAudioPreview(transcript: string, preview: OwnerCommandPreviewResponse, code: string) {
+  function formatAiWhatsappAudioPreview(transcript: string, preview: OwnerCommandPreviewResponse) {
     const safeTranscript = transcript.replace(/[\r\n\t]+/g, " ").trim().slice(0, 300);
-    return `Entendi o audio como: '${safeTranscript}'\nConfira a previa abaixo.\n\n${formatAiWhatsappPreview(preview, code)}`;
+    return `Entendi o audio como: '${safeTranscript}'\nConfira a previa abaixo.\n\n${formatAiWhatsappPreview(preview)}`;
   }
 
   function formatAiWhatsappEntityClarification(preview: OwnerCommandPreviewResponse) {
@@ -2134,8 +2387,14 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       }
     }
 
-    if (preview.intent === "sell_product" && missing.size === 1 && missing.has("productName")) {
-      return "Qual produto?";
+    if (preview.intent === "sell_product") {
+      if (missing.size === 1 && missing.has("productName")) return "Qual produto?";
+      if (missing.size === 1 && missing.has("quantity")) {
+        return preview.warnings.some((warning) => normalizeMatchText(warning).includes("estoque insuficiente"))
+          ? "Estoque insuficiente para essa quantidade. Qual quantidade você deseja?"
+          : "Qual quantidade você deseja?";
+      }
+      if (missing.size === 1 && missing.has("paymentMethod")) return "Qual é a forma de pagamento?";
     }
 
     const labels: Record<string, string> = {
@@ -7491,61 +7750,84 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       }
       commandText = audioTranscript;
     }
-    await safeAudit({
-      unitId,
-      action: "AI_WHATSAPP_PARSER_STARTED",
-      entity: "ai_whatsapp_command",
-      entityId: message.maskedPhone,
-      after: { correlationId, stage: "owner_command_parser_started", ...getAiWhatsappTextObservation(commandText) },
-    });
     const normalizedText = commandText.trim();
-    const confirmMatch = normalizedText.match(/^CONFIRMAR\s+(\d{4})$/i);
-    if (/^CANCELAR$/i.test(normalizedText)) {
-      let cancelled = false;
-      for (const [key, pending] of aiWhatsappPendingCommands.entries()) {
-        if (pending.phone === message.senderPhone
-          && pending.commandContext.unitId === whatsappContext.unitId
-          && pending.commandContext.actorId === whatsappContext.actorId) {
-          if (!pending.used && pending.expiresAt > Date.now()) cancelled = true;
-          pending.used = true;
-          aiWhatsappPendingCommands.delete(key);
-        }
-      }
+    const previewDecision = parseAiWhatsappPreviewDecision(normalizedText);
+    if (previewDecision) {
+      const pendingScopeKey = buildAiWhatsappPendingScopeKey(
+        message.senderPhone,
+        whatsappContext.unitId,
+        whatsappContext.actorId,
+      );
+      const activePending = getAiWhatsappActivePendingCommands(whatsappContext, message.senderPhone);
       const clarificationKey = buildAiWhatsappClarificationKey(unitId, message.senderPhone);
-      if (aiWhatsappClarificationContexts.delete(clarificationKey)) cancelled = true;
-      await safeAudit({
-        unitId,
-        action: "AI_WHATSAPP_COMMAND_CANCELLED",
-        entity: "ai_whatsapp_command",
-        entityId: message.maskedPhone,
-        after: { cancelled, phone: message.maskedPhone },
-      });
-      const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.", "cancellation_result");
-      return { ok: true, cancelled, responseDelivered };
-    }
 
-    if (confirmMatch) {
-      const code = confirmMatch[1];
-      const pendingKey = buildAiWhatsappPendingKey(message.senderPhone, code);
-      const pending = aiWhatsappPendingCommands.get(pendingKey);
-      if (!pending
-        || pending.used
-        || pending.expiresAt <= Date.now()
-        || pending.commandContext.unitId !== whatsappContext.unitId
-        || pending.commandContext.actorId !== whatsappContext.actorId
-        || pending.commandContext.origin !== "whatsapp_webhook") {
+      if (previewDecision.action === "cancel") {
+        const pendingEntry = activePending.length === 1 ? activePending[0] : undefined;
+        const clarificationCancelled = aiWhatsappClarificationContexts.delete(clarificationKey);
+        if (!pendingEntry && !clarificationCancelled) {
+          const expired = aiWhatsappExpiredPendingScopes.has(pendingScopeKey);
+          await safeAudit({
+            unitId,
+            action: "AI_WHATSAPP_COMMAND_REJECTED",
+            entity: "ai_whatsapp_command",
+            entityId: message.maskedPhone,
+            after: { reason: expired ? "expired_confirmation" : "missing_confirmation", phone: message.maskedPhone },
+          });
+          const responseDelivered = await safeSend(
+            expired
+              ? "A prévia expirou. Envie o pedido novamente."
+              : "Não há nenhuma operação aguardando confirmação.",
+            expired ? "confirmation_expired" : "confirmation_missing",
+          );
+          return { ok: true, cancelled: false, executed: false, responseDelivered };
+        }
+        if (pendingEntry) {
+          pendingEntry[1].used = true;
+          aiWhatsappPendingCommands.delete(pendingEntry[0]);
+        }
+        aiWhatsappExpiredPendingScopes.delete(pendingScopeKey);
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_COMMAND_CANCELLED",
+          entity: "ai_whatsapp_command",
+          entityId: pendingEntry?.[1].id ?? message.maskedPhone,
+          after: { cancelled: true, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.", "cancellation_result");
+        return { ok: true, cancelled: true, executed: false, responseDelivered };
+      }
+
+      const pendingEntry = previewDecision.code
+        ? (() => {
+            const keyedEntry = aiWhatsappPendingCommands.get(
+              buildAiWhatsappPendingKey(message.senderPhone, previewDecision.code ?? ""),
+            );
+            return activePending.length === 1 && keyedEntry?.id === activePending[0][1].id
+              ? activePending[0]
+              : undefined;
+          })()
+        : activePending.length === 1 ? activePending[0] : undefined;
+      if (!pendingEntry) {
+        const expired = aiWhatsappExpiredPendingScopes.has(pendingScopeKey);
         await safeAudit({
           unitId,
           action: "AI_WHATSAPP_COMMAND_REJECTED",
           entity: "ai_whatsapp_command",
           entityId: message.maskedPhone,
-          after: { reason: "missing_or_expired_confirmation", phone: message.maskedPhone },
+          after: { reason: expired ? "expired_confirmation" : "missing_confirmation", phone: message.maskedPhone },
         });
-        const responseDelivered = await safeSend("Essa acao ja foi confirmada ou expirou.", "confirmation_expired");
+        const responseDelivered = await safeSend(
+          expired
+            ? "A prévia expirou. Envie o pedido novamente."
+            : "Não há nenhuma operação aguardando confirmação.",
+          expired ? "confirmation_expired" : "confirmation_missing",
+        );
         return { ok: true, executed: false, responseDelivered };
       }
+      const [pendingKey, pending] = pendingEntry;
       pending.used = true;
       aiWhatsappPendingCommands.delete(pendingKey);
+      aiWhatsappExpiredPendingScopes.delete(pendingScopeKey);
       const execution = await executeOwnerCommand({
         request,
         unitId: pending.unitId,
@@ -7578,6 +7860,121 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       );
       return { ok: true, executed, responseDelivered };
     }
+
+    const activePendingForCorrection = getAiWhatsappActivePendingCommands(whatsappContext, message.senderPhone);
+    if (activePendingForCorrection.length === 1) {
+      const [previousPendingKey, previousPending] = activePendingForCorrection[0];
+      const ownerContext = await getOwnerCommandContext({ unitId, screenContext: "whatsapp" });
+      const correction = buildAiWhatsappCorrectedDraft(previousPending, normalizedText, ownerContext);
+      if (correction.status === "ambiguous") {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_PREVIEW_CORRECTION_CLARIFICATION",
+          entity: "ai_whatsapp_command",
+          entityId: previousPending.id,
+          after: { result: "AMBIGUOUS", intent: previousPending.intent, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(correction.message, "entity_clarification");
+        return { ok: true, corrected: false, ambiguous: true, executed: false, responseDelivered };
+      }
+      if (correction.status === "valid") {
+        const parsed = buildAiWhatsappCorrectionParseResult(previousPending, correction);
+        const correctedPreview = await resolveParsedOwnerCommandPreview(
+          { unitId, actorId, screenContext: "whatsapp", disableSemanticProvider: true },
+          parsed,
+        );
+        const executable = aiWhatsappAllowedIntents.has(correctedPreview.intent)
+          && Boolean(correctedPreview.confirmationToken)
+          && correctedPreview.allowedNextActions.includes("confirm_execute");
+        if (!executable) {
+          await safeAudit({
+            unitId,
+            action: "AI_WHATSAPP_PREVIEW_CORRECTION_REJECTED",
+            entity: "ai_whatsapp_command",
+            entityId: previousPending.id,
+            after: {
+              result: "INVALID_CORRECTION",
+              intent: previousPending.intent,
+              changedFields: correction.changedFields,
+              missingFields: correctedPreview.missingFields,
+              phone: message.maskedPhone,
+            },
+          });
+          const responseDelivered = await safeSend(
+            correctedPreview.executionMessage ?? formatAiWhatsappEntityClarification(correctedPreview),
+            "entity_clarification",
+          );
+          return { ok: true, corrected: false, executed: false, intent: previousPending.intent, responseDelivered };
+        }
+
+        const nextPending: AiWhatsappPendingCommand = {
+          id: crypto.randomUUID(),
+          code: generateAiWhatsappCode(),
+          phone: message.senderPhone,
+          unitId,
+          actorId,
+          commandContext: whatsappContext,
+          intent: correctedPreview.intent,
+          draft: correctedPreview.draft as OwnerCommandDraft,
+          confirmationToken: String(correctedPreview.confirmationToken),
+          expiresAt: Date.now() + getAiWhatsappTtlMs(),
+          used: false,
+        };
+        previousPending.used = true;
+        aiWhatsappPendingCommands.delete(previousPendingKey);
+        replaceAiWhatsappActivePendingCommand(nextPending);
+        aiWhatsappClarificationContexts.delete(buildAiWhatsappClarificationKey(unitId, message.senderPhone));
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_PREVIEW_CORRECTED",
+          entity: "ai_whatsapp_command",
+          entityId: nextPending.id,
+          after: {
+            result: "FINAL_PREVIEW",
+            intent: nextPending.intent,
+            changedFields: correction.changedFields,
+            previousPreviewInvalidated: true,
+            immediateConfirmationIgnored: correction.requestedImmediateConfirmation,
+            expiresAt: new Date(nextPending.expiresAt).toISOString(),
+            phone: message.maskedPhone,
+          },
+        });
+        const responseDelivered = await safeSend(
+          `Atualizei a prévia. Confira os dados e confirme novamente.\n\n${formatAiWhatsappPreview(correctedPreview)}`,
+          audioTranscript ? "audio_preview" : "text_preview",
+        );
+        return {
+          ok: true,
+          mode: "preview_only",
+          intent: correctedPreview.intent,
+          corrected: true,
+          executed: false,
+          audio: Boolean(audioTranscript),
+          responseDelivered,
+        };
+      }
+
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_PENDING_COMMAND_PRESERVED",
+        entity: "ai_whatsapp_command",
+        entityId: previousPending.id,
+        after: { result: "NEW_COMMAND_BLOCKED", intent: previousPending.intent, phone: message.maskedPhone },
+      });
+      const responseDelivered = await safeSend(
+        "Já existe uma operação aguardando confirmação. Você quer CANCELAR a prévia atual e iniciar esse novo pedido?",
+        "entity_clarification",
+      );
+      return { ok: true, pendingPreserved: true, executed: false, responseDelivered };
+    }
+
+    await safeAudit({
+      unitId,
+      action: "AI_WHATSAPP_PARSER_STARTED",
+      entity: "ai_whatsapp_command",
+      entityId: message.maskedPhone,
+      after: { correlationId, stage: "owner_command_parser_started", ...getAiWhatsappTextObservation(commandText) },
+    });
 
     const clarificationKey = buildAiWhatsappClarificationKey(unitId, message.senderPhone);
     // Um áudio novo é sempre um comando independente. Contexto pendente só pode
@@ -8040,7 +8437,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       expiresAt: Date.now() + getAiWhatsappTtlMs(),
       used: false,
     };
-    aiWhatsappPendingCommands.set(buildAiWhatsappPendingKey(message.senderPhone, code), pending);
+    replaceAiWhatsappActivePendingCommand(pending);
     await safeAudit({
       unitId,
       action: "AI_WHATSAPP_FINAL_DECISION",
@@ -8075,7 +8472,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       },
     });
     const responseDelivered = await safeSend(
-      audioTranscript ? formatAiWhatsappAudioPreview(audioTranscript, preview, code) : formatAiWhatsappPreview(preview, code),
+      audioTranscript ? formatAiWhatsappAudioPreview(audioTranscript, preview) : formatAiWhatsappPreview(preview),
       audioTranscript ? "audio_preview" : "text_preview",
     );
     return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, audio: Boolean(audioTranscript), responseDelivered };
