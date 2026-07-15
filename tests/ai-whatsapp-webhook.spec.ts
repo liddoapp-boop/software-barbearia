@@ -1096,7 +1096,7 @@ describe("Atendente IA WhatsApp-first", () => {
       "Deixa marcado um corte para João Victor dia 12/07/2020 às 10h.",
     ));
 
-    expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
+    expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "schedule_appointment", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
     expect(sentWhatsAppTexts(fetchMock)).toEqual([
       "Esse horario nao esta disponivel. Qual outro dia e horario voce deseja?",
@@ -1241,6 +1241,8 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it("gera uma unica previa para cliente novo com o marcador cliente sem criar dados", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -1347,6 +1349,8 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it("429 repetido abre circuito e comando deterministico completo nao insiste no Gemini", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
     const fetchMock = mockGeminiUnavailableAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -1845,6 +1849,8 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it("CANCELAR remove previa pendente e nao executa nada", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-14T15:00:00.000Z"));
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();

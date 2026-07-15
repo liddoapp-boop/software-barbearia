@@ -2274,6 +2274,15 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     } satisfies OwnerCommandParseResult;
   }
 
+  function buildAiWhatsappPreviewOnlyResponse<T extends Record<string, unknown>>(details: T) {
+    return {
+      ...details,
+      ok: true as const,
+      mode: "preview_only" as const,
+      executed: false as const,
+    };
+  }
+
   function formatCurrencyBR(value: unknown) {
     const amount = Number(value ?? 0);
     return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -7402,10 +7411,10 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
         message.replyTarget,
         "Nao foi possivel validar o acesso do WhatsApp agora. Tente novamente mais tarde.",
       ));
-      return { ok: true, executed: false, unavailable: true, reason: "whatsapp_identity_unavailable", responseDelivered: outcome.delivered };
+      return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason: "whatsapp_identity_unavailable", responseDelivered: outcome.delivered });
     }
     if (!whatsappContext) {
-      return { ok: true, executed: false, unavailable: true, reason: "whatsapp_identity_unavailable", responseDelivered: false };
+      return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason: "whatsapp_identity_unavailable", responseDelivered: false });
     }
 
     await safeAudit({
@@ -7445,7 +7454,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { result: "SAFE_FAILURE", keySource: webhookKeySource, phone: message.maskedPhone },
         });
         await finalize("EXECUTION_FAILED");
-        return { ok: true, executed: false, unavailable: true, reason: "deduplication_unavailable", responseDelivered: false };
+        return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason: "deduplication_unavailable", responseDelivered: false });
       }
       if (claim === "duplicate") {
         await safeAudit({
@@ -7541,7 +7550,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { reason: "feature_disabled", phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend(formatAiWhatsappAudioDisabled(), "audio_disabled");
-        return { ok: true, executed: false, audio: true, disabled: true, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ audio: true, disabled: true, responseDelivered });
       }
       if (!message.audio.messageId) {
         await safeAudit({
@@ -7552,7 +7561,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { reason: "missing_media", phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"), "audio_processing_failure");
-        return { ok: true, executed: false, audio: true, reason: "missing_media", responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ audio: true, reason: "missing_media", responseDelivered });
       }
       let audioBytes: Buffer;
       try {
@@ -7570,7 +7579,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { reason, phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("processing"), "audio_processing_failure");
-        return { ok: true, executed: false, audio: true, reason, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ audio: true, reason, responseDelivered });
       }
       await safeAudit({
         unitId,
@@ -7603,7 +7612,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { reason: "audio_transcription_unavailable", phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend(formatAiWhatsappAudioFailure("transcription"), "audio_transcription_failure");
-        return { ok: true, executed: false, audio: true, reason: "audio_transcription_unavailable", responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ audio: true, reason: "audio_transcription_unavailable", responseDelivered });
       }
       try {
         const vocabulary = buildBarbershopAudioVocabulary(await getOwnerCommandContext({
@@ -7746,7 +7755,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
             ? "audio_transcription_quota_failure"
             : temporaryProviderFailure ? "audio_transcription_provider_failure" : "audio_transcription_failure",
         );
-        return { ok: true, executed: false, audio: true, reason, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ audio: true, reason, responseDelivered });
       }
       commandText = audioTranscript;
     }
@@ -7779,7 +7788,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
               : "Não há nenhuma operação aguardando confirmação.",
             expired ? "confirmation_expired" : "confirmation_missing",
           );
-          return { ok: true, cancelled: false, executed: false, responseDelivered };
+          return buildAiWhatsappPreviewOnlyResponse({ cancelled: false, responseDelivered });
         }
         if (pendingEntry) {
           pendingEntry[1].used = true;
@@ -7794,7 +7803,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { cancelled: true, phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend("Acao cancelada. Nada foi alterado.", "cancellation_result");
-        return { ok: true, cancelled: true, executed: false, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ cancelled: true, responseDelivered });
       }
 
       const pendingEntry = previewDecision.code
@@ -7822,7 +7831,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
             : "Não há nenhuma operação aguardando confirmação.",
           expired ? "confirmation_expired" : "confirmation_missing",
         );
-        return { ok: true, executed: false, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ responseDelivered });
       }
       const [pendingKey, pending] = pendingEntry;
       pending.used = true;
@@ -7858,7 +7867,9 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           : String(executionRecord?.message ?? "Nao foi possivel confirmar essa acao."),
         "confirmation_result",
       );
-      return { ok: true, executed, responseDelivered };
+      return executed
+        ? { ok: true, executed: true, responseDelivered }
+        : buildAiWhatsappPreviewOnlyResponse({ responseDelivered });
     }
 
     const activePendingForCorrection = getAiWhatsappActivePendingCommands(whatsappContext, message.senderPhone);
@@ -7875,7 +7886,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           after: { result: "AMBIGUOUS", intent: previousPending.intent, phone: message.maskedPhone },
         });
         const responseDelivered = await safeSend(correction.message, "entity_clarification");
-        return { ok: true, corrected: false, ambiguous: true, executed: false, responseDelivered };
+        return buildAiWhatsappPreviewOnlyResponse({ corrected: false, ambiguous: true, responseDelivered });
       }
       if (correction.status === "valid") {
         const parsed = buildAiWhatsappCorrectionParseResult(previousPending, correction);
@@ -7904,7 +7915,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
             correctedPreview.executionMessage ?? formatAiWhatsappEntityClarification(correctedPreview),
             "entity_clarification",
           );
-          return { ok: true, corrected: false, executed: false, intent: previousPending.intent, responseDelivered };
+          return buildAiWhatsappPreviewOnlyResponse({ corrected: false, intent: previousPending.intent, responseDelivered });
         }
 
         const nextPending: AiWhatsappPendingCommand = {
@@ -7943,15 +7954,12 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           `Atualizei a prévia. Confira os dados e confirme novamente.\n\n${formatAiWhatsappPreview(correctedPreview)}`,
           audioTranscript ? "audio_preview" : "text_preview",
         );
-        return {
-          ok: true,
-          mode: "preview_only",
+        return buildAiWhatsappPreviewOnlyResponse({
           intent: correctedPreview.intent,
           corrected: true,
-          executed: false,
           audio: Boolean(audioTranscript),
           responseDelivered,
-        };
+        });
       }
 
       await safeAudit({
@@ -7965,7 +7973,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
         "Já existe uma operação aguardando confirmação. Você quer CANCELAR a prévia atual e iniciar esse novo pedido?",
         "entity_clarification",
       );
-      return { ok: true, pendingPreserved: true, executed: false, responseDelivered };
+      return buildAiWhatsappPreviewOnlyResponse({ pendingPreserved: true, responseDelivered });
     }
 
     await safeAudit({
@@ -8208,7 +8216,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           : audioAssistance ? formatAiWhatsappAudioParserFailure() : formatAiWhatsappGuidance(),
         temporaryFailure ? "temporary_parser_failure" : "guidance_parser_failure",
       );
-      return { ok: true, executed: false, unavailable: true, reason, responseDelivered };
+      return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason, responseDelivered });
     }
     if (audioAssistance?.provider.startsWith("local_whisper:")) {
       applyLocalAudioFieldSafety(preview, audioAssistance.canonicalization);
@@ -8419,7 +8427,9 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           : preview.executionMessage ?? formatAiWhatsappEntityClarification(preview),
         preview.intent === "unknown" ? "guidance_unsupported_intent" : "entity_clarification",
       );
-      return { ok: true, executed: false, intent: preview.intent, responseDelivered };
+      return preview.intent === "unknown"
+        ? { ok: true, executed: false, intent: preview.intent, responseDelivered }
+        : buildAiWhatsappPreviewOnlyResponse({ intent: preview.intent, responseDelivered });
     }
 
     const code = generateAiWhatsappCode();
@@ -8475,7 +8485,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       audioTranscript ? formatAiWhatsappAudioPreview(audioTranscript, preview) : formatAiWhatsappPreview(preview),
       audioTranscript ? "audio_preview" : "text_preview",
     );
-    return { ok: true, mode: "preview_only", intent: preview.intent, executed: false, audio: Boolean(audioTranscript), responseDelivered };
+    return buildAiWhatsappPreviewOnlyResponse({ intent: preview.intent, audio: Boolean(audioTranscript), responseDelivered });
     } catch {
       app.log.error({ event: "ai.whatsapp.unexpected_failure", phone: message.maskedPhone });
       await safeAudit({
@@ -8486,7 +8496,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
         after: { reason: "webhook_unexpected_failure", phone: message.maskedPhone },
       });
       const responseDelivered = await safeSend(formatAiWhatsappTemporaryFailure(), "unexpected_failure");
-      return { ok: true, executed: false, unavailable: true, reason: "webhook_unexpected_failure", responseDelivered };
+      return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason: "webhook_unexpected_failure", responseDelivered });
     }
   });
 
