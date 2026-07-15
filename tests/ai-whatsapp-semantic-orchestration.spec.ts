@@ -220,19 +220,22 @@ describe("orquestracao semantica real do WhatsApp", () => {
     }
 
     const geminiCalls = fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/"));
-    expect(geminiCalls).toHaveLength(cases.length);
+    expect(geminiCalls).toHaveLength(cases.length - 2);
     const structuredCalls = geminiCalls.filter(([, init]) => {
       const body = JSON.parse(String((init as RequestInit).body ?? "{}"));
       return body.generationConfig?.responseMimeType === "application/json"
         && body.generationConfig?.responseJsonSchema?.properties?.canonicalTime
         && body.generationConfig?.responseJsonSchema?.properties?.confidence;
     });
-    expect(structuredCalls.length).toBeGreaterThanOrEqual(50);
+    expect(structuredCalls.length).toBeGreaterThanOrEqual(cases.length - 2);
 
     const audit = await app.inject({ method: "GET", url: "/audit/events?unitId=unit-01&limit=500", headers: { authorization: `Bearer ${token}` } });
     const observed = (audit.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>).find(
       (event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "gemini",
     );
+    expect((audit.json().events as Array<{ action: string; afterJson?: Record<string, unknown> }>).some(
+      (event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "deterministic",
+    )).toBe(true);
     expect(observed?.afterJson?.fieldDiagnostics).toMatchObject({
       clientName: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
       serviceNames: { confidence: 0.95, source: "gemini_validated", status: "accepted" },

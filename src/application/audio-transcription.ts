@@ -20,6 +20,8 @@ const GEMINI_AUDIO_TRANSCRIPTION_RECENT_CALL_WINDOW_MS = 60_000;
 export type AudioTranscriptionDiagnostics = {
   providerCalled: boolean;
   durationMs: number;
+  passCount?: number;
+  vadResult?: "speech" | "silence" | "unknown";
   httpStatus?: number;
   responseFingerprint?: AudioTranscriptionResponseFingerprint;
   attemptCount?: number;
@@ -67,8 +69,45 @@ export type AudioTranscriptionResult = {
   normalizedMimetype?: string;
 };
 
+export type AudioTranscriptionWarmupResult = {
+  ready: true;
+  durationMs: number;
+  provider: string;
+  model?: string;
+};
+
+export type AudioTranscriptionInput = {
+  audio: Buffer;
+  mimetype: string;
+  correlationId?: string;
+  initialPrompt?: string;
+  pass?: 1 | 2;
+  timeoutMs?: number;
+};
+
 export interface AudioTranscriptionService {
-  transcribe(input: { audio: Buffer; mimetype: string; correlationId?: string }): Promise<AudioTranscriptionResult>;
+  transcribe(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult>;
+  warmUp?(): Promise<AudioTranscriptionWarmupResult>;
+}
+
+export function isApprovedLocalWhisperModelPath(modelPath: string) {
+  return /(?:large[-_.]?v3[-_.]?)?turbo.*q5[_-]?0/i.test(path.basename(modelPath));
+}
+
+export function buildLocalWhisperArgs(input: {
+  modelPath: string;
+  vadModelPath: string;
+  outputBase: string;
+  initialPrompt?: string;
+}) {
+  const prompt = String(input.initialPrompt ?? "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 1_500);
+  return [
+    "-m", input.modelPath, "-f", "-", "-l", "pt", "-p", "1", "-bs", "1", "-bo", "1", "-tp", "0",
+    "-nf", "-nt", "-np", "-sns", "--vad", "-vm", input.vadModelPath, "-vt", "0.5",
+    "-vspd", "250", "-vsd", "350", "-vp", "80",
+    ...(prompt ? ["--prompt", prompt] : []),
+    "-otxt", "-of", input.outputBase,
+  ];
 }
 
 type GeminiAudioTranscriptionRuntime = ResilientProviderRuntime;
@@ -375,7 +414,7 @@ export class GeminiAudioTranscriptionService implements AudioTranscriptionServic
     };
   }
 
-  async transcribe(input: { audio: Buffer; mimetype: string; correlationId?: string }): Promise<AudioTranscriptionResult> {
+  async transcribe(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult> {
     if (!input.audio.length || !input.mimetype.trim()) throw new AudioTranscriptionError("audio_transcription_failed");
     const startedAt = this.runtime.now();
     if (startedAt < this.circuitOpenUntil) {
@@ -494,8 +533,31 @@ export class GeminiAudioTranscriptionService implements AudioTranscriptionServic
   }
 }
 
+function buildSilentPcmWav(durationMs = 500) {
+  const sampleRate = 16_000;
+  const bytesPerSample = 2;
+  const sampleCount = Math.ceil(sampleRate * durationMs / 1_000);
+  const dataSize = sampleCount * bytesPerSample;
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * bytesPerSample, 28);
+  wav.writeUInt16LE(bytesPerSample, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(dataSize, 40);
+  return wav;
+}
+
 export class LocalWhisperAudioTranscriptionService implements AudioTranscriptionService {
   private active = false;
+  private warmupPromise?: Promise<AudioTranscriptionWarmupResult>;
 
   constructor(
     private readonly ffmpegPath: string,
@@ -504,13 +566,60 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
     private readonly vadModelPath: string,
     private readonly timeoutMs = 20_000,
     private readonly prompt = "Barbearia. Preserve nomes proprios, servicos, produtos, datas e horarios.",
+    private readonly warmupTimeoutMs = 90_000,
   ) {}
 
-  async transcribe(input: { audio: Buffer; mimetype: string; correlationId?: string }): Promise<AudioTranscriptionResult> {
+  async transcribe(input: AudioTranscriptionInput): Promise<AudioTranscriptionResult> {
+    return await this.runTranscription(input, this.timeoutMs);
+  }
+
+  async warmUp(): Promise<AudioTranscriptionWarmupResult> {
+    if (!this.warmupPromise) {
+      this.warmupPromise = this.performWarmUp();
+    }
+    return await this.warmupPromise;
+  }
+
+  private async performWarmUp(): Promise<AudioTranscriptionWarmupResult> {
+    const startedAt = Date.now();
+    try {
+      const result = await this.runTranscription({
+        audio: buildSilentPcmWav(),
+        mimetype: "audio/wav",
+        pass: 1,
+        timeoutMs: this.warmupTimeoutMs,
+      }, this.warmupTimeoutMs);
+      return {
+        ready: true,
+        durationMs: Date.now() - startedAt,
+        provider: result.provider,
+        model: result.diagnostics?.model,
+      };
+    } catch (error) {
+      if (error instanceof AudioTranscriptionError
+        && error.reason === "audio_transcription_no_speech"
+        && error.diagnostics.providerCalled) {
+        return {
+          ready: true,
+          durationMs: Date.now() - startedAt,
+          provider: `local_whisper:${path.basename(this.modelPath)}`,
+          model: error.diagnostics.model,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async runTranscription(input: AudioTranscriptionInput, timeoutLimitMs: number): Promise<AudioTranscriptionResult> {
     if (!input.audio.length || !input.mimetype.trim()) throw new AudioTranscriptionError("audio_transcription_failed");
     if (this.active) throw new AudioTranscriptionError("audio_transcription_unavailable", "ASR local ocupado; concorrencia configurada em uma execucao.");
     this.active = true;
     const startedAt = Date.now();
+    const timeoutMs = Math.max(1_000, Math.min(timeoutLimitMs, input.timeoutMs ?? timeoutLimitMs));
+    const initialPrompt = String(input.initialPrompt ?? this.prompt)
+      .replace(/[\r\n\t]+/g, " ")
+      .trim()
+      .slice(0, 1_500);
     const workDir = path.join(os.tmpdir(), `software-barbearia-asr-${randomUUID()}`);
     const outputBase = path.join(workDir, "transcript");
     let ffmpeg: ChildProcessWithoutNullStreams | undefined;
@@ -521,11 +630,16 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
         "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ar", "16000", "-ac", "1",
         "-c:a", "pcm_s16le", "-f", "wav", "pipe:1",
       ], { windowsHide: true });
-      whisper = spawn(this.whisperPath, [
-        "-m", this.modelPath, "-f", "-", "-l", "pt", "-p", "1", "-bs", "1", "-bo", "1", "-tp", "0",
-        "-nf", "-nt", "-np", "-sns", "--vad", "-vm", this.vadModelPath, "-vt", "0.5",
-        "-vspd", "250", "-vsd", "350", "-vp", "80", "--prompt", this.prompt, "-otxt", "-of", outputBase,
-      ], { windowsHide: true });
+      const whisperArgs = buildLocalWhisperArgs({
+        modelPath: this.modelPath,
+        vadModelPath: this.vadModelPath,
+        outputBase,
+        initialPrompt,
+      });
+      whisper = spawn(this.whisperPath, whisperArgs, { windowsHide: true });
+      ffmpeg.stderr.resume();
+      whisper.stdout.resume();
+      whisper.stderr.resume();
       ffmpeg.stdout.pipe(whisper.stdin);
       ffmpeg.stdin.end(input.audio);
 
@@ -541,7 +655,7 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
           ffmpeg?.kill();
           whisper?.kill();
           finish(Object.assign(new Error("ASR local timeout"), { code: "LOCAL_ASR_TIMEOUT" }));
-        }, this.timeoutMs);
+        }, timeoutMs);
         ffmpeg?.once("error", finish);
         whisper?.once("error", finish);
         whisper?.once("close", (code) => code === 0 ? finish() : finish(new Error(`whisper.cpp exit ${code ?? "unknown"}`)));
@@ -551,8 +665,10 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
       const diagnostics: AudioTranscriptionDiagnostics = {
         providerCalled: true,
         durationMs: Date.now() - startedAt,
+        passCount: input.pass ?? 1,
+        vadResult: transcript ? "speech" : "silence",
         attemptCount: 1,
-        totalBudgetMs: this.timeoutMs,
+        totalBudgetMs: timeoutMs,
         model: path.basename(this.modelPath),
         endpoint: "local_process",
       };
@@ -572,8 +688,10 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
         {
           providerCalled: Boolean(ffmpeg && whisper),
           durationMs: Date.now() - startedAt,
+          passCount: input.pass ?? 1,
+          vadResult: "unknown",
           attemptCount: ffmpeg && whisper ? 1 : 0,
-          totalBudgetMs: this.timeoutMs,
+          totalBudgetMs: timeoutMs,
           model: path.basename(this.modelPath),
           endpoint: "local_process",
         },
@@ -617,13 +735,16 @@ export function createAudioTranscriptionServiceFromEnv(): AudioTranscriptionServ
     const modelPath = process.env.LOCAL_WHISPER_MODEL_PATH?.trim();
     const vadModelPath = process.env.LOCAL_WHISPER_VAD_MODEL_PATH?.trim();
     if (!ffmpegPath || !whisperPath || !modelPath || !vadModelPath) return null;
+    if (process.env.NODE_ENV !== "test" && !isApprovedLocalWhisperModelPath(modelPath)) return null;
+    if (String(process.env.LOCAL_WHISPER_GPU_ENABLED ?? "true").trim().toLowerCase() !== "true") return null;
     return new LocalWhisperAudioTranscriptionService(
       ffmpegPath,
       whisperPath,
       modelPath,
       vadModelPath,
-      Math.min(20_000, getPositiveInteger(process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS, 20_000)),
+      20_000,
       process.env.LOCAL_WHISPER_PROMPT?.trim() || undefined,
+      Math.max(20_000, Math.min(120_000, getPositiveInteger(process.env.LOCAL_WHISPER_WARMUP_TIMEOUT_MS, 90_000))),
     );
   }
   if (provider !== "gemini") return null;

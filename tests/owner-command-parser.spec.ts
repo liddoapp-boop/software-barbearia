@@ -505,6 +505,30 @@ describe("parser textual Gemini tipado", () => {
     });
   });
 
+  it.each([
+    ["Registrar venda de 1 Pomada com pagamento Pix", "Pomada", 1],
+    ["Vender 2 Gel no Pix", "Gel", 2],
+  ])("aceita venda avulsa sem tornar cliente obrigatorio: %s", (message, productName, quantity) => {
+    const saleContext: OwnerCommandContext = {
+      ...context,
+      products: [...context.products, { name: "Gel", category: "Finalizacao" }],
+    };
+
+    expect(parseDeterministicOwnerCommand({ context: saleContext, message })).toMatchObject({
+      intent: "sell_product",
+      draft: { clientName: null, productName, quantity, paymentMethod: "Pix" },
+      missingFields: [],
+    });
+  });
+
+  it("pergunta somente produto quando a venda avulsa informa apenas pagamento", () => {
+    expect(parseDeterministicOwnerCommand({ context, message: "Registrar uma venda no Pix" })).toMatchObject({
+      intent: "sell_product",
+      draft: { clientName: null, productName: "", quantity: 1, paymentMethod: "Pix" },
+      missingFields: ["productName"],
+    });
+  });
+
   it("mantem comando sem pagamento incompleto, sem inventar campo", () => {
     expect(parseDeterministicOwnerCommand({ context, message: "Vendi uma pomada para Joao da Silva." })).toMatchObject({
       draft: { clientName: "Joao da Silva", paymentMethod: undefined },

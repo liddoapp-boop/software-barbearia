@@ -15,10 +15,17 @@ export type OwnerCommandContext = {
   screenContext?: string;
   now: Date;
   timezone: string;
-  services: Array<{ name: string; category?: string | null; price?: number; durationMin?: number }>;
+  services: Array<{
+    id?: string;
+    name: string;
+    category?: string | null;
+    price?: number;
+    durationMin?: number;
+    enabledProfessionalIds?: string[];
+  }>;
   products: Array<{ name: string; category?: string | null; salePrice?: number; stockQty?: number }>;
   paymentMethods: Array<{ name: string; isDefault?: boolean }>;
-  professionals: Array<{ name: string }>;
+  professionals: Array<{ id?: string; name: string }>;
 };
 
 export type OwnerCommandParseInput = {
@@ -76,6 +83,11 @@ export type OwnerCommandFallbackReason =
   | "local_llama_empty_response"
   | "local_llama_invalid_json"
   | "local_llama_invalid_schema"
+  | "deterministic_no_match"
+  | "deterministic_conflict"
+  | "invalid_client_boundary"
+  | "missing_required_fields"
+  | "grounding_failure"
   | "parser_error";
 
 export class OwnerCommandParserError extends Error {
@@ -277,10 +289,15 @@ function buildSafeContext(context: OwnerCommandContext) {
     screenContext: context.screenContext || "unknown",
     now: context.now.toISOString(),
     timezone: context.timezone,
-    services: context.services.slice(0, 80),
+    services: context.services.slice(0, 80).map(({ name, category, price, durationMin }) => ({
+      name,
+      category,
+      price,
+      durationMin,
+    })),
     products: context.products.slice(0, 80),
     paymentMethods: context.paymentMethods.slice(0, 20),
-    professionals: context.professionals.slice(0, 40),
+    professionals: context.professionals.slice(0, 40).map(({ name }) => ({ name })),
   };
 }
 
@@ -590,6 +607,10 @@ export function getDeterministicDateRecognitionType(message: string, now: Date, 
   return recognizeDeterministicDate(message, now, timezone)?.type;
 }
 
+export function recognizeOwnerCommandDate(message: string, now: Date, timezone: string) {
+  return recognizeDeterministicDate(message, now, timezone);
+}
+
 type DeterministicTimeRecognition = {
   time: string;
   ambiguous?: boolean;
@@ -812,7 +833,9 @@ function extractProductSaleClientName(message: string) {
 }
 
 function extractProductNameFromSaleMessage(message: string) {
-  const match = message.match(/\b(?:vendi|vendeu|venda|vender)\s+(?:(?:um|uma|uns|umas|\d+)\s+)?(.+?)\s+(?:para|pra|pro)\b/i);
+  const match = message.match(
+    /\b(?:vendi|vendeu|venda|vender|registrar\s+(?:uma\s+)?venda(?:\s+de)?)\s+(?:(?:um|uma|uns|umas|\d+)\s+)?(.+?)\s+(?:para|pra|pro)\b/i,
+  );
   if (!match?.[1]) return "";
   const productName = cleanClientName(match[1]);
   return productName ? productName.charAt(0).toUpperCase() + productName.slice(1) : "";
@@ -833,7 +856,7 @@ function cleanScheduleClientName(value: string) {
     .trim();
 }
 
-const operationEntityBoundary = /\s+(?:(?:e\s+|a[ií]\s+)?(?:ele|ela)\s+pagou\b|(?:e\s+|a[ií]\s+)?pagou\s+(?:no|na|em)\b|(?:e\s+|a[ií]\s+)?foi\s+(?:no|na|em)\b|pagamento\s+(?:no|na|em)\b|com\s+pagamento\s+(?:no|na|em)\b|recebi\s+em\b|e\s+marcou\b|para\s+amanh[ãa]\b|com\s+o\s+profissional\b)/i;
+const operationEntityBoundary = /\s+(?:(?:e\s+|a[ií]\s+)?(?:ele|ela)\s+pagou\b|(?:e\s+|a[ií]\s+)?pagou\s+(?:no|na|em)\b|(?:e\s+|a[ií]\s+)?foi\s+(?:no|na|em)\b|pagamento\s+(?:no|na|em)\b|com\s+pagamento\b|recebi\s+em\b|e\s+marcou\b|para\s+amanh[ãa]\b|com\s+o\s+profissional\b)/i;
 
 export function getOwnerCommandBoundaryObservation(message: string) {
   const candidate = message.match(/\b(?:para|pra|pro)\s+(.+?)(?=[,.;]|$)/i)?.[1] ?? "";
@@ -847,30 +870,82 @@ function delimitOperationEntity(value: string, cleaner = cleanClientName) {
   return cleaner(match ? value.slice(0, match.index) : value);
 }
 
+// These forms are only consumed at the command boundary. In particular, "Marco"
+// is never rewritten globally, so it remains a valid client after "para".
+const deterministicScheduleActionPattern = "(?:agenda|agendo|agende|agendar|marca|marco|marque|marcar|coloca|coloco|coloque|colocar|p(?:õe|oe)|ponho|ponha|bota|boto|bote|botar)";
+
+function hasServiceRoot(value: string, serviceName: string) {
+  const serviceRoots = normalizeMatchText(serviceName)
+    .split(" ")
+    .filter((word) => word.length >= 4)
+    .map((word) => word.slice(0, 4));
+  const valueRoots = new Set(
+    normalizeMatchText(value)
+      .split(" ")
+      .filter((word) => word.length >= 4)
+      .map((word) => word.slice(0, 4)),
+  );
+  return serviceRoots.some((root) => valueRoots.has(root));
+}
+
 function extractClientName(message: string, serviceName?: string) {
-  const dateMarker = `(?:amanh[ãa]|hoje|na\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|no\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|dia\\s+\\d{1,2}(?:\\/\\d{1,2})?|dia\\s+${spokenDayPattern}|(?:dia\\s+)?${spokenDayPattern}\\s+(?:de|do)\\s+${spokenMonthPattern}|[àa]s\\s*\\d{1,2})`;
-  if (serviceName) {
-    const servicePattern = escapeRegex(serviceName);
-    const serviceBeforeClient = new RegExp(`\\b${servicePattern}\\b\\s+(?:para|pra|pro)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
-    const serviceBeforeMatch = message.match(serviceBeforeClient);
-    if (serviceBeforeMatch?.[1]) return delimitOperationEntity(serviceBeforeMatch[1], cleanScheduleClientName);
-    const serviceBeforeClientAtEnd = new RegExp(`\\b${servicePattern}\\b\\s+(?:para|pra|pro)\\s+(.+?)(?=[,.;!?]*$)`, "i");
-    const trailingMatch = message.match(serviceBeforeClientAtEnd);
-    if (trailingMatch?.[1] && !new RegExp(`^(?:${dateMarker})`, "i").test(trailingMatch[1].trim())) {
-      return delimitOperationEntity(trailingMatch[1], cleanScheduleClientName);
+  const spokenClockBoundaryPattern = spokenClockNumberPattern.replace(/tres/g, "tr[eê]s");
+  const dateMarker = `(?:amanh[ãa]|hoje|na\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|no\\s+[a-zA-ZçÇãÃáÁàÀâÂéÉêÊíÍóÓôÔõÕúÚ]+|dia\\s+\\d{1,2}(?:\\/\\d{1,2})?|dia\\s+${spokenDayPattern}|(?:dia\\s+)?${spokenDayPattern}\\s+(?:de|do)\\s+${spokenMonthPattern}|[àa]s\\s*(?:\\d{1,2}|${spokenClockBoundaryPattern}))`;
+  const fieldBoundary = `(?:${dateMarker}|(?:data\\s*)?\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|hor[áa]rio\\b|com\\b)`;
+  const cleanCandidate = (value: string) => {
+    const beforeNextField = value.split(new RegExp(`\\s+(?=${fieldBoundary})`, "i"))[0] ?? "";
+    const candidate = delimitOperationEntity(beforeNextField, cleanScheduleClientName);
+    const normalizedCandidate = normalizeMatchText(candidate);
+    if (!normalizedCandidate
+      || (serviceName && (normalizedCandidate === normalizeMatchText(serviceName) || hasServiceRoot(candidate, serviceName)))) {
+      return "";
     }
-  }
-
-  const clientBeforeDate = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?=${dateMarker})`, "i");
-  const clientBeforeDateMatch = message.match(clientBeforeDate);
-  if (clientBeforeDateMatch?.[1]) return delimitOperationEntity(clientBeforeDateMatch[1], cleanScheduleClientName);
+    return candidate;
+  };
 
   if (serviceName) {
     const servicePattern = escapeRegex(serviceName);
-    const clientBeforeService = new RegExp(`^(?:agenda|agende|agendar|marca|marque|marcar)\\s+(.+?)\\s+(?:para|pra|pro)\\s+${servicePattern}\\b`, "i");
+    const clientBeforeService = new RegExp(`^${deterministicScheduleActionPattern}\\s+(.+?)\\s+(?:para|pra|pro)\\s+${servicePattern}\\b`, "i");
     const clientBeforeServiceMatch = message.match(clientBeforeService);
-    if (clientBeforeServiceMatch?.[1]) return delimitOperationEntity(clientBeforeServiceMatch[1], cleanScheduleClientName);
+    if (clientBeforeServiceMatch?.[1]) return cleanCandidate(clientBeforeServiceMatch[1]);
+
+    const naturalClientBeforeService = new RegExp(
+      `^${deterministicScheduleActionPattern}\\s+(.+?)\\s+(?:para|pra|pro)\\s+(.+)$`,
+      "i",
+    );
+    const naturalClientBeforeServiceMatch = message.match(naturalClientBeforeService);
+    if (naturalClientBeforeServiceMatch?.[1]
+      && naturalClientBeforeServiceMatch[2]
+      && hasServiceRoot(naturalClientBeforeServiceMatch[2], serviceName)) {
+      return cleanCandidate(naturalClientBeforeServiceMatch[1]);
+    }
+
+    const serviceBeforeClient = new RegExp(`\\b${servicePattern}\\b\\s+(?:para|pra|pro)\\s+(.+)$`, "i");
+    const serviceBeforeMatch = message.match(serviceBeforeClient);
+    if (serviceBeforeMatch?.[1]) {
+      const candidate = cleanCandidate(serviceBeforeMatch[1]);
+      if (candidate) return candidate;
+    }
+
+    const serviceThenClient = new RegExp(`\\b${servicePattern}\\b[\\s\\S]*\\s(?:para|pra|pro)\\s+(.+)$`, "i");
+    const serviceThenClientMatch = message.match(serviceThenClient);
+    if (serviceThenClientMatch?.[1]) {
+      const candidate = cleanCandidate(serviceThenClientMatch[1]);
+      if (candidate) return candidate;
+    }
+
+    const clientAfterTemporalField = new RegExp(`\\b${servicePattern}\\b[\\s\\S]*?(?:${dateMarker})\\s+(?:para|pra|pro)\\s+(.+)$`, "i");
+    const clientAfterTemporalFieldMatch = message.match(clientAfterTemporalField);
+    if (clientAfterTemporalFieldMatch?.[1]) return cleanCandidate(clientAfterTemporalFieldMatch[1]);
   }
+
+  const directClientAfterAction = new RegExp(`^${deterministicScheduleActionPattern}\\s+(?:para|pra|pro)\\s+(.+)$`, "i");
+  const directClientAfterActionMatch = message.match(directClientAfterAction);
+  if (directClientAfterActionMatch?.[1]) return cleanCandidate(directClientAfterActionMatch[1]);
+
+  const clientBeforeField = new RegExp(`^${deterministicScheduleActionPattern}\\s+(.+?)\\s+(?=${fieldBoundary})`, "i");
+  const clientBeforeFieldMatch = message.match(clientBeforeField);
+  if (clientBeforeFieldMatch?.[1]) return cleanCandidate(clientBeforeFieldMatch[1]);
   return "";
 }
 
@@ -878,16 +953,27 @@ const scheduleIntentCues = [
   "agendar",
   "agende",
   "agenda",
+  "agendo",
   "marcar",
   "marque",
   "marca",
+  "marco",
   "reservar",
   "reserve",
   "reserva",
   "coloca",
+  "coloco",
+  "coloque",
   "colocar",
   "coloca na agenda",
   "colocar na agenda",
+  "poe",
+  "ponho",
+  "ponha",
+  "bota",
+  "boto",
+  "bote",
+  "botar",
   "deixa marcado",
   "deixar marcado",
   "encaixar",
@@ -902,12 +988,19 @@ function hasBroadScheduleIntent(input: OwnerCommandParseInput) {
   const message = normalizeMatchText(input.message).trim();
   const normalized = ` ${message} `;
   if (/^agenda\s+(?:do|da|dos|das)\b/.test(message)) return false;
+  if (/\b(?:venda|vendi|vender|produto|pagamento|pagou|pix|dinheiro|cartao|preco|valor)\b/.test(message)) return false;
   if (scheduleIntentCues.some((cue) => {
     if (cue.includes(" ")) return normalized.includes(` ${cue} `);
     if (message === cue || message.startsWith(`${cue} `)) return true;
     return new RegExp(`\\b(?:pode|consegue|quero|preciso|favor)\\s+(?:me\\s+)?${cue}\\b`).test(message);
   })) return true;
   const serviceName = findServiceName(input.message, input.context);
+  const hasTemporalReference = Boolean(
+    recognizeDeterministicDate(input.message, input.context.now, input.context.timezone || "America/Sao_Paulo")
+    || recognizeDeterministicTime(input.message),
+  );
+  const hasClientMarker = /\b(?:para|pra|pro)\s+(?:(?:o|a)\s+)?[\p{L}][\p{L}\s'-]+/iu.test(input.message);
+  if (serviceName && hasTemporalReference && hasClientMarker) return true;
   return Boolean(serviceName && /\b(vai|quer|precisa)\b/.test(normalized));
 }
 
@@ -919,10 +1012,31 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
   const date = parseDeterministicDate(input.message, input.context.now, input.context.timezone || "America/Sao_Paulo");
   const timeRecognition = recognizeDeterministicTime(input.message);
   const time = timeRecognition?.time ?? "";
-  const professionalName = input.context.professionals.length === 1 ? input.context.professionals[0]?.name : undefined;
+  const matchingServices = serviceName
+    ? input.context.services.filter((item) =>
+        normalizeMatchText(item.name) === normalizeMatchText(serviceName) || hasServiceRoot(item.name, serviceName))
+    : [];
+  const service = matchingServices.length === 1 ? matchingServices[0] : undefined;
+  const configuredProfessionalIds = service?.enabledProfessionalIds;
+  const eligibleProfessionals = serviceName
+    ? Array.isArray(configuredProfessionalIds) && configuredProfessionalIds.length
+      ? input.context.professionals.filter((professional) => professional.id && configuredProfessionalIds.includes(professional.id))
+      : input.context.professionals
+    : [];
+  const professionalName = serviceName && eligibleProfessionals.length === 1
+    ? eligibleProfessionals[0]?.name
+    : undefined;
+  const professionalReason = !serviceName
+    ? undefined
+    : eligibleProfessionals.length === 0
+      ? "no_eligible_professional"
+      : eligibleProfessionals.length > 1
+        ? "multiple_eligible_professionals"
+        : undefined;
   const missingFields = [
     clientName ? "" : "clientName",
     serviceName ? "" : "serviceNames",
+    serviceName && !professionalName ? "professionalName" : "",
     date ? "" : "date",
     time ? "" : "time",
   ].filter(Boolean);
@@ -957,13 +1071,19 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
     fieldDiagnostics: {
       clientName: { confidence: clientName ? 0.98 : 0, source: "deterministic", status: clientName ? "accepted" : "missing" },
       serviceNames: { confidence: serviceName ? 0.98 : 0, source: "deterministic", status: serviceName ? "accepted" : "missing" },
-      professionalName: { confidence: professionalName ? 1 : 0, source: "context_default", status: professionalName ? "accepted" : "missing" },
+      professionalName: {
+        confidence: professionalName ? 1 : 0,
+        source: "context_default",
+        status: professionalName ? "accepted" : "missing",
+        reason: professionalReason,
+      },
       date: { confidence: date ? 0.99 : 0, source: "deterministic", status: date ? "accepted" : "missing" },
       time: {
         confidence: time ? 0.99 : timeRecognition?.ambiguous ? 0.5 : 0,
         source: "deterministic",
         status: time ? "accepted" : timeRecognition?.ambiguous ? "ambiguous" : "missing",
         reason: timeRecognition?.ambiguous ? "period_not_specified" : timeRecognition?.invalid ? "invalid_time" : undefined,
+        proposedValue: timeRecognition?.ambiguous ? timeRecognition.candidateTime : undefined,
       },
     },
     ambiguities: timeRecognition?.ambiguous ? [{ field: "time", reason: "period_not_specified" }] : [],
@@ -976,12 +1096,11 @@ function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerComm
   if (!hasSaleVerb) return null;
 
   const productName = findProductName(input.message, input.context) || extractProductNameFromSaleMessage(input.message);
-  const clientName = extractProductSaleClientName(input.message);
+  const clientName = extractProductSaleClientName(input.message) || null;
   const paymentMethod = findPaymentMethodName(input.message, input.context);
   const quantity = parseProductQuantity(input.message);
   const quotedUnitPrice = parseQuotedUnitPrice(input.message);
   const missingFields = [
-    clientName ? "" : "clientName",
     productName ? "" : "productName",
     Number.isInteger(quantity) && quantity > 0 ? "" : "quantity",
     paymentMethod ? "" : "paymentMethod",
@@ -996,7 +1115,9 @@ function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerComm
     confidence: missingFields.length ? 0.62 : 0.84,
     summary: missingFields.length
       ? "Previa de venda de produto incompleta. Revise os campos faltantes."
-      : `Venda de ${quantity} ${productName} para ${clientName} com pagamento ${paymentMethod}.`,
+      : clientName
+        ? `Venda de ${quantity} ${productName} para ${clientName} com pagamento ${paymentMethod}.`
+        : `Venda avulsa de ${quantity} ${productName} com pagamento ${paymentMethod}.`,
     draft: {
       clientName,
       productName,
@@ -1020,12 +1141,18 @@ export function parseCanonicalDeterministicOwnerCommand(input: OwnerCommandParse
   if (!parsed || parsed.intent !== "schedule_appointment") return parsed;
   const trimmed = input.message.trim();
   const hasCanonicalPrefix = /^agendar\b/i.test(trimmed);
+  const hasSafeNaturalPrefix = new RegExp(`^${deterministicScheduleActionPattern}(?:\\s|$)`, "i").test(trimmed);
   const hasInternalSentenceBoundary = /[.!?]\s+\S/.test(trimmed);
   const hasSpeechDisfluency = /(?:^|[,;:]|\s)(?:é|eh|hum|ahn)(?:[,;:]|\s|$)/i.test(trimmed);
+  const normalized = normalizeMatchText(trimmed);
+  const hasApproximateTime = /\b(?:umas|uns|aproximadamente|mais ou menos|por volta)\b/.test(normalized);
+  const hasSubtractiveTime = new RegExp(`\\b${spokenClockNumberPattern}\\s+para\\s+as?\\s+${spokenClockNumberPattern}\\b`).test(normalized);
+  const hasExplicitProfessionalClause = /\bcom\s+(?:o\s+|a\s+)?(?:profissional\s+)?\S+/i.test(trimmed);
   const clientName = typeof parsed.draft.clientName === "string" ? parsed.draft.clientName : "";
   const clientReason = getOwnerCommandClientNameRejectionReason(clientName);
-  if (!hasCanonicalPrefix || hasInternalSentenceBoundary || hasSpeechDisfluency || parsed.missingFields.length
-    || (clientReason && clientReason !== "contains_introducer")) {
+  if ((!hasCanonicalPrefix && !hasSafeNaturalPrefix) || hasInternalSentenceBoundary || hasSpeechDisfluency
+    || hasApproximateTime || hasSubtractiveTime || (!hasCanonicalPrefix && hasExplicitProfessionalClause)
+    || (clientReason && clientReason !== "contains_introducer" && clientReason !== "missing")) {
     return null;
   }
   return parsed;
@@ -1046,6 +1173,7 @@ export function getOwnerCommandClientNameRejectionReason(value: string) {
   const normalized = normalizeMatchText(value);
   if (!normalized) return "missing";
   if (/^(?:para\s+)?(?:o\s+|a\s+)?cliente\b/.test(normalized)) return "contains_introducer";
+  if (/\bou\b/.test(normalized)) return "contains_alternative";
   if (/^(?:e|eh|hum|ahn)\b|\b(?:e|eh|hum|ahn)$/.test(normalized)) return "hesitation_at_boundary";
   if (/\b(?:agendar|agenda|agende|marcar|marca|marque|reservar|reserva|reserve|encaixar|encaixa|faca|faz|quero|preciso|vai|cortar)\b/.test(normalized)) {
     return "contains_action_verb";

@@ -6,7 +6,9 @@ import {
 import {
   AudioTranscriptionError,
   LocalWhisperAudioTranscriptionService,
+  buildLocalWhisperArgs,
   createAudioTranscriptionServiceFromEnv,
+  isApprovedLocalWhisperModelPath,
 } from "../src/application/audio-transcription";
 
 const originalEnv = { ...process.env };
@@ -92,5 +94,38 @@ describe("provedores locais de IA", () => {
     expect(service).toBeInstanceOf(LocalWhisperAudioTranscriptionService);
     await expect(service?.transcribe({ audio: Buffer.from([1, 2, 3]), mimetype: "audio/ogg" }))
       .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
+    await expect(service?.warmUp?.())
+      .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
+  });
+
+  it("fixa o perfil local em turbo Q5_0, GPU, portugues, VAD, temperatura zero e uma thread", () => {
+    expect(isApprovedLocalWhisperModelPath("C:\\models\\ggml-large-v3-turbo-q5_0.bin")).toBe(true);
+    expect(isApprovedLocalWhisperModelPath("C:\\models\\ggml-large-v3-q8_0.bin")).toBe(false);
+    const args = buildLocalWhisperArgs({
+      modelPath: "C:\\models\\ggml-large-v3-turbo-q5_0.bin",
+      vadModelPath: "C:\\models\\ggml-silero-v6.2.0.bin",
+      outputBase: "C:\\temp\\transcript",
+      initialPrompt: `  Pomada\nPix ${"x".repeat(2_000)}  `,
+    });
+    expect(args).toEqual(expect.arrayContaining([
+      "-l", "pt", "-p", "1", "-bs", "1", "-bo", "1", "-tp", "0",
+      "--vad", "-vm", "C:\\models\\ggml-silero-v6.2.0.bin",
+    ]));
+    expect(args).not.toContain("-ng");
+    expect(args[args.indexOf("--prompt") + 1]).toHaveLength(1_500);
+  });
+
+  it("falha fechado em producao fora do modelo aprovado ou com GPU desativada", () => {
+    process.env.NODE_ENV = "production";
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
+    process.env.ASR_PROVIDER = "local_whisper";
+    process.env.LOCAL_WHISPER_FFMPEG_PATH = "ffmpeg.exe";
+    process.env.LOCAL_WHISPER_CLI_PATH = "whisper-cli.exe";
+    process.env.LOCAL_WHISPER_VAD_MODEL_PATH = "ggml-silero-v6.2.0.bin";
+    process.env.LOCAL_WHISPER_MODEL_PATH = "ggml-large-v3-q8_0.bin";
+    expect(createAudioTranscriptionServiceFromEnv()).toBeNull();
+    process.env.LOCAL_WHISPER_MODEL_PATH = "ggml-large-v3-turbo-q5_0.bin";
+    process.env.LOCAL_WHISPER_GPU_ENABLED = "false";
+    expect(createAudioTranscriptionServiceFromEnv()).toBeNull();
   });
 });
