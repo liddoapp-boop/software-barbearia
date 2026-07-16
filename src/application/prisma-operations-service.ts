@@ -107,6 +107,13 @@ import {
   writePrismaAuditEvent,
 } from "./audit-service";
 import { RetentionAiScorer } from "./gemini-retention-scoring";
+import {
+  ConfirmStockEntryInput,
+  StockEntryFailureStage,
+  stockEntryConfirmationResultSchema,
+  stockEntryDraftSchema,
+  stockEntryPreviewSchema,
+} from "./stock-entry";
 
 function asNumber(value: Prisma.Decimal | number | null | undefined): number {
   if (value == null) return 0;
@@ -255,6 +262,7 @@ export class PrismaOperationsService {
     private readonly prisma: PrismaClient,
     private readonly engine = new BarbershopEngine(),
     private readonly retentionAiScorer?: RetentionAiScorer | null,
+    private readonly stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>,
   ) {}
 
   private buildIdempotencyScope(input: {
@@ -6050,6 +6058,170 @@ export class PrismaOperationsService {
     }
 
     return response!;
+  }
+
+  async listStockEntryProducts(input: { unitId: string }) {
+    return await this.prisma.product.findMany({
+      where: { businessId: input.unitId, active: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async confirmStockEntry(input: ConfirmStockEntryInput) {
+    const draft = stockEntryDraftSchema.parse(input.draft);
+    return await this.prisma.$transaction(async (tx) => {
+      const where = {
+        unitId_action_idempotencyKey: {
+          unitId: input.unitId,
+          action: input.previewAction,
+          idempotencyKey: "active",
+        },
+      } as const;
+      const stored = await tx.idempotencyRecord.findUnique({ where });
+      if (!stored || stored.payloadHash !== input.previewPayloadHash || stored.resolution !== input.previewId) {
+        throw new Error("Prévia de entrada inválida ou substituída. Gere uma nova prévia.");
+      }
+      const storedJson = stored.responseJson && typeof stored.responseJson === "object" && !Array.isArray(stored.responseJson)
+        ? stored.responseJson as Record<string, unknown>
+        : {};
+      const preview = stockEntryPreviewSchema.parse(storedJson.preview);
+      if (preview.unitId !== input.unitId || preview.actorId !== input.actorId || preview.id !== input.previewId) {
+        throw new Error("Prévia de entrada não pertence ao owner ou à unidade atual.");
+      }
+      if (hashIdempotencyPayload(preview.draft) !== hashIdempotencyPayload(draft)) {
+        throw new Error("A prévia não corresponde aos dados confirmados.");
+      }
+      if (stored.status === "SUCCEEDED") {
+        const replay = stockEntryConfirmationResultSchema.parse(storedJson.result);
+        return { ...replay, replay: true };
+      }
+      if (new Date(preview.expiresAt).getTime() <= Date.now() || stored.status === "EXPIRED") {
+        throw new Error("A prévia expirou. Envie o pedido novamente.");
+      }
+      if (stored.status !== "PENDING") {
+        throw new Error("Conflito: confirmação de entrada ainda em processamento.");
+      }
+      const claimed = await tx.idempotencyRecord.updateMany({
+        where: {
+          unitId: input.unitId,
+          action: input.previewAction,
+          idempotencyKey: "active",
+          payloadHash: input.previewPayloadHash,
+          resolution: input.previewId,
+          status: "PENDING",
+        },
+        data: { status: "PROCESSING" },
+      });
+      if (claimed.count !== 1) {
+        const replayRecord = await tx.idempotencyRecord.findUnique({ where });
+        const replayJson = replayRecord?.responseJson && typeof replayRecord.responseJson === "object" && !Array.isArray(replayRecord.responseJson)
+          ? replayRecord.responseJson as Record<string, unknown>
+          : {};
+        if (replayRecord?.status === "SUCCEEDED" && replayRecord.resolution === input.previewId) {
+          const replay = stockEntryConfirmationResultSchema.parse(replayJson.result);
+          return { ...replay, replay: true };
+        }
+        throw new Error("Conflito: confirmação de entrada ainda em processamento.");
+      }
+      await this.stockEntryFailureHook?.("after_claim");
+
+      const product = await tx.product.findFirst({
+        where: { id: draft.productId, businessId: input.unitId, active: true },
+        select: { id: true, name: true, stockQty: true },
+      });
+      if (!product) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+      const operationId = input.previewId;
+      const occurredAt = new Date(draft.occurredAt);
+      const movement = await tx.stockMovement.create({
+        data: {
+          id: crypto.randomUUID(),
+          unitId: input.unitId,
+          productId: product.id,
+          movementType: "IN",
+          quantity: draft.quantity,
+          unitCost: new Prisma.Decimal(draft.unitCost),
+          totalCost: new Prisma.Decimal(draft.totalCost),
+          notes: draft.notes ?? null,
+          occurredAt,
+          referenceType: "STOCK_ENTRY",
+          referenceId: operationId,
+        },
+      });
+      const updated = await tx.product.updateMany({
+        where: { id: product.id, businessId: input.unitId, active: true },
+        data: { stockQty: { increment: draft.quantity } },
+      });
+      if (updated.count !== 1) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+      const updatedProduct = await tx.product.findUniqueOrThrow({
+        where: { id: product.id },
+        select: { id: true, name: true, stockQty: true },
+      });
+      await this.stockEntryFailureHook?.("after_stock");
+
+      const financialEntry = draft.registerExpense
+        ? await tx.financialEntry.create({
+            data: {
+              id: crypto.randomUUID(),
+              unitId: input.unitId,
+              kind: "EXPENSE",
+              category: "COMPRA_ESTOQUE",
+              amount: new Prisma.Decimal(draft.totalCost),
+              occurredAt,
+              referenceType: "STOCK_ENTRY",
+              referenceId: operationId,
+              description: `Compra de estoque - ${product.name}`,
+              notes: draft.notes ?? null,
+              idempotencyKey: `stock-entry:${input.previewId}`,
+            },
+          })
+        : null;
+      await this.stockEntryFailureHook?.("after_financial");
+
+      await this.recordCriticalAudit(tx, {
+        ...input.audit,
+        unitId: input.unitId,
+        idempotencyKey: input.previewId,
+        action: "STOCK_ENTRY_CONFIRMED",
+        entity: "stock_entry",
+        entityId: operationId,
+        before: { productId: product.id, stockQty: product.stockQty },
+        after: {
+          productId: product.id,
+          stockQty: updatedProduct.stockQty,
+          quantity: draft.quantity,
+          unitCost: draft.unitCost,
+          totalCost: draft.totalCost,
+          financialExpenseCreated: Boolean(financialEntry),
+          movementId: movement.id,
+        },
+        metadata: { previewId: input.previewId, operationId },
+      });
+      const response = stockEntryConfirmationResultSchema.parse({
+        operationId,
+        previewId: input.previewId,
+        movement: {
+          id: movement.id,
+          productId: movement.productId,
+          quantity: movement.quantity,
+          unitCost: Number(movement.unitCost),
+          totalCost: Number(movement.totalCost),
+          occurredAt: movement.occurredAt.toISOString(),
+        },
+        product: updatedProduct,
+        financialEntry: financialEntry ? { id: financialEntry.id, amount: Number(financialEntry.amount) } : null,
+        replay: false,
+      });
+      await tx.idempotencyRecord.update({
+        where,
+        data: {
+          status: "SUCCEEDED",
+          responseJson: { preview, result: response } as Prisma.InputJsonValue,
+          resolution: operationId,
+        },
+      });
+      return response;
+    });
   }
 
   async registerManualFinancialEntry(input: {

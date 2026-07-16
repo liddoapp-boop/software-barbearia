@@ -821,6 +821,9 @@ model StockMovement {
   productId     String
   movementType  StockMovementType
   quantity      Int
+  unitCost      Decimal?          @db.Decimal(10, 2)
+  totalCost     Decimal?          @db.Decimal(12, 2)
+  notes         String?
   occurredAt    DateTime
   referenceType String
   referenceId   String?

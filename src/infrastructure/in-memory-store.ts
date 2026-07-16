@@ -241,6 +241,7 @@ export class InMemoryStore {
   productSales: ProductSale[] = [];
   refunds: Refund[] = [];
   stockMovements: StockMovement[] = [];
+  aiWhatsappStockEntryPreviews = new Map<string, unknown>();
   inventoryCounts: StockInventoryCount[] = [];
   dailyClosings: DailyClosing[] = [];
   auditEvents: AuditEvent[] = [];

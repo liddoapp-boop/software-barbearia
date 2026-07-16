@@ -109,6 +109,15 @@ import {
   toJsonValue,
 } from "./idempotency";
 import { RetentionAiScorer } from "./gemini-retention-scoring";
+import { toAuditEvent } from "./audit-service";
+import {
+  ConfirmStockEntryInput,
+  StockEntryConfirmationResult,
+  StockEntryFailureStage,
+  StockEntryPreviewRecord,
+  buildStockEntryPreviewStorageKey,
+  stockEntryDraftSchema,
+} from "./stock-entry";
 
 type MemoryIdempotencyRecord = {
   unitId: string;
@@ -194,11 +203,13 @@ export class OperationsService {
   >();
   private readonly dashboardSuggestionTelemetry: DashboardSuggestionTelemetryEvent[] = [];
   private readonly idempotencyRecords = new Map<string, MemoryIdempotencyRecord>();
+  private readonly stockEntryConfirmationsInFlight = new Map<string, Promise<StockEntryConfirmationResult>>();
 
   constructor(
     private readonly store: InMemoryStore,
     private readonly engine = new BarbershopEngine(),
     private readonly retentionAiScorer?: RetentionAiScorer | null,
+    private readonly stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>,
   ) {}
 
   private idempotencyScope(input: {
@@ -3834,6 +3845,148 @@ export class OperationsService {
     };
     this.finishMemoryIdempotency(scope, response);
     return response;
+  }
+
+  listStockEntryProducts(input: { unitId: string }) {
+    return this.store.products
+      .filter((product) => product.active && ((product as Product & { businessId?: string }).businessId ?? "unit-01") === input.unitId)
+      .map((product) => ({ id: product.id, name: product.name }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  }
+
+  async confirmStockEntry(input: ConfirmStockEntryInput): Promise<StockEntryConfirmationResult> {
+    const inFlight = this.stockEntryConfirmationsInFlight.get(input.previewId);
+    if (inFlight) {
+      const result = await inFlight;
+      return { ...result, replay: true };
+    }
+    const confirmation = this.executeStockEntryConfirmation(input);
+    this.stockEntryConfirmationsInFlight.set(input.previewId, confirmation);
+    try {
+      return await confirmation;
+    } finally {
+      this.stockEntryConfirmationsInFlight.delete(input.previewId);
+    }
+  }
+
+  private async executeStockEntryConfirmation(input: ConfirmStockEntryInput): Promise<StockEntryConfirmationResult> {
+    const draft = stockEntryDraftSchema.parse(input.draft);
+    const storageKey = buildStockEntryPreviewStorageKey(input.unitId, input.previewAction);
+    const record = this.store.aiWhatsappStockEntryPreviews.get(storageKey) as StockEntryPreviewRecord | undefined;
+    const validRecord = record
+      && record.preview.id === input.previewId
+      && record.preview.unitId === input.unitId
+      && record.preview.actorId === input.actorId
+      && record.payloadHash === input.previewPayloadHash;
+    if (!validRecord) throw new Error("Prévia de entrada inválida ou substituída. Gere uma nova prévia.");
+    if (record.status === "SUCCEEDED" && record.response) return { ...record.response, replay: true };
+    if (record.status === "EXPIRED" || new Date(record.preview.expiresAt).getTime() <= Date.now()) {
+      record.status = "EXPIRED";
+      throw new Error("A prévia expirou. Envie o pedido novamente.");
+    }
+    if (record.status !== "PENDING") throw new Error("A prévia não está disponível para confirmação.");
+    if (hashIdempotencyPayload(record.preview.draft) !== hashIdempotencyPayload(draft)) {
+      throw new Error("A prévia não corresponde aos dados confirmados.");
+    }
+
+    const product = this.store.products.find((item) =>
+      item.id === draft.productId
+      && item.active
+      && ((item as Product & { businessId?: string }).businessId ?? "unit-01") === input.unitId);
+    if (!product) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+
+    const previousStock = product.stockQty;
+    const movementLength = this.store.stockMovements.length;
+    const financialLength = this.store.financialEntries.length;
+    const auditLength = this.store.auditEvents.length;
+    record.status = "PROCESSING";
+    try {
+      await this.stockEntryFailureHook?.("after_claim");
+      const operationId = input.previewId;
+      const occurredAt = new Date(draft.occurredAt);
+      product.stockQty += draft.quantity;
+      const movement: StockMovement = {
+        id: crypto.randomUUID(),
+        unitId: input.unitId,
+        productId: product.id,
+        movementType: "IN",
+        quantity: draft.quantity,
+        unitCost: draft.unitCost,
+        totalCost: draft.totalCost,
+        notes: draft.notes,
+        occurredAt,
+        referenceType: "STOCK_ENTRY",
+        referenceId: operationId,
+      };
+      this.store.stockMovements.push(movement);
+      await this.stockEntryFailureHook?.("after_stock");
+
+      const financialEntry: FinancialEntry | null = draft.registerExpense
+        ? {
+            id: crypto.randomUUID(),
+            unitId: input.unitId,
+            kind: "EXPENSE",
+            category: "COMPRA_ESTOQUE",
+            amount: draft.totalCost,
+            occurredAt,
+            referenceType: "STOCK_ENTRY",
+            referenceId: operationId,
+            description: `Compra de estoque - ${product.name}`,
+            notes: draft.notes,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }
+        : null;
+      if (financialEntry) this.store.financialEntries.push(financialEntry);
+      await this.stockEntryFailureHook?.("after_financial");
+
+      const audit = toAuditEvent({
+        ...input.audit,
+        unitId: input.unitId,
+        idempotencyKey: input.previewId,
+        action: "STOCK_ENTRY_CONFIRMED",
+        entity: "stock_entry",
+        entityId: operationId,
+        before: { productId: product.id, stockQty: previousStock },
+        after: {
+          productId: product.id,
+          stockQty: product.stockQty,
+          quantity: draft.quantity,
+          unitCost: draft.unitCost,
+          totalCost: draft.totalCost,
+          financialExpenseCreated: Boolean(financialEntry),
+          movementId: movement.id,
+        },
+        metadata: { previewId: input.previewId, operationId },
+      });
+      this.store.auditEvents.push(audit);
+      const response: StockEntryConfirmationResult = {
+        operationId,
+        previewId: input.previewId,
+        movement: {
+          id: movement.id,
+          productId: product.id,
+          quantity: movement.quantity,
+          unitCost: draft.unitCost,
+          totalCost: draft.totalCost,
+          occurredAt: occurredAt.toISOString(),
+        },
+        product: { id: product.id, name: product.name, stockQty: product.stockQty },
+        financialEntry: financialEntry ? { id: financialEntry.id, amount: financialEntry.amount } : null,
+        replay: false,
+      };
+      record.status = "SUCCEEDED";
+      record.response = response;
+      return response;
+    } catch (error) {
+      product.stockQty = previousStock;
+      this.store.stockMovements.splice(movementLength);
+      this.store.financialEntries.splice(financialLength);
+      this.store.auditEvents.splice(auditLength);
+      record.status = "PENDING";
+      delete record.response;
+      throw error;
+    }
   }
 
   registerManualFinancialEntry(input: {

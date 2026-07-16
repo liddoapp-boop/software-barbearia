@@ -5,6 +5,10 @@ import { createApp } from "../src/http/app";
 import { prisma } from "../src/infrastructure/database/prisma";
 import { hashPassword } from "../src/http/security";
 import { buildServiceSetKey } from "../src/domain/appointment-services";
+import { PrismaOperationsService } from "../src/application/prisma-operations-service";
+import { StockEntryPreviewRepository } from "../src/application/stock-entry-preview-repository";
+import { STOCK_ENTRY_PREVIEW_VERSION, StockEntryPreview } from "../src/application/stock-entry";
+import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -3110,6 +3114,98 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(csv.statusCode).toBe(200);
     expect(csv.headers["content-type"]).toContain("text/csv");
     expect(csv.body).toContain("Atendimento finalizado");
+  });
+
+  it("confirma entrada de estoque atomicamente, bloqueia concorrência e reverte falha", async () => {
+    const scenario = await createScenario();
+    const repository = new StockEntryPreviewRepository({
+      backend: "prisma",
+      memoryStore: new InMemoryStore(),
+      prisma,
+    });
+    const now = new Date("2026-07-15T15:00:00.000Z");
+    const makePreview = (registerExpense: boolean): StockEntryPreview => ({
+      version: STOCK_ENTRY_PREVIEW_VERSION,
+      id: crypto.randomUUID(),
+      unitId: scenario.unitId,
+      actorId: "db-owner",
+      phoneFingerprint: "db-phone-fingerprint",
+      draft: {
+        productId: scenario.productId,
+        productName: "Pomada DB",
+        quantity: 8,
+        unitCost: 5,
+        totalCost: 40,
+        occurredAt: "2026-07-15T12:00:00.000-03:00",
+        registerExpense,
+      },
+      createdAt: now.toISOString(),
+      expiresAt: new Date("2099-07-15T15:10:00.000Z").toISOString(),
+    });
+    const audit = (previewId: string) => ({
+      actorId: "db-owner",
+      actorRole: "owner" as const,
+      route: "/webhooks/evolution/whatsapp",
+      method: "POST",
+      requestId: uniqueId("stock-entry-db"),
+      idempotencyKey: previewId,
+    });
+    const initialProduct = await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } });
+    const preview = makePreview(true);
+    const record = await repository.save(preview);
+    const input = {
+      unitId: scenario.unitId,
+      actorId: preview.actorId,
+      previewId: preview.id,
+      previewAction: record.action,
+      previewPayloadHash: record.payloadHash,
+      draft: preview.draft,
+      audit: audit(preview.id),
+    };
+    const service = new PrismaOperationsService(prisma);
+    const confirmations = await Promise.allSettled([
+      service.confirmStockEntry(input),
+      service.confirmStockEntry(input),
+    ]);
+    expect(confirmations.filter((item) => item.status === "fulfilled")).toHaveLength(2);
+    const repeated = await service.confirmStockEntry(input);
+    expect(repeated.replay).toBe(true);
+    const [updatedProduct, movements, expenses, audits] = await Promise.all([
+      prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } }),
+      prisma.stockMovement.findMany({ where: { unitId: scenario.unitId, referenceType: "STOCK_ENTRY", referenceId: preview.id } }),
+      prisma.financialEntry.findMany({ where: { unitId: scenario.unitId, referenceType: "STOCK_ENTRY", referenceId: preview.id } }),
+      prisma.auditLog.findMany({ where: { unitId: scenario.unitId, action: "STOCK_ENTRY_CONFIRMED", entityId: preview.id } }),
+    ]);
+    expect(updatedProduct).toMatchObject({
+      stockQty: initialProduct.stockQty + 8,
+      salePrice: initialProduct.salePrice,
+      costPrice: initialProduct.costPrice,
+    });
+    expect(movements).toHaveLength(1);
+    expect(Number(movements[0].unitCost)).toBe(5);
+    expect(Number(movements[0].totalCost)).toBe(40);
+    expect(expenses).toHaveLength(1);
+    expect(audits).toHaveLength(1);
+
+    const rollbackPreview = makePreview(false);
+    const rollbackRecord = await repository.save(rollbackPreview);
+    const rollbackService = new PrismaOperationsService(prisma, undefined, undefined, (stage) => {
+      if (stage === "after_stock") throw new Error("db_stock_entry_rollback");
+    });
+    const stockBeforeRollback = updatedProduct.stockQty;
+    await expect(rollbackService.confirmStockEntry({
+      ...input,
+      previewId: rollbackPreview.id,
+      previewAction: rollbackRecord.action,
+      previewPayloadHash: rollbackRecord.payloadHash,
+      draft: rollbackPreview.draft,
+      audit: audit(rollbackPreview.id),
+    })).rejects.toThrow("db_stock_entry_rollback");
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(stockBeforeRollback);
+    expect(await prisma.stockMovement.count({ where: { referenceId: rollbackPreview.id } })).toBe(0);
+    expect(await prisma.financialEntry.count({ where: { referenceId: rollbackPreview.id } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { entityId: rollbackPreview.id, action: "STOCK_ENTRY_CONFIRMED" } })).toBe(0);
+    expect((await repository.find({ unitId: scenario.unitId, actorId: rollbackPreview.actorId, phoneFingerprint: rollbackPreview.phoneFingerprint }))?.status).toBe("PENDING");
   });
 }, DB_TEST_TIMEOUT_MS);
 

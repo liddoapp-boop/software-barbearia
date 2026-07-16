@@ -302,7 +302,8 @@ export interface FinancialEntry {
     | "COMMISSION"
     | "APPOINTMENT_REFUND"
     | "PRODUCT_SALE_REFUND"
-    | "CHECKOUT_PAYMENT";
+    | "CHECKOUT_PAYMENT"
+    | "STOCK_ENTRY";
   referenceId?: UUID;
   professionalId?: UUID;
   customerId?: UUID;
@@ -569,6 +570,9 @@ export interface StockMovement {
   productId: UUID;
   movementType: "IN" | "OUT" | "LOSS" | "INTERNAL_USE";
   quantity: number;
+  unitCost?: number;
+  totalCost?: number;
+  notes?: string;
   occurredAt: Date;
   referenceType:
     | "PRODUCT_SALE"
@@ -576,7 +580,8 @@ export interface StockMovement {
     | "ADJUSTMENT"
     | "INTERNAL"
     | "PRODUCT_REFUND"
-    | "INVENTORY_COUNT";
+    | "INVENTORY_COUNT"
+    | "STOCK_ENTRY";
   referenceId?: UUID;
 }
 

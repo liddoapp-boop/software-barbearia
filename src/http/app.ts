@@ -49,6 +49,18 @@ import {
   resolveAiWhatsappEntity,
 } from "../application/whatsapp-entity-resolution";
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
+import { StockEntryPreviewRepository } from "../application/stock-entry-preview-repository";
+import {
+  STOCK_ENTRY_PREVIEW_VERSION,
+  StockEntryDraftWithoutExpense,
+  StockEntryFailureStage,
+  StockEntryPreview,
+  formatStockEntryPreview,
+  interpretStockEntryCommand,
+  looksLikeStockEntryCommand,
+  parseStockEntryFinancialClarificationAnswer,
+  parseStockEntryPreviewDecision,
+} from "../application/stock-entry";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
 import { prisma } from "../infrastructure/database/prisma";
@@ -890,6 +902,7 @@ export function createApp(options: {
   audioTranscriptionService?: AudioTranscriptionService | null;
   ownerCommandParser?: OwnerCommandParser | null;
   readinessProbe?: () => Promise<void>;
+  stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>;
 } = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
@@ -933,8 +946,13 @@ export function createApp(options: {
     : getGeminiAudioTranscriptionTotalBudgetMsFromEnv();
   const operations =
     backend === "prisma"
-      ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
-      : new OperationsService(memoryStore, undefined, retentionAiScorer);
+      ? new PrismaOperationsService(prisma, undefined, retentionAiScorer, options.stockEntryFailureHook)
+      : new OperationsService(memoryStore, undefined, retentionAiScorer, options.stockEntryFailureHook);
+  const stockEntryPreviews = new StockEntryPreviewRepository({
+    backend: backend === "prisma" ? "prisma" : "memory",
+    memoryStore,
+    prisma: backend === "prisma" ? prisma : undefined,
+  });
   const rateLimiter = new MemoryRateLimiter();
   let activeAudioRequests = 0;
   const revokedAccessTokens = new Map<string, number>();
@@ -1794,6 +1812,14 @@ export function createApp(options: {
     origin: "whatsapp_webhook";
   };
 
+  type StockEntryFinancialClarification = {
+    unitId: string;
+    actorId: string;
+    phoneFingerprint: string;
+    draft: StockEntryDraftWithoutExpense;
+    expiresAt: number;
+  };
+
   class AiWhatsappIdentityError extends Error {
     constructor(public readonly reason: "missing_unit_configuration" | "unit_not_found" | "owner_access_missing" | "owner_access_ambiguous") {
       super(reason);
@@ -1819,6 +1845,7 @@ export function createApp(options: {
   const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
   const aiWhatsappExpiredPendingScopes = new Map<string, number>();
   const aiWhatsappClarificationContexts = new Map<string, AiWhatsappClarificationContext>();
+  const stockEntryFinancialClarifications = new Map<string, StockEntryFinancialClarification>();
   const aiWhatsappProcessedWebhookMessages = new Map<string, number>();
   const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
 
@@ -8018,6 +8045,210 @@ export function createApp(options: {
     }
     const normalizedText = commandText.trim();
     const previewDecision = parseAiWhatsappPreviewDecision(normalizedText);
+    const stockEntryDecision = parseStockEntryPreviewDecision(normalizedText);
+    const stockEntryScope = {
+      unitId,
+      actorId,
+      phoneFingerprint: whatsappContext.phoneFingerprint,
+    };
+    const stockEntryFinancialClarificationKey = `${unitId}:${actorId}:${whatsappContext.phoneFingerprint}`;
+    const storedStockEntryFinancialClarification = stockEntryFinancialClarifications.get(stockEntryFinancialClarificationKey);
+    const stockEntryFinancialClarification = storedStockEntryFinancialClarification
+      && storedStockEntryFinancialClarification.expiresAt > Date.now()
+      ? storedStockEntryFinancialClarification
+      : undefined;
+    if (storedStockEntryFinancialClarification && !stockEntryFinancialClarification) {
+      stockEntryFinancialClarifications.delete(stockEntryFinancialClarificationKey);
+    }
+    const currentStockEntry = await stockEntryPreviews.find(stockEntryScope);
+    if (stockEntryDecision && currentStockEntry && !stockEntryFinancialClarification) {
+      if (!webhookReplayKey) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_REJECTED",
+          entity: "stock_entry_command",
+          entityId: message.maskedPhone,
+          after: { result: "SAFE_FAILURE", reason: "missing_webhook_id" },
+        });
+        await finalize("EXECUTION_FAILED");
+        const responseDelivered = await safeSend(
+          "Não foi possível validar o identificador desta mensagem. Envie CONFIRMAR ou CANCELAR novamente.",
+          "confirmation_missing",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", unavailable: true, responseDelivered });
+      }
+      if (currentStockEntry.status === "EXPIRED") {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_PREVIEW_EXPIRED",
+          entity: "stock_entry_preview",
+          entityId: currentStockEntry.preview.id,
+          after: { result: "EXPIRED", previewId: currentStockEntry.preview.id },
+        });
+        await finalize("EXECUTION_FAILED");
+        const responseDelivered = await safeSend("A prévia expirou. Envie o pedido novamente.", "confirmation_expired");
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", expired: true, responseDelivered });
+      }
+      if (stockEntryDecision === "cancel") {
+        const cancelled = currentStockEntry.status === "PENDING"
+          ? await stockEntryPreviews.cancel(currentStockEntry)
+          : false;
+        await safeAudit({
+          unitId,
+          action: cancelled ? "AI_WHATSAPP_STOCK_ENTRY_CANCELLED" : "AI_WHATSAPP_STOCK_ENTRY_CANCEL_REJECTED",
+          entity: "stock_entry_preview",
+          entityId: currentStockEntry.preview.id,
+          after: { cancelled, previewId: currentStockEntry.preview.id },
+        });
+        const responseDelivered = await safeSend(
+          cancelled ? "Ação cancelada. Nada foi alterado." : "Não há entrada de estoque aguardando cancelamento.",
+          "cancellation_result",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", cancelled, responseDelivered });
+      }
+      if (!["PENDING", "SUCCEEDED"].includes(currentStockEntry.status)) {
+        const responseDelivered = await safeSend("Não há entrada de estoque aguardando confirmação.", "confirmation_missing");
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", responseDelivered });
+      }
+      const confirmationStartedAt = Date.now();
+      try {
+        const result = await operations.confirmStockEntry({
+          unitId,
+          actorId,
+          previewId: currentStockEntry.preview.id,
+          previewAction: currentStockEntry.action,
+          previewPayloadHash: currentStockEntry.payloadHash,
+          draft: currentStockEntry.preview.draft,
+          audit: {
+            actorId,
+            actorRole: "owner",
+            route: "/webhooks/evolution/whatsapp",
+            method: "POST",
+            requestId: correlationId,
+            idempotencyKey: currentStockEntry.preview.id,
+          },
+        });
+        app.log.info({
+          event: result.replay ? "stock.entry.idempotent_replay" : "stock.entry.transaction.completed",
+          unitId,
+          previewId: result.previewId,
+          operationId: result.operationId,
+          durationMs: Date.now() - confirmationStartedAt,
+          financialExpenseCreated: Boolean(result.financialEntry),
+        });
+        await safeAudit({
+          unitId,
+          action: result.replay ? "AI_WHATSAPP_STOCK_ENTRY_REPLAYED" : "AI_WHATSAPP_STOCK_ENTRY_CONFIRMED",
+          entity: "stock_entry",
+          entityId: result.operationId,
+          after: {
+            result: result.replay ? "IDEMPOTENT_REPLAY" : "SUCCEEDED",
+            previewId: result.previewId,
+            operationId: result.operationId,
+            durationMs: Date.now() - confirmationStartedAt,
+            financialExpenseCreated: Boolean(result.financialEntry),
+          },
+        });
+        await finalize("SUCCEEDED");
+        const responseDelivered = await safeSend(
+          result.replay
+            ? `Esta entrada já foi confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.`
+            : `Entrada confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.${result.financialEntry ? " Despesa registrada." : " Sem despesa financeira."}`,
+          "confirmation_result",
+        );
+        return { ok: true, executed: true, intent: "stock_entry", replay: result.replay, operationId: result.operationId, responseDelivered };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "stock_entry_failed";
+        app.log.error({
+          event: "stock.entry.transaction.rolled_back",
+          unitId,
+          previewId: currentStockEntry.preview.id,
+          durationMs: Date.now() - confirmationStartedAt,
+          reason: crypto.createHash("sha256").update(reason).digest("hex").slice(0, 12),
+        });
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_ROLLED_BACK",
+          entity: "stock_entry",
+          entityId: currentStockEntry.preview.id,
+          after: { result: "SAFE_FAILURE", previewId: currentStockEntry.preview.id, durationMs: Date.now() - confirmationStartedAt },
+        });
+        await finalize("EXECUTION_FAILED");
+        const responseDelivered = await safeSend("Não foi possível confirmar a entrada. Nada foi alterado; tente confirmar novamente.", "confirmation_result");
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", unavailable: true, responseDelivered });
+      }
+    }
+
+    if (currentStockEntry?.status === "PENDING") {
+      const newStockEntryBlocked = looksLikeStockEntryCommand(normalizedText);
+      const responseDelivered = await safeSend(
+        newStockEntryBlocked
+          ? "Já existe uma entrada de estoque aguardando decisão.\n\nResponda CONFIRMAR ou CANCELAR antes de iniciar outra entrada."
+          : "Já existe uma entrada de estoque aguardando decisão. Responda CONFIRMAR ou CANCELAR.",
+        "entity_clarification",
+      );
+      return buildAiWhatsappPreviewOnlyResponse({
+        intent: "stock_entry",
+        pendingPreserved: true,
+        newStockEntryBlocked,
+        responseDelivered,
+      });
+    }
+    if (stockEntryFinancialClarification && !looksLikeStockEntryCommand(normalizedText)) {
+      if (stockEntryDecision === "cancel") {
+        stockEntryFinancialClarifications.delete(stockEntryFinancialClarificationKey);
+        const responseDelivered = await safeSend("Ação cancelada. Nada foi alterado.", "cancellation_result");
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", cancelled: true, responseDelivered });
+      }
+      const expenseDecision = parseStockEntryFinancialClarificationAnswer(normalizedText);
+      if (expenseDecision === null) {
+        const responseDelivered = await safeSend(
+          "Estou aguardando apenas a decisão financeira desta entrada. Responda Sim ou Não.",
+          "entity_clarification",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", clarification: true, reason: "financial_ambiguous", responseDelivered });
+      }
+      if (!webhookReplayKey) {
+        await finalize("EXECUTION_FAILED");
+        const responseDelivered = await safeSend(
+          "Não foi possível validar o identificador desta mensagem. Responda Sim ou Não novamente.",
+          "entity_clarification",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", unavailable: true, responseDelivered });
+      }
+      const now = new Date();
+      const preview: StockEntryPreview = {
+        version: STOCK_ENTRY_PREVIEW_VERSION,
+        id: crypto.randomUUID(),
+        unitId,
+        actorId,
+        phoneFingerprint: whatsappContext.phoneFingerprint,
+        draft: { ...stockEntryFinancialClarification.draft, registerExpense: expenseDecision },
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + getAiWhatsappTtlMs()).toISOString(),
+      };
+      await stockEntryPreviews.save(preview);
+      stockEntryFinancialClarifications.delete(stockEntryFinancialClarificationKey);
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_STOCK_ENTRY_FINANCIAL_CLARIFIED",
+        entity: "stock_entry_preview",
+        entityId: preview.id,
+        after: { previewId: preview.id, financialExpenseRequested: expenseDecision },
+      });
+      const responseDelivered = await safeSend(
+        formatStockEntryPreview(preview),
+        audioTranscript ? "audio_preview" : "text_preview",
+      );
+      return buildAiWhatsappPreviewOnlyResponse({
+        intent: "stock_entry",
+        clarified: true,
+        previewId: preview.id,
+        preview: preview.draft,
+        audio: Boolean(audioTranscript),
+        responseDelivered,
+      });
+    }
     if (previewDecision) {
       const pendingScopeKey = buildAiWhatsappPendingScopeKey(
         message.senderPhone,
@@ -8235,6 +8466,134 @@ export function createApp(options: {
         "entity_clarification",
       );
       return buildAiWhatsappPreviewOnlyResponse({ pendingPreserved: true, responseDelivered });
+    }
+
+    if (looksLikeStockEntryCommand(normalizedText)) {
+      const stockEntryStartedAt = Date.now();
+      stockEntryFinancialClarifications.delete(stockEntryFinancialClarificationKey);
+      if (!webhookReplayKey) {
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_REJECTED",
+          entity: "stock_entry_command",
+          entityId: message.maskedPhone,
+          after: { result: "SAFE_FAILURE", reason: "missing_webhook_id" },
+        });
+        await finalize("EXECUTION_FAILED");
+        const responseDelivered = await safeSend(
+          "Não foi possível validar o identificador desta mensagem. Reenvie o pedido.",
+          "entity_clarification",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", unavailable: true, responseDelivered });
+      }
+      const products = await operations.listStockEntryProducts({ unitId });
+      const interpretation = interpretStockEntryCommand({ message: normalizedText, products });
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_STOCK_ENTRY_INTENT_IDENTIFIED",
+        entity: "stock_entry_command",
+        entityId: message.maskedPhone,
+        after: {
+          result: interpretation.recognized ? "RECOGNIZED" : "REJECTED",
+          origin: audioTranscript ? "audio" : "text",
+          durationMs: Date.now() - stockEntryStartedAt,
+        },
+      });
+      if (interpretation.recognized && interpretation.status === "clarification") {
+        if (interpretation.reason === "financial_ambiguous" && interpretation.draftWithoutExpense) {
+          stockEntryFinancialClarifications.set(stockEntryFinancialClarificationKey, {
+            unitId,
+            actorId,
+            phoneFingerprint: whatsappContext.phoneFingerprint,
+            draft: interpretation.draftWithoutExpense,
+            expiresAt: Date.now() + getAiWhatsappTtlMs(),
+          });
+        }
+        const ambiguous = interpretation.reason.includes("ambiguous") || interpretation.reason === "cost_inconsistent";
+        app.log.info({
+          event: "stock.entry.clarification.requested",
+          unitId,
+          reason: interpretation.reason,
+          candidateCount: interpretation.candidateNames?.length ?? 0,
+          durationMs: Date.now() - stockEntryStartedAt,
+        });
+        await safeAudit({
+          unitId,
+          action: interpretation.reason === "product_ambiguous"
+            ? "AI_WHATSAPP_STOCK_ENTRY_PRODUCT_AMBIGUOUS"
+            : "AI_WHATSAPP_STOCK_ENTRY_CLARIFICATION_REQUESTED",
+          entity: "stock_entry_command",
+          entityId: message.maskedPhone,
+          after: {
+            result: ambiguous ? "AMBIGUOUS" : "MISSING_OR_INVALID",
+            reason: interpretation.reason,
+            candidateCount: interpretation.candidateNames?.length ?? 0,
+            durationMs: Date.now() - stockEntryStartedAt,
+          },
+        });
+        await finalize(ambiguous ? "AMBIGUOUS_FIELDS" : interpretation.reason === "product_not_found" ? "GROUNDING_FAILED" : "MISSING_FIELDS");
+        const responseDelivered = await safeSend(interpretation.message, "entity_clarification");
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "stock_entry",
+          clarification: true,
+          reason: interpretation.reason,
+          responseDelivered,
+        });
+      }
+      if (interpretation.recognized && interpretation.status === "ready") {
+        const now = new Date();
+        const preview: StockEntryPreview = {
+          version: STOCK_ENTRY_PREVIEW_VERSION,
+          id: crypto.randomUUID(),
+          unitId,
+          actorId,
+          phoneFingerprint: whatsappContext.phoneFingerprint,
+          draft: interpretation.draft,
+          createdAt: now.toISOString(),
+          expiresAt: new Date(now.getTime() + getAiWhatsappTtlMs()).toISOString(),
+        };
+        await stockEntryPreviews.save(preview);
+        app.log.info({
+          event: "stock.entry.preview.created",
+          unitId,
+          previewId: preview.id,
+          productId: preview.draft.productId,
+          origin: audioTranscript ? "audio" : "text",
+          durationMs: Date.now() - stockEntryStartedAt,
+        });
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_PRODUCT_RESOLVED",
+          entity: "product",
+          entityId: preview.draft.productId,
+          after: { result: "RESOLVED", previewId: preview.id },
+        });
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_PREVIEW_CREATED",
+          entity: "stock_entry_preview",
+          entityId: preview.id,
+          after: {
+            result: "PREVIEW_PERSISTED",
+            previewId: preview.id,
+            expiresAt: preview.expiresAt,
+            origin: audioTranscript ? "audio" : "text",
+            financialExpenseRequested: preview.draft.registerExpense,
+            durationMs: Date.now() - stockEntryStartedAt,
+          },
+        });
+        const responseDelivered = await safeSend(
+          formatStockEntryPreview(preview),
+          audioTranscript ? "audio_preview" : "text_preview",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "stock_entry",
+          previewId: preview.id,
+          preview: preview.draft,
+          audio: Boolean(audioTranscript),
+          responseDelivered,
+        });
+      }
     }
 
     await safeAudit({

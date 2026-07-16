@@ -1,0 +1,4 @@
+ALTER TABLE "StockMovement"
+ADD COLUMN "unitCost" DECIMAL(10,2),
+ADD COLUMN "totalCost" DECIMAL(12,2),
+ADD COLUMN "notes" TEXT;
