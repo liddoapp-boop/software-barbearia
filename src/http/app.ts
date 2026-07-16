@@ -51,6 +51,12 @@ import {
 import { AuditRecorder, TransactionalAuditContext } from "../application/audit-service";
 import { StockEntryPreviewRepository } from "../application/stock-entry-preview-repository";
 import {
+  MemoryStockAlertStore,
+  PrismaStockAlertStore,
+  StockAlertDispatcher,
+  resolveConfiguredStockAlertOwner,
+} from "../application/stock-alert-outbox";
+import {
   STOCK_ENTRY_PREVIEW_VERSION,
   StockEntryCorrectionClarification,
   StockEntryFailureStage,
@@ -903,6 +909,8 @@ export function createApp(options: {
   ownerCommandParser?: OwnerCommandParser | null;
   readinessProbe?: () => Promise<void>;
   stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>;
+  stockAlertSend?: (phone: string, text: string) => Promise<void>;
+  stockAlertNow?: () => Date;
 } = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
@@ -952,6 +960,14 @@ export function createApp(options: {
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer, options.stockEntryFailureHook)
       : new OperationsService(memoryStore, undefined, retentionAiScorer, options.stockEntryFailureHook);
+  const stockAlertDispatcher = new StockAlertDispatcher({
+    store: backend === "prisma"
+      ? new PrismaStockAlertStore(prisma)
+      : new MemoryStockAlertStore(memoryStore),
+    send: options.stockAlertSend ?? sendWhatsAppMessage,
+    resolveOwnerPhone: resolveConfiguredStockAlertOwner,
+    now: options.stockAlertNow,
+  });
   const stockEntryPreviews = new StockEntryPreviewRepository({
     backend: backend === "prisma" ? "prisma" : "memory",
     memoryStore,
@@ -3370,6 +3386,13 @@ export function createApp(options: {
           level: process.env.LOG_LEVEL ?? "info",
         }
       : false,
+  });
+  app.addHook("onResponse", async () => {
+    try {
+      await stockAlertDispatcher.dispatchDue();
+    } catch {
+      app.log.error({ event: "stock.alert.dispatcher.unavailable" });
+    }
   });
   app.log.info({
     event: "ai.whatsapp.audio.transcription.configured",

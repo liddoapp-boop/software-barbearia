@@ -129,6 +129,18 @@ enum IntegrationWebhookStatus {
   FAILED
 }
 
+enum StockAlertType {
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+enum StockAlertDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
 model Unit {
   id                        String                     @id
   name                      String
@@ -146,6 +158,7 @@ model Unit {
   productSales              ProductSale[]
   refunds                   Refund[]
   stockMovements            StockMovement[]
+  stockAlerts               StockAlert[]
   loyaltyPrograms           LoyaltyProgram[]
   loyaltyLedger             LoyaltyLedger[]
   servicePackages           ServicePackage[]
@@ -422,6 +435,8 @@ model Product {
   costPrice           Decimal                   @db.Decimal(10, 2)
   stockQty            Int                       @default(0)
   minStockAlert       Int                       @default(0)
+  stockAlertCycle     Int                       @default(0)
+  stockAlertCycleActive Boolean                 @default(false)
   notes               String?
   active              Boolean                   @default(true)
   createdAt           DateTime                  @default(now())
@@ -431,8 +446,34 @@ model Product {
   refundItems         RefundItem[]
   serviceConsumptions ServiceStockConsumption[]
   inventoryCounts     StockInventoryCount[]
+  stockAlerts         StockAlert[]
 
   @@index([businessId, active])
+}
+
+model StockAlert {
+  id              String                   @id
+  unitId          String
+  productId       String
+  alertType       StockAlertType
+  cycle           Int
+  status          StockAlertDeliveryStatus @default(PENDING)
+  quantity        Int
+  minimumStock    Int
+  attempts        Int                      @default(0)
+  maxAttempts     Int                      @default(3)
+  nextAttemptAt   DateTime?
+  claimedAt       DateTime?
+  sentAt          DateTime?
+  lastErrorCode   String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  unit            Unit                     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  product         Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([unitId, productId, alertType, cycle])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([unitId, productId, cycle])
 }
 
 model ServiceStockConsumption {

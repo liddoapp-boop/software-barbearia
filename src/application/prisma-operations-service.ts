@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import { BarbershopEngine } from "./barbershop-engine";
+import { recordPrismaStockTransition } from "./stock-alert-outbox";
 import {
   Appointment,
   AppointmentStatus,
@@ -2267,6 +2268,12 @@ export class PrismaOperationsService {
             referenceId: reason,
           },
         });
+        await recordPrismaStockTransition(tx, {
+          unitId: input.unitId,
+          productId: input.id,
+          previousQuantity: current.stockQty,
+          previousMinimumStock: current.minStockAlert,
+        });
       }
       return product;
     });
@@ -2400,6 +2407,11 @@ export class PrismaOperationsService {
         where: { id: input.id },
         data: { stockQty: nextQty },
       });
+      await recordPrismaStockTransition(tx, {
+        unitId: input.unitId,
+        productId: input.id,
+        previousQuantity: currentQty,
+      });
       return { movement, updated };
     });
 
@@ -2500,6 +2512,11 @@ export class PrismaOperationsService {
           await tx.product.update({
             where: { id: product.id },
             data: { stockQty: countedQty },
+          });
+          await recordPrismaStockTransition(tx, {
+            unitId: input.unitId,
+            productId: product.id,
+            previousQuantity: expectedQty,
           });
         }
         const count = await tx.stockInventoryCount.create({
@@ -4099,6 +4116,10 @@ export class PrismaOperationsService {
       }
 
       for (const movement of stockConsumptionMovements) {
+        const previousProduct = await tx.product.findUniqueOrThrow({
+          where: { id: movement.productId },
+          select: { stockQty: true },
+        });
         await tx.stockMovement.create({
           data: {
             id: movement.id,
@@ -4118,6 +4139,11 @@ export class PrismaOperationsService {
               decrement: movement.quantity,
             },
           },
+        });
+        await recordPrismaStockTransition(tx, {
+          unitId: movement.unitId,
+          productId: movement.productId,
+          previousQuantity: previousProduct.stockQty,
         });
       }
     });
@@ -4268,6 +4294,10 @@ export class PrismaOperationsService {
       });
 
       for (const movement of result.stockMovements) {
+        const previousProduct = await tx.product.findUniqueOrThrow({
+          where: { id: movement.productId },
+          select: { stockQty: true },
+        });
         await tx.stockMovement.create({
           data: {
             id: movement.id,
@@ -4295,6 +4325,11 @@ export class PrismaOperationsService {
         if (stockUpdate.count !== 1) {
           throw new Error("Estoque insuficiente para venda de produto");
         }
+        await recordPrismaStockTransition(tx, {
+          unitId: input.unitId,
+          productId: movement.productId,
+          previousQuantity: previousProduct.stockQty,
+        });
       }
 
       if (result.commission) {
@@ -5023,6 +5058,7 @@ export class PrismaOperationsService {
         });
       }
 
+      const stockAlertPreviousQtyByProduct = new Map<string, number>();
       if (saleResult) {
         await tx.productSale.create({
           data: {
@@ -5052,6 +5088,9 @@ export class PrismaOperationsService {
             select: { stockQty: true, name: true },
           });
           if (!currentProduct) throw new Error("Produto nao encontrado ou inativo");
+          if (!stockAlertPreviousQtyByProduct.has(movement.productId)) {
+            stockAlertPreviousQtyByProduct.set(movement.productId, currentProduct.stockQty);
+          }
           if (currentProduct.stockQty < movement.quantity) {
             throw new Error(
               `Estoque insuficiente para ${currentProduct.name}. Disponivel=${currentProduct.stockQty}, solicitado=${movement.quantity}`,
@@ -5115,6 +5154,9 @@ export class PrismaOperationsService {
         if (!currentProduct || !currentProduct.active) {
           throw new Error("Produto de consumo do servico nao encontrado ou inativo");
         }
+        if (!stockAlertPreviousQtyByProduct.has(movement.productId)) {
+          stockAlertPreviousQtyByProduct.set(movement.productId, currentProduct.stockQty);
+        }
         if (currentProduct.stockQty < movement.quantity) {
           throw new Error(
             `Estoque insuficiente para ${currentProduct.name}. Disponivel=${currentProduct.stockQty}, solicitado=${movement.quantity}`,
@@ -5147,6 +5189,14 @@ export class PrismaOperationsService {
         if (stockUpdate.count !== 1) {
           throw new Error("Estoque insuficiente para consumo do servico");
         }
+      }
+
+      for (const [productId, previousQuantity] of stockAlertPreviousQtyByProduct) {
+        await recordPrismaStockTransition(tx, {
+          unitId: appointment.unitId,
+          productId,
+          previousQuantity,
+        });
       }
 
       await tx.client.update({
@@ -5613,6 +5663,10 @@ export class PrismaOperationsService {
           }
         }
         for (const movement of productRefundStockMovements) {
+          const previousProduct = await tx.product.findUniqueOrThrow({
+            where: { id: movement.productId },
+            select: { stockQty: true },
+          });
           await tx.stockMovement.create({
             data: {
               id: movement.id,
@@ -5632,6 +5686,11 @@ export class PrismaOperationsService {
                 increment: movement.quantity,
               },
             },
+          });
+          await recordPrismaStockTransition(tx, {
+            unitId: input.unitId,
+            productId: movement.productId,
+            previousQuantity: previousProduct.stockQty,
           });
         }
         const pendingAppointmentCommissions = appointmentCommissions.filter(
@@ -5938,6 +5997,10 @@ export class PrismaOperationsService {
           },
         });
         for (const movement of stockMovements) {
+          const previousProduct = await tx.product.findFirstOrThrow({
+            where: { id: movement.productId, businessId: input.unitId },
+            select: { stockQty: true },
+          });
           await tx.stockMovement.create({
             data: {
               id: movement.id,
@@ -5957,6 +6020,11 @@ export class PrismaOperationsService {
           if (updatedProduct.count !== 1) {
             throw new Error("Produto da devolucao nao pertence a unidade");
           }
+          await recordPrismaStockTransition(tx, {
+            unitId: input.unitId,
+            productId: movement.productId,
+            previousQuantity: previousProduct.stockQty,
+          });
         }
 
         const isFullyRefunded = Array.from(soldByProduct.entries()).every(([productId, sold]) => {
@@ -6159,6 +6227,11 @@ export class PrismaOperationsService {
       const updatedProduct = await tx.product.findUniqueOrThrow({
         where: { id: product.id },
         select: { id: true, name: true, stockQty: true },
+      });
+      await recordPrismaStockTransition(tx, {
+        unitId: input.unitId,
+        productId: product.id,
+        previousQuantity: product.stockQty,
       });
       await this.stockEntryFailureHook?.("after_stock");
 
@@ -6371,6 +6444,11 @@ export class PrismaOperationsService {
           name: true,
           stockQty: true,
         },
+      });
+      await recordPrismaStockTransition(tx, {
+        unitId: input.unitId,
+        productId: input.productId,
+        previousQuantity: product.stockQty,
       });
 
       response = {

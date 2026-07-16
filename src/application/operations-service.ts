@@ -1,5 +1,6 @@
 import { BarbershopEngine } from "./barbershop-engine";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
+import { recordMemoryStockTransition } from "./stock-alert-outbox";
 import {
   Appointment,
   AppointmentBlock,
@@ -211,6 +212,15 @@ export class OperationsService {
     private readonly retentionAiScorer?: RetentionAiScorer | null,
     private readonly stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>,
   ) {}
+
+  private recordStockTransition(input: {
+    unitId: string;
+    product: Product;
+    previousQuantity: number;
+    previousMinimumStock?: number;
+  }) {
+    return recordMemoryStockTransition(this.store, input);
+  }
 
   private idempotencyScope(input: {
     unitId: string;
@@ -1857,6 +1867,7 @@ export class OperationsService {
     }
 
     const previousQty = Number(product.stockQty || 0);
+    const previousMinimumStock = Number(product.minStockAlert || 0);
     product.name = nextName;
     product.salePrice = Number(nextSalePrice.toFixed(2));
     product.costPrice = Number(nextCostPrice.toFixed(2));
@@ -1884,6 +1895,12 @@ export class OperationsService {
         referenceId: "Ajuste por edicao de produto",
       };
       this.store.stockMovements.push(movement);
+      this.recordStockTransition({
+        unitId: input.unitId,
+        product,
+        previousQuantity: previousQty,
+        previousMinimumStock,
+      });
       log = {
         id: movement.id,
         type: "ADJUSTMENT",
@@ -1976,6 +1993,7 @@ export class OperationsService {
       referenceId: String(input.reason ?? "").trim() || "Ajuste rapido de estoque",
     };
     this.store.stockMovements.push(movement);
+    this.recordStockTransition({ unitId: input.unitId, product, previousQuantity: current });
 
     return {
       product: this.mapInventoryProduct(product, input.unitId),
@@ -2050,6 +2068,7 @@ export class OperationsService {
       count.movementId = movement.id;
       product.stockQty = countedQty;
       this.store.stockMovements.push(movement);
+      this.recordStockTransition({ unitId: input.unitId, product, previousQuantity: expectedQty });
     }
     this.store.inventoryCounts.push(count);
     const response = { count, movement };
@@ -2909,6 +2928,11 @@ export class OperationsService {
         const product = this.store.products.find((row) => row.id === movement.productId);
         if (!product) return;
         product.stockQty -= movement.quantity;
+        this.recordStockTransition({
+          unitId: appointment.unitId,
+          product,
+          previousQuantity: product.stockQty + movement.quantity,
+        });
       });
     }
 
@@ -2932,6 +2956,7 @@ export class OperationsService {
     idempotencyKey?: string;
     idempotencyPayloadHash?: string;
     audit?: unknown;
+    deferStockAlerts?: boolean;
   }) {
     const scope = this.idempotencyScope({
       unitId: input.unitId,
@@ -2995,6 +3020,13 @@ export class OperationsService {
       const product = this.store.products.find((item) => item.id === movement.productId);
       if (!product) continue;
       product.stockQty -= movement.quantity;
+      if (!input.deferStockAlerts) {
+        this.recordStockTransition({
+          unitId: input.unitId,
+          product,
+          previousQuantity: product.stockQty + movement.quantity,
+        });
+      }
     }
 
     this.finishMemoryIdempotency(scope, result);
@@ -3161,6 +3193,9 @@ export class OperationsService {
       productSales: structuredClone(this.store.productSales),
       stockMovements: structuredClone(this.store.stockMovements),
       products: structuredClone(this.store.products),
+      stockAlerts: structuredClone(this.store.stockAlerts),
+      stockAlertCycleStates: new Map(this.store.stockAlertCycleStates),
+      auditEvents: structuredClone(this.store.auditEvents),
     };
 
     this.startMemoryIdempotency(checkoutScope);
@@ -3234,6 +3269,7 @@ export class OperationsService {
           clientId: appointment.clientId,
           soldAt: input.completedAt,
           items: checkoutProducts,
+          deferStockAlerts: true,
         });
         saleResult.revenue.paymentMethod = paymentMethod;
         if (input.notes) saleResult.revenue.notes = String(input.notes).trim();
@@ -3408,6 +3444,16 @@ export class OperationsService {
         });
       }
 
+      for (const product of this.store.products) {
+        const previous = rollback.products.find((item) => item.id === product.id);
+        if (!previous || previous.stockQty === product.stockQty) continue;
+        this.recordStockTransition({
+          unitId: appointment.unitId,
+          product,
+          previousQuantity: previous.stockQty,
+        });
+      }
+
       const clientAppointments = this.store.appointments
         .filter(
           (item) =>
@@ -3457,6 +3503,9 @@ export class OperationsService {
       this.store.productSales = rollback.productSales;
       this.store.stockMovements = rollback.stockMovements;
       this.store.products = rollback.products;
+      this.store.stockAlerts = rollback.stockAlerts;
+      this.store.stockAlertCycleStates = rollback.stockAlertCycleStates;
+      this.store.auditEvents = rollback.auditEvents;
       this.clearMemoryIdempotency(checkoutScope);
       throw error;
     }
@@ -3658,7 +3707,11 @@ export class OperationsService {
     this.store.stockMovements.push(...stockMovements);
     for (const movement of stockMovements) {
       const product = this.store.products.find((item) => item.id === movement.productId);
-      if (product) product.stockQty += movement.quantity;
+      if (product) {
+        const previousQuantity = product.stockQty;
+        product.stockQty += movement.quantity;
+        this.recordStockTransition({ unitId: input.unitId, product, previousQuantity });
+      }
     }
     appointment.history.push({
       changedAt: input.refundedAt,
@@ -3814,7 +3867,11 @@ export class OperationsService {
     this.store.stockMovements.push(...stockMovements);
     for (const movement of stockMovements) {
       const product = this.store.products.find((item) => item.id === movement.productId);
-      if (product) product.stockQty += movement.quantity;
+      if (product) {
+        const previousQuantity = product.stockQty;
+        product.stockQty += movement.quantity;
+        this.recordStockTransition({ unitId: input.unitId, product, previousQuantity });
+      }
     }
 
     const isFullyRefunded = Array.from(soldByProduct.entries()).every(([productId, sold]) => {
@@ -3898,6 +3955,8 @@ export class OperationsService {
     const previousStock = product.stockQty;
     const movementLength = this.store.stockMovements.length;
     const auditLength = this.store.auditEvents.length;
+    const alertLength = this.store.stockAlerts.length;
+    const previousAlertCycleState = this.store.stockAlertCycleStates.get(product.id);
     record.status = "PROCESSING";
     try {
       await this.stockEntryFailureHook?.("after_claim");
@@ -3939,6 +3998,7 @@ export class OperationsService {
         metadata: { previewId: input.previewId, operationId },
       });
       this.store.auditEvents.push(audit);
+      this.recordStockTransition({ unitId: input.unitId, product, previousQuantity: previousStock });
       const response: StockEntryConfirmationResult = {
         operationId,
         previewId: input.previewId,
@@ -3960,6 +4020,9 @@ export class OperationsService {
       product.stockQty = previousStock;
       this.store.stockMovements.splice(movementLength);
       this.store.auditEvents.splice(auditLength);
+      this.store.stockAlerts.splice(alertLength);
+      if (previousAlertCycleState) this.store.stockAlertCycleStates.set(product.id, previousAlertCycleState);
+      else this.store.stockAlertCycleStates.delete(product.id);
       record.status = "PENDING";
       delete record.response;
       throw error;
@@ -4036,6 +4099,8 @@ export class OperationsService {
 
     this.startMemoryIdempotency(scope);
 
+    const previousQuantity = product.stockQty;
+
     if (input.movementType === "IN") {
       product.stockQty += quantity;
     } else {
@@ -4053,6 +4118,7 @@ export class OperationsService {
       referenceId: input.referenceId ?? input.reason,
     };
     this.store.stockMovements.push(movement);
+    this.recordStockTransition({ unitId: input.unitId, product, previousQuantity });
     const response = {
       movement,
       product: {

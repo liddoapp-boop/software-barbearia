@@ -9,6 +9,7 @@ import { PrismaOperationsService } from "../src/application/prisma-operations-se
 import { StockEntryPreviewRepository } from "../src/application/stock-entry-preview-repository";
 import { STOCK_ENTRY_PREVIEW_VERSION, StockEntryPreview } from "../src/application/stock-entry";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
+import { PrismaStockAlertStore, StockAlertDispatcher } from "../src/application/stock-alert-outbox";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -3212,6 +3213,109 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(await prisma.financialEntry.count({ where: { referenceId: rollbackPreview.id } })).toBe(0);
     expect(await prisma.auditLog.count({ where: { entityId: rollbackPreview.id, action: "STOCK_ENTRY_CONFIRMED" } })).toBe(0);
     expect((await repository.find({ unitId: scenario.unitId, actorId: rollbackPreview.actorId, phoneFingerprint: rollbackPreview.phoneFingerprint }))?.status).toBe("PENDING");
+  });
+
+  it("persiste ciclo, deduplica concorrencia e despacha uma unica vez no Prisma", async () => {
+    vi.useRealTimers();
+    const scenario = await createScenario();
+    await prisma.product.update({
+      where: { id: scenario.productId },
+      data: { stockQty: 7, minStockAlert: 5 },
+    });
+    const service = new PrismaOperationsService(prisma);
+
+    await Promise.all([
+      service.registerStockManualMovement({
+        unitId: scenario.unitId,
+        productId: scenario.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-concurrent-a"),
+      }),
+      service.registerStockManualMovement({
+        unitId: scenario.unitId,
+        productId: scenario.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-concurrent-b"),
+      }),
+    ]);
+
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(5);
+    const alerts = await prisma.stockAlert.findMany({ where: { productId: scenario.productId } });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ alertType: "LOW_STOCK", cycle: 1, status: "PENDING" });
+
+    const sent: string[] = [];
+    const options = {
+      store: new PrismaStockAlertStore(prisma),
+      send: async (_phone: string, text: string) => { sent.push(text); },
+      resolveOwnerPhone: (unitId: string) => unitId === scenario.unitId ? "5511999999999" : undefined,
+    };
+    await Promise.all([
+      new StockAlertDispatcher(options).dispatchDue(),
+      new StockAlertDispatcher({ ...options, store: new PrismaStockAlertStore(prisma) }).dispatchDue(),
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(await prisma.stockAlert.count({ where: { productId: scenario.productId, status: "SENT" } })).toBe(1);
+
+    await service.registerStockManualMovement({
+      unitId: scenario.unitId,
+      productId: scenario.productId,
+      movementType: "IN",
+      quantity: 1,
+      occurredAt: new Date(),
+      idempotencyKey: uniqueId("stock-alert-reset"),
+    });
+    await service.registerStockManualMovement({
+      unitId: scenario.unitId,
+      productId: scenario.productId,
+      movementType: "OUT",
+      quantity: 1,
+      occurredAt: new Date(),
+      idempotencyKey: uniqueId("stock-alert-cycle-two"),
+    });
+    expect(await prisma.stockAlert.count({ where: { productId: scenario.productId } })).toBe(2);
+    expect(await prisma.auditLog.count({ where: { unitId: scenario.unitId, action: "STOCK_ALERT_CYCLE_RESET" } })).toBe(1);
+  });
+
+  it("faz rollback comercial quando a intencao transacional do alerta falha", async () => {
+    vi.useRealTimers();
+    const scenario = await createScenario();
+    await prisma.product.update({
+      where: { id: scenario.productId },
+      data: { stockQty: 6, minStockAlert: 5 },
+    });
+    await prisma.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION test_fail_stock_alert_insert() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'controlled_stock_alert_failure';
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER test_fail_stock_alert_insert
+      BEFORE INSERT ON "StockAlert"
+      FOR EACH ROW EXECUTE FUNCTION test_fail_stock_alert_insert();
+    `);
+    try {
+      const service = new PrismaOperationsService(prisma);
+      await expect(service.adjustInventoryStock({
+        unitId: scenario.unitId,
+        id: scenario.productId,
+        type: "OUT",
+        quantity: 1,
+        reason: "Falha controlada da outbox",
+      })).rejects.toThrow("controlled_stock_alert_failure");
+      expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(6);
+      expect(await prisma.stockMovement.count({ where: { productId: scenario.productId } })).toBe(0);
+      expect(await prisma.stockAlert.count({ where: { productId: scenario.productId } })).toBe(0);
+    } finally {
+      await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS test_fail_stock_alert_insert ON "StockAlert"');
+      await prisma.$executeRawUnsafe("DROP FUNCTION IF EXISTS test_fail_stock_alert_insert()");
+    }
   });
 }, DB_TEST_TIMEOUT_MS);
 
