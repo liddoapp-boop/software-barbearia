@@ -52,9 +52,11 @@ import { AuditRecorder, TransactionalAuditContext } from "../application/audit-s
 import { StockEntryPreviewRepository } from "../application/stock-entry-preview-repository";
 import {
   STOCK_ENTRY_PREVIEW_VERSION,
+  StockEntryCorrectionClarification,
   StockEntryFailureStage,
   StockEntryPreview,
   formatStockEntryPreview,
+  interpretStockEntryCorrection,
   interpretStockEntryCommand,
   looksLikeStockEntryCommand,
   parseStockEntryPreviewDecision,
@@ -1814,6 +1816,12 @@ export function createApp(options: {
     origin: "whatsapp_webhook";
   };
 
+  type StockEntryCorrectionClarificationContext = {
+    previewId: string;
+    clarification: StockEntryCorrectionClarification;
+    expiresAt: number;
+  };
+
   class AiWhatsappIdentityError extends Error {
     constructor(public readonly reason: "missing_unit_configuration" | "unit_not_found" | "owner_access_missing" | "owner_access_ambiguous") {
       super(reason);
@@ -1839,6 +1847,7 @@ export function createApp(options: {
   const aiWhatsappPendingCommands = new Map<string, AiWhatsappPendingCommand>();
   const aiWhatsappExpiredPendingScopes = new Map<string, number>();
   const aiWhatsappClarificationContexts = new Map<string, AiWhatsappClarificationContext>();
+  const stockEntryCorrectionClarifications = new Map<string, StockEntryCorrectionClarificationContext>();
   const aiWhatsappProcessedWebhookMessages = new Map<string, number>();
   const aiWhatsappAllowedIntents = new Set<OwnerCommandIntent>(["schedule_appointment", "sell_product"]);
 
@@ -2158,6 +2167,9 @@ export function createApp(options: {
     }
     for (const [key, context] of aiWhatsappClarificationContexts.entries()) {
       if (context.expiresAt <= now) aiWhatsappClarificationContexts.delete(key);
+    }
+    for (const [key, context] of stockEntryCorrectionClarifications.entries()) {
+      if (context.expiresAt <= now) stockEntryCorrectionClarifications.delete(key);
     }
   }
 
@@ -8044,7 +8056,17 @@ export function createApp(options: {
       actorId,
       phoneFingerprint: whatsappContext.phoneFingerprint,
     };
+    const stockEntryCorrectionKey = `${unitId}:${actorId}:${whatsappContext.phoneFingerprint}`;
     const currentStockEntry = await stockEntryPreviews.find(stockEntryScope);
+    const storedStockEntryCorrectionClarification = stockEntryCorrectionClarifications.get(stockEntryCorrectionKey);
+    const stockEntryCorrectionClarification = storedStockEntryCorrectionClarification
+      && storedStockEntryCorrectionClarification.expiresAt > Date.now()
+      && storedStockEntryCorrectionClarification.previewId === currentStockEntry?.preview.id
+      ? storedStockEntryCorrectionClarification
+      : undefined;
+    if (storedStockEntryCorrectionClarification && !stockEntryCorrectionClarification) {
+      stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
+    }
     if (stockEntryDecision && currentStockEntry) {
       if (!webhookReplayKey) {
         await safeAudit({
@@ -8074,6 +8096,7 @@ export function createApp(options: {
         return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", expired: true, responseDelivered });
       }
       if (stockEntryDecision === "cancel") {
+        stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
         const cancelled = currentStockEntry.status === "PENDING"
           ? await stockEntryPreviews.cancel(currentStockEntry)
           : false;
@@ -8095,6 +8118,7 @@ export function createApp(options: {
         return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", responseDelivered });
       }
       const confirmationStartedAt = Date.now();
+      stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
       try {
         const result = await operations.confirmStockEntry({
           unitId,
@@ -8162,11 +8186,122 @@ export function createApp(options: {
     }
 
     if (currentStockEntry?.status === "PENDING") {
+      const products = await operations.listStockEntryProducts({ unitId });
+      const correction = interpretStockEntryCorrection({
+        message: normalizedText,
+        currentDraft: currentStockEntry.preview.draft,
+        products,
+        clarification: stockEntryCorrectionClarification?.clarification,
+      });
+      if (correction.status === "clarification") {
+        if (correction.clarification) {
+          stockEntryCorrectionClarifications.set(stockEntryCorrectionKey, {
+            previewId: currentStockEntry.preview.id,
+            clarification: correction.clarification,
+            expiresAt: Date.now() + getAiWhatsappTtlMs(),
+          });
+        }
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_CORRECTION_CLARIFICATION",
+          entity: "stock_entry_preview",
+          entityId: currentStockEntry.preview.id,
+          after: {
+            result: "AMBIGUOUS",
+            reason: correction.reason,
+            candidateCount: correction.candidateNames?.length ?? 0,
+            previewPreserved: true,
+          },
+        });
+        const responseDelivered = await safeSend(correction.message, "entity_clarification");
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "stock_entry",
+          corrected: false,
+          clarification: true,
+          reason: correction.reason,
+          pendingPreserved: true,
+          responseDelivered,
+        });
+      }
+      if (correction.status === "invalid") {
+        stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_CORRECTION_REJECTED",
+          entity: "stock_entry_preview",
+          entityId: currentStockEntry.preview.id,
+          after: { result: "INVALID_CORRECTION", reason: correction.reason, previewPreserved: true },
+        });
+        const responseDelivered = await safeSend(correction.message, "entity_clarification");
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "stock_entry",
+          corrected: false,
+          invalidCorrection: true,
+          reason: correction.reason,
+          pendingPreserved: true,
+          responseDelivered,
+        });
+      }
+      if (correction.status === "valid") {
+        if (!webhookReplayKey) {
+          const responseDelivered = await safeSend(
+            "Não foi possível validar o identificador desta correção. Envie a correção novamente.",
+            "entity_clarification",
+          );
+          return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", corrected: false, unavailable: true, pendingPreserved: true, responseDelivered });
+        }
+        stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
+        const draftChanged = JSON.stringify(correction.draft) !== JSON.stringify(currentStockEntry.preview.draft);
+        let updatedPreview = currentStockEntry.preview;
+        if (draftChanged) {
+          const now = new Date();
+          updatedPreview = {
+            ...currentStockEntry.preview,
+            id: crypto.randomUUID(),
+            draft: correction.draft,
+            createdAt: now.toISOString(),
+            expiresAt: new Date(now.getTime() + getAiWhatsappTtlMs()).toISOString(),
+          };
+          const replaced = await stockEntryPreviews.replacePending(currentStockEntry, updatedPreview);
+          if (!replaced) {
+            const responseDelivered = await safeSend(
+              "A prévia mudou enquanto a correção era processada. Confira a situação atual antes de tentar novamente.",
+              "entity_clarification",
+            );
+            return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", corrected: false, conflict: true, responseDelivered });
+          }
+        }
+        await safeAudit({
+          unitId,
+          action: "AI_WHATSAPP_STOCK_ENTRY_PREVIEW_CORRECTED",
+          entity: "stock_entry_preview",
+          entityId: updatedPreview.id,
+          after: {
+            result: "PREVIEW_UPDATED",
+            changedFields: correction.changedFields,
+            previousPreviewInvalidated: draftChanged,
+            previousPreviewFingerprint: crypto.createHash("sha256").update(currentStockEntry.preview.id).digest("hex").slice(0, 12),
+          },
+        });
+        const responseDelivered = await safeSend(
+          formatStockEntryPreview(updatedPreview, { updated: true }),
+          audioTranscript ? "audio_preview" : "text_preview",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "stock_entry",
+          corrected: true,
+          previewId: updatedPreview.id,
+          preview: updatedPreview.draft,
+          audio: Boolean(audioTranscript),
+          responseDelivered,
+        });
+      }
+
       const newStockEntryBlocked = looksLikeStockEntryCommand(normalizedText);
       const responseDelivered = await safeSend(
         newStockEntryBlocked
-          ? "Já existe uma entrada de estoque aguardando decisão.\n\nResponda CONFIRMAR ou CANCELAR antes de iniciar outra entrada."
-          : "Já existe uma entrada de estoque aguardando decisão. Responda CONFIRMAR ou CANCELAR.",
+          ? "Já existe uma entrada de estoque aguardando decisão.\n\nResponda CONFIRMAR, CANCELAR ou envie uma correção antes de iniciar outra entrada."
+          : "Já existe uma entrada de estoque aguardando decisão. Responda CONFIRMAR, CANCELAR ou envie uma correção.",
         "entity_clarification",
       );
       return buildAiWhatsappPreviewOnlyResponse({

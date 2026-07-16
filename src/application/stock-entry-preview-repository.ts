@@ -128,6 +128,45 @@ export class StockEntryPreviewRepository {
     return record;
   }
 
+  async replacePending(current: StockEntryPreviewRecord, preview: StockEntryPreview) {
+    const action = this.action(preview);
+    if (action !== current.action) return null;
+    const payloadHash = hashIdempotencyPayload(preview);
+    const nextRecord: StockEntryPreviewRecord = {
+      action,
+      key: STOCK_ENTRY_PREVIEW_ACTIVE_KEY,
+      payloadHash,
+      status: "PENDING",
+      preview,
+    };
+    if (this.input.backend === "memory") {
+      const storageKey = buildStockEntryPreviewStorageKey(preview.unitId, action);
+      const stored = this.input.memoryStore.aiWhatsappStockEntryPreviews.get(storageKey) as StockEntryPreviewRecord | undefined;
+      if (!stored || stored.status !== "PENDING" || stored.payloadHash !== current.payloadHash || stored.preview.id !== current.preview.id) {
+        return null;
+      }
+      this.input.memoryStore.aiWhatsappStockEntryPreviews.set(storageKey, nextRecord);
+      return nextRecord;
+    }
+    const updated = await this.input.prisma!.idempotencyRecord.updateMany({
+      where: {
+        unitId: preview.unitId,
+        action,
+        idempotencyKey: STOCK_ENTRY_PREVIEW_ACTIVE_KEY,
+        payloadHash: current.payloadHash,
+        resolution: current.preview.id,
+        status: "PENDING",
+      },
+      data: {
+        payloadHash,
+        responseJson: { preview } as Prisma.InputJsonValue,
+        resolution: preview.id,
+        expiresAt: new Date(preview.expiresAt),
+      },
+    });
+    return updated.count === 1 ? nextRecord : null;
+  }
+
   async cancel(record: StockEntryPreviewRecord) {
     if (this.input.backend === "memory") {
       const stored = this.input.memoryStore.aiWhatsappStockEntryPreviews.get(

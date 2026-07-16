@@ -190,7 +190,7 @@ O processo executa um warm-up real com FFmpeg, `whisper-cli`, modelo e VAD antes
 - áudio depende integralmente dos binários, modelos e GPU locais e não possui fallback remoto;
 - recuperação da Evolution não substitui nova autenticação quando a própria API comprovar perda real da sessão.
 
-A Etapa 1.1 fica registrada apenas como evolução futura. Correções conversacionais como “me enganei”, alteração posterior de campos, múltiplos itens na mesma compra, fornecedor, nota fiscal, alteração de preço e integração financeira não pertencem ao escopo encerrado da Etapa 1.
+A Etapa 1.1 foi implementada como extensão separada para correções conversacionais de produto, quantidade, custo e data enquanto a prévia ainda está pendente; consulte `docs/STOCK_ENTRY_WHATSAPP_STAGE1_1.md`. Correção após confirmação, múltiplos itens na mesma compra, fornecedor, nota fiscal, alteração de preço e integração financeira continuam fora do escopo.
 
 ## Threat model resumido
 

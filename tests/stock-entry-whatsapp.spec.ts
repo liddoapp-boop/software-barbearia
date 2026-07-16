@@ -8,6 +8,7 @@ import {
   STOCK_ENTRY_PREVIEW_VERSION,
   StockEntryDraft,
   StockEntryPreview,
+  interpretStockEntryCorrection,
   interpretStockEntryCommand,
 } from "../src/application/stock-entry";
 import type { AudioTranscriptionService } from "../src/application/audio-transcription";
@@ -166,6 +167,26 @@ describe("parser determinístico de entrada de estoque", () => {
     expect(result).toMatchObject({ recognized: true, status: "ready", draft: expected });
   });
 
+  it.each([
+    "Adiciona uma unidade de Pomada Matte no estoque. Paguei seis reais no total.",
+    "Adiciono uma unidade de Pomada Matte no estoque, paguei seis reais no total",
+    "Coloca uma Pomada Matte no estoque, paguei seis reais.",
+    "Adiciona uma unidade da Pomada Matte, o total foi seis reais.",
+    "Comprei uma Pomada Matte por seis reais.",
+  ])("aceita variações naturais seguras da entrada inicial: %s", (message) => {
+    expect(interpretStockEntryCommand({ message, products, now })).toMatchObject({
+      recognized: true,
+      status: "ready",
+      draft: {
+        productName: "Pomada Matte",
+        quantity: 1,
+        unitCost: 6,
+        totalCost: 6,
+        salePrice: 59,
+      },
+    });
+  });
+
   it("interpreta data e observação e calcula somente no sistema", () => {
     const result = interpretStockEntryCommand({
       message: "Comprei 2 pentes por 8 reais cada dia 14/07/2026. Obs: reposição do balcão",
@@ -192,6 +213,209 @@ describe("parser determinístico de entrada de estoque", () => {
       status: "clarification",
       reason,
     });
+  });
+});
+
+describe("correções naturais da prévia de entrada de estoque", () => {
+  const now = new Date("2026-07-16T15:00:00.000Z");
+  const currentDraft = draft({ quantity: 2, unitCost: 5, totalCost: 10 });
+  const correctionProducts = [
+    ...products,
+    { id: "prd-oleo", name: "Óleo para Barba", salePrice: 42 },
+  ];
+
+  it.each([
+    ["Me enganei, são 3 unidades.", { quantity: 3, unitCost: 5, totalCost: 15 }],
+    ["Na verdade coloca 4.", { quantity: 4, unitCost: 5, totalCost: 20 }],
+    ["A quantidade correta é 2.", { quantity: 2, unitCost: 5, totalCost: 10 }],
+    ["O valor por unidade é 6 reais.", { quantity: 2, unitCost: 6, totalCost: 12 }],
+    ["O custo unitário correto é 5,50.", { quantity: 2, unitCost: 5.5, totalCost: 11 }],
+    ["Me enganei, foi 7 reais cada.", { quantity: 2, unitCost: 7, totalCost: 14 }],
+    ["O total correto é 12 reais.", { quantity: 2, unitCost: 6, totalCost: 12 }],
+    ["Na verdade paguei 14 no total.", { quantity: 2, unitCost: 7, totalCost: 14 }],
+    ["A compra inteira deu 20 reais.", { quantity: 2, unitCost: 10, totalCost: 20 }],
+    ["Na verdade são 3 unidades e o total foi 18 reais.", { quantity: 3, unitCost: 6, totalCost: 18 }],
+  ])("corrige e recalcula somente os campos informados: %s", (message, expected) => {
+    expect(interpretStockEntryCorrection({ message, currentDraft, products: correctionProducts, now })).toMatchObject({
+      status: "valid",
+      draft: expected,
+    });
+  });
+
+  it.each([
+    "Me enganei, o total correto é sete reais.",
+    "Me enganei, o total, na verdade, é sete reais",
+    "Na verdade paguei sete reais no total.",
+  ])("identifica explicitamente o custo total na variação observada: %s", (message) => {
+    const pendingDraft = draft({ quantity: 1, unitCost: 6, totalCost: 6 });
+    expect(interpretStockEntryCorrection({ message, currentDraft: pendingDraft, products: correctionProducts, now })).toMatchObject({
+      status: "valid",
+      changedFields: ["totalCost"],
+      draft: { quantity: 1, unitCost: 7, totalCost: 7 },
+    });
+  });
+
+  it("identifica explicitamente o custo unitário sem confundi-lo com total", () => {
+    const pendingDraft = draft({ quantity: 1, unitCost: 6, totalCost: 6 });
+    expect(interpretStockEntryCorrection({
+      message: "O custo unitário correto é sete reais.",
+      currentDraft: pendingDraft,
+      products: correctionProducts,
+      now,
+    })).toMatchObject({
+      status: "valid",
+      changedFields: ["unitCost"],
+      draft: { quantity: 1, unitCost: 7, totalCost: 7 },
+    });
+  });
+
+  it("troca produto e recarrega somente o preço de venda informativo", () => {
+    expect(interpretStockEntryCorrection({
+      message: "Troca para Óleo para Barba.",
+      currentDraft,
+      products: correctionProducts,
+      now,
+    })).toMatchObject({
+      status: "valid",
+      changedFields: ["product"],
+      draft: {
+        productId: "prd-oleo",
+        productName: "Óleo para Barba",
+        salePrice: 42,
+        quantity: 2,
+        unitCost: 5,
+        totalCost: 10,
+      },
+    });
+  });
+
+  it.each([
+    "Na verdade o produto é Óleo para Barba.",
+    "Me enganei, era o óleo.",
+  ])("aceita variações naturais para corrigir produto: %s", (message) => {
+    expect(interpretStockEntryCorrection({ message, currentDraft, products: correctionProducts, now })).toMatchObject({
+      status: "valid",
+      changedFields: ["product"],
+      draft: { productId: "prd-oleo", productName: "Óleo para Barba", salePrice: 42 },
+    });
+  });
+
+  it("corrige produto, quantidade e custo unitário na mesma mensagem", () => {
+    expect(interpretStockEntryCorrection({
+      message: "Troca para Óleo para Barba, foram 2 unidades a 8 reais cada.",
+      currentDraft,
+      products: correctionProducts,
+      now,
+    })).toMatchObject({
+      status: "valid",
+      changedFields: ["product", "quantity", "unitCost"],
+      draft: {
+        productId: "prd-oleo",
+        salePrice: 42,
+        quantity: 2,
+        unitCost: 8,
+        totalCost: 16,
+      },
+    });
+  });
+
+  it("não escolhe silenciosamente um produto ambíguo e aceita o nome exato depois", () => {
+    const ambiguousProducts = [
+      ...correctionProducts,
+      { id: "prd-pomada-brilho", name: "Pomada Brilho", salePrice: 55 },
+    ];
+    const ambiguous = interpretStockEntryCorrection({
+      message: "Troca para a pomada.",
+      currentDraft,
+      products: ambiguousProducts,
+      now,
+    });
+    expect(ambiguous).toMatchObject({
+      status: "clarification",
+      reason: "product_ambiguous",
+      clarification: { kind: "product" },
+    });
+    expect(interpretStockEntryCorrection({
+      message: "Pomada Brilho",
+      currentDraft,
+      products: ambiguousProducts,
+      now,
+      clarification: ambiguous.status === "clarification" ? ambiguous.clarification : undefined,
+    })).toMatchObject({
+      status: "valid",
+      draft: { productId: "prd-pomada-brilho", salePrice: 55 },
+    });
+  });
+
+  it.each([
+    ["A data correta foi ontem.", "2026-07-15T12:00:00.000-03:00"],
+    ["Foi no dia 15/07/2026.", "2026-07-15T12:00:00.000-03:00"],
+    ["Na verdade comprei hoje.", "2026-07-16T12:00:00.000-03:00"],
+  ])("corrige a data: %s", (message, occurredAt) => {
+    expect(interpretStockEntryCorrection({ message, currentDraft, products: correctionProducts, now })).toMatchObject({
+      status: "valid",
+      changedFields: ["date"],
+      draft: { occurredAt },
+    });
+  });
+
+  it.each([
+    "Me enganei, são 0 unidades.",
+    "A quantidade correta é -2.",
+    "O custo unitário correto é zero.",
+    "O custo unitário correto é abc.",
+    "O total correto é abc.",
+    "O total correto é -12 reais.",
+    "A data correta foi 31/02/2026.",
+    "Troca para Navalha Inexistente.",
+    "São 3 unidades, custou 5 reais cada e o total foi 20 reais.",
+  ])("recusa correção inválida sem produzir nova prévia: %s", (message) => {
+    expect(interpretStockEntryCorrection({ message, currentDraft, products: correctionProducts, now })).toMatchObject({
+      status: "invalid",
+    });
+  });
+
+  it("preserva a prévia em ambiguidade e resolve a resposta posterior", () => {
+    const ambiguous = interpretStockEntryCorrection({
+      message: "Me enganei, o valor correto é 12 reais.",
+      currentDraft,
+      products: correctionProducts,
+      now,
+    });
+    expect(ambiguous).toMatchObject({
+      status: "clarification",
+      reason: "cost_kind_ambiguous",
+      message: "Os R$ 12,00 correspondem ao custo unitário ou ao custo total?",
+      clarification: { kind: "cost_kind", amount: 12 },
+    });
+    expect(interpretStockEntryCorrection({
+      message: "É o total.",
+      currentDraft,
+      products: correctionProducts,
+      now,
+      clarification: ambiguous.status === "clarification" ? ambiguous.clarification : undefined,
+    })).toMatchObject({ status: "valid", draft: { unitCost: 6, totalCost: 12 } });
+  });
+
+  it.each([
+    "O valor correto é 12.",
+    "Na verdade foi 3.",
+  ])("pede esclarecimento sem adivinhar: %s", (message) => {
+    expect(interpretStockEntryCorrection({ message, currentDraft, products: correctionProducts, now })).toMatchObject({
+      status: "clarification",
+    });
+  });
+
+  it("mantém a fotografia anterior intacta quando o campo continua ambíguo", () => {
+    const pendingDraft = draft({ quantity: 1, unitCost: 6, totalCost: 6 });
+    const before = structuredClone(pendingDraft);
+    expect(interpretStockEntryCorrection({
+      message: "Me enganei, precisa ser sete reais.",
+      currentDraft: pendingDraft,
+      products: correctionProducts,
+      now,
+    })).toMatchObject({ status: "clarification", reason: "field_ambiguous" });
+    expect(pendingDraft).toEqual(before);
   });
 });
 
@@ -265,6 +489,27 @@ describe("operação atômica de entrada em memória", () => {
     expect(store.stockMovements).toHaveLength(0);
     expect(store.financialEntries).toHaveLength(0);
   });
+
+  it("invalida atomicamente a fotografia anterior ao substituir a prévia", async () => {
+    const store = new InMemoryStore();
+    const saved = await savePreview(store, { draft: draft({ quantity: 2, unitCost: 5, totalCost: 10 }) });
+    const updatedPreview: StockEntryPreview = {
+      ...saved.preview,
+      id: crypto.randomUUID(),
+      draft: draft({ quantity: 3, unitCost: 6, totalCost: 18 }),
+      createdAt: new Date("2026-07-15T15:01:00.000Z").toISOString(),
+    };
+    const updatedRecord = await saved.repository.replacePending(saved.record, updatedPreview);
+    expect(updatedRecord).not.toBeNull();
+
+    const service = new OperationsService(store);
+    await expect(service.confirmStockEntry(confirmationInput(saved))).rejects.toThrow(/prévia|invalida|inválida/i);
+    const latest = { preview: updatedPreview, record: updatedRecord!, repository: saved.repository };
+    const confirmed = await service.confirmStockEntry(confirmationInput(latest));
+    expect(confirmed).toMatchObject({ replay: false, movement: { quantity: 3, unitCost: 6, totalCost: 18 } });
+    expect(store.stockMovements).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(0);
+  });
 });
 
 describe("orquestrador único de texto e áudio no WhatsApp", () => {
@@ -333,6 +578,207 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(store.stockMovements[0]).toMatchObject({ movementType: "IN", quantity: 2, unitCost: 5, totalCost: 10 });
     expect(store.financialEntries).toHaveLength(0);
     expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
+    await app.close();
+  });
+
+  it("atualiza a mesma prévia, resolve ambiguidade e confirma somente a versão mais recente", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ memoryStore: store });
+    const product = store.products.find((item) => item.id === "prd-pomada")!;
+    const stockBefore = product.stockQty;
+
+    const original = await webhook(app, evolutionTextPayload(
+      "Adiciona 2 unidades de Pomada Matte no estoque. Paguei 10 reais no total.",
+      "stock-correction-original-001",
+    ));
+    const originalPreviewId = original.json().previewId;
+
+    const corrected = await webhook(app, evolutionRealisticExtendedTextPayload(
+      "Me enganei, o total correto é 12 reais.",
+      "stock-correction-total-001",
+    ));
+    expect(corrected.json()).toMatchObject({
+      intent: "stock_entry",
+      corrected: true,
+      preview: { quantity: 2, unitCost: 6, totalCost: 12, salePrice: 59 },
+    });
+    expect(corrected.json().previewId).not.toBe(originalPreviewId);
+    expect(sentTexts(fetchMock).at(-1)).toContain("Entrada de estoque atualizada");
+    expect(product.stockQty).toBe(stockBefore);
+
+    const ambiguous = await webhook(app, evolutionTextPayload(
+      "O valor correto é 18 reais.",
+      "stock-correction-ambiguous-001",
+    ));
+    expect(ambiguous.json()).toMatchObject({ intent: "stock_entry", corrected: false, clarification: true });
+    expect(sentTexts(fetchMock).at(-1)).toBe("Os R$ 18,00 correspondem ao custo unitário ou ao custo total?");
+
+    const clarified = await webhook(app, evolutionTextPayload("É o total.", "stock-correction-clarified-001"));
+    expect(clarified.json()).toMatchObject({
+      intent: "stock_entry",
+      corrected: true,
+      preview: { quantity: 2, unitCost: 9, totalCost: 18 },
+    });
+    expect(product.stockQty).toBe(stockBefore);
+
+    const confirmed = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-correction-confirm-001"));
+    const replay = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-correction-confirm-002"));
+    expect(confirmed.json()).toMatchObject({ executed: true, replay: false });
+    expect(replay.json()).toMatchObject({ executed: true, replay: true });
+    expect(product.stockQty).toBe(stockBefore + 2);
+    expect(store.stockMovements).toHaveLength(1);
+    expect(store.stockMovements[0]).toMatchObject({ quantity: 2, unitCost: 9, totalCost: 18 });
+    expect(store.financialEntries).toHaveLength(0);
+    await app.close();
+  });
+
+  it("texto e áudio percorrem o mesmo parser de correção e produzem a mesma prévia atualizada", async () => {
+    const run = async (audio: boolean) => {
+      const store = new InMemoryStore();
+      const fetchMock = transportMock();
+      vi.stubGlobal("fetch", fetchMock);
+      const correction = "Na verdade são 3 unidades e o total foi 18 reais.";
+      const transcriber: AudioTranscriptionService = {
+        transcribe: vi.fn(async () => ({ transcript: correction, provider: "local_whisper:test" })),
+      };
+      const app = createApp({ memoryStore: store, audioTranscriptionService: audio ? transcriber : undefined });
+      await webhook(app, evolutionRealisticExtendedTextPayload(
+        "Adiciona 2 unidades de Pomada Matte no estoque. Paguei 10 reais no total.",
+        `stock-correction-${audio ? "audio" : "text"}-original-001`,
+      ));
+      const response = await webhook(
+        app,
+        audio
+          ? evolutionAudioPayload("stock-correction-audio-001")
+          : evolutionTextPayload(correction, "stock-correction-text-001"),
+      );
+      await app.close();
+      return { body: response.json(), fetchMock };
+    };
+
+    const textResult = await run(false);
+    const audioResult = await run(true);
+    expect(textResult.body.preview).toEqual(audioResult.body.preview);
+    expect(textResult.body).toMatchObject({ corrected: true, audio: false });
+    expect(audioResult.body).toMatchObject({ corrected: true, audio: true });
+    expect([...textResult.fetchMock.mock.calls, ...audioResult.fetchMock.mock.calls]
+      .some(([url]) => /gemini|openai|qwen/i.test(String(url)))).toBe(false);
+  });
+
+  it("texto original e transcript real do áudio atualizam o mesmo custo total sem mutação antes de CONFIRMAR", async () => {
+    const run = async (audio: boolean) => {
+      const store = new InMemoryStore();
+      const fetchMock = transportMock();
+      vi.stubGlobal("fetch", fetchMock);
+      const transcript = "Me enganei, o total, na verdade, é sete reais";
+      const transcriber: AudioTranscriptionService = {
+        transcribe: vi.fn(async () => ({ transcript, provider: "local_whisper:test" })),
+      };
+      const app = createApp({ memoryStore: store, audioTranscriptionService: audio ? transcriber : undefined });
+      const product = store.products.find((item) => item.id === "prd-pomada")!;
+      const before = { stockQty: product.stockQty, salePrice: product.salePrice };
+      await webhook(app, evolutionTextPayload(
+        "Adiciona 1 unidade de Pomada Matte no estoque. Paguei 6 reais no total.",
+        `stock-total-seven-${audio ? "audio" : "text"}-original-001`,
+      ));
+      const response = await webhook(
+        app,
+        audio
+          ? evolutionAudioPayload("stock-total-seven-audio-correction-001")
+          : evolutionTextPayload("Me enganei, o total correto é sete reais.", "stock-total-seven-text-correction-001"),
+      );
+      const body = response.json();
+      expect(product).toMatchObject(before);
+      expect(store.stockMovements).toHaveLength(0);
+      expect(store.financialEntries).toHaveLength(0);
+      await app.close();
+      return body;
+    };
+
+    const textResult = await run(false);
+    const audioResult = await run(true);
+    expect(audioResult.preview).toEqual(textResult.preview);
+    expect(textResult).toMatchObject({ corrected: true, audio: false, preview: { quantity: 1, unitCost: 7, totalCost: 7 } });
+    expect(audioResult).toMatchObject({ corrected: true, audio: true, preview: { quantity: 1, unitCost: 7, totalCost: 7 } });
+  });
+
+  it("frase canônica e transcript real do áudio inicial geram a mesma prévia sem mutação", async () => {
+    const run = async (audio: boolean) => {
+      const store = new InMemoryStore();
+      const fetchMock = transportMock();
+      vi.stubGlobal("fetch", fetchMock);
+      const transcript = "Adiciono uma unidade de Pomada Matte no estoque, paguei seis reais no total";
+      const transcriber: AudioTranscriptionService = {
+        transcribe: vi.fn(async () => ({ transcript, provider: "local_whisper:test" })),
+      };
+      const app = createApp({ memoryStore: store, audioTranscriptionService: audio ? transcriber : undefined });
+      const product = store.products.find((item) => item.id === "prd-pomada")!;
+      const before = { stockQty: product.stockQty, salePrice: product.salePrice };
+      const response = await webhook(
+        app,
+        audio
+          ? evolutionAudioPayload("stock-initial-real-audio-001")
+          : evolutionTextPayload(
+              "Adiciona uma unidade de Pomada Matte no estoque. Paguei seis reais no total.",
+              "stock-initial-canonical-text-001",
+            ),
+      );
+      const body = response.json();
+      expect(product).toMatchObject(before);
+      expect(store.stockMovements).toHaveLength(0);
+      expect(store.financialEntries).toHaveLength(0);
+      await app.close();
+      return body;
+    };
+
+    const textResult = await run(false);
+    const audioResult = await run(true);
+    expect(audioResult.preview).toEqual(textResult.preview);
+    expect(textResult).toMatchObject({ intent: "stock_entry", audio: false, executed: false });
+    expect(audioResult).toMatchObject({ intent: "stock_entry", audio: true, executed: false });
+    expect(audioResult.preview).toMatchObject({ productName: "Pomada Matte", quantity: 1, unitCost: 6, totalCost: 6, salePrice: 59 });
+  });
+
+  it("cancela a versão atualizada sem mutação", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ memoryStore: store });
+    const product = store.products.find((item) => item.id === "prd-pomada")!;
+    const stockBefore = product.stockQty;
+    await webhook(app, evolutionTextPayload(
+      "Adiciona 2 unidades de Pomada Matte no estoque. Paguei 10 reais no total.",
+      "stock-correction-cancel-original-001",
+    ));
+    await webhook(app, evolutionTextPayload("Me enganei, são 3 unidades.", "stock-correction-cancel-update-001"));
+    const cancelled = await webhook(app, evolutionTextPayload("CANCELAR", "stock-correction-cancel-001"));
+    expect(cancelled.json()).toMatchObject({ intent: "stock_entry", cancelled: true, executed: false });
+    expect(product.stockQty).toBe(stockBefore);
+    expect(store.stockMovements).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    await app.close();
+  });
+
+  it("repetir a mesma correção preserva a fotografia atual e não duplica efeitos", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ memoryStore: store });
+    await webhook(app, evolutionTextPayload(
+      "Adiciona 2 unidades de Pomada Matte no estoque. Paguei 10 reais no total.",
+      "stock-correction-repeat-original-001",
+    ));
+    const first = await webhook(app, evolutionTextPayload("O total correto é 12 reais.", "stock-correction-repeat-001"));
+    const repeated = await webhook(app, evolutionTextPayload("O total correto é 12 reais.", "stock-correction-repeat-002"));
+    expect(repeated.json()).toMatchObject({ corrected: true, previewId: first.json().previewId, preview: first.json().preview });
+
+    await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-correction-repeat-confirm-001"));
+    await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-correction-repeat-confirm-002"));
+    expect(store.stockMovements).toHaveLength(1);
+    expect(store.stockMovements[0]).toMatchObject({ quantity: 2, unitCost: 6, totalCost: 12 });
+    expect(store.financialEntries).toHaveLength(0);
     await app.close();
   });
 
@@ -496,7 +942,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       pendingPreserved: true,
       newStockEntryBlocked: true,
     });
-    expect(sentTexts(fetchMock).at(-1)).toContain("Responda CONFIRMAR ou CANCELAR antes de iniciar outra entrada");
+    expect(sentTexts(fetchMock).at(-1)).toContain("Responda CONFIRMAR, CANCELAR ou envie uma correção antes de iniciar outra entrada");
     const stored = [...store.aiWhatsappStockEntryPreviews.values()][0] as { preview: StockEntryPreview };
     expect(stored.preview).toMatchObject({
       id: originalBody.previewId,

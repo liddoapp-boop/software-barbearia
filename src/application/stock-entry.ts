@@ -104,6 +104,32 @@ export type StockEntryInterpretation =
     }
   | { recognized: true; status: "ready"; draft: StockEntryDraft };
 
+export type StockEntryCorrectionField = "product" | "quantity" | "unitCost" | "totalCost" | "date";
+
+export type StockEntryCorrectionClarification =
+  | { kind: "cost_kind"; amount: number }
+  | { kind: "product" };
+
+export type StockEntryCorrectionInterpretation =
+  | { status: "not_correction" }
+  | {
+      status: "clarification";
+      reason: "cost_kind_ambiguous" | "field_ambiguous" | "product_ambiguous";
+      message: string;
+      clarification?: StockEntryCorrectionClarification;
+      candidateNames?: string[];
+    }
+  | {
+      status: "invalid";
+      reason: "quantity_invalid" | "cost_invalid" | "cost_inconsistent" | "date_invalid" | "product_not_found";
+      message: string;
+    }
+  | {
+      status: "valid";
+      draft: StockEntryDraft;
+      changedFields: StockEntryCorrectionField[];
+    };
+
 const NUMBER_WORD_VALUES = new Map<string, number>([
   ["um", 1], ["uma", 1], ["dois", 2], ["duas", 2], ["tres", 3], ["quatro", 4],
   ["cinco", 5], ["seis", 6], ["sete", 7], ["oito", 8], ["nove", 9], ["dez", 10],
@@ -176,16 +202,18 @@ const QUANTITY_TOKEN = "(?:\\d{1,6}|um|uma|dois|duas|tres|quatro|cinco|seis|sete
 
 export function looksLikeStockEntryCommand(message: string) {
   const text = normalizedWords(message);
-  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adicionar|adicione|entrada|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text);
+  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|entrada|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text);
   const hasStockCue = /\bestoque\b/.test(text);
+  const hasAmbiguousPlacementVerb = /\b(?:coloca|coloco|colocar|coloque)\b/.test(text);
   const hasSaleCue = /\b(?:vendi|venda|cliente|pagamento)\b/.test(text);
+  if (hasAmbiguousPlacementVerb && !hasStockCue) return false;
   return hasEntryVerb && (!hasSaleCue || hasStockCue || /\b(?:comprei|compramos|recebi|recebemos|reposicao)\b/.test(text));
 }
 
 function extractProductDescriptor(text: string) {
   const normalized = normalizeText(text);
   const patterns = [
-    new RegExp(`\\b(?:comprei|compramos|recebi|recebemos|adiciona|adicionar|adicione|inclui|incluir|repor)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
+    new RegExp(`\\b(?:comprei|compramos|recebi|recebemos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|inclui|incluir|repor)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
     new RegExp(`\\bentrada\\s+(?:de\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
   ];
   for (const pattern of patterns) {
@@ -278,7 +306,13 @@ function resolveCosts(message: string, quantity: number) {
   }
   const candidates = extractMoneyCandidates(message);
   if (!candidates.length) return { reason: "cost_missing" as const };
-  if (candidates.some((candidate) => candidate.kind === "unknown")) return { reason: "cost_ambiguous" as const };
+  const unknownCandidates = candidates.filter((candidate) => candidate.kind === "unknown");
+  if (unknownCandidates.length) {
+    if (quantity === 1 && candidates.length === 1) {
+      return { unitCost: unknownCandidates[0].amount, totalCost: unknownCandidates[0].amount };
+    }
+    return { reason: "cost_ambiguous" as const };
+  }
   const unitValues = [...new Set(candidates.filter((candidate) => candidate.kind === "unit").map((candidate) => candidate.amount))];
   const totalValues = [...new Set(candidates.filter((candidate) => candidate.kind === "total").map((candidate) => candidate.amount))];
   if (unitValues.length > 1 || totalValues.length > 1) return { reason: "cost_inconsistent" as const };
@@ -327,6 +361,204 @@ function resolveOccurredAt(message: string, now: Date) {
 function extractNotes(message: string) {
   const match = String(message).match(/\b(?:obs|observa[cç][aã]o|observa[cç][oõ]es)\s*[:=-]\s*(.+)$/iu);
   return match?.[1]?.trim().slice(0, 500) || undefined;
+}
+
+const CORRECTION_NUMBER_TOKEN = "(?:-?\\d{1,7}(?:[.,]\\d{1,2})?|zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|catorze|quatorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem|cento|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil)";
+
+function parseCorrectionNumber(value: string) {
+  const normalized = normalizedWords(value);
+  if (normalized === "zero") return 0;
+  if (/^-?\d{1,7}(?:[.,]\d{1,2})?$/.test(value.trim())) return Number(value.trim().replace(",", "."));
+  return parseNumberWords(value);
+}
+
+function firstCorrectionNumber(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const value = parseCorrectionNumber(match[1]);
+    if (value !== undefined && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function correctionMoney(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\u00a0/g, " ");
+}
+
+function correctionProductTarget(text: string) {
+  const patterns = [
+    /\btroca(?:r)?(?:\s+o\s+produto)?\s+para\s+(.+?)(?=\s*,|[.;]|\s+(?:foram|sao|quantidade|custou|custo|total)\b|$)/i,
+    /\b(?:o\s+)?produto\s+(?:correto\s+)?(?:e|era|foi)\s+(.+?)(?=\s*,|[.;]|$)/i,
+    /\b(?:me\s+enganei\s*,?\s*)?era\s+(?:o|a)?\s*(.+?)(?=\s*,|[.;]|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].replace(/^(?:o|a|os|as)\s+/i, "").trim();
+  }
+  return undefined;
+}
+
+export function interpretStockEntryCorrection(input: {
+  message: string;
+  currentDraft: StockEntryDraft;
+  products: StockEntryProductCandidate[];
+  now?: Date;
+  clarification?: StockEntryCorrectionClarification;
+}): StockEntryCorrectionInterpretation {
+  const text = normalizeText(input.message);
+  const correctionMarker = /\b(?:me enganei|na verdade|corret[oa]|corrigir|corrige|troca|trocar)\b/.test(text);
+  if (looksLikeStockEntryCommand(text) && !correctionMarker) return { status: "not_correction" };
+
+  const changedFields: StockEntryCorrectionField[] = [];
+  let product = input.products.find((candidate) => candidate.id === input.currentDraft.productId);
+  let quantity: number | undefined;
+  let unitCost: number | undefined;
+  let totalCost: number | undefined;
+  let occurredAt: string | undefined;
+
+  if (input.clarification?.kind === "cost_kind") {
+    if (/\b(?:total|compra\s+inteira|ao\s+todo)\b/.test(text)) {
+      totalCost = input.clarification.amount;
+      changedFields.push("totalCost");
+    } else if (/\b(?:unitari[oa]|por\s+unidade|cada|unidade)\b/.test(text)) {
+      unitCost = input.clarification.amount;
+      changedFields.push("unitCost");
+    } else {
+      return {
+        status: "clarification",
+        reason: "cost_kind_ambiguous",
+        message: `Os ${correctionMoney(input.clarification.amount)} correspondem ao custo unitário ou ao custo total?`,
+        clarification: input.clarification,
+      };
+    }
+  }
+
+  const productTarget = input.clarification?.kind === "product" ? text : correctionProductTarget(text);
+  if (productTarget) {
+    const resolution = resolveProduct(text, productTarget, input.products);
+    if (!resolution.match) {
+      if (resolution.candidates.length > 1) {
+        return {
+          status: "clarification",
+          reason: "product_ambiguous",
+          message: `Encontrei mais de um produto parecido: ${resolution.candidates.map((item) => item.name).join(", ")}. Qual é o produto exato?`,
+          clarification: { kind: "product" },
+          candidateNames: resolution.candidates.map((item) => item.name),
+        };
+      }
+      return { status: "invalid", reason: "product_not_found", message: "Não encontrei esse produto cadastrado nesta unidade." };
+    }
+    product = resolution.match;
+    changedFields.push("product");
+  }
+
+  const quantityCue = /\b(?:sao|foram)\s+|\bquantidade\b|\bcoloca\b/.test(text);
+  quantity = firstCorrectionNumber(text, [
+    new RegExp(`\\b(?:sao|foram)\\s+(${CORRECTION_NUMBER_TOKEN})\\s+(?:unidades?|itens?)\\b`, "i"),
+    new RegExp(`\\bquantidade(?:\\s+correta)?\\s*(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
+    new RegExp(`\\bcoloca\\s+(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
+  ]);
+  if (quantity !== undefined) {
+    if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 100_000) {
+      return { status: "invalid", reason: "quantity_invalid", message: "A quantidade deve ser um número inteiro positivo." };
+    }
+    changedFields.push("quantity");
+  } else if (quantityCue) {
+    return { status: "invalid", reason: "quantity_invalid", message: "A quantidade informada não é válida." };
+  }
+
+  if (!input.clarification) {
+    unitCost = firstCorrectionNumber(text, [
+      new RegExp(`\\b(?:custo|valor)\\s+(?:unitari[oa]|por\\s+unidade)(?:\\s+corret[oa])?\\s*(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?`, "i"),
+      new RegExp(`\\b(?:foi|custou)?\\s*(${CORRECTION_NUMBER_TOKEN})\\s*(?:reais?)?\\s*(?:cada|por\\s+unidade)\\b`, "i"),
+    ]);
+    totalCost = firstCorrectionNumber(text, [
+      new RegExp(`\\b(?:o\\s+)?total(?:\\s+correto)?(?:\\s*,?\\s+na\\s+verdade\\s*,?)?\\s*(?:e|era|foi|deu|:)?\\s*(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?`, "i"),
+      new RegExp(`\\bpaguei\\s+(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?\\s*(?:no\\s+total|ao\\s+todo)\\b`, "i"),
+      new RegExp(`\\b(?:a\\s+)?compra\\s+inteira\\s+(?:deu|foi)\\s+(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?`, "i"),
+    ]);
+    if (unitCost !== undefined) changedFields.push("unitCost");
+    if (totalCost !== undefined) changedFields.push("totalCost");
+
+    const unknownCost = firstCorrectionNumber(text, [
+      new RegExp(`\\b(?:o\\s+)?valor\\s+correto\\s*(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?`, "i"),
+    ]);
+    if (unknownCost !== undefined && unitCost === undefined && totalCost === undefined) {
+      if (unknownCost <= 0) return { status: "invalid", reason: "cost_invalid", message: "O custo deve ser maior que zero." };
+      return {
+        status: "clarification",
+        reason: "cost_kind_ambiguous",
+        message: `Os ${correctionMoney(unknownCost)} correspondem ao custo unitário ou ao custo total?`,
+        clarification: { kind: "cost_kind", amount: unknownCost },
+      };
+    }
+  }
+
+  if ((unitCost !== undefined && unitCost <= 0) || (totalCost !== undefined && totalCost <= 0)) {
+    return { status: "invalid", reason: "cost_invalid", message: "O custo deve ser maior que zero." };
+  }
+  if (/\b(?:custo\s+unitario|valor\s+por\s+unidade|total(?:\s+correto(?:\s*,?\s+na\s+verdade)?|\s*,?\s+na\s+verdade))\b/.test(text)
+    && unitCost === undefined && totalCost === undefined && !input.clarification) {
+    return { status: "invalid", reason: "cost_invalid", message: "O custo informado não é válido." };
+  }
+
+  const hasDateCue = /\b(?:ontem|hoje|data|dia\s+\d{1,2}[/-]|comprei\s+hoje)\b/.test(text);
+  if (hasDateCue) {
+    occurredAt = resolveOccurredAt(text, input.now ?? new Date()) ?? undefined;
+    if (!occurredAt) return { status: "invalid", reason: "date_invalid", message: "A data informada não é válida. Use dia/mês/ano." };
+    changedFields.push("date");
+  }
+
+  if (!changedFields.length) {
+    const genericNumber = firstCorrectionNumber(text, [
+      new RegExp(`\\b(?:na\\s+verdade\\s+)?foi\\s+(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
+    ]);
+    if (genericNumber !== undefined || correctionMarker) {
+      return {
+        status: "clarification",
+        reason: "field_ambiguous",
+        message: "Você quer corrigir o produto, a quantidade, o custo unitário, o custo total ou a data?",
+      };
+    }
+    return { status: "not_correction" };
+  }
+
+  const nextQuantity = quantity ?? input.currentDraft.quantity;
+  let nextUnitCost = unitCost ?? input.currentDraft.unitCost;
+  let nextTotalCost = totalCost ?? input.currentDraft.totalCost;
+  const unitChanged = unitCost !== undefined;
+  const totalChanged = totalCost !== undefined;
+  const quantityChanged = quantity !== undefined;
+
+  if (unitChanged && totalChanged) {
+    if (Math.round(nextUnitCost * nextQuantity * 100) !== Math.round(nextTotalCost * 100)) {
+      return { status: "invalid", reason: "cost_inconsistent", message: "Os valores de custo não fecham com a quantidade; a prévia anterior foi preservada." };
+    }
+  } else if (totalChanged) {
+    const totalCents = Math.round(nextTotalCost * 100);
+    if (totalCents % nextQuantity !== 0) {
+      return { status: "invalid", reason: "cost_inconsistent", message: "O total não permite calcular um custo unitário com precisão de centavos." };
+    }
+    nextUnitCost = totalCents / nextQuantity / 100;
+  } else if (unitChanged || quantityChanged) {
+    nextTotalCost = Math.round(nextUnitCost * nextQuantity * 100) / 100;
+  }
+
+  const parsed = stockEntryDraftSchema.safeParse({
+    ...input.currentDraft,
+    productId: product?.id ?? input.currentDraft.productId,
+    productName: product?.name ?? input.currentDraft.productName,
+    salePrice: product?.salePrice ?? input.currentDraft.salePrice,
+    quantity: nextQuantity,
+    unitCost: nextUnitCost,
+    totalCost: nextTotalCost,
+    occurredAt: occurredAt ?? input.currentDraft.occurredAt,
+  });
+  if (!parsed.success) {
+    return { status: "invalid", reason: "cost_invalid", message: "A correção informada não é válida; a prévia anterior foi preservada." };
+  }
+  return { status: "valid", draft: parsed.data, changedFields: [...new Set(changedFields)] };
 }
 
 export function parseStockEntryPreviewDecision(message: string) {
@@ -402,10 +634,10 @@ function currencyBR(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export function formatStockEntryPreview(preview: StockEntryPreview) {
+export function formatStockEntryPreview(preview: StockEntryPreview, options: { updated?: boolean } = {}) {
   const draft = preview.draft;
   const lines = [
-    "Entrada de estoque",
+    options.updated ? "Entrada de estoque atualizada" : "Entrada de estoque",
     `Produto: ${draft.productName}`,
     `Quantidade: ${draft.quantity}`,
     `Custo unitário de compra: ${currencyBR(draft.unitCost)}`,
