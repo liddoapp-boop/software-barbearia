@@ -1268,7 +1268,7 @@ function renderServices() {
       aria-label="${safeName}, ${fmtBRL(s.price)}, ${safeDuration} minutos, ${selected ? 'selecionado' : 'selecionar'}"
       aria-pressed="${selected}" data-service-id="${safeId}" style="animation-delay:${i*.04}s">
       <div class="svc-img">
-        ${hasImg ? `<img src="${safeImageUrl}" alt="${safeName}" loading="lazy" onerror="this.parentNode.innerHTML='${IMG_PH.replace(/"/g,"'")}'">` : IMG_PH}
+        ${hasImg ? `<img src="${safeImageUrl}" alt="${safeName}" loading="lazy" data-service-image>` : IMG_PH}
       </div>
       <div class="svc-body">
         <div class="svc-name">${safeName}</div>
@@ -1288,6 +1288,12 @@ function renderServices() {
       <div class="professional-note">Atendimento com Geovane Borges</div>
     </div>`);
   setupServiceDragScroll(w.querySelector('.svc-scroll'));
+
+  w.querySelectorAll('[data-service-image]').forEach((image) => {
+    image.addEventListener('error', () => {
+      if (image.parentElement) image.parentElement.innerHTML = IMG_PH;
+    }, { once: true });
+  });
 
   w.querySelectorAll('[data-service-id]').forEach(c => {
     c.addEventListener('click', () => onPickService(c.dataset.serviceId, runId));

@@ -250,7 +250,11 @@ export function issueAccessToken(input: {
   expiresInSec?: number;
 }) {
   const nowSec = Math.floor(Date.now() / 1000);
-  const expiresInSec = Math.max(300, input.expiresInSec ?? 60 * 60 * 8);
+  const configuredTtl = Number(process.env.AUTH_SESSION_TTL_SEC);
+  const defaultTtl = Number.isInteger(configuredTtl) && configuredTtl >= 300
+    ? Math.min(configuredTtl, 8 * 60 * 60)
+    : 30 * 60;
+  const expiresInSec = Math.min(8 * 60 * 60, Math.max(300, input.expiresInSec ?? defaultTtl));
   const activeUnitId = input.activeUnitId ?? input.user.unitIds[0];
   if (!input.user.unitIds.includes(activeUnitId)) {
     throw new Error("Unidade nao autorizada para o usuario");
@@ -284,8 +288,20 @@ export function verifyAccessToken(token: string): AuthSession {
     throw new Error("Token invalido");
   }
 
+  let header: { alg?: unknown; typ?: unknown };
+  try {
+    header = JSON.parse(fromBase64Url(headerSegment)) as { alg?: unknown; typ?: unknown };
+  } catch {
+    throw new Error("Token invalido");
+  }
+  if (header.alg !== "HS256" || header.typ !== "JWT") {
+    throw new Error("Token invalido");
+  }
+
   const expectedSignature = signHmac(`${headerSegment}.${payloadSegment}`, getAuthSecret());
-  if (expectedSignature !== signature) {
+  const expected = Buffer.from(expectedSignature);
+  const incoming = Buffer.from(signature);
+  if (expected.length !== incoming.length || !crypto.timingSafeEqual(expected, incoming)) {
     throw new Error("Token invalido");
   }
 

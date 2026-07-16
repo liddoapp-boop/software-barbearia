@@ -419,9 +419,8 @@ describe("blindagem de agendamentos", () => {
     });
     expect(created.statusCode).toBe(200);
     const appointmentId = created.json().appointment.id;
-    const headers = await ownerHeaders(app);
-
     vi.setSystemTime(new Date("2026-04-22T12:44:00.000Z"));
+    const headers = await ownerHeaders(app);
     const early = await patchAppointmentStatus(app, appointmentId, "NO_SHOW", "noshow-early-001", {}, headers);
     expect([400, 422]).toContain(early.statusCode);
     expect(early.json().error).toBe("O cliente ainda esta dentro do periodo de tolerancia de 15 minutos.");

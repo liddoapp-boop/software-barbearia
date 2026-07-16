@@ -31,6 +31,14 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function bindImageFailureFallbacks(root) {
+  root?.querySelectorAll("img[data-hide-on-error]").forEach((image) => {
+    image.addEventListener("error", () => {
+      if (image.parentElement) image.parentElement.style.display = "none";
+    }, { once: true });
+  });
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -343,7 +351,7 @@ export function renderServiceDetail(elements, payload = null) {
 
           ${service.imageUrl ? `
           <div class="svc-detail-img">
-            <img src="${escapeHtml(service.imageUrl)}" alt="${escapeHtml(service.name)}" loading="lazy" onerror="this.parentNode.style.display='none'" />
+            <img src="${escapeHtml(service.imageUrl)}" alt="${escapeHtml(service.name)}" loading="lazy" data-hide-on-error />
           </div>
           ` : ""}
 
@@ -396,6 +404,7 @@ export function renderServiceDetail(elements, payload = null) {
     </aside>
   `;
   elements.drawerHost.classList.remove("hidden");
+  bindImageFailureFallbacks(elements.drawerHost);
   bindEntityDrawers(elements.drawerHost);
   elements.drawerHost.querySelectorAll("[data-drawer-close]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -481,7 +490,7 @@ export function renderServiceEditPanel(elements, service = {}, professionals = [
             <div class="svc-edit-field svc-edit-full">
               <label for="svcEditImageUrl">Imagem do servico (URL)</label>
               <input id="svcEditImageUrl" type="url" maxlength="500" value="${escapeHtml(service.imageUrl || "")}" class="svc-edit-input" placeholder="https://..." />
-              ${service.imageUrl ? `<div class="svc-edit-img-preview" id="${imagePreviewId}"><img src="${escapeHtml(service.imageUrl)}" alt="Preview" onerror="this.parentNode.style.display='none'" /></div>` : `<div class="svc-edit-img-preview" id="${imagePreviewId}" style="display:none"><img alt="Preview" /></div>`}
+              ${service.imageUrl ? `<div class="svc-edit-img-preview" id="${imagePreviewId}"><img src="${escapeHtml(service.imageUrl)}" alt="Preview" data-hide-on-error /></div>` : `<div class="svc-edit-img-preview" id="${imagePreviewId}" style="display:none"><img alt="Preview" /></div>`}
             </div>
 
             <div class="svc-edit-field svc-edit-full">
@@ -511,6 +520,7 @@ export function renderServiceEditPanel(elements, service = {}, professionals = [
   `;
 
   elements.drawerHost.classList.remove("hidden");
+  bindImageFailureFallbacks(elements.drawerHost);
 
   const imgInput = elements.drawerHost.querySelector("#svcEditImageUrl");
   const imgPreview = elements.drawerHost.querySelector(`#${imagePreviewId}`);

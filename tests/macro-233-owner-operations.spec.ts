@@ -63,11 +63,12 @@ describe("Macro 233 owner-only operations", () => {
   const previousEnv: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    for (const key of ["DATA_BACKEND", "AUTH_ENFORCED", "BLOCK_COMMERCIAL_REFUNDS", "ENABLE_COMMISSION_TEST_RULES"]) {
+    for (const key of ["DATA_BACKEND", "AUTH_ENFORCED", "AUTH_SESSION_TTL_SEC", "BLOCK_COMMERCIAL_REFUNDS", "ENABLE_COMMISSION_TEST_RULES"]) {
       previousEnv[key] = process.env[key];
     }
     process.env.DATA_BACKEND = "memory";
     process.env.AUTH_ENFORCED = "true";
+    process.env.AUTH_SESSION_TTL_SEC = "28800";
     process.env.BLOCK_COMMERCIAL_REFUNDS = "true";
     delete process.env.ENABLE_COMMISSION_TEST_RULES;
     vi.useFakeTimers({ toFake: ["Date"] });

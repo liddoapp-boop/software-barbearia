@@ -1,6 +1,6 @@
 services:
   api:
-    image: evoapicloud/evolution-api:latest
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: barbearia-evolution-api-local
     restart: unless-stopped
     depends_on:
@@ -38,19 +38,6 @@ services:
       - evolution-local
     expose:
       - "8080"
-
-  manager:
-    image: evoapicloud/evolution-manager:latest
-    container_name: barbearia-evolution-manager-local
-    profiles:
-      - manager
-    restart: unless-stopped
-    depends_on:
-      - api
-    ports:
-      - "127.0.0.1:${EVOLUTION_MANAGER_PORT:-3000}:80"
-    networks:
-      - evolution-local
 
   postgres:
     image: postgres:15-alpine

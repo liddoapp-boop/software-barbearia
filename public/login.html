@@ -207,7 +207,6 @@
       function persistSession(data) {
         const user = data.user || {};
         localStorage.setItem("sb.authSession", JSON.stringify({
-          accessToken: data.accessToken,
           expiresAt: data.expiresAt,
           user: {
             id: user.id,
@@ -218,12 +217,13 @@
             unitIds: Array.isArray(user.unitIds) ? user.unitIds : [],
           },
         }));
-        localStorage.setItem("authToken", data.accessToken);
+        localStorage.removeItem("authToken");
       }
 
       async function loginWithBackend(email, password) {
         const res = await fetch("/auth/login", {
           method: "POST",
+          credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
         });
@@ -252,6 +252,7 @@
 
           const res = await fetch("/auth/firebase", {
             method: "POST",
+            credentials: "same-origin",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ idToken }),
           });

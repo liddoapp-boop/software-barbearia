@@ -240,6 +240,8 @@ function tomorrowDate() {
 
 describe("Atendente IA owner-only", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-15T15:00:00.000Z"));
     process.env.DATA_BACKEND = "memory";
     process.env.AUTH_ENFORCED = "true";
     process.env.GEMINI_API_KEY = "fake-gemini-key-for-test";
@@ -355,8 +357,9 @@ describe("Atendente IA owner-only", () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("IA indisponivel: configure GEMINI_API_KEY no ambiente local seguro.");
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error).toBe("Erro interno");
+    expect(JSON.stringify(response.json())).not.toContain("GEMINI_API_KEY");
   });
 
   it("nao cria agendamento, nao altera estoque e nao cria financeiro", async () => {

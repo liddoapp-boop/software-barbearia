@@ -61,8 +61,8 @@ async function bootstrap() {
     ? createApp()
     : createApp({ audioTranscriptionService });
   const port = Number(process.env.PORT ?? 3333);
-  const defaultHost = process.env.NODE_ENV === "production" ? "127.0.0.1" : "0.0.0.0";
-  const host = process.env.HOST ?? defaultHost;
+  // Fail closed: exposicao na LAN exige uma decisao explicita via HOST.
+  const host = process.env.HOST?.trim() || "127.0.0.1";
   await app.listen({ port, host });
   // eslint-disable-next-line no-console
   console.log(`API online em http://${host}:${port}`);

@@ -1434,9 +1434,9 @@ const agendaElements = {
 };
 
 function normalizeSessionRole(role) {
-  const value = String(role || "").trim().toLowerCase();
+  const value = String(role || "");
   if (value === "owner" || value === "recepcao" || value === "profissional") return value;
-  return "owner";
+  return "unauthenticated";
 }
 
 function getSessionRole(session) {
@@ -1448,7 +1448,7 @@ function getStoredSessionRole() {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_AUTH_SESSION) || "null");
     return getSessionRole(parsed);
   } catch (_error) {
-    return "owner";
+    return "unauthenticated";
   }
 }
 
@@ -1466,6 +1466,7 @@ state.mobileTab = mapModuleToMobileTab(state.activeModule);
 if (!isAllowedModule(state.activeModule)) {
   state.activeModule = firstAllowedModule();
   state.mobileTab = mapModuleToMobileTab(state.activeModule);
+  localStorage.setItem(STORAGE_ACTIVE_MODULE, state.activeModule);
 }
 
 function canCheckoutAppointment() {
@@ -1644,11 +1645,14 @@ if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
 }
 
 let authSession = restoreAuthSession();
+let authSessionValidated = false;
+let authValidationPromise = null;
 unitId = getSessionUnitId(authSession);
 state.role = getSessionRole(authSession);
 if (!isAllowedModule(state.activeModule)) {
   state.activeModule = firstAllowedModule();
   state.mobileTab = mapModuleToMobileTab(state.activeModule);
+  localStorage.setItem(STORAGE_ACTIVE_MODULE, state.activeModule);
 }
 if (inventorySearch) inventoryFilters.search = String(inventorySearch.value || "").trim();
 if (inventoryCategoryFilter) inventoryFilters.category = inventoryCategoryFilter.value || "";
@@ -1660,7 +1664,7 @@ function restoreAuthSession() {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.accessToken || !parsed.expiresAt) return null;
+    if (!parsed.expiresAt || !parsed.user) return null;
     return parsed;
   } catch (_error) {
     return null;
@@ -1668,19 +1672,26 @@ function restoreAuthSession() {
 }
 
 function persistAuthSession(session) {
-  authSession = session;
-  unitId = getSessionUnitId(session);
-  state.role = getSessionRole(session);
+  const safeSession = {
+    expiresAt: session?.expiresAt,
+    user: session?.user,
+  };
+  authSession = safeSession;
+  unitId = getSessionUnitId(safeSession);
+  state.role = getSessionRole(safeSession);
   if (!isAllowedModule(state.activeModule)) {
     state.activeModule = firstAllowedModule();
     state.mobileTab = mapModuleToMobileTab(state.activeModule);
+    localStorage.setItem(STORAGE_ACTIVE_MODULE, state.activeModule);
   }
-  localStorage.setItem(STORAGE_AUTH_SESSION, JSON.stringify(session));
-  localStorage.setItem("authToken", session.accessToken);
+  localStorage.setItem(STORAGE_AUTH_SESSION, JSON.stringify(safeSession));
+  localStorage.removeItem("authToken");
 }
 
 function clearAuthSession() {
   authSession = null;
+  authSessionValidated = false;
+  authValidationPromise = null;
   unitId = "";
   localStorage.removeItem(STORAGE_AUTH_SESSION);
   localStorage.removeItem("authToken");
@@ -1696,7 +1707,7 @@ function redirectToLogin() {
 }
 
 function isAuthSessionValid(session = authSession) {
-  if (!session?.accessToken || !session?.expiresAt) return false;
+  if (!session?.expiresAt || !session?.user) return false;
   const expiresAtMs = new Date(session.expiresAt).getTime();
   if (!Number.isFinite(expiresAtMs)) return false;
   return expiresAtMs > Date.now() + 30_000;
@@ -1714,10 +1725,17 @@ function buildOperationIdempotencyKey(action) {
   return `${action}-${suffix}`;
 }
 
-function buildAuthHeaders(baseHeaders) {
+function getCsrfCookie() {
+  const prefix = "sb_csrf=";
+  const value = document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix));
+  return value ? decodeURIComponent(value.slice(prefix.length)) : "";
+}
+
+function buildAuthHeaders(baseHeaders, method = "GET") {
   const headers = new Headers(baseHeaders || {});
-  if (authSession?.accessToken) {
-    headers.set("Authorization", `Bearer ${authSession.accessToken}`);
+  if (!["GET", "HEAD", "OPTIONS"].includes(String(method).toUpperCase())) {
+    const csrfToken = getCsrfCookie();
+    if (csrfToken) headers.set("x-csrf-token", csrfToken);
   }
   headers.set("x-correlation-id", buildCorrelationId());
   return headers;
@@ -1728,9 +1746,32 @@ function getCurrentActorId() {
 }
 
 async function ensureAuthSession() {
-  if (isAuthSessionValid()) return authSession;
-  redirectToLogin();
-  throw new Error("Sessao expirada. Faca login novamente.");
+  if (!isAuthSessionValid()) {
+    redirectToLogin();
+    throw new Error("Sessao expirada. Faca login novamente.");
+  }
+  if (authSessionValidated) return authSession;
+  if (!authValidationPromise) {
+    authValidationPromise = window.fetch("/auth/me", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { "x-correlation-id": buildCorrelationId() },
+    }).then(async (response) => {
+      if (!response.ok) throw new Error("Sessao invalida");
+      const payload = await response.json();
+      persistAuthSession({ expiresAt: authSession?.expiresAt, user: payload.user });
+      authSessionValidated = true;
+      return authSession;
+    }).finally(() => {
+      authValidationPromise = null;
+    });
+  }
+  try {
+    return await authValidationPromise;
+  } catch (_error) {
+    redirectToLogin();
+    throw new Error("Sessao expirada. Faca login novamente.");
+  }
 }
 
 async function apiFetch(url, options = {}) {
@@ -1763,7 +1804,8 @@ async function apiFetch(url, options = {}) {
   const execute = () =>
     window.fetch(url, {
       ...fetchOptions,
-      headers: buildAuthHeaders(fetchOptions.headers),
+      headers: buildAuthHeaders(fetchOptions.headers, fetchOptions.method),
+      credentials: "same-origin",
       signal: controller?.signal || externalSignal,
     });
 
@@ -2014,8 +2056,13 @@ function bindShellEvents() {
         return;
       }
       if (action === "logout") {
-        clearAuthSession();
-        window.location.replace("/login");
+        const headers = buildAuthHeaders({}, "POST");
+        window.fetch("/auth/logout", { method: "POST", headers, credentials: "same-origin", keepalive: true })
+          .catch(() => undefined)
+          .finally(() => {
+            clearAuthSession();
+            window.location.replace("/login");
+          });
       }
     });
   });
@@ -2970,7 +3017,7 @@ function renderRecentSales() {
   saleRecentList.innerHTML = `<div class="pdv-history-list">${productSalesHistory
     .map(
       (sale) => `
-        <button type="button" class="pdv-history-row" data-product-sale-detail="${sale.id}">
+        <button type="button" class="pdv-history-row" data-product-sale-detail="${escapeHtml(sale.id)}">
           <div class="pdv-history-identity">
             <strong class="pdv-history-name">${escapeHtml(sale.clientLabel)}</strong>
             <span class="pdv-history-meta">${escapeHtml(sale.soldAtLabel)} · ${escapeHtml(sale.itemsSummary)}</span>

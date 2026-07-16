@@ -1529,6 +1529,10 @@ describe("Atendente IA WhatsApp-first", () => {
     const rejected = await postWebhook(app, evolutionPayload("Na verdade é hoje às dez da manhã"));
     expect(rejected.json()).toMatchObject({ corrected: false, executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("horario nao esta disponivel");
+    expect(store.auditEvents.some((event) =>
+      event.action === "AI_WHATSAPP_FINAL_STATE"
+      && event.afterJson?.state === "AVAILABILITY_UNAVAILABLE",
+    )).toBe(true);
 
     const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
     expect(confirmed.json()).toMatchObject({ executed: true });

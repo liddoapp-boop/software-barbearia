@@ -6,16 +6,16 @@
     <meta name="theme-color" content="#0B0F14" />
     <script>
       (function () {
-        var t = localStorage.getItem("authToken");
-        if (!t) { window.location.replace("/login"); return; }
+        var raw = localStorage.getItem("sb.authSession");
+        if (!raw) { window.location.replace("/login"); return; }
         try {
-          var p = JSON.parse(atob(t.split(".")[1]));
-          if (p.exp && p.exp < Date.now() / 1000) {
+          var p = JSON.parse(raw);
+          if (!p.expiresAt || !p.user || new Date(p.expiresAt).getTime() <= Date.now()) {
             localStorage.removeItem("authToken");
             localStorage.removeItem("sb.authSession");
             window.location.replace("/login");
           }
-        } catch (_) {}
+        } catch (_) { window.location.replace("/login"); }
       })();
     </script>
     <title>Liddo Barber | Painel Operacional</title>

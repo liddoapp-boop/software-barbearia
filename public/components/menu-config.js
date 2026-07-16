@@ -50,6 +50,7 @@ export const HIDDEN_OWNER_MODULES = [
 ];
 
 export const ROLE_ACCESS = {
+  unauthenticated: [],
   owner: [
     "agenda",
     "clientes",
@@ -65,18 +66,19 @@ export const ROLE_ACCESS = {
 };
 
 export const ROLE_DEFAULT_MODULE = {
+  unauthenticated: null,
   owner: "agenda",
   recepcao: "agenda",
   profissional: "agenda",
 };
 
 function normalizeRole(role) {
-  const value = String(role || "").trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(ROLE_ACCESS, value) ? value : "owner";
+  const value = String(role || "");
+  return Object.prototype.hasOwnProperty.call(ROLE_ACCESS, value) ? value : "unauthenticated";
 }
 
 export function getDefaultModuleForRole(role) {
-  return ROLE_DEFAULT_MODULE[normalizeRole(role)] || "agenda";
+  return ROLE_DEFAULT_MODULE[normalizeRole(role)] || null;
 }
 
 export function getAllowedModulesForRole(role) {

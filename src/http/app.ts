@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import path from "node:path";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { z } from "zod";
 import { OperationsService } from "../application/operations-service";
 import { PrismaOperationsService } from "../application/prisma-operations-service";
@@ -80,6 +81,16 @@ import {
 } from "./security";
 import { verifyFirebaseIdToken, isFirebaseToken } from "./firebase-auth";
 import {
+  AUTH_SESSION_COOKIE,
+  MemoryRateLimiter,
+  assertCsrf,
+  clearAuthCookies,
+  enforceRateLimit,
+  getClientAddress,
+  parseCookies,
+  setAuthCookies,
+} from "./request-security";
+import {
   sendWhatsAppMessage,
   sendEmail,
   getWhatsAppConnectionState,
@@ -92,8 +103,11 @@ import {
 
 type RequestWithAuth = FastifyRequest & {
   auth?: AuthSession;
+  authSource?: "bearer" | "cookie";
+  authToken?: string;
   correlationId?: string;
   hasInvalidToken?: boolean;
+  audioSlotAcquired?: boolean;
 };
 
 type AccessPolicy = {
@@ -202,19 +216,112 @@ function getAllowedCorsOrigins() {
   return allowedOrigins.length ? allowedOrigins : values;
 }
 
+function getInlineScriptHashes() {
+  const publicRoot = path.join(process.cwd(), "public");
+  const hashes = new Set<string>();
+  for (const fileName of ["index.html", "login.html", "booking.html"]) {
+    try {
+      const html = fs.readFileSync(path.join(publicRoot, fileName), "utf8");
+      const pattern = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+      for (const match of html.matchAll(pattern)) {
+        // The HTML parser canonicalizes CRLF before CSP evaluates inline bytes.
+        const content = (match[1] ?? "").replace(/\r\n?/g, "\n");
+        hashes.add(`'sha256-${crypto.createHash("sha256").update(content).digest("base64")}'`);
+      }
+    } catch {
+      // Static assets can be absent in narrow unit-test packaging.
+    }
+  }
+  return [...hashes].join(" ");
+}
+
+function getTrustedProxies() {
+  const raw = process.env.TRUST_PROXY?.trim();
+  if (!raw || raw.toLowerCase() === "false") return false;
+  if (raw.toLowerCase() === "true" || raw === "*") {
+    throw new Error("TRUST_PROXY deve listar proxies conhecidos por IP ou CIDR");
+  }
+  const proxies = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  if (!proxies.length || proxies.some((value) => !/^[0-9a-f:.]+(?:\/\d{1,3})?$/i.test(value))) {
+    throw new Error("TRUST_PROXY deve listar proxies conhecidos por IP ou CIDR");
+  }
+  return proxies;
+}
+
+function safeCorrelationId(input: string | string[] | undefined) {
+  if (typeof input !== "string") return crypto.randomUUID();
+  const value = input.trim();
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : crypto.randomUUID();
+}
+
+function hasDuplicateQueryParameter(url: string) {
+  const queryStart = url.indexOf("?");
+  if (queryStart < 0) return false;
+  const seen = new Set<string>();
+  for (const key of new URLSearchParams(url.slice(queryStart + 1)).keys()) {
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}
+
 function getContentSecurityPolicy() {
+  const inlineScriptHashes = getInlineScriptHashes();
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://www.gstatic.com https://unpkg.com https://cdn.jsdelivr.net",
+    `script-src 'self' ${inlineScriptHashes} https://www.gstatic.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: https:",
-    "connect-src 'self' https:",
+    "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com",
     "object-src 'none'",
     "base-uri 'self'",
-    "frame-ancestors 'self'",
+    "frame-ancestors 'none'",
     "form-action 'self'",
+    "upgrade-insecure-requests",
   ].join("; ");
+}
+
+function positiveIntegerFromEnv(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function getRateLimitPolicy(method: string, route: string) {
+  if (route === "/auth/login" || route === "/auth/firebase") {
+    return { category: "login", limit: positiveIntegerFromEnv("RATE_LIMIT_LOGIN_MAX", 10), windowMs: 15 * 60_000 };
+  }
+  if (route === "/webhooks/evolution/whatsapp") {
+    return { category: "whatsapp", limit: positiveIntegerFromEnv("RATE_LIMIT_WHATSAPP_MAX", 120), windowMs: 60_000 };
+  }
+  if (route.includes("audio")) {
+    return { category: "audio", limit: positiveIntegerFromEnv("RATE_LIMIT_AUDIO_MAX", 12), windowMs: 60_000 };
+  }
+  if (route.startsWith("/public/")) {
+    const isWrite = method !== "GET" && method !== "HEAD";
+    return {
+      category: isWrite ? "public-write" : "public-read",
+      limit: positiveIntegerFromEnv(isWrite ? "RATE_LIMIT_PUBLIC_WRITE_MAX" : "RATE_LIMIT_PUBLIC_READ_MAX", isWrite ? 20 : 60),
+      windowMs: isWrite ? 10 * 60_000 : 60_000,
+    };
+  }
+  if (route.startsWith("/reports/")) {
+    return { category: "reports", limit: positiveIntegerFromEnv("RATE_LIMIT_REPORTS_MAX", 60), windowMs: 60_000 };
+  }
+  return { category: "authenticated", limit: positiveIntegerFromEnv("RATE_LIMIT_AUTHENTICATED_MAX", 600), windowMs: 60_000 };
+}
+
+function getWebhookRateLimitIdentity(body: unknown) {
+  const record = asRecord(body);
+  const data = asRecord(record?.data);
+  const key = asRecord(data?.key);
+  const candidate = key?.remoteJid ?? data?.sender ?? record?.sender ?? record?.instance;
+  return typeof candidate === "string" ? candidate.slice(0, 160) : "unknown";
+}
+
+function isAudioWebhookPayload(body: unknown) {
+  const serialized = JSON.stringify(body ?? {}).slice(0, 200_000);
+  return /audioMessage|audio\/|"ptt"\s*:\s*true/i.test(serialized);
 }
 
 const normalizePublicFilterText = (value: unknown) =>
@@ -364,6 +471,8 @@ function isWithinWorkingHours(
 function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (
     route === "/health" ||
+    route === "/health/live" ||
+    route === "/health/ready" ||
     route === "/" ||
     route === "/login" ||
     route === "/agendamento" ||
@@ -378,7 +487,7 @@ function getPolicyForRoute(method: string, route: string): AccessPolicy {
   if (route === "/catalog") {
     return { isPublic: false, roles: ["owner", "recepcao", "profissional"], unitSource: "query" };
   }
-  if (route === "/auth/login" || route === "/auth/firebase") return { isPublic: true };
+  if (route === "/auth/login" || route === "/auth/firebase" || route === "/auth/logout") return { isPublic: true };
   if (route === "/integrations/billing/webhooks/:provider") return { isPublic: true };
   if (route === "/webhooks/evolution/whatsapp") return { isPublic: true };
   if (route === "/whatsapp/status" || route === "/whatsapp/connect" || route === "/whatsapp/disconnect") {
@@ -776,7 +885,12 @@ async function resolveFirebaseUser(
   };
 }
 
-export function createApp(options: { memoryStore?: InMemoryStore; audioTranscriptionService?: AudioTranscriptionService | null; ownerCommandParser?: OwnerCommandParser | null } = {}) {
+export function createApp(options: {
+  memoryStore?: InMemoryStore;
+  audioTranscriptionService?: AudioTranscriptionService | null;
+  ownerCommandParser?: OwnerCommandParser | null;
+  readinessProbe?: () => Promise<void>;
+} = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
   if (process.env.NODE_ENV === "production") {
@@ -821,6 +935,22 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer)
       : new OperationsService(memoryStore, undefined, retentionAiScorer);
+  const rateLimiter = new MemoryRateLimiter();
+  let activeAudioRequests = 0;
+  const revokedAccessTokens = new Map<string, number>();
+  const accessTokenFingerprint = (token: string) => crypto.createHash("sha256").update(token).digest("base64url");
+  const isAccessTokenRevoked = (token: string) => {
+    const now = Date.now();
+    for (const [fingerprint, expiresAt] of revokedAccessTokens) {
+      if (expiresAt <= now) revokedAccessTokens.delete(fingerprint);
+    }
+    return revokedAccessTokens.has(accessTokenFingerprint(token));
+  };
+  const revokeAccessToken = (token: string, expiresAt: string) => {
+    const expiry = new Date(expiresAt).getTime();
+    revokedAccessTokens.set(accessTokenFingerprint(token), Number.isFinite(expiry) ? expiry : Date.now() + 30 * 60_000);
+  };
+  const contentSecurityPolicy = getContentSecurityPolicy();
 
   const buildAppointmentBlockEvents = (blocks: Array<{
     id: string;
@@ -1886,12 +2016,23 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     const apiKey = String(process.env.EVOLUTION_API_KEY ?? "").trim();
     if (!baseUrl || !apiKey) throw new EvolutionAudioError("download_failed");
     const configuredUrl = String(process.env.EVOLUTION_MEDIA_DOWNLOAD_URL ?? "").trim();
-    const url = configuredUrl || `${baseUrl}/chat/getBase64FromMediaMessage/${encodeURIComponent(input.instance)}`;
+    let url: string;
+    try {
+      const evolutionOrigin = new URL(baseUrl);
+      const downloadUrl = new URL(configuredUrl || `${baseUrl}/chat/getBase64FromMediaMessage/${encodeURIComponent(input.instance)}`);
+      if (!["http:", "https:"].includes(downloadUrl.protocol) || downloadUrl.origin !== evolutionOrigin.origin) {
+        throw new Error("untrusted_media_origin");
+      }
+      url = downloadUrl.toString();
+    } catch {
+      throw new EvolutionAudioError("download_failed");
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), getAiWhatsappAudioDownloadTimeoutMs());
     try {
       const response = await fetch(url, {
         method: "POST",
+        redirect: "error",
         headers: { "content-type": "application/json", apikey: apiKey },
         body: JSON.stringify({ message: input.audio.source, convertToMp4: false }),
         signal: controller.signal,
@@ -3190,6 +3331,8 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   }
 
   const app = Fastify({
+    trustProxy: getTrustedProxies(),
+    bodyLimit: positiveIntegerFromEnv("HTTP_BODY_LIMIT_BYTES", 1_048_576),
     logger: httpLogEnabled
       ? {
           level: process.env.LOG_LEVEL ?? "info",
@@ -3214,9 +3357,14 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   });
 
   app.addHook("onRequest", async (_request, reply) => {
-    reply.header("Content-Security-Policy", getContentSecurityPolicy());
+    reply.header("Content-Security-Policy", contentSecurityPolicy);
     reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (process.env.NODE_ENV === "production") {
+      reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
   });
 
   app.get("/favicon.ico", async (_request, reply) => {
@@ -4377,16 +4525,28 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
 
   app.addHook("onRequest", async (request, reply) => {
     const req = request as RequestWithAuth;
-    const incomingCorrelation = request.headers["x-correlation-id"];
-    const correlationId =
-      typeof incomingCorrelation === "string" && incomingCorrelation.trim().length > 0
-        ? incomingCorrelation.trim()
-        : crypto.randomUUID();
+    const correlationId = safeCorrelationId(request.headers["x-correlation-id"]);
     req.correlationId = correlationId;
     reply.header("x-correlation-id", correlationId);
+    if (hasDuplicateQueryParameter(request.url)) {
+      return reply.status(400).send({ error: "Dados invalidos", requestId: correlationId });
+    }
 
     const authorization = request.headers.authorization;
-    if (!authorization) return;
+    if (!authorization) {
+      const sessionCookie = parseCookies(request.headers.cookie)[AUTH_SESSION_COOKIE];
+      if (!sessionCookie) return;
+      try {
+        if (isAccessTokenRevoked(sessionCookie)) throw new Error("Token revogado");
+        req.auth = verifyAccessToken(sessionCookie);
+        req.authSource = "cookie";
+        req.authToken = sessionCookie;
+        req.hasInvalidToken = false;
+      } catch {
+        req.hasInvalidToken = true;
+      }
+      return;
+    }
     const [scheme, token] = authorization.split(" ");
     if (scheme?.toLowerCase() !== "bearer" || !token) {
       req.hasInvalidToken = true;
@@ -4405,6 +4565,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
         );
         if (session) {
           req.auth = session;
+          req.authSource = "bearer";
           req.hasInvalidToken = false;
         } else {
           req.hasInvalidToken = true;
@@ -4417,18 +4578,69 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
 
     // Token customizado legado (HS256)
     try {
+      if (isAccessTokenRevoked(token)) throw new Error("Token revogado");
       req.auth = verifyAccessToken(token);
+      req.authSource = "bearer";
+      req.authToken = token;
       req.hasInvalidToken = false;
     } catch {
       req.hasInvalidToken = true;
     }
   });
 
-  app.addHook("preHandler", async (request) => {
+  app.addHook("preHandler", async (request, reply) => {
     const req = request as RequestWithAuth;
     const method = request.method.toUpperCase();
     const route = routePattern(request);
     const policy = getPolicyForRoute(method, route);
+
+    const skipRateLimit = route === "/health" || route.startsWith("/health/")
+      || route === "/" || route === "/login" || route === "/agendamento"
+      || route === "/favicon.ico" || route === "/*";
+    if (!skipRateLimit) {
+      const ratePolicy = getRateLimitPolicy(method, route);
+      const actorKey = route === "/webhooks/evolution/whatsapp"
+        ? getWebhookRateLimitIdentity(request.body)
+        : req.auth
+          ? `${req.auth.userId}:${req.auth.activeUnitId}`
+          : getClientAddress(request);
+      enforceRateLimit({
+        limiter: rateLimiter,
+        key: `${ratePolicy.category}:${actorKey}`,
+        limit: ratePolicy.limit,
+        windowMs: ratePolicy.windowMs,
+        reply,
+      });
+      if (route === "/webhooks/evolution/whatsapp" && isAudioWebhookPayload(request.body)) {
+        const audioLimit = positiveIntegerFromEnv("RATE_LIMIT_AUDIO_MAX", 12);
+        enforceRateLimit({
+          limiter: rateLimiter,
+          key: `audio:${actorKey}`,
+          limit: audioLimit,
+          windowMs: 60_000,
+          reply,
+        });
+        const maxConcurrent = positiveIntegerFromEnv("AI_AUDIO_MAX_CONCURRENT", 2);
+        if (activeAudioRequests >= maxConcurrent) {
+          reply.header("Retry-After", 1);
+          throw Object.assign(new Error("Muitas requisicoes"), { statusCode: 429, publicCode: "AUDIO_BUSY" });
+        }
+        activeAudioRequests += 1;
+        req.audioSlotAcquired = true;
+      }
+    }
+
+    if (
+      req.authSource === "cookie" &&
+      !["GET", "HEAD", "OPTIONS"].includes(method) &&
+      !route.startsWith("/public/") &&
+      route !== "/auth/login" &&
+      route !== "/auth/firebase" &&
+      route !== "/webhooks/evolution/whatsapp" &&
+      route !== "/integrations/billing/webhooks/:provider"
+    ) {
+      assertCsrf(request);
+    }
 
     if (policy.isPublic) return;
 
@@ -4485,6 +4697,10 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
 
   app.addHook("onResponse", async (request, reply) => {
     const req = request as RequestWithAuth;
+    if (req.audioSlotAcquired) {
+      activeAudioRequests = Math.max(0, activeAudioRequests - 1);
+      req.audioSlotAcquired = false;
+    }
     app.log.info({
       event: "http.request.completed",
       method: request.method,
@@ -4562,7 +4778,10 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   }
 
   function csvEscape(value: unknown) {
-    return `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const raw = String(value ?? "");
+    // Planilhas interpretam estes prefixos como formulas mesmo em CSV entre aspas.
+    const neutralized = /^[\t\r ]*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+    return `"${neutralized.replaceAll('"', '""')}"`;
   }
 
   function buildCsv(rows: unknown[][]) {
@@ -4686,7 +4905,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     ];
   }
 
-  app.post("/auth/login", async (request) => {
+  app.post("/auth/login", async (request, reply) => {
     const body = authLoginSchema.parse(request.body);
     const email = body.email.trim().toLowerCase();
     const user = await authenticateLogin({
@@ -4700,9 +4919,12 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       user,
       activeUnitId: body.activeUnitId,
     });
+    setAuthCookies(reply, token.accessToken, token.expiresAt);
+    const exposeBearer = process.env.NODE_ENV === "test"
+      || safeHeaderValue(request.headers["x-auth-mode"])?.toLowerCase() === "bearer";
 
     return {
-      accessToken: token.accessToken,
+      ...(exposeBearer ? { accessToken: token.accessToken } : {}),
       expiresAt: token.expiresAt,
       user: {
         id: user.id,
@@ -4749,8 +4971,8 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
     };
 
     const token = issueAccessToken({ user: authUser, activeUnitId: session.activeUnitId });
+    setAuthCookies(reply, token.accessToken, token.expiresAt);
     return {
-      accessToken: token.accessToken,
       expiresAt: token.expiresAt,
       user: {
         id: authUser.id,
@@ -4761,6 +4983,13 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
         activeUnitId: session.activeUnitId,
       },
     };
+  });
+
+  app.post("/auth/logout", async (request, reply) => {
+    const req = request as RequestWithAuth;
+    if (req.authToken && req.auth) revokeAccessToken(req.authToken, req.auth.expiresAt);
+    clearAuthCookies(reply);
+    return { ok: true };
   });
 
   app.get("/auth/me", async (request) => {
@@ -4942,15 +5171,43 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       .send(csv);
   });
 
-  app.get("/health", async () => ({
-    ok: true,
-    authEnforced,
-    audio: {
-      enabled: audioTranscriptionEnabled,
-      ready: Boolean(audioTranscriptionService),
-      provider: configuredAsrProvider || "none",
-    },
-  }));
+  app.get("/health/live", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { status: "ok" };
+  });
+
+  app.get("/health/ready", async (_request, reply) => {
+    let databaseReady = backend === "memory";
+    if (backend === "prisma") {
+      try {
+        await Promise.race([
+          options.readinessProbe ? options.readinessProbe() : prisma.$queryRaw`SELECT 1`,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("readiness_timeout")), 2_000)),
+        ]);
+        databaseReady = true;
+      } catch {
+        databaseReady = false;
+      }
+    }
+    const audioReady = !audioTranscriptionEnabled || Boolean(audioTranscriptionService);
+    const ready = databaseReady && authEnforced && audioReady;
+    reply.header("Cache-Control", "no-store");
+    if (!ready) reply.status(503);
+    return {
+      status: ready ? "ready" : "not_ready",
+      checks: {
+        database: databaseReady ? "ok" : "unavailable",
+        authentication: authEnforced ? "ok" : "disabled",
+        audio: audioReady ? "ok" : "unavailable",
+      },
+    };
+  });
+
+  // Alias legado: apenas liveness, sem revelar configuracao interna.
+  app.get("/health", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { ok: true, status: "ok" };
+  });
   app.get("/", async (_request, reply) => {
     return reply.sendFile("index.html");
   });
@@ -7885,6 +8142,7 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           entityId: previousPending.id,
           after: { result: "AMBIGUOUS", intent: previousPending.intent, phone: message.maskedPhone },
         });
+        await finalize("AMBIGUOUS_FIELDS");
         const responseDelivered = await safeSend(correction.message, "entity_clarification");
         return buildAiWhatsappPreviewOnlyResponse({ corrected: false, ambiguous: true, responseDelivered });
       }
@@ -7911,6 +8169,9 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
               phone: message.maskedPhone,
             },
           });
+          await finalize(correctedPreview.missingFields.includes("availability")
+            ? "AVAILABILITY_UNAVAILABLE"
+            : "MISSING_FIELDS");
           const responseDelivered = await safeSend(
             correctedPreview.executionMessage ?? formatAiWhatsappEntityClarification(correctedPreview),
             "entity_clarification",
@@ -8414,13 +8675,16 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
       });
       const hasAmbiguity = Boolean(preview.ambiguities?.length)
         || Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "ambiguous");
+      const hasAvailabilityFailure = preview.missingFields.includes("availability");
       const hasGroundingFailure = (preview.entityResolutionDiagnostics ?? []).some((entity) =>
         !["EXACT_MATCH", "NOT_FOUND_NEW_CLIENT", "RESOLVED"].includes(entity.result));
       await finalize(preview.intent === "unknown"
         ? "UNKNOWN_INTENT"
         : hasAmbiguity
           ? "AMBIGUOUS_FIELDS"
-          : hasGroundingFailure ? "GROUNDING_FAILED" : "MISSING_FIELDS");
+          : hasAvailabilityFailure
+            ? "AVAILABILITY_UNAVAILABLE"
+            : hasGroundingFailure ? "GROUNDING_FAILED" : "MISSING_FIELDS");
       const responseDelivered = await safeSend(
         preview.intent === "unknown"
           ? audioAssistance ? formatAiWhatsappAudioParserFailure() : formatAiWhatsappGuidance()
@@ -9742,17 +10006,18 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
   });
 
   app.setErrorHandler(
-    (error: Error, _request: FastifyRequest, reply: FastifyReply) => {
-      const errorCode = (error as Error & { code?: string }).code;
+    (error: Error, request: FastifyRequest, reply: FastifyReply) => {
+      const typedError = error as Error & { code?: string; statusCode?: number; publicCode?: string };
+      const errorCode = typedError.code;
       const isUniqueConstraint = errorCode === "P2002";
       const isWriteConflict = errorCode === "P2034";
-      const message = isUniqueConstraint
+      const rawMessage = isUniqueConstraint
         ? "Conflito: operacao critica ja processada para esta origem"
         : isWriteConflict
           ? "Conflito: operacao concorrente deve ser repetida"
         : error.message || "Erro inesperado";
-      const normalized = message.toLowerCase();
-      const statusCode =
+      const normalized = rawMessage.toLowerCase();
+      let statusCode = typedError.statusCode ?? (
         isUniqueConstraint || isWriteConflict
           ? 409
           : normalized.includes("nao autenticado") ||
@@ -9773,9 +10038,43 @@ export function createApp(options: { memoryStore?: InMemoryStore; audioTranscrip
           ? 409
           : normalized.includes("invalida")
             ? 422
-            : 400;
+            : 400);
 
-      reply.status(statusCode).send({ error: message });
+      const isSchemaError = error instanceof z.ZodError;
+      const isParserError = errorCode === "FST_ERR_CTP_INVALID_JSON_BODY"
+        || errorCode === "FST_ERR_CTP_BODY_TOO_LARGE";
+      if (isSchemaError) statusCode = 400;
+      const looksTechnical = /(?:\bECONN|\bENOTFOUND|\bETIMEDOUT|prisma|postgres|database|\bselect\s|\binsert\s|\bupdate\s|\bdelete\s+from|[A-Z]:\\|\/[^\s]+\.(?:ts|js)|api[_-]?key|password|secret|stack)/i.test(rawMessage);
+      if (!typedError.statusCode && !isSchemaError && !isUniqueConstraint && !isWriteConflict && looksTechnical) {
+        statusCode = 500;
+      }
+      const publicMessages: Record<number, string> = {
+        401: "Nao autenticado",
+        429: "Muitas requisicoes",
+        500: "Erro interno",
+        503: "Servico temporariamente indisponivel",
+      };
+      const schemaMessage = isSchemaError
+        ? error.issues.map((issue) => issue.message).filter(Boolean).join("; ") || "Dados invalidos"
+        : "Dados invalidos";
+      const message = isSchemaError || isParserError
+        ? schemaMessage
+        : publicMessages[statusCode] ?? rawMessage;
+      const correlationId = (request as RequestWithAuth).correlationId ?? request.id;
+      if (statusCode >= 500) {
+        app.log.error({
+          event: "http.request.failed",
+          errorName: error.name,
+          errorCode,
+          statusCode,
+          requestId: correlationId,
+        });
+      }
+      reply.status(statusCode).send({
+        error: message,
+        code: typedError.publicCode,
+        requestId: correlationId,
+      });
     },
   );
 

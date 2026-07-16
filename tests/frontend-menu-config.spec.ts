@@ -62,4 +62,14 @@ describe("frontend menu role access", () => {
     );
     expect(visibleModules).toEqual(["agenda", "clientes"]);
   });
+
+  it.each([undefined, null, "", "admin", "OWNER", " owner ", { role: "owner" }])(
+    "falha fechado para papel ausente, desconhecido ou adulterado: %s",
+    async (role) => {
+      const { getAllowedModulesForRole, filterMenuGroupsByRole, MENU_GROUPS, getDefaultModuleForRole } = await loadMenuConfig();
+      expect(getAllowedModulesForRole(role)).toEqual([]);
+      expect(filterMenuGroupsByRole(MENU_GROUPS, role)).toEqual([]);
+      expect(getDefaultModuleForRole(role)).toBeNull();
+    },
+  );
 });

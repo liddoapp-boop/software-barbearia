@@ -59,12 +59,17 @@ async function main() {
 
   const env = {
     ...process.env,
+    NODE_ENV: "test",
     DATABASE_URL: url.toString(),
     DATA_BACKEND: "prisma",
     RUN_DB_TESTS: "1",
   };
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  runChecked(npx, ["prisma", "generate"], env);
+  if (String(process.env.SKIP_PRISMA_GENERATE ?? "false").toLowerCase() !== "true") {
+    runChecked(npx, ["prisma", "generate"], env);
+  } else {
+    console.log("[test-db] prisma generate ignorado explicitamente; usando cliente local ja gerado");
+  }
   runChecked(npx, ["tsx", "scripts/ensure-test-database.ts"], {
     ...process.env,
     TEST_DATABASE_URL_COMPUTED: url.toString(),
