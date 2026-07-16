@@ -48,13 +48,15 @@ npm ci
 
 ### Piloto Geovane
 
-O modo recomendado para o banco piloto é:
+O comando cotidiano e seguro para o banco piloto é:
 
 ```powershell
-npm run dev:pilot
+npm run dev
 ```
 
-Esse comando lê `.env.pilot.local`, exige `DATA_BACKEND=prisma` e recusa bancos que não sejam `barbearia_pilot` em host local. O arquivo é local, ignorado pelo Git e nunca deve ser enviado ao repositório.
+`npm run dev:pilot` é o alias explícito do mesmo modo. Ambos leem `.env.pilot.local`, exigem `DATA_BACKEND=prisma`, fixam o bind em `127.0.0.1:3333` e recusam bancos que não sejam `barbearia_pilot` em host local. O arquivo é local, ignorado pelo Git e nunca deve ser enviado ao repositório.
+
+Para desenvolvimento técnico sem dados do piloto, use `npm run dev:isolated`. Esse comando usa memória, escuta em `127.0.0.1:3334` e informa claramente o modo no terminal. A execução direta de `src/server.ts` com `.env` genérico é bloqueada na porta 3333.
 
 Depois do startup:
 
@@ -73,7 +75,7 @@ npm run build
 npm start
 ```
 
-`npm run dev` executa somente a demonstração do motor de domínio e não inicia o servidor web. `npm run dev:api` executa `prisma db push` antes do servidor e, por isso, só deve ser usado em um banco local deliberadamente descartável.
+O modo isolado não executa `prisma db push`, seed ou migration. Mudanças de schema e testes com escrita devem usar exclusivamente o fluxo de banco descartável descrito abaixo.
 
 ## Variáveis de ambiente
 
@@ -99,7 +101,9 @@ Integrações opcionais têm variáveis próprias para billing, Firebase, Gmail,
 
 | Comando | Uso |
 | --- | --- |
-| `npm run dev:pilot` | Inicia o piloto local com guard do banco `barbearia_pilot`. |
+| `npm run dev` | Comando cotidiano; inicia o piloto local protegido. |
+| `npm run dev:pilot` | Alias explícito do mesmo modo piloto. |
+| `npm run dev:isolated` | Inicia backend em memória na porta 3334, sem acessar o piloto. |
 | `npm run build` | Compila TypeScript em `dist/`. |
 | `npm start` | Inicia o servidor compilado. |
 | `npm test` | Executa a suíte Vitest comum. |

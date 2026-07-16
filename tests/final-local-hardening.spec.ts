@@ -392,7 +392,8 @@ describe("fechamento tecnico local", () => {
     const compose = fs.readFileSync(path.join(process.cwd(), "infra/evolution-local/docker-compose.yml"), "utf8");
     const pipeline = fs.readFileSync(path.join(process.cwd(), "src/application/ai-whatsapp-pipeline.ts"), "utf8");
     const app = fs.readFileSync(path.join(process.cwd(), "src/http/app.ts"), "utf8");
-    expect(server).toContain('|| "127.0.0.1"');
+    expect(server).toContain('import { assertSafeServerEnvironment } from "./server-environment"');
+    expect(server).toContain("const serverEnvironment = assertSafeServerEnvironment()");
     expect(compose).toContain("evoapicloud/evolution-api:v2.3.7");
     expect(compose).not.toContain("evoapicloud/evolution-api:latest");
     expect(pipeline).toContain('"AVAILABILITY_UNAVAILABLE"');

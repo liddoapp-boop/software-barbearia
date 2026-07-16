@@ -6,10 +6,12 @@ import {
   createAudioTranscriptionServiceFromEnv,
   isAudioTranscriptionEnabledFromEnv,
 } from "./application/audio-transcription";
+import { assertSafeServerEnvironment } from "./server-environment";
 
 dotenv.config();
 
 async function bootstrap() {
+  const serverEnvironment = assertSafeServerEnvironment();
   const configuredProvider = String(process.env.ASR_PROVIDER ?? process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER ?? "")
     .trim()
     .toLowerCase();
@@ -60,9 +62,7 @@ async function bootstrap() {
   const app = audioTranscriptionService === undefined
     ? createApp()
     : createApp({ audioTranscriptionService });
-  const port = Number(process.env.PORT ?? 3333);
-  // Fail closed: exposicao na LAN exige uma decisao explicita via HOST.
-  const host = process.env.HOST?.trim() || "127.0.0.1";
+  const { port, host } = serverEnvironment;
   await app.listen({ port, host });
   // eslint-disable-next-line no-console
   console.log(`API online em http://${host}:${port}`);

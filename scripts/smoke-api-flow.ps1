@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($BaseUrl)) {
-  $BaseUrl = "http://127.0.0.1:3333"
+  $BaseUrl = "http://127.0.0.1:3334"
 }
 if ([string]::IsNullOrWhiteSpace($UnitId)) {
   $UnitId = "unit-01"
@@ -18,6 +18,11 @@ if ([string]::IsNullOrWhiteSpace($OwnerEmail)) {
 }
 if ([string]::IsNullOrWhiteSpace($OwnerPassword)) {
   $OwnerPassword = "owner123"
+}
+
+$smokeUri = [Uri]$BaseUrl
+if (($smokeUri.Host -in @("localhost", "127.0.0.1", "::1")) -and $smokeUri.Port -eq 3333) {
+  throw "Smoke de escrita recusado na porta operacional 3333. Use o modo isolado na porta 3334."
 }
 
 function Step($message) {
@@ -158,7 +163,7 @@ function Ensure-ApiReady($projectRoot, $url) {
   $previousPort = $env:PORT
   $env:PORT = [string]$port
   try {
-    $process = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev:api" -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+    $process = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev:isolated" -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
   } finally {
     $env:PORT = $previousPort
   }
@@ -212,7 +217,7 @@ try {
     activeUnitId = $unitId
   } | ConvertTo-Json
 
-  $login = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/login" -ContentType "application/json" -Body $loginPayload
+  $login = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/login" -ContentType "application/json" -Headers @{ "x-auth-mode" = "bearer" } -Body $loginPayload
   Assert ($null -ne $login.accessToken) "Login nao retornou accessToken"
 
   $headers = @{

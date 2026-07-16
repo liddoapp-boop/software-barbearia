@@ -4,9 +4,9 @@
   "description": "Plataforma premium de gestao para barbearias",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "npm run dev:pilot",
     "dev:pilot": "node scripts/start-pilot-local.mjs",
-    "dev:api": "prisma db push && tsx src/server.ts",
+    "dev:isolated": "node scripts/start-isolated-local.mjs",
     "start": "node dist/src/server.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",

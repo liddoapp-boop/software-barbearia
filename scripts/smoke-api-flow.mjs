@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import net from "node:net";
 import process from "node:process";
@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
 
-const baseUrl = (process.env.SMOKE_BASE_URL || "http://127.0.0.1:3333").replace(/\/+$/, "");
+const baseUrl = (process.env.SMOKE_BASE_URL || "http://127.0.0.1:3334").replace(/\/+$/, "");
 const unitId = process.env.SMOKE_UNIT_ID || "unit-01";
 const correlationId = crypto.randomUUID();
 const explicitBaseUrl = Boolean(process.env.SMOKE_BASE_URL?.trim());
@@ -21,6 +21,19 @@ function isLocalSmokeTarget(urlString) {
   } catch {
     return false;
   }
+}
+
+function isOperationalLocalTarget(urlString) {
+  try {
+    const url = new URL(urlString);
+    return isLocalSmokeTarget(urlString) && Number(url.port || 80) === 3333;
+  } catch {
+    return false;
+  }
+}
+
+if (isOperationalLocalTarget(baseUrl)) {
+  throw new Error("Smoke de escrita recusado na porta operacional 3333. Use o modo isolado na porta 3334.");
 }
 
 const requiresExplicitCredentials = production || (explicitBaseUrl && !isLocalSmokeTarget(baseUrl));
@@ -107,6 +120,7 @@ function responseSummary(body) {
 async function loginOwner() {
   const result = await request("/auth/login", {
     method: "POST",
+    headers: { "x-auth-mode": "bearer" },
     body: JSON.stringify({
       email: ownerEmail,
       password: ownerPassword,
@@ -163,8 +177,11 @@ async function ensureApiReady() {
   }
 
   step("API offline. Iniciando servidor local para o smoke");
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  apiProcess = spawn(npmCmd, ["run", "dev:api"], {
+  const command = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : "npm";
+  const args = process.platform === "win32"
+    ? ["/d", "/s", "/c", "npm run dev:isolated"]
+    : ["run", "dev:isolated"];
+  apiProcess = spawn(command, args, {
     cwd: process.cwd(),
     env: { ...process.env, PORT: String(port) },
     detached: process.platform !== "win32",
@@ -190,7 +207,7 @@ async function ensureApiReady() {
 function stopApiProcess() {
   if (!apiProcess || apiProcess.exitCode != null) return;
   if (process.platform === "win32") {
-    apiProcess.kill("SIGTERM");
+    spawnSync("taskkill", ["/PID", String(apiProcess.pid), "/T", "/F"], { stdio: "ignore" });
     return;
   }
   try {

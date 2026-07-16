@@ -54,6 +54,10 @@ const child = spawn(process.execPath, [tsxCli, "src/server.ts"], {
   env: {
     ...process.env,
     ...parsed,
+    NODE_ENV: "development",
+    SERVER_MODE: "pilot",
+    PORT: "3333",
+    HOST: "127.0.0.1",
   },
   stdio: "inherit",
   shell: false,
