@@ -1,0 +1,9 @@
+{
+  "runtimeImage": "software-barbearia/evolution-api:2.3.7-local.1",
+  "baseImage": "evoapicloud/evolution-api:v2.3.7",
+  "baseDigest": "sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339",
+  "baseRef": "evoapicloud/evolution-api:v2.3.7@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339",
+  "evolutionVersion": "2.3.7",
+  "baileysVersion": "7.0.0-rc.9",
+  "patchVersion": "software-barbearia-offline-queue-v1"
+}

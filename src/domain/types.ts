@@ -302,8 +302,7 @@ export interface FinancialEntry {
     | "COMMISSION"
     | "APPOINTMENT_REFUND"
     | "PRODUCT_SALE_REFUND"
-    | "CHECKOUT_PAYMENT"
-    | "STOCK_ENTRY";
+    | "CHECKOUT_PAYMENT";
   referenceId?: UUID;
   professionalId?: UUID;
   customerId?: UUID;

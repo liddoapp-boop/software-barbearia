@@ -3124,7 +3124,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       prisma,
     });
     const now = new Date("2026-07-15T15:00:00.000Z");
-    const makePreview = (registerExpense: boolean): StockEntryPreview => ({
+    const makePreview = (): StockEntryPreview => ({
       version: STOCK_ENTRY_PREVIEW_VERSION,
       id: crypto.randomUUID(),
       unitId: scenario.unitId,
@@ -3136,8 +3136,8 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         quantity: 8,
         unitCost: 5,
         totalCost: 40,
+        salePrice: Number(initialProduct.salePrice),
         occurredAt: "2026-07-15T12:00:00.000-03:00",
-        registerExpense,
       },
       createdAt: now.toISOString(),
       expiresAt: new Date("2099-07-15T15:10:00.000Z").toISOString(),
@@ -3151,7 +3151,7 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       idempotencyKey: previewId,
     });
     const initialProduct = await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } });
-    const preview = makePreview(true);
+    const preview = makePreview();
     const record = await repository.save(preview);
     const input = {
       unitId: scenario.unitId,
@@ -3163,6 +3163,12 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
       audit: audit(preview.id),
     };
     const service = new PrismaOperationsService(prisma);
+    const listedProduct = (await service.listStockEntryProducts({ unitId: scenario.unitId }))
+      .find((product) => product.id === scenario.productId);
+    expect(listedProduct).toMatchObject({
+      id: scenario.productId,
+      salePrice: Number(initialProduct.salePrice),
+    });
     const confirmations = await Promise.allSettled([
       service.confirmStockEntry(input),
       service.confirmStockEntry(input),
@@ -3184,10 +3190,10 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect(movements).toHaveLength(1);
     expect(Number(movements[0].unitCost)).toBe(5);
     expect(Number(movements[0].totalCost)).toBe(40);
-    expect(expenses).toHaveLength(1);
+    expect(expenses).toHaveLength(0);
     expect(audits).toHaveLength(1);
 
-    const rollbackPreview = makePreview(false);
+    const rollbackPreview = makePreview();
     const rollbackRecord = await repository.save(rollbackPreview);
     const rollbackService = new PrismaOperationsService(prisma, undefined, undefined, (stage) => {
       if (stage === "after_stock") throw new Error("db_stock_entry_rollback");

@@ -83,9 +83,13 @@ describe("provedores locais de IA", () => {
     expect(createOwnerCommandParserFromEnv()).toBeInstanceOf(LocalLlamaOwnerCommandParser);
   });
 
-  it("seleciona whisper.cpp somente quando habilitado e falha fechado se o processo estiver indisponivel", async () => {
+  it("seleciona whisper.cpp sem rede externa e falha fechado se o processo estiver indisponivel", async () => {
+    const fetchMock = vi.fn(async () => { throw new Error("external_network_forbidden"); });
+    vi.stubGlobal("fetch", fetchMock);
     process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
     process.env.ASR_PROVIDER = "local_whisper";
+    process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER = "gemini";
+    process.env.AI_AUDIO_TRANSCRIPTION_API_KEY = "paid-key-must-not-be-used";
     process.env.LOCAL_WHISPER_FFMPEG_PATH = "Z:\\missing\\ffmpeg.exe";
     process.env.LOCAL_WHISPER_CLI_PATH = "Z:\\missing\\whisper-cli.exe";
     process.env.LOCAL_WHISPER_MODEL_PATH = "Z:\\missing\\model.bin";
@@ -96,6 +100,7 @@ describe("provedores locais de IA", () => {
       .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
     await expect(service?.warmUp?.())
       .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fixa o perfil local em turbo Q5_0, GPU, portugues, VAD, temperatura zero e uma thread", () => {

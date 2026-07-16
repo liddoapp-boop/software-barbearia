@@ -3850,7 +3850,7 @@ export class OperationsService {
   listStockEntryProducts(input: { unitId: string }) {
     return this.store.products
       .filter((product) => product.active && ((product as Product & { businessId?: string }).businessId ?? "unit-01") === input.unitId)
-      .map((product) => ({ id: product.id, name: product.name }))
+      .map((product) => ({ id: product.id, name: product.name, salePrice: product.salePrice }))
       .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
   }
 
@@ -3897,7 +3897,6 @@ export class OperationsService {
 
     const previousStock = product.stockQty;
     const movementLength = this.store.stockMovements.length;
-    const financialLength = this.store.financialEntries.length;
     const auditLength = this.store.auditEvents.length;
     record.status = "PROCESSING";
     try {
@@ -3921,25 +3920,6 @@ export class OperationsService {
       this.store.stockMovements.push(movement);
       await this.stockEntryFailureHook?.("after_stock");
 
-      const financialEntry: FinancialEntry | null = draft.registerExpense
-        ? {
-            id: crypto.randomUUID(),
-            unitId: input.unitId,
-            kind: "EXPENSE",
-            category: "COMPRA_ESTOQUE",
-            amount: draft.totalCost,
-            occurredAt,
-            referenceType: "STOCK_ENTRY",
-            referenceId: operationId,
-            description: `Compra de estoque - ${product.name}`,
-            notes: draft.notes,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }
-        : null;
-      if (financialEntry) this.store.financialEntries.push(financialEntry);
-      await this.stockEntryFailureHook?.("after_financial");
-
       const audit = toAuditEvent({
         ...input.audit,
         unitId: input.unitId,
@@ -3954,7 +3934,6 @@ export class OperationsService {
           quantity: draft.quantity,
           unitCost: draft.unitCost,
           totalCost: draft.totalCost,
-          financialExpenseCreated: Boolean(financialEntry),
           movementId: movement.id,
         },
         metadata: { previewId: input.previewId, operationId },
@@ -3972,7 +3951,6 @@ export class OperationsService {
           occurredAt: occurredAt.toISOString(),
         },
         product: { id: product.id, name: product.name, stockQty: product.stockQty },
-        financialEntry: financialEntry ? { id: financialEntry.id, amount: financialEntry.amount } : null,
         replay: false,
       };
       record.status = "SUCCEEDED";
@@ -3981,7 +3959,6 @@ export class OperationsService {
     } catch (error) {
       product.stockQty = previousStock;
       this.store.stockMovements.splice(movementLength);
-      this.store.financialEntries.splice(financialLength);
       this.store.auditEvents.splice(auditLength);
       record.status = "PENDING";
       delete record.response;

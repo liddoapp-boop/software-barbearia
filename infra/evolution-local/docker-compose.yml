@@ -1,6 +1,11 @@
 services:
   api:
-    image: evoapicloud/evolution-api:v2.3.7
+    image: software-barbearia/evolution-api:2.3.7-local.1
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        EVOLUTION_BASE_REF: evoapicloud/evolution-api:v2.3.7@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339
     container_name: barbearia-evolution-api-local
     restart: unless-stopped
     depends_on:
@@ -38,6 +43,12 @@ services:
       - evolution-local
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   postgres:
     image: postgres:15-alpine

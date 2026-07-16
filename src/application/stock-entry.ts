@@ -8,22 +8,21 @@ export const STOCK_ENTRY_PREVIEW_ACTIVE_KEY = "active";
 export type StockEntryProductCandidate = {
   id: string;
   name: string;
+  salePrice: number;
 };
 
 export const stockEntryDraftSchema = z.object({
   productId: z.string().min(1),
   productName: z.string().min(1).max(200),
+  salePrice: z.number().nonnegative().max(1_000_000),
   quantity: z.number().int().min(1).max(100_000),
   unitCost: z.number().positive().max(1_000_000),
   totalCost: z.number().positive().max(10_000_000),
   occurredAt: z.string().datetime({ offset: true }),
   notes: z.string().trim().min(1).max(500).optional(),
-  registerExpense: z.boolean(),
 });
 
 export type StockEntryDraft = z.infer<typeof stockEntryDraftSchema>;
-export const stockEntryDraftWithoutExpenseSchema = stockEntryDraftSchema.omit({ registerExpense: true });
-export type StockEntryDraftWithoutExpense = z.infer<typeof stockEntryDraftWithoutExpenseSchema>;
 
 export const stockEntryPreviewSchema = z.object({
   version: z.literal(STOCK_ENTRY_PREVIEW_VERSION),
@@ -65,16 +64,12 @@ export const stockEntryConfirmationResultSchema = z.object({
     name: z.string().min(1),
     stockQty: z.number().int(),
   }),
-  financialEntry: z.object({
-    id: z.string().min(1),
-    amount: z.number().positive(),
-  }).nullable(),
   replay: z.boolean(),
 });
 
 export type StockEntryConfirmationResult = z.infer<typeof stockEntryConfirmationResultSchema>;
 
-export type StockEntryFailureStage = "after_claim" | "after_stock" | "after_financial";
+export type StockEntryFailureStage = "after_claim" | "after_stock";
 
 export type ConfirmStockEntryInput = {
   unitId: string;
@@ -103,11 +98,9 @@ export type StockEntryInterpretation =
         | "cost_missing"
         | "cost_ambiguous"
         | "cost_inconsistent"
-        | "date_invalid"
-        | "financial_ambiguous";
+        | "date_invalid";
       message: string;
       candidateNames?: string[];
-      draftWithoutExpense?: StockEntryDraftWithoutExpense;
     }
   | { recognized: true; status: "ready"; draft: StockEntryDraft };
 
@@ -336,38 +329,11 @@ function extractNotes(message: string) {
   return match?.[1]?.trim().slice(0, 500) || undefined;
 }
 
-export function parseStockEntryExpenseDecision(message: string) {
-  const text = normalizedWords(message);
-  const negativePattern = /\b(?:sem despesa|nao registrar (?:a )?despesa|nao gerar (?:a )?despesa|nao criar (?:a )?despesa|fora do financeiro|registrar despesa nao)\b/;
-  const negative = negativePattern.test(text);
-  const positiveText = text.replace(new RegExp(negativePattern.source, "g"), " ");
-  const positive = /\b(?:com despesa|registrar (?:a )?despesa|gerar (?:a )?despesa|criar (?:a )?despesa|lancar no financeiro|registrar despesa sim)\b/.test(positiveText);
-  if (negative && positive) return "ambiguous" as const;
-  if (negative) return false as const;
-  if (positive) return true as const;
-  return null;
-}
-
 export function parseStockEntryPreviewDecision(message: string) {
   const normalized = message.trim().toLocaleLowerCase("pt-BR");
   if (normalized === "confirmar") return "confirm" as const;
   if (normalized === "cancelar") return "cancel" as const;
   return null;
-}
-
-export function parseStockEntryFinancialClarificationAnswer(message: string) {
-  const normalized = normalizeText(message);
-  if (normalized === "sim") return true as const;
-  if (normalized === "nao") return false as const;
-  return null;
-}
-
-function resolveExpenseFlag(message: string) {
-  const explicit = parseStockEntryExpenseDecision(message);
-  if (explicit === "ambiguous") return { ambiguous: true, value: false };
-  if (explicit !== null) return { ambiguous: false, value: explicit };
-  const text = normalizedWords(message);
-  return { ambiguous: false, value: /\b(?:comprei|compramos|paguei|pagamos|compra)\b/.test(text) };
 }
 
 export function interpretStockEntryCommand(input: {
@@ -419,28 +385,15 @@ export function interpretStockEntryCommand(input: {
   if (!occurredAt) {
     return { recognized: true, status: "clarification", reason: "date_invalid", message: "A data informada não é válida. Use dia/mês/ano." };
   }
-  const expense = resolveExpenseFlag(input.message);
-  const draftWithoutExpense = stockEntryDraftWithoutExpenseSchema.parse({
+  const draft = stockEntryDraftSchema.parse({
     productId: product.match.id,
     productName: product.match.name,
+    salePrice: product.match.salePrice,
     quantity: quantity.quantity,
     unitCost: costs.unitCost,
     totalCost: costs.totalCost,
     occurredAt,
     notes: extractNotes(input.message),
-  });
-  if (expense.ambiguous) {
-    return {
-      recognized: true,
-      status: "clarification",
-      reason: "financial_ambiguous",
-      message: "Devo registrar a despesa financeira: Sim ou Não?",
-      draftWithoutExpense,
-    };
-  }
-  const draft = stockEntryDraftSchema.parse({
-    ...draftWithoutExpense,
-    registerExpense: expense.value,
   });
   return { recognized: true, status: "ready", draft };
 }
@@ -455,10 +408,10 @@ export function formatStockEntryPreview(preview: StockEntryPreview) {
     "Entrada de estoque",
     `Produto: ${draft.productName}`,
     `Quantidade: ${draft.quantity}`,
-    `Custo unitário: ${currencyBR(draft.unitCost)}`,
+    `Custo unitário de compra: ${currencyBR(draft.unitCost)}`,
     `Custo total: ${currencyBR(draft.totalCost)}`,
+    `Preço de venda atual: ${currencyBR(draft.salePrice)}`,
     `Data: ${draft.occurredAt.slice(8, 10)}/${draft.occurredAt.slice(5, 7)}/${draft.occurredAt.slice(0, 4)}`,
-    `Registrar despesa financeira: ${draft.registerExpense ? "Sim" : "Não"}`,
   ];
   if (draft.notes) lines.push(`Observação: ${draft.notes}`);
   lines.push("", "CONFIRMAR ou CANCELAR");

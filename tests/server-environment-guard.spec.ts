@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
@@ -87,6 +88,60 @@ describe("server environment guard", () => {
       expect(source).toContain("Smoke de escrita recusado na porta operacional 3333");
       expect(source).toContain("dev:isolated");
     }
+  });
+
+  it("carrega somente integracao e Whisper locais no modo isolado e mantem o banco descartavel", async () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts", "start-isolated-local.mjs")).href;
+    const launcher = await import(moduleUrl) as {
+      buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
+      isLocalWhisperConfigReady: (env: Record<string, string>) => boolean;
+    };
+    const localEnv = {
+      AI_WHATSAPP_ENABLED: "true",
+      AI_WHATSAPP_OWNER_PHONE: "5511999999999",
+      EVOLUTION_API_URL: "http://127.0.0.1:8080",
+      EVOLUTION_API_KEY: "local-evolution-key",
+      EVOLUTION_INSTANCE_NAME: "local-instance",
+      EVOLUTION_WEBHOOK_SECRET: "local-webhook-secret",
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+      AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
+      ASR_PROVIDER: "local_whisper",
+      LOCAL_WHISPER_GPU_ENABLED: "true",
+      LOCAL_WHISPER_FFMPEG_PATH: "C:\\local\\ffmpeg.exe",
+      LOCAL_WHISPER_CLI_PATH: "C:\\local\\whisper-cli.exe",
+      LOCAL_WHISPER_MODEL_PATH: "C:\\local\\ggml-large-v3-turbo-q5_0.bin",
+      LOCAL_WHISPER_VAD_MODEL_PATH: "C:\\local\\ggml-silero-v6.2.0.bin",
+      AI_AUDIO_TRANSCRIPTION_PROVIDER: "gemini",
+      AI_AUDIO_TRANSCRIPTION_API_KEY: "paid-key-must-not-be-loaded",
+      AI_AUDIO_TRANSCRIPTION_MODEL: "remote-model-must-not-be-loaded",
+      DATABASE_URL: "postgresql://hidden:hidden@localhost:5432/barbearia_pilot",
+    };
+    const childEnv = launcher.buildIsolatedChildEnv(localEnv, {
+      AI_AUDIO_TRANSCRIPTION_PROVIDER: "remote-provider-from-parent",
+      GEMINI_API_KEY: "remote-key-from-parent",
+      SEMANTIC_PROVIDER: "local_llama",
+    }, 3334);
+
+    expect(launcher.isLocalWhisperConfigReady(childEnv)).toBe(true);
+    expect(childEnv).toMatchObject({
+      NODE_ENV: "development",
+      SERVER_MODE: "isolated",
+      DATA_BACKEND: "memory",
+      HOST: "127.0.0.1",
+      PORT: "3334",
+      AI_WHATSAPP_UNIT_ID: "unit-01",
+      ASR_PROVIDER: "local_whisper",
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+      AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
+      LOCAL_WHISPER_MODEL_PATH: "C:\\local\\ggml-large-v3-turbo-q5_0.bin",
+    });
+    expect(childEnv.DATABASE_URL).toContain("barbearia_isolated_not_used");
+    expect(childEnv.DATABASE_URL).not.toContain("barbearia_pilot");
+    expect(childEnv.AI_AUDIO_TRANSCRIPTION_PROVIDER).toBe("");
+    expect(childEnv.AI_AUDIO_TRANSCRIPTION_API_KEY).toBe("");
+    expect(childEnv.AI_AUDIO_TRANSCRIPTION_MODEL).toBe("");
+    expect(childEnv.GEMINI_API_KEY).toBe("");
+    expect(childEnv.SEMANTIC_PROVIDER).toBe("");
   });
 
   it("bloqueia a execucao direta antes do listener sem expor a URL", () => {

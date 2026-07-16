@@ -6063,9 +6063,12 @@ export class PrismaOperationsService {
   async listStockEntryProducts(input: { unitId: string }) {
     return await this.prisma.product.findMany({
       where: { businessId: input.unitId, active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, salePrice: true },
       orderBy: { name: "asc" },
-    });
+    }).then((products) => products.map((product) => ({
+      ...product,
+      salePrice: Number(product.salePrice),
+    })));
   }
 
   async confirmStockEntry(input: ConfirmStockEntryInput) {
@@ -6159,25 +6162,6 @@ export class PrismaOperationsService {
       });
       await this.stockEntryFailureHook?.("after_stock");
 
-      const financialEntry = draft.registerExpense
-        ? await tx.financialEntry.create({
-            data: {
-              id: crypto.randomUUID(),
-              unitId: input.unitId,
-              kind: "EXPENSE",
-              category: "COMPRA_ESTOQUE",
-              amount: new Prisma.Decimal(draft.totalCost),
-              occurredAt,
-              referenceType: "STOCK_ENTRY",
-              referenceId: operationId,
-              description: `Compra de estoque - ${product.name}`,
-              notes: draft.notes ?? null,
-              idempotencyKey: `stock-entry:${input.previewId}`,
-            },
-          })
-        : null;
-      await this.stockEntryFailureHook?.("after_financial");
-
       await this.recordCriticalAudit(tx, {
         ...input.audit,
         unitId: input.unitId,
@@ -6192,7 +6176,6 @@ export class PrismaOperationsService {
           quantity: draft.quantity,
           unitCost: draft.unitCost,
           totalCost: draft.totalCost,
-          financialExpenseCreated: Boolean(financialEntry),
           movementId: movement.id,
         },
         metadata: { previewId: input.previewId, operationId },
@@ -6209,7 +6192,6 @@ export class PrismaOperationsService {
           occurredAt: movement.occurredAt.toISOString(),
         },
         product: updatedProduct,
-        financialEntry: financialEntry ? { id: financialEntry.id, amount: Number(financialEntry.amount) } : null,
         replay: false,
       });
       await tx.idempotencyRecord.update({

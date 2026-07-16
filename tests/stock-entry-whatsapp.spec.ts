@@ -16,8 +16,8 @@ import type { Product } from "../src/domain/types";
 const originalEnv = { ...process.env };
 const ownerPhone = "5511999999999";
 const products = [
-  { id: "prd-pente", name: "Pente" },
-  { id: "prd-pomada", name: "Pomada Matte" },
+  { id: "prd-pente", name: "Pente", salePrice: 12 },
+  { id: "prd-pomada", name: "Pomada Matte", salePrice: 59 },
 ];
 
 function addPente(store: InMemoryStore, businessId = "unit-01") {
@@ -42,8 +42,8 @@ function draft(overrides: Partial<StockEntryDraft> = {}): StockEntryDraft {
     quantity: 10,
     unitCost: 10,
     totalCost: 100,
+    salePrice: 59,
     occurredAt: "2026-07-15T12:00:00.000-03:00",
-    registerExpense: true,
     ...overrides,
   };
 }
@@ -103,6 +103,21 @@ function evolutionTextPayload(text: string, messageId: string, phone = ownerPhon
   };
 }
 
+function evolutionRealisticExtendedTextPayload(text: string, messageId: string) {
+  return {
+    event: "messages.upsert",
+    instance: "test-instance",
+    data: {
+      key: { id: messageId, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      pushName: "Owner Teste",
+      message: { extendedTextMessage: { text } },
+      messageType: "extendedTextMessage",
+      messageTimestamp: 1_784_171_200,
+      source: "android",
+    },
+  };
+}
+
 function evolutionAudioPayload(messageId: string) {
   return {
     instance: "test-instance",
@@ -142,11 +157,10 @@ describe("parser determinístico de entrada de estoque", () => {
   const now = new Date("2026-07-15T15:00:00.000Z");
 
   it.each([
-    ["Comprei oito pentes por cinco reais cada.", { productName: "Pente", quantity: 8, unitCost: 5, totalCost: 40, registerExpense: true }],
-    ["Adiciona dez pomadas no estoque. Paguei cem reais no total.", { productName: "Pomada Matte", quantity: 10, unitCost: 10, totalCost: 100, registerExpense: true }],
-    ["Adiciona 4 pentes no estoque por 6 reais cada, sem despesa.", { productName: "Pente", quantity: 4, unitCost: 6, totalCost: 24, registerExpense: false }],
-    ["Comprei 4 pentes por 6 reais cada, não registrar despesa.", { productName: "Pente", quantity: 4, unitCost: 6, totalCost: 24, registerExpense: false }],
-    ["Comprei 2 pentes por R$ 7,50 cada.", { productName: "Pente", quantity: 2, unitCost: 7.5, totalCost: 15, registerExpense: true }],
+    ["Comprei oito pentes por cinco reais cada.", { productName: "Pente", quantity: 8, unitCost: 5, totalCost: 40, salePrice: 12 }],
+    ["Adiciona dez pomadas no estoque. Paguei cem reais no total.", { productName: "Pomada Matte", quantity: 10, unitCost: 10, totalCost: 100, salePrice: 59 }],
+    ["Adiciona 4 pentes no estoque por 6 reais cada.", { productName: "Pente", quantity: 4, unitCost: 6, totalCost: 24, salePrice: 12 }],
+    ["Comprei 2 pentes por R$ 7,50 cada.", { productName: "Pente", quantity: 2, unitCost: 7.5, totalCost: 15, salePrice: 12 }],
   ])("interpreta custo unitário e total sem modelo: %s", (message, expected) => {
     const result = interpretStockEntryCommand({ message, products, now });
     expect(result).toMatchObject({ recognized: true, status: "ready", draft: expected });
@@ -166,7 +180,7 @@ describe("parser determinístico de entrada de estoque", () => {
 
   it.each([
     ["Comprei 3 navalhas por 5 reais cada.", "product_not_found"],
-    ["Adiciona 3 pomadas no estoque por 5 reais cada.", "product_ambiguous", [{ id: "1", name: "Pomada Matte" }, { id: "2", name: "Pomada Brilho" }]],
+    ["Adiciona 3 pomadas no estoque por 5 reais cada.", "product_ambiguous", [{ id: "1", name: "Pomada Matte", salePrice: 59 }, { id: "2", name: "Pomada Brilho", salePrice: 55 }]],
     ["Adiciona 3 pentes no estoque por 15 reais.", "cost_ambiguous"],
     ["Adiciona 3 pentes no estoque por 5 reais cada, total 20 reais.", "cost_inconsistent"],
     ["Adiciona 3 pentes no estoque por 10 reais no total.", "cost_inconsistent"],
@@ -182,28 +196,20 @@ describe("parser determinístico de entrada de estoque", () => {
 });
 
 describe("operação atômica de entrada em memória", () => {
-  it("confirma com financeiro e preserva preço de venda e custo cadastral", async () => {
+  it("confirma sem financeiro e preserva preço de venda e custo cadastral", async () => {
     const store = new InMemoryStore();
     const product = store.products.find((item) => item.id === "prd-pomada")!;
     const before = { stockQty: product.stockQty, salePrice: product.salePrice, costPrice: product.costPrice };
     const saved = await savePreview(store);
     const result = await new OperationsService(store).confirmStockEntry(confirmationInput(saved));
 
-    expect(result).toMatchObject({ product: { stockQty: before.stockQty + 10 }, financialEntry: { amount: 100 }, replay: false });
+    expect(result).toMatchObject({ product: { stockQty: before.stockQty + 10 }, replay: false });
+    expect(result).not.toHaveProperty("financialEntry");
     expect(store.stockMovements).toHaveLength(1);
     expect(store.stockMovements[0]).toMatchObject({ movementType: "IN", unitCost: 10, totalCost: 100, referenceType: "STOCK_ENTRY" });
-    expect(store.financialEntries).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(0);
     expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
     expect(product).toMatchObject({ salePrice: before.salePrice, costPrice: before.costPrice });
-  });
-
-  it("confirma sem financeiro", async () => {
-    const store = new InMemoryStore();
-    const saved = await savePreview(store, { draft: draft({ registerExpense: false }) });
-    const result = await new OperationsService(store).confirmStockEntry(confirmationInput(saved));
-    expect(result.financialEntry).toBeNull();
-    expect(store.financialEntries).toHaveLength(0);
-    expect(store.stockMovements).toHaveLength(1);
   });
 
   it("bloqueia confirmação repetida e concorrente sem duplicar efeitos", async () => {
@@ -220,7 +226,7 @@ describe("operação atômica de entrada em memória", () => {
     expect([first.replay, concurrent.replay].sort()).toEqual([false, true]);
     expect(repeated.replay).toBe(true);
     expect(store.stockMovements).toHaveLength(1);
-    expect(store.financialEntries).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(0);
     expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
   });
 
@@ -286,6 +292,50 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     process.env = { ...originalEnv };
   });
 
+  it("gera e confirma uma única entrada para o payload messages.upsert realista", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ memoryStore: store });
+    const product = store.products.find((item) => item.id === "prd-pomada")!;
+    const before = { stockQty: product.stockQty, salePrice: product.salePrice };
+
+    const realistic = await webhook(app, evolutionRealisticExtendedTextPayload(
+      "Adiciona 2 unidades de Pomada Matte no estoque. Paguei 10 reais no total.",
+      "stock-realistic-extended-001",
+    ));
+    expect(realistic.json()).toMatchObject({
+      intent: "stock_entry",
+      executed: false,
+      preview: {
+        productName: "Pomada Matte",
+        quantity: 2,
+        unitCost: 5,
+        totalCost: 10,
+        salePrice: 59,
+      },
+    });
+    expect(realistic.json().preview).not.toHaveProperty("registerExpense");
+    expect(sentTexts(fetchMock).at(-1)).toMatch(/Custo unitário de compra: R\$\s*5,00/);
+    expect(sentTexts(fetchMock).at(-1)).toMatch(/Custo total: R\$\s*10,00/);
+    expect(sentTexts(fetchMock).at(-1)).toMatch(/Preço de venda atual: R\$\s*59,00/);
+    expect(sentTexts(fetchMock).at(-1)).not.toMatch(/financeir|despesa/i);
+    expect(product).toMatchObject(before);
+    expect(store.stockMovements).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+
+    const confirmed = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-realistic-confirm-001"));
+    const repeated = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-realistic-confirm-002"));
+    expect(confirmed.json()).toMatchObject({ executed: true, replay: false });
+    expect(repeated.json()).toMatchObject({ executed: true, replay: true });
+    expect(product).toMatchObject({ stockQty: before.stockQty + 2, salePrice: before.salePrice });
+    expect(store.stockMovements).toHaveLength(1);
+    expect(store.stockMovements[0]).toMatchObject({ movementType: "IN", quantity: 2, unitCost: 5, totalCost: 10 });
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
+    await app.close();
+  });
+
   it("texto e áudio geram o mesmo payload determinístico sem chamar IA paga", async () => {
     const command = "Comprei oito pentes por cinco reais cada.";
     const textStore = new InMemoryStore();
@@ -312,30 +362,33 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(textBody).toMatchObject({ intent: "stock_entry", executed: false, audio: false });
     expect(audioBody).toMatchObject({ intent: "stock_entry", executed: false, audio: true });
     expect(sentTexts(audioTransport).at(-1)).toContain("Entrada de estoque");
-    expect(sentTexts(audioTransport).at(-1)).toMatch(/Custo unitário: R\$\s*5,00/);
+    expect(sentTexts(audioTransport).at(-1)).toMatch(/Custo unitário de compra: R\$\s*5,00/);
     expect(sentTexts(audioTransport).at(-1)).toMatch(/Custo total: R\$\s*40,00/);
-    expect(sentTexts(audioTransport).at(-1)).toContain("Registrar despesa financeira: Sim");
+    expect(sentTexts(audioTransport).at(-1)).toMatch(/Preço de venda atual: R\$\s*12,00/);
+    expect(sentTexts(audioTransport).at(-1)).not.toMatch(/financeir|despesa/i);
     expect(sentTexts(audioTransport).at(-1)).toContain("CONFIRMAR ou CANCELAR");
     expect([...textTransport.mock.calls, ...audioTransport.mock.calls].some(([url]) => /gemini|openai|qwen/i.test(String(url)))).toBe(false);
     await audioApp.close();
   });
 
-  it("prévia e cancelamento não alteram estoque nem financeiro", async () => {
+  it("prévia e cancelamento não alteram estoque, preço, movimento ou financeiro", async () => {
     const store = new InMemoryStore();
     const fetchMock = transportMock();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp({ memoryStore: store });
     const product = store.products.find((item) => item.id === "prd-pomada")!;
-    const before = product.stockQty;
+    const before = { stockQty: product.stockQty, salePrice: product.salePrice };
     const preview = await webhook(app, evolutionTextPayload("Adiciona dez pomadas no estoque. Paguei cem reais no total.", "stock-preview-001"));
     expect(preview.json()).toMatchObject({ intent: "stock_entry", executed: false });
-    expect(product.stockQty).toBe(before);
+    expect(product).toMatchObject(before);
     expect(store.stockMovements).toHaveLength(0);
     expect(store.financialEntries).toHaveLength(0);
     const cancelled = await webhook(app, evolutionTextPayload("CANCELAR", "stock-cancel-001"));
     expect(cancelled.json()).toMatchObject({ cancelled: true, executed: false });
-    expect(product.stockQty).toBe(before);
+    expect(product).toMatchObject(before);
     expect(store.stockMovements).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(0);
     await app.close();
   });
 
@@ -347,7 +400,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const product = store.products.find((item) => item.id === "prd-pomada")!;
     const stockBefore = product.stockQty;
     await webhook(app, evolutionTextPayload(
-      "Adiciona 2 pomadas no estoque por 5 reais cada, sem despesa.",
+      "Adiciona 2 pomadas no estoque por 5 reais cada.",
       "stock-strict-preview-001",
     ));
 
@@ -379,7 +432,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const product = store.products.find((item) => item.id === "prd-pomada")!;
     const stockBefore = product.stockQty;
     await webhook(app, evolutionTextPayload(
-      "Adiciona 2 pomadas no estoque por 5 reais cada, sem despesa.",
+      "Adiciona 2 pomadas no estoque por 5 reais cada.",
       "stock-strict-cancel-preview-001",
     ));
 
@@ -416,7 +469,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(repeated.json()).toMatchObject({ executed: true, replay: true });
     expect(product).toMatchObject({ stockQty: before.stockQty + 10, salePrice: before.salePrice, costPrice: before.costPrice });
     expect(store.stockMovements).toHaveLength(1);
-    expect(store.financialEntries).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(0);
     await app.close();
   });
 
@@ -428,12 +481,12 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const product = store.products.find((item) => item.id === "prd-pomada")!;
     const stockBefore = product.stockQty;
     const original = await webhook(app, evolutionTextPayload(
-      "Adiciona 2 pomadas no estoque por 5 reais cada, sem despesa.",
+      "Adiciona 2 pomadas no estoque por 5 reais cada.",
       "stock-pending-original-001",
     ));
     const originalBody = original.json();
     const blocked = await webhook(app, evolutionTextPayload(
-      "Adiciona 8 pomadas no estoque por 7 reais cada e registrar despesa.",
+      "Adiciona 8 pomadas no estoque por 7 reais cada.",
       "stock-pending-new-intent-001",
     ));
 
@@ -447,7 +500,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const stored = [...store.aiWhatsappStockEntryPreviews.values()][0] as { preview: StockEntryPreview };
     expect(stored.preview).toMatchObject({
       id: originalBody.previewId,
-      draft: { quantity: 2, unitCost: 5, totalCost: 10, registerExpense: false },
+      draft: { quantity: 2, unitCost: 5, totalCost: 10, salePrice: 59 },
     });
     expect(product.stockQty).toBe(stockBefore);
     expect(store.stockMovements).toHaveLength(0);
@@ -459,47 +512,6 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(product.stockQty).toBe(stockBefore + 2);
     expect(store.stockMovements).toHaveLength(1);
     expect(store.financialEntries).toHaveLength(0);
-    await app.close();
-  });
-
-  it("aceita resposta financeira isolada somente quando esse campo foi solicitado", async () => {
-    const store = new InMemoryStore();
-    const fetchMock = transportMock();
-    vi.stubGlobal("fetch", fetchMock);
-    const app = createApp({ memoryStore: store });
-    const product = store.products.find((item) => item.id === "prd-pomada")!;
-    const stockBefore = product.stockQty;
-
-    const ambiguous = await webhook(app, evolutionTextPayload(
-      "Comprei 2 pomadas por 5 reais cada, com despesa e sem despesa.",
-      "stock-financial-ambiguous-001",
-    ));
-    expect(ambiguous.json()).toMatchObject({
-      intent: "stock_entry",
-      executed: false,
-      clarification: true,
-      reason: "financial_ambiguous",
-    });
-    const notIsolated = await webhook(app, evolutionTextPayload("Registrar despesa", "stock-financial-not-isolated-001"));
-    expect(notIsolated.json()).toMatchObject({ clarification: true, reason: "financial_ambiguous", executed: false });
-    expect(store.aiWhatsappStockEntryPreviews.size).toBe(0);
-
-    const clarified = await webhook(app, evolutionTextPayload("  SIM  ", "stock-financial-answer-001"));
-    expect(clarified.json()).toMatchObject({
-      intent: "stock_entry",
-      executed: false,
-      clarified: true,
-      preview: { quantity: 2, unitCost: 5, totalCost: 10, registerExpense: true },
-    });
-    expect(product.stockQty).toBe(stockBefore);
-    expect(store.stockMovements).toHaveLength(0);
-    expect(store.financialEntries).toHaveLength(0);
-
-    const confirmed = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-financial-confirm-001"));
-    expect(confirmed.json()).toMatchObject({ executed: true, replay: false });
-    expect(product.stockQty).toBe(stockBefore + 2);
-    expect(store.stockMovements).toHaveLength(1);
-    expect(store.financialEntries).toHaveLength(1);
     await app.close();
   });
 
@@ -533,7 +545,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const retry = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-evolution-confirm-002"));
     expect(retry.json()).toMatchObject({ executed: true, replay: true, responseDelivered: true });
     expect(store.stockMovements).toHaveLength(1);
-    expect(store.financialEntries).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(0);
     await app.close();
   });
 
