@@ -67,6 +67,15 @@ import {
   looksLikeStockEntryCommand,
   parseStockEntryPreviewDecision,
 } from "../application/stock-entry";
+import {
+  LocalLlamaReactivationMessageProvider,
+  MemoryReactivationAnalysisSource,
+  PrismaReactivationAnalysisSource,
+  ReactivationAnalysisService,
+  ReactivationMessageVariantProvider,
+  formatReactivationAnalysisReport,
+  looksLikeReactivationAnalysisCommand,
+} from "../application/reactivation-analysis";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
 import { prisma } from "../infrastructure/database/prisma";
@@ -911,6 +920,7 @@ export function createApp(options: {
   stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>;
   stockAlertSend?: (phone: string, text: string) => Promise<void>;
   stockAlertNow?: () => Date;
+  reactivationMessageProvider?: ReactivationMessageVariantProvider | null;
 } = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
@@ -960,6 +970,25 @@ export function createApp(options: {
     backend === "prisma"
       ? new PrismaOperationsService(prisma, undefined, retentionAiScorer, options.stockEntryFailureHook)
       : new OperationsService(memoryStore, undefined, retentionAiScorer, options.stockEntryFailureHook);
+  const envPositiveInteger = (name: string, fallback: number) => {
+    const parsed = Number(process.env[name]);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const reactivationMessageProvider = options.reactivationMessageProvider === undefined
+    ? process.env.NODE_ENV === "test"
+      ? undefined
+      : new LocalLlamaReactivationMessageProvider()
+    : options.reactivationMessageProvider ?? undefined;
+  const reactivationAnalysis = new ReactivationAnalysisService(
+    backend === "prisma"
+      ? new PrismaReactivationAnalysisSource(prisma)
+      : new MemoryReactivationAnalysisSource(memoryStore),
+    reactivationMessageProvider,
+    {
+      defaultReturnDays: envPositiveInteger("REACTIVATION_DEFAULT_RETURN_DAYS", 45),
+      cooldownDays: envPositiveInteger("REACTIVATION_COOLDOWN_DAYS", 30),
+    },
+  );
   const stockAlertDispatcher = new StockAlertDispatcher({
     store: backend === "prisma"
       ? new PrismaStockAlertStore(prisma)
@@ -1119,6 +1148,7 @@ export function createApp(options: {
     "schedule_appointment",
     "cancel_appointment",
     "report_query",
+    "reactivation_analysis",
     "unknown",
   ]);
 
@@ -3115,6 +3145,32 @@ export function createApp(options: {
       throw new Error("Contexto confiavel do webhook invalido.");
     }
     await assertOwnerCommandUnitExists(input.unitId);
+    if (looksLikeReactivationAnalysisCommand(input.message)) {
+      const analysis = await reactivationAnalysis.analyze({ unitId: input.unitId });
+      return {
+        ok: true,
+        mode: "preview_only",
+        intent: "reactivation_analysis",
+        confidence: 1,
+        summary: "Análise de clientes inativos e prévias de reativação.",
+        draft: { analysis },
+        missingFields: [],
+        warnings: ["Nenhuma mensagem foi enviada."],
+        allowedNextActions: [],
+        executed: false,
+        executionMessage: formatReactivationAnalysisReport(analysis),
+        parserDiagnostics: {
+          strategy: "deterministic",
+          status: "PARSED_COMPLETE",
+          deterministicDurationMs: 0,
+          presentFields: ["analysis"],
+          missingFields: [],
+          correlationId: input.correlationId,
+          source: input.source ?? "text",
+          interpreterVersion: "commercial-understanding-v1",
+        },
+      };
+    }
     const context = await getOwnerCommandContext({
       unitId: input.unitId,
       screenContext: input.screenContext,
@@ -3932,6 +3988,7 @@ export function createApp(options: {
       .regex(/^\d{4}-\d{2}-\d{2}$/, "birthDate deve estar no formato YYYY-MM-DD")
       .optional(),
     notes: z.string().max(500).optional(),
+    whatsappOptOut: z.boolean().optional(),
     status: z.enum(["NEW", "ACTIVE", "VIP", "INACTIVE"]).optional(),
     tags: z
       .array(z.enum(["NEW", "RECURRING", "VIP", "INACTIVE"]))
@@ -5367,6 +5424,7 @@ export function createApp(options: {
       email: body.email,
       birthDate: body.birthDate ? new Date(`${body.birthDate}T00:00:00.000Z`) : undefined,
       notes: body.notes,
+      whatsappOptOut: body.whatsappOptOut,
       status: body.status,
       tags: body.tags,
     });
@@ -7690,6 +7748,7 @@ export function createApp(options: {
       guidance_parser_failure: "INVALID_STRUCTURED_OUTPUT",
       guidance_unsupported_intent: "UNKNOWN_INTENT",
       entity_clarification: "MISSING_FIELDS",
+      reactivation_analysis_report: "PREVIEW_SENT",
       audio_preview: "PREVIEW_SENT",
       text_preview: "PREVIEW_SENT",
       unexpected_failure: "EXECUTION_FAILED",
@@ -9099,6 +9158,30 @@ export function createApp(options: {
         missingFields: preview.missingFields,
       },
     });
+    if (preview.intent === "reactivation_analysis") {
+      aiWhatsappClarificationContexts.delete(clarificationKey);
+      await safeAudit({
+        unitId,
+        action: "AI_WHATSAPP_FINAL_DECISION",
+        entity: "ai_whatsapp_command",
+        entityId: message.maskedPhone,
+        after: {
+          correlationId,
+          stage: "owner_command_final_decision",
+          result: "FINAL_READ_ONLY_REPORT",
+          reason: "reactivation_analysis_only",
+        },
+      });
+      const responseDelivered = await safeSend(
+        preview.executionMessage ?? preview.summary,
+        "reactivation_analysis_report",
+      );
+      return buildAiWhatsappPreviewOnlyResponse({
+        intent: preview.intent,
+        audio: Boolean(audioTranscript),
+        responseDelivered,
+      });
+    }
     await safeAudit({
       unitId,
       action: "AI_WHATSAPP_ENTITY_RESOLUTION_COMPLETED",

@@ -10,6 +10,11 @@ import { StockEntryPreviewRepository } from "../src/application/stock-entry-prev
 import { STOCK_ENTRY_PREVIEW_VERSION, StockEntryPreview } from "../src/application/stock-entry";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 import { PrismaStockAlertStore, StockAlertDispatcher } from "../src/application/stock-alert-outbox";
+import {
+  MemoryReactivationAnalysisSource,
+  PrismaReactivationAnalysisSource,
+  ReactivationAnalysisService,
+} from "../src/application/reactivation-analysis";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -430,6 +435,51 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
 
   afterAll(async () => {
     await prisma.$disconnect();
+  });
+
+  it("mantem a analise de reativacao identica em memoria e Prisma sem enviar mensagens", async () => {
+    const scenario = await createScenario();
+    const now = new Date("2026-05-01T00:00:00.000Z");
+    await prisma.client.update({
+      where: { id: scenario.clientId },
+      data: { phone: "5511999991234", whatsappOptOut: false },
+    });
+    const completedDates = ["2026-01-21T00:00:00.000Z", "2026-02-20T00:00:00.000Z", "2026-03-22T00:00:00.000Z"];
+    const appointments = completedDates.map((value, index) => ({
+      id: uniqueId(`reactivation-db-${index}`),
+      unitId: scenario.unitId,
+      clientId: scenario.clientId,
+      professionalId: scenario.professionalId,
+      serviceId: scenario.serviceId,
+      startsAt: new Date(value),
+      endsAt: new Date(new Date(value).getTime() + 45 * 60_000),
+      status: "COMPLETED" as const,
+      isFitting: false,
+      totalPriceSnapshot: 75,
+      effectiveDurationMinSnapshot: 45,
+      durationCalculationMode: "SUM" as const,
+    }));
+    await prisma.appointment.createMany({ data: appointments });
+
+    const persisted = await new ReactivationAnalysisService(new PrismaReactivationAnalysisSource(prisma))
+      .analyze({ unitId: scenario.unitId, now });
+    const store = new InMemoryStore();
+    store.units = [{ id: scenario.unitId, name: (await prisma.unit.findUniqueOrThrow({ where: { id: scenario.unitId } })).name, timezone: "America/Sao_Paulo" }];
+    store.clients = [{ id: scenario.clientId, businessId: scenario.unitId, fullName: "Cliente DB", phone: "5511999991234", whatsappOptOut: false, tags: ["RECURRING"] }];
+    store.services = [{ ...store.services[0]!, id: scenario.serviceId, businessId: scenario.unitId, name: "Corte DB" }];
+    store.professionals = [{ ...store.professionals[0]!, id: scenario.professionalId, businessId: scenario.unitId }];
+    store.appointments = appointments.map((item) => ({ ...item, history: [] }));
+    const inMemory = await new ReactivationAnalysisService(new MemoryReactivationAnalysisSource(store))
+      .analyze({ unitId: scenario.unitId, now });
+
+    expect(persisted).toEqual(inMemory);
+    expect(persisted.candidates[0]).toMatchObject({
+      segment: "OVERDUE",
+      typicalIntervalDays: 30,
+      phoneMasked: "(**) *****-1234",
+    });
+    expect(persisted.messagesSent).toBe(0);
+    expect(await prisma.automationExecution.count({ where: { unitId: scenario.unitId } })).toBe(0);
   });
 
   it("atualiza profissional e reconcilia TeamMember sem duplicacao", async () => {

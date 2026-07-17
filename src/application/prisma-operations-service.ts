@@ -433,6 +433,7 @@ export class PrismaOperationsService {
         email: item.email ?? null,
         birthDate: item.birthDate ? item.birthDate.toISOString() : null,
         notes: item.notes ?? null,
+        whatsappOptOut: item.whatsappOptOut,
         status: mapClientTagsToStatus(item.tags),
         tags: item.tags,
         createdAt: item.createdAt.toISOString(),
@@ -451,6 +452,7 @@ export class PrismaOperationsService {
     email?: string;
     birthDate?: Date;
     notes?: string;
+    whatsappOptOut?: boolean;
     status?: "NEW" | "ACTIVE" | "VIP" | "INACTIVE";
     tags?: Array<"NEW" | "RECURRING" | "VIP" | "INACTIVE">;
   }) {
@@ -496,6 +498,7 @@ export class PrismaOperationsService {
         email: input.email ? String(input.email).trim() : null,
         birthDate: input.birthDate ?? null,
         notes: input.notes ? String(input.notes).trim() : null,
+        whatsappOptOut: input.whatsappOptOut ?? false,
         tags,
       },
     });
@@ -509,6 +512,7 @@ export class PrismaOperationsService {
         email: created.email ?? null,
         birthDate: created.birthDate ? created.birthDate.toISOString() : null,
         notes: created.notes ?? null,
+        whatsappOptOut: created.whatsappOptOut,
         status: mapClientTagsToStatus(created.tags),
         tags: created.tags,
         createdAt: created.createdAt.toISOString(),

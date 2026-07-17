@@ -416,6 +416,7 @@ export class OperationsService {
           email: metadata.email ?? null,
           birthDate: metadata.birthDate ? metadata.birthDate.toISOString() : null,
           notes: metadata.notes ?? null,
+          whatsappOptOut: client.whatsappOptOut ?? false,
           status: mapClientTagsToStatus(client.tags ?? []),
           tags: client.tags ?? [],
           createdAt: (metadata.createdAt ?? new Date()).toISOString(),
@@ -453,6 +454,7 @@ export class OperationsService {
     email?: string;
     birthDate?: Date;
     notes?: string;
+    whatsappOptOut?: boolean;
     status?: "NEW" | "ACTIVE" | "VIP" | "INACTIVE";
     tags?: Array<"NEW" | "RECURRING" | "VIP" | "INACTIVE">;
   }) {
@@ -495,6 +497,7 @@ export class OperationsService {
       email: input.email ? String(input.email).trim() : undefined,
       birthDate: input.birthDate,
       notes: input.notes ? String(input.notes).trim() : undefined,
+      whatsappOptOut: input.whatsappOptOut ?? false,
       createdAt: now,
       updatedAt: now,
     };
@@ -510,6 +513,7 @@ export class OperationsService {
         email: created.email ?? null,
         birthDate: created.birthDate ? created.birthDate.toISOString() : null,
         notes: created.notes ?? null,
+        whatsappOptOut: created.whatsappOptOut,
         status: mapClientTagsToStatus(created.tags),
         tags: created.tags,
         createdAt: created.createdAt.toISOString(),

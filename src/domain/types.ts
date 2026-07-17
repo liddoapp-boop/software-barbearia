@@ -217,6 +217,7 @@ export interface Client {
   businessId?: UUID;
   fullName: string;
   phone?: string;
+  whatsappOptOut?: boolean;
   preferredProfessionalId?: UUID;
   tags: Array<"NEW" | "RECURRING" | "VIP" | "INACTIVE">;
 }

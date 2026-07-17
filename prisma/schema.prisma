@@ -405,6 +405,7 @@ model Client {
   businessId              String                   @default("unit-01")
   fullName                String
   phone                   String?
+  whatsappOptOut          Boolean                  @default(false)
   email                   String?
   birthDate               DateTime?
   notes                   String?

@@ -45,6 +45,7 @@ export type OwnerCommandParseResult = {
     | "schedule_appointment"
     | "cancel_appointment"
     | "report_query"
+    | "reactivation_analysis"
     | "unknown";
   confidence: number;
   summary: string;
@@ -141,6 +142,7 @@ const ownerCommandResponseSchema = z.object({
       "schedule_appointment",
       "cancel_appointment",
       "report_query",
+      "reactivation_analysis",
       "unknown",
     ])
     .default("unknown"),

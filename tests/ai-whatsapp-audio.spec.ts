@@ -26,6 +26,75 @@ function audioPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("comando do owner para analise de reativacao", () => {
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DATA_BACKEND = "memory";
+    process.env.NODE_ENV = "test";
+    process.env.AUTH_ENFORCED = "true";
+    process.env.HTTP_LOG_ENABLED = "false";
+    process.env.AI_WHATSAPP_ENABLED = "true";
+    process.env.AI_WHATSAPP_OWNER_PHONE = ownerPhone;
+    process.env.AI_WHATSAPP_UNIT_ID = "unit-01";
+    process.env.EVOLUTION_WEBHOOK_SECRET = "test-webhook-secret";
+    process.env.EVOLUTION_API_URL = "http://evolution.local";
+    process.env.EVOLUTION_API_KEY = "test-evolution-key";
+    process.env.EVOLUTION_INSTANCE_NAME = "test-instance";
+    process.env.AI_WHATSAPP_AUDIO_ENABLED = "true";
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    process.env = { ...originalEnv };
+  });
+
+  it("texto e audio retornam o mesmo relatorio somente leitura sem campanha nem envio a cliente", async () => {
+    const transcript = "Quem está sumido da barbearia?";
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript,
+      provider: "local_whisper:test",
+      diagnostics: { providerCalled: true, durationMs: 20, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const completedAt = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
+    store.appointments.push({
+      id: "reactivation-completed",
+      unitId: "unit-01",
+      clientId: "cli-01",
+      professionalId: "pro-01",
+      serviceId: "svc-corte",
+      startsAt: completedAt,
+      endsAt: new Date(completedAt.getTime() + 45 * 60_000),
+      status: "COMPLETED",
+      isFitting: false,
+      history: [],
+    });
+    const appointmentsBefore = store.appointments.length;
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+
+    const textResponse = await postWebhook(app, textPayload(transcript, "reactivation-text-001"));
+    const audioResponse = await postWebhook(app, audioPayload({ data: {
+      key: { id: "reactivation-audio-001", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(textResponse.json()).toMatchObject({ intent: "reactivation_analysis", mode: "preview_only", executed: false });
+    expect(audioResponse.json()).toMatchObject({ intent: "reactivation_analysis", mode: "preview_only", audio: true, executed: false });
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(sentTexts(fetchMock)).toHaveLength(2);
+    expect(sentTexts(fetchMock)[0]).toContain("Análise de reativação");
+    expect(sentTexts(fetchMock)[1]).toContain("Nenhuma mensagem foi enviada.");
+    expect(store.appointments).toHaveLength(appointmentsBefore);
+    expect(store.automationExecutions).toHaveLength(0);
+    await app.close();
+  });
+});
+
 function textPayload(text: string, messageId = `text-${text}`) {
   return {
     instance: "test-instance",
