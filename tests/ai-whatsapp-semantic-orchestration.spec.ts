@@ -208,7 +208,7 @@ describe("orquestracao semantica real do WhatsApp", () => {
         expect(text).not.toMatch(/Cliente:\s*(?:cliente\b|.*(?:\bé\b|\beh\b|\bhum\b|\bahn\b)\s*$)/im);
       } else if (item.expected === "clarification") {
         expect(response.json()).toMatchObject({ intent: "schedule_appointment" });
-        expect(text).toBe(item.expectedReply);
+        expect(text, item.message).toBe(item.expectedReply);
         expect(text).not.toContain("CONFIRMAR");
       } else {
         expect(response.json()).toMatchObject({ intent: "unknown" });
@@ -237,8 +237,8 @@ describe("orquestracao semantica real do WhatsApp", () => {
       clientName: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
       serviceNames: { confidence: 0.95, source: "gemini_validated", status: "accepted" },
       professionalName: { confidence: 1, source: "context_default", status: "accepted" },
-      date: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
-      time: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
+      date: { confidence: 0.96, source: "deterministic", status: "accepted" },
+      time: { confidence: 0.96, source: "deterministic", status: "accepted" },
     });
 
     const after = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });

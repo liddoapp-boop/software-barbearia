@@ -60,7 +60,12 @@ describe("provedores locais de IA", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const parser = new LocalLlamaOwnerCommandParser("http://127.0.0.1:11435", "Qwen3-4B-Q4_K_M.gguf", 1000);
+    const parser = new LocalLlamaOwnerCommandParser(
+      "http://127.0.0.1:11435",
+      "google_gemma-3-4b-it-Q4_K_M.gguf",
+      1000,
+      "4996030242583a40aa151ff93f49ed787ac8c25e4120c3ae4588b2e2a7d1ae94",
+    );
     const result = await parser.parseGemini(parserInput);
 
     expect(result.result?.intent).toBe("schedule_appointment");
@@ -71,16 +76,16 @@ describe("provedores locais de IA", () => {
       chat_template_kwargs: { enable_thinking: false },
       response_format: { type: "json_schema" },
     });
-    expect(body.messages[0].content).toContain("/no_think");
-    expect(body.response_format.schema.additionalProperties).toBe(false);
+    expect(body.messages[0].content).not.toContain("/no_think");
+    expect(body.response_format.json_schema.schema.additionalProperties).toBe(false);
   });
 
-  it("mantem o semantico deterministico por padrao e seleciona local apenas por flag", () => {
+  it("seleciona o semantico local por padrao em producao e permite desativacao explicita", () => {
     process.env.NODE_ENV = "production";
     delete process.env.SEMANTIC_PROVIDER;
-    expect(createOwnerCommandParserFromEnv()).toBeNull();
-    process.env.SEMANTIC_PROVIDER = "local_llama";
     expect(createOwnerCommandParserFromEnv()).toBeInstanceOf(LocalLlamaOwnerCommandParser);
+    process.env.SEMANTIC_PROVIDER = "deterministic";
+    expect(createOwnerCommandParserFromEnv()).toBeNull();
   });
 
   it("seleciona whisper.cpp sem rede externa e falha fechado se o processo estiver indisponivel", async () => {

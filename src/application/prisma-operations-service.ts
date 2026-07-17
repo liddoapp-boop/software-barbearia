@@ -6519,6 +6519,7 @@ export class PrismaOperationsService {
             ? row.source
             : undefined,
         amount: row.amount,
+        paymentMethod: row.paymentMethod ?? undefined,
         occurredAt: new Date(row.date),
         referenceType: row.referenceType,
         referenceId: row.referenceId ?? undefined,

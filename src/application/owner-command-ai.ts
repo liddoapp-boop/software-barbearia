@@ -8,6 +8,7 @@ import {
   ProviderAttemptDiagnostic,
   ResilientProviderError,
 } from "./resilient-provider";
+import { interpretCommercialCommandDeterministic } from "./commercial-understanding";
 
 export type OwnerCommandContext = {
   unitId: string;
@@ -55,6 +56,7 @@ export type OwnerCommandParseResult = {
   fallbackReason?: OwnerCommandFallbackReason;
   fieldDiagnostics?: Record<string, OwnerCommandFieldDiagnostic>;
   ambiguities?: Array<{ field: string; reason: string }>;
+  clarificationCode?: string;
 };
 
 export type OwnerCommandFieldDiagnostic = {
@@ -1111,7 +1113,7 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
   };
 }
 
-function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
+function legacyDeterministicProductSaleParse(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
   const normalized = normalizeMatchText(input.message);
   const hasSaleVerb = /\b(vendi|vendeu|venda|vender|registrar venda)\b/.test(normalized);
   if (!hasSaleVerb) return null;
@@ -1151,6 +1153,80 @@ function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerComm
     allowedNextActions: [],
     executed: false,
   };
+}
+
+function deterministicProductSaleParse(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
+  const legacy = legacyDeterministicProductSaleParse(input);
+  const understanding = interpretCommercialCommandDeterministic({
+    message: input.message,
+    products: input.context.products,
+  });
+  if (understanding.kind === "RESOLVED" && understanding.command.intent === "PRODUCT_SALE") {
+    const item = understanding.command.items[0];
+    return {
+      ok: true,
+      mode: "preview_only",
+      intent: "sell_product",
+      confidence: 1,
+      summary: `Venda de ${item.quantity} ${item.productReference}.`,
+      draft: {
+        clientName: legacy?.draft.clientName ?? null,
+        productName: item.productReference,
+        quantity: item.quantity,
+        paymentMethod: legacy?.draft.paymentMethod,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+        quotedUnitPrice: item.unitPrice,
+      },
+      missingFields: [],
+      warnings: [],
+      allowedNextActions: [],
+      executed: false,
+      fieldDiagnostics: {
+        productName: { confidence: 1, source: "deterministic", status: "accepted" },
+        quantity: { confidence: 1, source: "deterministic", status: "accepted" },
+        quotedUnitPrice: { confidence: 1, source: "deterministic", status: "accepted" },
+      },
+    };
+  }
+  if (understanding.kind === "NEEDS_CLARIFICATION" && understanding.intent === "PRODUCT_SALE") {
+    if (
+      (understanding.questionCode === "PRODUCT_ENTITY_AMBIGUOUS" || understanding.questionCode === "PRODUCT_ENTITY_NOT_FOUND")
+      && typeof legacy?.draft.productName === "string"
+      && legacy.draft.productName.trim()
+    ) {
+      return legacy;
+    }
+    const known = understanding.knownFields;
+    const productName = typeof known.productReference === "string" ? known.productReference : "";
+    const quantity = typeof known.quantity === "number" ? known.quantity : 0;
+    const unitPrice = typeof known.unitPrice === "number" ? known.unitPrice : undefined;
+    const missingFields = [
+      ...understanding.missingFields.map((field) => field === "productReference" ? "productName" : field),
+      ...understanding.ambiguousFields.map((field) => field === "productReference" ? "productName" : field),
+    ];
+    return {
+      ok: true,
+      mode: "preview_only",
+      intent: "sell_product",
+      confidence: 0.7,
+      summary: "Venda de produto requer esclarecimento específico.",
+      draft: {
+        clientName: legacy?.draft.clientName ?? null,
+        productName,
+        quantity,
+        paymentMethod: legacy?.draft.paymentMethod,
+        ...(unitPrice === undefined ? {} : { quotedUnitPrice: unitPrice }),
+      },
+      missingFields: Array.from(new Set(missingFields)),
+      warnings: [],
+      allowedNextActions: [],
+      executed: false,
+      ambiguities: understanding.ambiguousFields.map((field) => ({ field, reason: understanding.questionCode })),
+      clarificationCode: understanding.questionCode,
+    };
+  }
+  return legacy;
 }
 
 export function parseDeterministicOwnerCommand(input: OwnerCommandParseInput): OwnerCommandParseResult | null {
@@ -1300,18 +1376,23 @@ function sanitizeSemanticScheduleV2(
 
   const dateField = parsed.fields.date;
   const deterministicDate = recognizeDeterministicDate(input.message, input.context.now, input.context.timezone || "America/Sao_Paulo");
+  const dateAmbiguous = parsed.ambiguities.some((item) => item.field === "date");
   let date = "";
   let dateReason = "";
-  if (!dateField.canonical) dateReason = "missing";
+  if (dateAmbiguous) {
+    dateReason = "semantic_ambiguous";
+  } else if (deterministicDate?.date) {
+    date = deterministicDate.date;
+  } else if (!dateField.canonical) dateReason = "missing";
   else if (dateField.confidence < 0.8) dateReason = "low_confidence";
   else if (!isGroundedEvidence(input.message, dateField.evidence) || !isGroundedEvidence(input.message, dateField.expression)) dateReason = "not_grounded";
   else if (!isValidIsoDate(dateField.canonical)) dateReason = "invalid_calendar_date";
   else if (deterministicDate?.date && deterministicDate.date !== dateField.canonical) dateReason = "deterministic_semantic_divergence";
-  if (!dateReason) date = dateField.canonical;
+  if (!date && !dateReason) date = dateField.canonical;
   diagnostics.date = {
-    confidence: dateField.canonical ? dateField.confidence : 0,
-    source: "gemini_validated",
-    status: date ? "accepted" : dateReason === "missing" ? "missing" : "rejected",
+    confidence: date ? dateField.canonical ? dateField.confidence : 1 : 0,
+    source: deterministicDate?.date ? "deterministic" : "gemini_validated",
+    status: date ? "accepted" : dateReason === "semantic_ambiguous" ? "ambiguous" : dateReason === "missing" ? "missing" : "rejected",
     reason: dateReason || undefined,
     expression: dateField.expression || undefined,
   };
@@ -1321,19 +1402,23 @@ function sanitizeSemanticScheduleV2(
   const approximateTime = timeField.precision === "approximate";
   let time = "";
   let timeReason = "";
-  if ((timeField.ambiguous || deterministicTime?.ambiguous) && !approximateTime) timeReason = "period_not_specified";
-  else if (!timeField.canonical) timeReason = "missing";
+  if (deterministicTime?.time && !deterministicTime.ambiguous && !approximateTime) {
+    time = deterministicTime.time;
+  } else if ((timeField.ambiguous || deterministicTime?.ambiguous) && !approximateTime) timeReason = "period_not_specified";
+  else if (!timeField.canonical && deterministicTime?.time && !deterministicTime.ambiguous) {
+    time = deterministicTime.time;
+  } else if (!timeField.canonical) timeReason = "missing";
   else if (timeField.confidence < 0.82) timeReason = "low_confidence";
   else if (!isGroundedEvidence(input.message, timeField.evidence) || !isGroundedEvidence(input.message, timeField.expression)) timeReason = "not_grounded";
   else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeField.canonical)) timeReason = "invalid_time";
   else if (deterministicTime?.time && deterministicTime.time !== timeField.canonical) timeReason = "deterministic_semantic_divergence";
   else if (approximateTime) timeReason = "approximate_time";
   else timeReason = validateSemanticTimePeriod(timeField.canonical, timeField.evidence);
-  if (!timeReason) time = timeField.canonical;
+  if (!time && !timeReason) time = timeField.canonical;
   const timeAmbiguous = timeReason === "period_not_specified" || timeReason === "approximate_time";
   diagnostics.time = {
-    confidence: timeField.canonical || timeField.expression ? timeField.confidence : 0,
-    source: "gemini_validated",
+    confidence: time ? timeField.canonical ? timeField.confidence : 1 : timeField.expression ? timeField.confidence : 0,
+    source: deterministicTime?.time && !deterministicTime.ambiguous ? "deterministic" : "gemini_validated",
     status: time ? "accepted" : timeAmbiguous ? "ambiguous" : timeReason === "missing" ? "missing" : "rejected",
     reason: timeReason || undefined,
     expression: timeField.expression || undefined,
@@ -1576,6 +1661,25 @@ function sanitizeSemanticScheduleResult(
     warnings,
     allowedNextActions: [],
     executed: false,
+    fieldDiagnostics: {
+      clientName: clientName
+        ? { confidence: parsed.confidence, source: "gemini_validated", status: "accepted" }
+        : { confidence: 0, source: "gemini_validated", status: "missing" },
+      serviceNames: serviceNames.length
+        ? { confidence: parsed.confidence, source: deterministicService ? "deterministic" : "gemini_validated", status: "accepted" }
+        : { confidence: 0, source: "gemini_validated", status: "missing" },
+      professionalName: professionalName
+        ? { confidence: 1, source: explicitProfessional ? "gemini_validated" : "context_default", status: "accepted" }
+        : rawProfessionalName
+          ? { confidence: parsed.confidence, source: "gemini_validated", status: "rejected", reason: "not_in_tenant_catalog" }
+          : { confidence: 0, source: "gemini_validated", status: "missing" },
+      date: date
+        ? { confidence: 1, source: "deterministic", status: "accepted" }
+        : { confidence: 0, source: "deterministic", status: "missing" },
+      time: time
+        ? { confidence: 1, source: "deterministic", status: "accepted" }
+        : { confidence: 0, source: "deterministic", status: timeRecognition?.ambiguous ? "ambiguous" : "missing", reason: timeRecognition?.ambiguous ? "period_not_specified" : undefined },
+    },
   };
 }
 
@@ -1797,8 +1901,9 @@ export class LocalLlamaOwnerCommandParser implements OwnerCommandParser {
     private readonly endpoint: string,
     private readonly model: string,
     private readonly timeoutMs = 15_000,
+    private readonly modelHash = "unknown",
   ) {
-    this.modelVersion = `local_llama:${model}`;
+    this.modelVersion = `local_llama:${model}@sha256:${modelHash}`;
   }
 
   async parseGemini(input: OwnerCommandParseInput): Promise<OwnerCommandParserAttempt> {
@@ -1811,13 +1916,20 @@ export class LocalLlamaOwnerCommandParser implements OwnerCommandParser {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           model: this.model,
-          messages: [{ role: "user", content: `/no_think\n${buildPrompt(input)}` }],
+          messages: [{ role: "user", content: buildPrompt(input) }],
           temperature: 0,
-          max_tokens: 512,
+          max_tokens: 320,
           stream: false,
           reasoning_format: "none",
           chat_template_kwargs: { enable_thinking: false },
-          response_format: { type: "json_schema", schema: semanticStructuredOutputJsonSchema },
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "commercial_understanding",
+              strict: true,
+              schema: semanticStructuredOutputJsonSchema,
+            },
+          },
         }),
         signal: controller.signal,
       });
@@ -1920,15 +2032,21 @@ export function createGeminiOwnerCommandParserFromEnv(): OwnerCommandParser | nu
 
 export function createOwnerCommandParserFromEnv(): OwnerCommandParser | null {
   const configuredProvider = process.env.SEMANTIC_PROVIDER?.trim().toLowerCase();
-  const provider = configuredProvider || (process.env.NODE_ENV === "test" && process.env.GEMINI_API_KEY ? "gemini" : "deterministic");
+  const provider = configuredProvider || (process.env.NODE_ENV === "test"
+    ? process.env.GEMINI_API_KEY ? "gemini" : "deterministic"
+    : "local_llama");
   if (provider === "local_llama") {
     const endpoint = (process.env.LOCAL_LLAMA_URL?.trim() || "http://127.0.0.1:11435").replace(/\/$/, "");
-    const model = process.env.LOCAL_LLAMA_MODEL?.trim() || "Qwen3-4B-Q4_K_M.gguf";
+    const model = process.env.LOCAL_LLAMA_MODEL?.trim() || "google_gemma-3-4b-it-Q4_K_M.gguf";
+    const modelHash = process.env.LOCAL_LLAMA_MODEL_SHA256?.trim().toLowerCase()
+      || "4996030242583a40aa151ff93f49ed787ac8c25e4120c3ae4588b2e2a7d1ae94";
     const configuredTimeout = Number(process.env.LOCAL_LLAMA_TIMEOUT_MS ?? 15_000);
     const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
       ? Math.min(15_000, Math.trunc(configuredTimeout))
       : 15_000;
-    return new LocalLlamaOwnerCommandParser(endpoint, model, timeoutMs);
+    return new LocalLlamaOwnerCommandParser(endpoint, model, timeoutMs, modelHash);
   }
-  return provider === "gemini" ? createGeminiOwnerCommandParserFromEnv() : null;
+  return provider === "gemini" && process.env.NODE_ENV === "test"
+    ? createGeminiOwnerCommandParserFromEnv()
+    : null;
 }

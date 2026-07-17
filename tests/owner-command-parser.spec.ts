@@ -429,8 +429,8 @@ describe("parser textual Gemini tipado", () => {
           clientName: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
           serviceNames: { confidence: 0.95, source: "gemini_validated", status: "accepted" },
           professionalName: { confidence: 1, source: "context_default", status: "accepted" },
-          date: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
-          time: { confidence: 0.96, source: "gemini_validated", status: "accepted" },
+          date: { confidence: 0.96, source: "deterministic", status: "accepted" },
+          time: { confidence: 0.96, source: "deterministic", status: "accepted" },
         },
       },
     });
@@ -460,18 +460,6 @@ describe("parser textual Gemini tipado", () => {
       field: "clientName",
       reason: "low_confidence",
     },
-    {
-      name: "periodo da tarde perdido",
-      response: semanticV2({ time: "05:00" }),
-      field: "time",
-      reason: "deterministic_semantic_divergence",
-    },
-    {
-      name: "data divergente do texto",
-      response: semanticV2({ date: "2026-07-15" }),
-      field: "date",
-      reason: "deterministic_semantic_divergence",
-    },
   ])("rejeita campo preenchido mas semanticamente suspeito: $name", async ({ response, field, reason }) => {
     const message = "Marque um corte para o cliente João Victor. É amanhã, às 5 da tarde.";
     const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
@@ -482,6 +470,22 @@ describe("parser textual Gemini tipado", () => {
     expect(attempt.result?.missingFields).toContain(field);
     expect(attempt.result?.allowedNextActions).toEqual([]);
     expect(attempt.result?.fieldDiagnostics?.[field]).toMatchObject({ status: "rejected", reason });
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["periodo da tarde perdido", semanticV2({ time: "05:00" }), "time", "17:00"],
+    ["data divergente do texto", semanticV2({ date: "2026-07-15" }), "date", "2026-07-14"],
+  ])("mantém o valor determinístico quando o modelo diverge: %s", async (_name, response, field, expected) => {
+    const message = "Marque um corte para o cliente João Victor. É amanhã, às 5 da tarde.";
+    const realContext = { ...context, now: new Date("2026-07-13T15:00:00.000Z") };
+    vi.stubGlobal("fetch", mockSemanticV2(response));
+
+    const attempt = await parser().parseGemini({ context: realContext, message });
+
+    expect(attempt.result?.draft[field]).toBe(expected);
+    expect(attempt.result?.missingFields).not.toContain(field);
+    expect(attempt.result?.fieldDiagnostics?.[field]).toMatchObject({ status: "accepted", source: "deterministic" });
     vi.unstubAllGlobals();
   });
 

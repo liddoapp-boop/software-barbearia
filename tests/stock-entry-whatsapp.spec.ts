@@ -155,6 +155,17 @@ function sentTexts(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe("parser determinístico de entrada de estoque", () => {
+  it.each([
+    "Entraram cinco Pomadas Matte no estoque.",
+    "Chegaram cinco Pomadas Matte.",
+    "Dá entrada em cinco Pomadas Matte.",
+  ])("reconhece variação natural e pede somente o custo ausente: %s", (message) => {
+    expect(interpretStockEntryCommand({ message, products, now })).toMatchObject({
+      recognized: true,
+      status: "clarification",
+      reason: "cost_missing",
+    });
+  });
   const now = new Date("2026-07-15T15:00:00.000Z");
 
   it.each([

@@ -5348,6 +5348,7 @@ export class OperationsService {
             ? item.source
             : undefined,
         amount: item.amount,
+        paymentMethod: item.paymentMethod ?? undefined,
         occurredAt: new Date(item.date),
         referenceType: item.referenceType,
         referenceId: item.referenceId ?? undefined,

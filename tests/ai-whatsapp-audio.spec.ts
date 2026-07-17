@@ -752,7 +752,7 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     const fresh = await postWebhook(app, textPayload("16:00", `after-cancel-${stage}`));
     expect(fresh.json()).toMatchObject({ ok: true, executed: false, unavailable: true, reason: "deterministic_no_match" });
-    expect(sentTexts(fetchMock).at(-1)).toBe("Nao consegui entender com seguranca. Envie novamente ou escreva a mensagem em texto.");
+    expect(sentTexts(fetchMock).at(-1)).toBe("Essa operação ainda não está disponível. Posso ajudar com vendas de produtos, entradas de estoque, agendamentos e correções de prévias.");
     expect(sentTexts(fetchMock).at(-1)).not.toContain("Maria Nova");
   });
 
@@ -828,7 +828,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     const responses = await Promise.all([postWebhook(app, audioPayload()), postWebhook(app, audioPayload()), postWebhook(app, audioPayload())]);
 
     expect(responses.filter((response) => response.json().deduplicated === true)).toHaveLength(2);
-    expect(sentTexts(fetchMock)).toEqual(["Entendi: Rafael, corte, amanhã. Você quer marcar exatamente às 16:00?"]);
+    expect(sentTexts(fetchMock)).toEqual(["Para qual cliente?"]);
   });
 
   it("so executa a venda transcrita apos CONFIRMAR usando o fluxo oficial", async () => {
@@ -1065,7 +1065,7 @@ describe("audio do atendente IA via WhatsApp", () => {
 
   it("distingue audio ininteligivel de falha temporaria do provedor", async () => {
     for (const scenario of [
-      { failure: "", expected: "O áudio foi transcrito, mas não consegui identificar o pedido com segurança" },
+      { failure: "", expected: "Não consegui ouvir o áudio com clareza" },
       { failure: "audio_transcription_failed", expected: "falha temporaria do servico" },
       { failure: "audio_transcription_429", expected: "falha temporaria do servico" },
       { failure: "audio_transcription_timeout", expected: "falha temporaria do servico" },
@@ -1282,7 +1282,7 @@ describe("audio do atendente IA via WhatsApp", () => {
       expect(response.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: scenario.reason });
       expect(sentTexts(fetchMock).at(-1)).toContain(
         scenario.reason === "audio_transcription_empty"
-          ? "O áudio foi transcrito, mas não consegui identificar o pedido com segurança"
+          ? "Não consegui ouvir o áudio com clareza"
           : "falha temporaria do servico",
       );
       vi.unstubAllGlobals();
@@ -1358,8 +1358,8 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentTexts(fetchMock)[0]).toContain("Produto: Pomada");
-    expect(sentTexts(fetchMock)[0]).toContain("Pagamento: Pix");
-    expect(sentTexts(fetchMock)[0]).toContain("Cliente: nao vinculado");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 59,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 59,00");
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
     expect(transcribe).toHaveBeenCalledTimes(1);
     expect(transcribe.mock.calls[0]?.[0]).toMatchObject({ pass: 1, timeoutMs: 20_000 });
@@ -1377,6 +1377,103 @@ describe("audio do atendente IA via WhatsApp", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(after.json().sales).toHaveLength(before.json().sales.length);
+  });
+
+  it("usa o mesmo núcleo para o áudio real de venda com total, sem efeito antes de CONFIRMAR", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcript = "Vendi 11 pomadas Matte por 649.";
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript,
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 120, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const stockAlerts: string[] = [];
+    const app = createApp({
+      memoryStore: store,
+      audioTranscriptionService: { transcribe },
+      ownerCommandParser: null,
+      stockAlertSend: async (_phone, text) => { stockAlerts.push(text); },
+    });
+    const beforeSales = store.productSales.length;
+
+    const preview = await postWebhook(app, audioPayload({ data: {
+      key: { id: "semantic-sale-real-001", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(preview.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
+    expect(sentTexts(fetchMock)[0]).toContain("Venda de produto");
+    expect(sentTexts(fetchMock)[0]).toContain("Produto: Pomada Matte");
+    expect(sentTexts(fetchMock)[0]).toContain("Quantidade: 11");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 59,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 649,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Estoque atual: 15");
+    expect(sentTexts(fetchMock)[0]).toContain("Estoque após a venda: 4");
+    expect(store.products[0].stockQty).toBe(15);
+    expect(store.productSales).toHaveLength(beforeSales);
+    expect(store.stockAlerts).toHaveLength(0);
+
+    const confirmed = await postWebhook(app, textPayload("CONFIRMAR", "semantic-sale-confirm-001"));
+    expect(confirmed.json()).toMatchObject({ ok: true, executed: true });
+    expect(store.products[0].stockQty).toBe(4);
+    expect(store.productSales).toHaveLength(beforeSales + 1);
+    expect(store.stockAlerts).toHaveLength(1);
+    expect(store.stockAlerts[0]).toMatchObject({ alertType: "LOW_STOCK", quantity: 4 });
+    expect(stockAlerts).toHaveLength(1);
+
+    await postWebhook(app, textPayload("CONFIRMAR", "semantic-sale-confirm-002"));
+    expect(store.products[0].stockQty).toBe(4);
+    expect(store.productSales).toHaveLength(beforeSales + 1);
+    expect(store.stockAlerts).toHaveLength(1);
+  });
+
+  it.each([
+    ["sale-01", "Saíram três Pomadas Matte, deu cento e setenta e sete reais.", "sell_product", 3],
+    ["sale-02", "O cliente levou duas Pomadas Matte, ficou cento e dezoito reais.", "sell_product", 2],
+    ["sale-03", "Vendi quatro unidades de Pomada Matte a cinquenta e nove cada.", "sell_product", 4],
+    ["sale-04", "Passei cinco Pomadas Matte, total duzentos e noventa e cinco reais.", "sell_product", 5],
+    ["sale-05", "Foram seis Pomadas Matte vendidas, tudo trezentos e cinquenta e quatro reais.", "sell_product", 6],
+    ["stock-01", "Entraram sete Pomadas Matte no estoque, paguei setenta reais no total.", "stock_entry", 7],
+    ["stock-02", "Chegaram oito Pomadas Matte no estoque, paguei oitenta reais no total.", "stock_entry", 8],
+    ["stock-03", "Recebi nove Pomadas Matte no estoque, paguei noventa reais no total.", "stock_entry", 9],
+    ["stock-04", "Comprei dez Pomadas Matte, custo unitário de dez reais.", "stock_entry", 10],
+    ["stock-05", "Dar entrada em onze Pomadas Matte, total cento e dez reais.", "stock_entry", 11],
+  ])("canário cego de áudio %s atravessa o núcleo compartilhado", async (id, transcript, intent, quantity) => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript,
+      provider: "local_whisper:blind-canary",
+      diagnostics: { providerCalled: true, durationMs: 100, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const stockBefore = store.products.find((product) => product.name === "Pomada Matte")?.stockQty;
+    const salesBefore = store.productSales.length;
+    const movementsBefore = store.stockMovements.length;
+
+    const response = await postWebhook(app, audioPayload({ data: {
+      key: { id: `blind-${id}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
+    } }));
+
+    expect(response.json()).toMatchObject({ ok: true, intent, audio: true, executed: false });
+    if (intent === "stock_entry") {
+      expect(response.json().preview).toMatchObject({ quantity });
+    } else {
+      expect(sentTexts(fetchMock)[0]).toContain(`Quantidade: ${quantity}`);
+    }
+    expect(store.products.find((product) => product.name === "Pomada Matte")?.stockQty).toBe(stockBefore);
+    expect(store.productSales).toHaveLength(salesBefore);
+    expect(store.stockMovements).toHaveLength(movementsBefore);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    await app.close();
   });
 
   it("texto e audio autorizados resolvem a mesma identidade e unidade", async () => {
@@ -1460,7 +1557,7 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     expect(response.json()).toMatchObject({ ok: true, executed: false });
     expect(sentTexts(fetchMock)).toEqual([
-      "O áudio foi transcrito, mas não consegui identificar o pedido com segurança. Envie novamente ou escreva a mensagem em texto.",
+      "Essa operação ainda não está disponível. Posso ajudar com vendas de produtos, entradas de estoque, agendamentos e correções de prévias.",
     ]);
     expect(sentTexts(fetchMock)[0]).not.toMatch(/Vendi uma pomada|Agendar corte para Joao|CONFIRMAR/);
     expect(transcribe).toHaveBeenCalledTimes(1);

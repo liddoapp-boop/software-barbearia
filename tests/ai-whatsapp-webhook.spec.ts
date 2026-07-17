@@ -510,7 +510,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, ignored: true, responseDelivered: true });
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Nao consegui entender com seguranca. Envie novamente ou escreva a mensagem em texto.");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Não recebi informações suficientes para identificar uma operação. Envie o produto, a quantidade e os demais dados necessários.");
   });
 
   it("texto de venda gera previa e nao executa", async () => {
@@ -575,6 +575,51 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(store.productSales).toHaveLength(before.sales + 1);
     expect(store.productSales.at(-1)?.clientId).toBeUndefined();
     expect(store.clients).toHaveLength(before.clients);
+  });
+
+  it.each([
+    ["PIX", "Pix"],
+    ["dinheiro", "Dinheiro"],
+    ["débito", "Cartao de debito"],
+    ["crédito", "Cartao de credito"],
+  ])("preserva %s da prévia WhatsApp até o lançamento financeiro", async (requestedPayment, expectedPaymentMethod) => {
+    const fetchMock = mockGeminiIntentAndWhatsapp("sell_product", {
+      productName: "Pomada",
+      quantity: 1,
+      paymentMethod: requestedPayment,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store });
+    const token = await loginOwner(app);
+
+    const preview = await postWebhook(app, evolutionPayload(`Vendi uma Pomada com pagamento ${requestedPayment}.`));
+    expect(preview.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain(`Pagamento: ${expectedPaymentMethod}`);
+
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
+
+    const replay = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(replay.json()).toMatchObject({ ok: true, executed: false });
+
+    const entries = await app.inject({
+      method: "GET",
+      url: "/financial/entries?unitId=unit-01&start=2026-01-01T00:00:00.000Z&end=2026-12-31T23:59:59.999Z",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(entries.statusCode).toBe(200);
+    expect(entries.json().entries).toContainEqual(expect.objectContaining({
+      source: "PRODUCT",
+      amount: 59,
+      paymentMethod: expectedPaymentMethod,
+    }));
+    expect(store.productSales).toHaveLength(1);
+    expect(store.financialEntries).toHaveLength(1);
+    expect(store.financialEntries[0]?.paymentMethod).toBe(expectedPaymentMethod);
+    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(14);
+    expect(store.stockMovements).toHaveLength(1);
+    expect(store.stockAlerts).toHaveLength(0);
   });
 
   it("B: gera previa direta para dois Gel no Pix sem cliente", async () => {
@@ -677,7 +722,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
     expect(sale.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
     const texts = sentWhatsAppTexts(fetchMock);
-    expect(texts.filter((text) => text.startsWith("Entendi o seguinte:") && text.includes("Produto:"))).toHaveLength(1);
+    expect(texts.filter((text) => text.startsWith("Venda de produto") && text.includes("Produto:"))).toHaveLength(1);
     expect(texts.at(-1)).toContain("Cliente: nao vinculado");
     expect(texts.at(-1)).not.toContain("João Vittor");
   });
@@ -691,7 +736,76 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
-    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Qual produto?"]);
+    expect(sentWhatsAppTexts(fetchMock)).toEqual(["Entendi a operação, mas não encontrei esse produto no catálogo. Qual é o produto cadastrado?"]);
+  });
+
+  it.each([
+    ["pix", "Pix"],
+    ["dinheiro", "Dinheiro"],
+  ])("completa somente o pagamento %s sem perder a venda pendente", async (reply, expectedPayment) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    store.businessPaymentMethods.forEach((method) => { method.isDefault = false; });
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const product = store.products.find((item) => item.id === "prd-pomada")!;
+    const stockBefore = product.stockQty;
+    const salesBefore = store.productSales.length;
+    const financialBefore = store.financialEntries.length;
+    const alertsBefore = store.stockAlerts.length;
+
+    const question = await postWebhook(app, evolutionPayload("Vendi 11 pomadas Matte por 649."));
+    expect(question.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Qual é a forma de pagamento?");
+
+    const completed = await postWebhook(app, evolutionPayload(reply));
+    expect(completed.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
+    const preview = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
+    expect(preview).toContain("Produto: Pomada Matte");
+    expect(preview).toContain("Quantidade: 11");
+    expect(preview).toContain("Valor unitário: R$ 59,00");
+    expect(preview).toContain("Valor total: R$ 649,00");
+    expect(preview).toContain(`Pagamento: ${expectedPayment}`);
+    expect(preview).toContain("Estoque atual: 15");
+    expect(preview).toContain("Estoque após a venda: 4");
+    expect(preview).toContain("CONFIRMAR");
+    expect(preview).toContain("CANCELAR");
+    expect(product.stockQty).toBe(stockBefore);
+    expect(store.productSales).toHaveLength(salesBefore);
+    expect(store.financialEntries).toHaveLength(financialBefore);
+    expect(store.stockAlerts).toHaveLength(alertsBefore);
+  });
+
+  it("pix sem contexto pendente não cria venda", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    const response = await postWebhook(app, evolutionPayload("pix"));
+
+    expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
+    expect(store.productSales).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+  });
+
+  it("CANCELAR remove a venda em esclarecimento sem criar prévia ou mutação", async () => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    store.businessPaymentMethods.forEach((method) => { method.isDefault = false; });
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+
+    await postWebhook(app, evolutionPayload("Vendi 11 pomadas Matte por 649."));
+    const cancellation = await postWebhook(app, evolutionPayload("CANCELAR"));
+    const isolatedReply = await postWebhook(app, evolutionPayload("pix"));
+
+    expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
+    expect(isolatedReply.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
+    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(15);
+    expect(store.productSales).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.stockAlerts).toHaveLength(0);
   });
 
   it("deduplica tres entregas concorrentes do mesmo eventId e envia uma unica previa", async () => {
@@ -849,7 +963,10 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("produto");
-    await expect(countCommercialState(app, token)).resolves.toEqual(before);
+    await expect(countCommercialState(app, token)).resolves.toEqual({
+      ...before,
+      parsedAudits: before.parsedAudits + 1,
+    });
   });
 
   it("nao aceita data e horario inventados pela interpretacao semantica", async () => {
@@ -869,7 +986,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
     expect(response.json()).toMatchObject({ ok: true, intent: "schedule_appointment", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Qual dia e horario voce deseja?");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Informe somente: dia, horario, cliente.");
     await expect(countCommercialState(app, token)).resolves.toEqual(before);
   });
 
@@ -1342,7 +1459,7 @@ describe("Atendente IA WhatsApp-first", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
-      expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Nao consegui");
+      expect(sentWhatsAppTexts(fetchMock).at(-1)).toMatch(/N[aã]o consegui/);
       await expect(countCommercialState(app, token)).resolves.toEqual(before);
       vi.unstubAllGlobals();
     }
@@ -1369,7 +1486,7 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it("comando desconhecido recebe orientacao segura sem exemplos e auditoria sem numero completo", async () => {
-    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    const fetchMock = mockGeminiIntentAndWhatsapp("unknown", {});
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
     const token = await loginOwner(app);
@@ -1377,7 +1494,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const response = await postWebhook(app, evolutionPayload("asdf teste qualquer"));
 
     expect(response.statusCode).toBe(200);
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Nao consegui entender com seguranca. Envie novamente ou escreva a mensagem em texto.");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Essa operação ainda não está disponível. Posso ajudar com vendas de produtos, entradas de estoque, agendamentos e correções de prévias.");
     expect(sentWhatsAppTexts(fetchMock).at(-1)).not.toMatch(/Vendi uma pomada|Agendar corte para Joao/);
     const events = await auditEvents(app, token);
     const serialized = JSON.stringify(events.filter((event) => event.action === "AI_WHATSAPP_AI_FAILURE"));
@@ -1559,8 +1676,8 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it.each([
-    ["O produto é Gel", ["Produto: Gel", "Quantidade: 1", "Pagamento: Pix", "Valor: R$ 25,00"]],
-    ["São duas pomadas, não uma", ["Produto: Pomada Matte", "Quantidade: 2", "Valor: R$ 118,00"]],
+    ["O produto é Gel", ["Produto: Gel", "Quantidade: 1", "Pagamento: Pix", "Valor total: R$ 25,00"]],
+    ["São duas pomadas, não uma", ["Produto: Pomada Matte", "Quantidade: 2", "Valor total: R$ 118,00"]],
     ["O pagamento é Dinheiro", ["Produto: Pomada Matte", "Quantidade: 1", "Pagamento: Dinheiro"]],
     ["Vincula ao cliente Carlos Silva", ["Cliente: Carlos Silva", "Produto: Pomada Matte"]],
   ])("corrige venda e recalcula sem mutacao: %s", async (correction, expectedLines) => {

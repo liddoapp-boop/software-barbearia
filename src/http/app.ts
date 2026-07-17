@@ -1295,7 +1295,6 @@ export function createApp(options: {
     if (!Number.isInteger(draft.quantity) || Number(draft.quantity) < 1 || Number(draft.quantity) > 99) {
       missingFields.push("quantity");
     }
-    if (!draft.paymentMethod) missingFields.push("paymentMethod");
     if (draft.quotedUnitPrice !== undefined && (!Number.isFinite(draft.quotedUnitPrice) || draft.quotedUnitPrice < 0)) {
       missingFields.push("quotedUnitPrice");
     }
@@ -1641,12 +1640,12 @@ export function createApp(options: {
       backend === "prisma"
         ? prisma.paymentMethod.findMany({
             where: { unitId: input.unitId, isActive: true },
-            select: { name: true },
+            select: { name: true, isDefault: true },
           })
         : Promise.resolve(
             memoryStore.businessPaymentMethods
               .filter((item) => item.unitId === input.unitId && item.isActive)
-              .map((item) => ({ name: item.name })),
+              .map((item) => ({ name: item.name, isDefault: item.isDefault })),
           ),
     ]);
     const clients = catalog.clients as unknown as Array<Record<string, unknown>>;
@@ -1691,10 +1690,19 @@ export function createApp(options: {
       warnings.push("Quantidade invalida para venda de produto.");
     }
 
-    const whatsappPayment = input.strictWhatsappEntities
+    const requestedPaymentMethod = String(input.draft.paymentMethod ?? "").trim();
+    const whatsappPayment = input.strictWhatsappEntities && requestedPaymentMethod
       ? resolveWhatsappEntity({ entity: "payment", rows: paymentMethods, getName: (item) => item.name, name: input.draft.paymentMethod })
       : null;
-    const paymentMethod = input.strictWhatsappEntities ? whatsappPayment?.match ?? null : findUniqueByName(paymentMethods, (item) => item.name, input.draft.paymentMethod);
+    const defaultPaymentMethods = paymentMethods.filter((item) => item.isDefault);
+    const deterministicDefaultPayment = !requestedPaymentMethod
+      ? defaultPaymentMethods.length === 1
+        ? defaultPaymentMethods[0]
+        : paymentMethods.length === 1 ? paymentMethods[0] : null
+      : null;
+    const paymentMethod = deterministicDefaultPayment ?? (input.strictWhatsappEntities
+      ? whatsappPayment?.match ?? null
+      : findUniqueByName(paymentMethods, (item) => item.name, requestedPaymentMethod));
     if (!paymentMethod || (whatsappPayment && !isAiWhatsappResolvedEntityStatus(whatsappPayment.status))) {
       missingFields.push("paymentMethod");
       warnings.push("Metodo de pagamento nao encontrado, ambiguo ou sem alias autorizado.");
@@ -1726,7 +1734,7 @@ export function createApp(options: {
         ? [
             ...(hasRequestedClient ? [getWhatsappClientResolutionDiagnostic(whatsappClient)] : []),
             getWhatsappEntityResolutionDiagnostic("product", whatsappProduct),
-            getWhatsappEntityResolutionDiagnostic("payment", whatsappPayment),
+            ...(requestedPaymentMethod ? [getWhatsappEntityResolutionDiagnostic("payment", whatsappPayment)] : []),
           ]
         : [],
       sale: product && paymentMethod && quantity > 0 && stockQty >= quantity
@@ -1780,6 +1788,8 @@ export function createApp(options: {
       providerAttempts?: ProviderAttemptDiagnostic[];
       model?: string;
       fallbackUsed?: boolean;
+      source: "text" | "audio";
+      interpreterVersion: "commercial-understanding-v1";
     };
     entityResolutionDiagnostics?: Array<{ entity: string; result: string; candidateCount: number; sourceStatus?: string }>;
   };
@@ -1811,11 +1821,11 @@ export function createApp(options: {
   type AiWhatsappClarificationContext = {
     unitId: string;
     phone: string;
-    intent: "schedule_appointment";
+    intent: "schedule_appointment" | "sell_product";
     draft: Record<string, unknown>;
     missingFields: string[];
     fieldDiagnostics?: OwnerCommandParseResult["fieldDiagnostics"];
-    pendingField?: "clientName" | "serviceNames" | "professionalName" | "date" | "time";
+    pendingField?: "clientName" | "serviceNames" | "professionalName" | "date" | "time" | "paymentMethod";
     proposedValue?: string;
     originCorrelationId: string;
     commandContext: AiWhatsappCommandContext;
@@ -2482,14 +2492,22 @@ export function createApp(options: {
     if (preview.intent === "sell_product") {
       const sale = preview.sale ?? {};
       const draft = preview.draft as Record<string, unknown>;
-      const clientName = String(sale.clientName ?? draft.clientName ?? "").trim();
-      lines.push(
-        `Cliente: ${clientName || "nao vinculado"}`,
+      lines.splice(0, lines.length,
+        "Venda de produto",
+        "",
         `Produto: ${String(sale.productName ?? draft.productName ?? "-")}`,
         `Quantidade: ${String(sale.quantity ?? draft.quantity ?? "-")}`,
+        `Cliente: ${String(sale.clientName ?? draft.clientName ?? "").trim() || "nao vinculado"}`,
         `Pagamento: ${String(sale.paymentMethod ?? draft.paymentMethod ?? "-")}`,
-        `Valor: ${formatCurrencyBR(sale.total)}`,
+        `Valor unitário: ${formatCurrencyBR(sale.unitPrice ?? draft.unitPrice)}`,
+        `Valor total: ${formatCurrencyBR(sale.total ?? draft.totalPrice)}`,
       );
+      if (Number.isFinite(Number(sale.stockQty))) {
+        lines.push(
+          `Estoque atual: ${String(sale.stockQty)}`,
+          `Estoque após a venda: ${String(Number(sale.stockQty) - Number(sale.quantity ?? draft.quantity ?? 0))}`,
+        );
+      }
     } else if (preview.intent === "schedule_appointment") {
       const draft = preview.draft as Record<string, unknown>;
       lines.push(
@@ -2509,11 +2527,19 @@ export function createApp(options: {
   }
 
   function formatAiWhatsappGuidance() {
-    return "Nao consegui entender com seguranca. Envie novamente ou escreva a mensagem em texto.";
+    return "Não recebi informações suficientes para identificar uma operação. Envie o produto, a quantidade e os demais dados necessários.";
   }
 
   function formatAiWhatsappAudioParserFailure() {
-    return "O áudio foi transcrito, mas não consegui identificar o pedido com segurança. Envie novamente ou escreva a mensagem em texto.";
+    return "Não consegui interpretar esse pedido por um erro interno. Nenhuma operação foi executada. Tente novamente em instantes.";
+  }
+
+  function formatAiWhatsappTranscriptionFailure() {
+    return "Não consegui ouvir o áudio com clareza. Grave novamente em um local mais silencioso ou envie a mensagem por texto.";
+  }
+
+  function formatAiWhatsappUnsupportedOperation() {
+    return "Essa operação ainda não está disponível. Posso ajudar com vendas de produtos, entradas de estoque, agendamentos e correções de prévias.";
   }
 
   function formatAiWhatsappTemporaryFailure() {
@@ -2523,7 +2549,7 @@ export function createApp(options: {
   function formatAiWhatsappAudioFailure(kind: "processing" | "transcription") {
     return kind === "processing"
       ? "Recebi um audio, mas nao consegui processar. Tente enviar novamente ou mande em texto."
-      : formatAiWhatsappAudioParserFailure();
+      : formatAiWhatsappTranscriptionFailure();
   }
 
   function formatAiWhatsappAudioProviderFailure() {
@@ -2545,6 +2571,25 @@ export function createApp(options: {
 
   function formatAiWhatsappEntityClarification(preview: OwnerCommandPreviewResponse) {
     const missing = new Set(preview.missingFields ?? []);
+    if (preview.clarificationCode === "PRODUCT_SALE_AMBIGUOUS_VALUE_ROLE") {
+      const quantity = String(preview.draft.quantity ?? "-");
+      const product = String(preview.draft.productName ?? "produto");
+      const value = preview.draft.quotedUnitPrice ?? preview.draft.totalPrice;
+      return `Entendi que é uma venda de ${quantity} unidades de ${product}. Os ${formatCurrencyBR(value)} correspondem ao valor total ou ao valor de cada unidade?`;
+    }
+    if (preview.clarificationCode === "PRODUCT_ENTITY_AMBIGUOUS") {
+      return "Encontrei mais de um produto parecido. Qual produto você quis dizer?";
+    }
+    if (preview.clarificationCode === "PRODUCT_ENTITY_NOT_FOUND") {
+      return "Entendi a operação, mas não encontrei esse produto no catálogo. Qual é o produto cadastrado?";
+    }
+    if (preview.clarificationCode === "PRODUCT_SALE_MISSING_QUANTITY") {
+      const product = String(preview.draft.productName ?? "esse produto");
+      return `Entendi que você quer registrar uma venda de ${product}. Quantas unidades foram vendidas?`;
+    }
+    if (preview.clarificationCode === "PRODUCT_SALE_VALUE_INCONSISTENT") {
+      return "A quantidade e o valor informado não correspondem ao preço cadastrado. O valor é total ou por unidade?";
+    }
     if (preview.intent === "schedule_appointment") {
       const pendingField = selectAiWhatsappScheduleClarificationField(preview.missingFields);
       if (pendingField === "clientName") return "Para qual cliente?";
@@ -2830,6 +2875,17 @@ export function createApp(options: {
           }
         }
       }
+    } else if (pendingField === "paymentMethod") {
+      const ownerContext = await getOwnerCommandContext({ unitId: input.unitId, screenContext: "whatsapp" });
+      const resolution = resolveWhatsappEntity({
+        entity: "payment",
+        rows: ownerContext.paymentMethods,
+        getName: (item) => item.name,
+        name: rawValue,
+      });
+      if (isAiWhatsappResolvedEntityStatus(resolution.status)) {
+        resolvedValue = String((resolution.match as Record<string, unknown>)?.name ?? rawValue).trim();
+      }
     }
 
     if (pendingField && resolvedValue) {
@@ -2850,11 +2906,11 @@ export function createApp(options: {
       parsed: {
         ok: true,
         mode: "preview_only",
-        intent: "schedule_appointment",
+        intent: context.intent,
         confidence: acceptedConfidences.length ? Math.min(...acceptedConfidences) : 0.8,
         summary: remainingMissingFields.length
-          ? "Previa de agendamento incompleta. Revise os campos faltantes ou ambiguos."
-          : "Previa de agendamento completada pelo contexto da conversa.",
+          ? "Previa incompleta. Revise os campos faltantes ou ambiguos."
+          : "Previa completada pelo contexto da conversa.",
         draft,
         missingFields: remainingMissingFields,
         warnings: remainingMissingFields.length ? ["Comando incompleto para criar agendamento."] : [],
@@ -2976,7 +3032,7 @@ export function createApp(options: {
       const normalized = normalizeOwnerScheduleDraft(parsed.draft);
       const allowNewClient = input.screenContext !== "whatsapp" || isTrustedNewClientDraft(parsed);
       const resolved = normalized.missingFields.length
-        ? input.screenContext === "whatsapp" && input.disableSemanticProvider
+        ? input.screenContext === "whatsapp"
           ? await resolveIncompleteWhatsappScheduleClient({
               unitId: input.unitId,
               draft: normalized.draft,
@@ -3048,6 +3104,7 @@ export function createApp(options: {
     priorClarificationContext?: AiWhatsappClarificationContext;
     disableSemanticProvider?: boolean;
     channelContext?: AiWhatsappCommandContext;
+    source?: "text" | "audio";
   }): Promise<OwnerCommandPreviewResponse> {
     if (input.channelContext && (
       input.channelContext.origin !== "whatsapp_webhook"
@@ -3081,10 +3138,12 @@ export function createApp(options: {
     const providerFallbackStrategy = (attempt: { model?: string }) => attempt.model?.startsWith("local_llama:")
       ? "deterministic_after_local_llama_failure" as const
       : "deterministic_after_gemini_failure" as const;
-    const withDiagnostics = (preview: OwnerCommandPreviewResponse, diagnostics: Omit<NonNullable<OwnerCommandPreviewResponse["parserDiagnostics"]>, "presentFields" | "missingFields" | "correlationId">) => ({
+    const withDiagnostics = (preview: OwnerCommandPreviewResponse, diagnostics: Omit<NonNullable<OwnerCommandPreviewResponse["parserDiagnostics"]>, "presentFields" | "missingFields" | "correlationId" | "source" | "interpreterVersion">) => ({
       ...preview,
       parserDiagnostics: {
         ...diagnostics,
+        source: input.source ?? "text",
+        interpreterVersion: "commercial-understanding-v1" as const,
         presentFields: getOwnerCommandPresentFields(preview.draft),
         missingFields: preview.missingFields,
         correlationId: input.correlationId,
@@ -8709,6 +8768,8 @@ export function createApp(options: {
           missingFields: preview.missingFields,
           correlationId,
           fieldDiagnostics: preview.fieldDiagnostics,
+          source: audioAssistance ? "audio" : "text",
+          interpreterVersion: "commercial-understanding-v1",
         };
         if (continuation.accepted) {
           await safeAudit({
@@ -8732,8 +8793,9 @@ export function createApp(options: {
           screenContext: "whatsapp",
           correlationId,
           priorClarificationContext,
-          disableSemanticProvider: audioAssistance?.provider.startsWith("local_whisper:") ?? false,
+          disableSemanticProvider: false,
           channelContext: whatsappContext,
+          source: audioAssistance ? "audio" : "text",
         });
       }
 
@@ -8796,8 +8858,9 @@ export function createApp(options: {
               screenContext: "whatsapp",
               correlationId,
               priorClarificationContext,
-              disableSemanticProvider: true,
+              disableSemanticProvider: false,
               channelContext: whatsappContext,
+              source: "audio",
             });
             const firstCriticalMissing = getAudioCriticalMissingFields(preview).length;
             const secondCriticalMissing = getAudioCriticalMissingFields(secondPreview).length;
@@ -8907,7 +8970,9 @@ export function createApp(options: {
       const responseDelivered = await safeSend(
         temporaryFailure
           ? formatAiWhatsappTemporaryFailure()
-          : audioAssistance ? formatAiWhatsappAudioParserFailure() : formatAiWhatsappGuidance(),
+          : reason === "deterministic_no_match"
+            ? formatAiWhatsappUnsupportedOperation()
+            : formatAiWhatsappAudioParserFailure(),
         temporaryFailure ? "temporary_parser_failure" : "guidance_parser_failure",
       );
       return buildAiWhatsappPreviewOnlyResponse({ unavailable: true, reason, responseDelivered });
@@ -9046,13 +9111,25 @@ export function createApp(options: {
       },
     });
     if (!aiWhatsappAllowedIntents.has(preview.intent) || !preview.confirmationToken || !preview.allowedNextActions.includes("confirm_execute")) {
-      if (preview.intent === "schedule_appointment"
-        && Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "accepted")) {
-        const pendingField = selectAiWhatsappScheduleClarificationField(preview.missingFields);
+      const scheduleClarification = preview.intent === "schedule_appointment"
+        && Object.values(preview.fieldDiagnostics ?? {}).some((field) => field.status === "accepted");
+      const salePaymentClarification = preview.intent === "sell_product"
+        && preview.missingFields.length === 1
+        && preview.missingFields[0] === "paymentMethod"
+        && typeof preview.draft.productName === "string"
+        && preview.draft.productName.trim().length > 0
+        && Number.isInteger(Number(preview.draft.quantity))
+        && Number(preview.draft.quantity) > 0
+        && preview.fieldDiagnostics?.productName?.status === "accepted"
+        && preview.fieldDiagnostics?.quantity?.status === "accepted";
+      if (scheduleClarification || salePaymentClarification) {
+        const pendingField = preview.intent === "sell_product"
+          ? "paymentMethod" as const
+          : selectAiWhatsappScheduleClarificationField(preview.missingFields);
         const clarificationContext: AiWhatsappClarificationContext = {
           unitId,
           phone: message.senderPhone,
-          intent: "schedule_appointment",
+          intent: salePaymentClarification ? "sell_product" : "schedule_appointment",
           draft: { ...preview.draft },
           missingFields: [...preview.missingFields],
           fieldDiagnostics: preview.fieldDiagnostics,
@@ -9120,7 +9197,7 @@ export function createApp(options: {
             : hasGroundingFailure ? "GROUNDING_FAILED" : "MISSING_FIELDS");
       const responseDelivered = await safeSend(
         preview.intent === "unknown"
-          ? audioAssistance ? formatAiWhatsappAudioParserFailure() : formatAiWhatsappGuidance()
+          ? formatAiWhatsappUnsupportedOperation()
           : preview.executionMessage ?? formatAiWhatsappEntityClarification(preview),
         preview.intent === "unknown" ? "guidance_unsupported_intent" : "entity_clarification",
       );

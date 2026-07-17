@@ -34,6 +34,8 @@
     "test:db": "tsx scripts/run-db-tests.ts",
     "test:migration:2290": "tsx scripts/test-migration-2290.ts",
     "test:stability": "tsx scripts/run-local-stability.ts",
+    "semantic:benchmark": "tsx scripts/benchmark-local-semantic.ts",
+    "semantic:doctor": "node scripts/local-semantic-doctor.mjs",
     "smoke:api": "node scripts/smoke-api-flow.mjs",
     "smoke:api:readonly": "node scripts/smoke-api-readonly.mjs",
     "smoke:api:ps": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"

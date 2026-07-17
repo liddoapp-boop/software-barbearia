@@ -202,18 +202,20 @@ const QUANTITY_TOKEN = "(?:\\d{1,6}|um|uma|dois|duas|tres|quatro|cinco|seis|sete
 
 export function looksLikeStockEntryCommand(message: string) {
   const text = normalizedWords(message);
-  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|entrada|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text);
+  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|entrada|entraram|entrou|chegaram|chegou|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text);
   const hasStockCue = /\bestoque\b/.test(text);
   const hasAmbiguousPlacementVerb = /\b(?:coloca|coloco|colocar|coloque)\b/.test(text);
   const hasSaleCue = /\b(?:vendi|venda|cliente|pagamento)\b/.test(text);
   if (hasAmbiguousPlacementVerb && !hasStockCue) return false;
-  return hasEntryVerb && (!hasSaleCue || hasStockCue || /\b(?:comprei|compramos|recebi|recebemos|reposicao)\b/.test(text));
+  return hasEntryVerb && (!hasSaleCue || hasStockCue || /\b(?:comprei|compramos|recebi|recebemos|entraram|entrou|chegaram|chegou|reposicao)\b/.test(text));
 }
 
 function extractProductDescriptor(text: string) {
   const normalized = normalizeText(text);
   const patterns = [
     new RegExp(`\\b(?:comprei|compramos|recebi|recebemos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|inclui|incluir|repor)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
+    new RegExp(`\\b(?:entraram|entrou|chegaram|chegou)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
+    new RegExp(`\\b(?:da|dar|de)\\s+entrada\\s+(?:em|de)?\\s*(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
     new RegExp(`\\bentrada\\s+(?:de\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
   ];
   for (const pattern of patterns) {
