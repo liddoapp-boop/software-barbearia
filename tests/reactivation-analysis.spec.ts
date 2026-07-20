@@ -145,7 +145,14 @@ describe("analise de reativacao 3A", () => {
     const memory = await new ReactivationAnalysisService(new MemoryReactivationAnalysisSource(store))
       .analyze({ unitId: "unit-01", now: NOW });
     const prismaMock = {
-      unit: { findUnique: vi.fn(async () => ({ id: "unit-01", name: store.units[0]!.name })) },
+      unit: { findUnique: vi.fn(async () => ({
+        id: "unit-01",
+        name: store.units[0]!.name,
+        businessSettings: {
+          displayName: store.businessSettings[0]!.displayName ?? null,
+          businessName: store.businessSettings[0]!.businessName,
+        },
+      })) },
       client: { findMany: vi.fn(async () => store.clients.filter((item) => item.businessId === "unit-01").map((item) => ({
         id: item.id,
         businessId: item.businessId!,

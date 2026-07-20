@@ -76,6 +76,18 @@ import {
   formatReactivationAnalysisReport,
   looksLikeReactivationAnalysisCommand,
 } from "../application/reactivation-analysis";
+import {
+  MemoryReactivationCampaignRepository,
+  PrismaReactivationCampaignRepository,
+  REACTIVATION_PUBLIC_BOOKING_URL_ERROR,
+  ReactivationCampaignConfigurationError,
+  ReactivationCampaignService,
+  formatReactivationCampaignPreview,
+  formatReactivationCampaignSummary,
+  isUnambiguousWhatsappOptOut,
+  looksLikeReactivationCampaignCommand,
+  parseStrictReactivationDecision,
+} from "../application/reactivation-campaign";
 import { InMemoryStore } from "../infrastructure/in-memory-store";
 import { AppointmentStatus, Client, ReportExportType } from "../domain/types";
 import { prisma } from "../infrastructure/database/prisma";
@@ -921,6 +933,9 @@ export function createApp(options: {
   stockAlertSend?: (phone: string, text: string) => Promise<void>;
   stockAlertNow?: () => Date;
   reactivationMessageProvider?: ReactivationMessageVariantProvider | null;
+  reactivationSend?: (phone: string, text: string) => Promise<void>;
+  reactivationNow?: () => Date;
+  reactivationPublicBookingUrl?: string;
 } = {}) {
   const backend = getDataBackend();
   const authEnforced = isAuthEnforced();
@@ -989,6 +1004,17 @@ export function createApp(options: {
       cooldownDays: envPositiveInteger("REACTIVATION_COOLDOWN_DAYS", 30),
     },
   );
+  const reactivationCampaigns = new ReactivationCampaignService({
+    analysis: reactivationAnalysis,
+    repository: backend === "prisma"
+      ? new PrismaReactivationCampaignRepository(prisma)
+      : new MemoryReactivationCampaignRepository(memoryStore),
+    send: options.reactivationSend ?? sendWhatsAppMessage,
+    now: options.reactivationNow,
+    maxRecipients: 20,
+    claimTimeoutMs: envPositiveInteger("REACTIVATION_RECIPIENT_CLAIM_TIMEOUT_MS", 300_000),
+    publicBookingUrl: options.reactivationPublicBookingUrl ?? process.env.PUBLIC_BOOKING_URL,
+  });
   const stockAlertDispatcher = new StockAlertDispatcher({
     store: backend === "prisma"
       ? new PrismaStockAlertStore(prisma)
@@ -3145,6 +3171,35 @@ export function createApp(options: {
       throw new Error("Contexto confiavel do webhook invalido.");
     }
     await assertOwnerCommandUnitExists(input.unitId);
+    if (looksLikeReactivationCampaignCommand(input.message)) {
+      const campaign = await reactivationCampaigns.createDraft({
+        unitId: input.unitId,
+        ownerId: input.actorId ?? "owner",
+      });
+      return {
+        ok: true,
+        mode: "preview_only",
+        intent: "reactivation_analysis",
+        confidence: 1,
+        summary: "Prévia persistida da campanha manual de reativação.",
+        draft: { campaign },
+        missingFields: [],
+        warnings: ["Nada foi enviado. Confirmação estrita obrigatória."],
+        allowedNextActions: ["confirm_execute", "cancel"],
+        executed: false,
+        executionMessage: formatReactivationCampaignPreview(campaign),
+        parserDiagnostics: {
+          strategy: "deterministic",
+          status: "PARSED_COMPLETE",
+          deterministicDurationMs: 0,
+          presentFields: ["campaign"],
+          missingFields: [],
+          correlationId: input.correlationId,
+          source: input.source ?? "text",
+          interpreterVersion: "commercial-understanding-v1",
+        },
+      };
+    }
     if (looksLikeReactivationAnalysisCommand(input.message)) {
       const analysis = await reactivationAnalysis.analyze({ unitId: input.unitId });
       return {
@@ -7749,6 +7804,9 @@ export function createApp(options: {
       guidance_unsupported_intent: "UNKNOWN_INTENT",
       entity_clarification: "MISSING_FIELDS",
       reactivation_analysis_report: "PREVIEW_SENT",
+      reactivation_campaign_preview: "PREVIEW_SENT",
+      reactivation_campaign_configuration_error: "EXECUTION_FAILED",
+      reactivation_opt_out: "SUCCEEDED",
       audio_preview: "PREVIEW_SENT",
       text_preview: "PREVIEW_SENT",
       unexpected_failure: "EXECUTION_FAILED",
@@ -7812,6 +7870,44 @@ export function createApp(options: {
     if (message.fromMe) {
       app.log.info({ event: "ai.whatsapp.ignored", reason: "from_me", phone: message.maskedPhone });
       return { ok: true, ignored: true };
+    }
+    if (message.text && isUnambiguousWhatsappOptOut(message.text)) {
+      const configuredUnitId = String(process.env.AI_WHATSAPP_UNIT_ID ?? "").trim();
+      if (!configuredUnitId) {
+        app.log.error({ event: "reactivation.opt_out.rejected", reason: "unit_not_configured", phone: message.maskedPhone });
+        return { ok: true, ignored: true };
+      }
+      unitId = configuredUnitId;
+      if (webhookReplayKey) {
+        const claim = await claimAiWhatsappWebhook({
+          unitId,
+          replayKey: webhookReplayKey,
+          payloadHash: getIdempotencyPayloadHash(request.body),
+        });
+        if (claim === "duplicate") {
+          await finalize("DUPLICATE");
+          return { ok: true, replay: true, deduplicated: true, executed: false, responseDelivered: false };
+        }
+      }
+      const result = await reactivationCampaigns.optOut({ unitId, phone: message.senderPhone });
+      await safeAudit({
+        unitId,
+        action: "CLIENT_WHATSAPP_OPT_OUT",
+        entity: "client",
+        entityId: result?.clientId ?? "unmatched",
+        after: {
+          result: result ? "OPTED_OUT" : "NO_MATCH",
+          phone: result?.phoneMasked ?? message.maskedPhone,
+          matchedClients: result?.matchedClients ?? 0,
+          changedClients: result?.changedClients ?? 0,
+          cancelledPending: result?.cancelledPending ?? 0,
+        },
+      });
+      const responseDelivered = await safeSend(
+        "Tudo certo. Você não receberá novas mensagens promocionais desta barbearia.",
+        "reactivation_opt_out",
+      );
+      return { ok: true, optedOut: Boolean(result), responseDelivered };
     }
     if (!ownerPhone || message.senderPhone !== ownerPhone) {
       app.log.warn({ event: "ai.whatsapp.rejected", reason: "unauthorized_phone", phone: message.maskedPhone });
@@ -8199,6 +8295,72 @@ export function createApp(options: {
     };
     const stockEntryCorrectionKey = `${unitId}:${actorId}:${whatsappContext.phoneFingerprint}`;
     const currentStockEntry = await stockEntryPreviews.find(stockEntryScope);
+    const currentReactivationDraft = await reactivationCampaigns.findDraft(unitId, actorId);
+    const strictReactivationDecision = parseStrictReactivationDecision(normalizedText);
+    const activeGenericPending = getAiWhatsappActivePendingCommands(whatsappContext, message.senderPhone);
+    if (currentReactivationDraft) {
+      if (strictReactivationDecision === "CANCELAR") {
+        const cancelled = await reactivationCampaigns.cancel({ unitId, ownerId: actorId });
+        await safeAudit({
+          unitId,
+          action: "REACTIVATION_CAMPAIGN_CANCELLED",
+          entity: "reactivation_campaign",
+          entityId: currentReactivationDraft.id,
+          after: { cancelled, messagesSent: 0 },
+        });
+        const responseDelivered = await safeSend(
+          cancelled ? "Campanha cancelada. Nenhuma mensagem foi enviada." : "Não há campanha aguardando cancelamento.",
+          "cancellation_result",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({ intent: "reactivation_campaign", cancelled, responseDelivered });
+      }
+      if (strictReactivationDecision === "CONFIRMAR") {
+        const summary = await reactivationCampaigns.confirm({ unitId, ownerId: actorId });
+        if (!summary) {
+          const responseDelivered = await safeSend("Não há campanha aguardando confirmação.", "confirmation_missing");
+          return buildAiWhatsappPreviewOnlyResponse({ intent: "reactivation_campaign", responseDelivered });
+        }
+        await safeAudit({
+          unitId,
+          action: summary.replay ? "REACTIVATION_CAMPAIGN_REPLAYED" : "REACTIVATION_CAMPAIGN_COMPLETED",
+          entity: "reactivation_campaign",
+          entityId: summary.campaignId,
+          after: {
+            status: summary.status,
+            selected: summary.selected,
+            sent: summary.sent,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            uncertain: summary.uncertain,
+            pending: summary.pending,
+            processing: summary.processing,
+            duplicateMessages: 0,
+          },
+        });
+        await finalize(summary.status === "PARTIAL" ? "EXECUTION_FAILED" : "SUCCEEDED");
+        const responseDelivered = await safeSend(formatReactivationCampaignSummary(summary), "confirmation_result");
+        return { ok: true, executed: true, intent: "reactivation_campaign", replay: summary.replay, responseDelivered };
+      }
+      const responseDelivered = await safeSend(
+        "Há uma campanha de reativação aguardando decisão. Responda exatamente CONFIRMAR ou CANCELAR. 'sim', 'ok' e equivalentes não confirmam.",
+        "entity_clarification",
+      );
+      return buildAiWhatsappPreviewOnlyResponse({ intent: "reactivation_campaign", pendingPreserved: true, responseDelivered });
+    }
+    if (strictReactivationDecision === "CONFIRMAR" && !currentStockEntry && activeGenericPending.length === 0) {
+      const summary = await reactivationCampaigns.confirm({ unitId, ownerId: actorId });
+      if (summary) {
+        await safeAudit({
+          unitId,
+          action: "REACTIVATION_CAMPAIGN_REPLAYED",
+          entity: "reactivation_campaign",
+          entityId: summary.campaignId,
+          after: { status: summary.status, duplicateMessages: 0 },
+        });
+        const responseDelivered = await safeSend(formatReactivationCampaignSummary(summary), "confirmation_result");
+        return { ok: true, executed: true, intent: "reactivation_campaign", replay: true, responseDelivered };
+      }
+    }
     const storedStockEntryCorrectionClarification = stockEntryCorrectionClarifications.get(stockEntryCorrectionKey);
     const stockEntryCorrectionClarification = storedStockEntryCorrectionClarification
       && storedStockEntryCorrectionClarification.expiresAt > Date.now()
@@ -8992,6 +9154,31 @@ export function createApp(options: {
         }
       }
     } catch (error) {
+      if (error instanceof ReactivationCampaignConfigurationError) {
+        app.log.warn({
+          event: "reactivation.campaign.rejected",
+          reason: error.reason,
+          phone: message.maskedPhone,
+        });
+        await safeAudit({
+          unitId,
+          action: "REACTIVATION_CAMPAIGN_REJECTED",
+          entity: "reactivation_campaign",
+          entityId: webhookEntityId,
+          after: { reason: error.reason, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(
+          REACTIVATION_PUBLIC_BOOKING_URL_ERROR,
+          "reactivation_campaign_configuration_error",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "reactivation_campaign",
+          unavailable: true,
+          reason: "reactivation_public_booking_url_invalid",
+          error: REACTIVATION_PUBLIC_BOOKING_URL_ERROR,
+          responseDelivered,
+        });
+      }
       const reason = error instanceof OwnerCommandParserError ? error.reason : "parser_error";
       const providerAttempts = error instanceof OwnerCommandParserError ? error.attempts : [];
       const temporaryFailure = ["gemini_429", "gemini_5xx", "gemini_timeout", "gemini_circuit_open", "gemini_network_error", "local_llama_timeout", "local_llama_unavailable", "local_llama_http_error"].includes(reason);
@@ -9158,6 +9345,25 @@ export function createApp(options: {
         missingFields: preview.missingFields,
       },
     });
+    if (asRecord(preview.draft)?.campaign) {
+      aiWhatsappClarificationContexts.delete(clarificationKey);
+      await safeAudit({
+        unitId,
+        action: "REACTIVATION_CAMPAIGN_DRAFTED",
+        entity: "reactivation_campaign",
+        entityId: String(asRecord(preview.draft.campaign)?.campaignId ?? message.maskedPhone),
+        after: { result: "DRAFT", messagesSent: 0, audio: Boolean(audioTranscript) },
+      });
+      const responseDelivered = await safeSend(
+        preview.executionMessage ?? preview.summary,
+        "reactivation_campaign_preview",
+      );
+      return buildAiWhatsappPreviewOnlyResponse({
+        intent: preview.intent,
+        audio: Boolean(audioTranscript),
+        responseDelivered,
+      });
+    }
     if (preview.intent === "reactivation_analysis") {
       aiWhatsappClarificationContexts.delete(clarificationKey);
       await safeAudit({
@@ -9343,7 +9549,32 @@ export function createApp(options: {
       audioTranscript ? "audio_preview" : "text_preview",
     );
     return buildAiWhatsappPreviewOnlyResponse({ intent: preview.intent, audio: Boolean(audioTranscript), responseDelivered });
-    } catch {
+    } catch (error) {
+      if (error instanceof ReactivationCampaignConfigurationError) {
+        app.log.warn({
+          event: "reactivation.campaign.rejected",
+          reason: error.reason,
+          phone: message.maskedPhone,
+        });
+        await safeAudit({
+          unitId,
+          action: "REACTIVATION_CAMPAIGN_REJECTED",
+          entity: "reactivation_campaign",
+          entityId: webhookEntityId,
+          after: { reason: error.reason, phone: message.maskedPhone },
+        });
+        const responseDelivered = await safeSend(
+          REACTIVATION_PUBLIC_BOOKING_URL_ERROR,
+          "reactivation_campaign_configuration_error",
+        );
+        return buildAiWhatsappPreviewOnlyResponse({
+          intent: "reactivation_campaign",
+          unavailable: true,
+          reason: "reactivation_public_booking_url_invalid",
+          error: REACTIVATION_PUBLIC_BOOKING_URL_ERROR,
+          responseDelivered,
+        });
+      }
       app.log.error({ event: "ai.whatsapp.unexpected_failure", phone: message.maskedPhone });
       await safeAudit({
         unitId,

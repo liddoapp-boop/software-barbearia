@@ -41,6 +41,11 @@ import {
   UUID,
 } from "../domain/types";
 import type { StockAlertRecord } from "../application/stock-alerts";
+import type {
+  ReactivationCampaignRecord,
+  ReactivationRecipientAuditRecord,
+  ReactivationRecipientRecord,
+} from "../application/reactivation-campaign";
 import { buildServiceSetKey } from "../domain/appointment-services";
 
 export class InMemoryStore {
@@ -243,6 +248,9 @@ export class InMemoryStore {
   refunds: Refund[] = [];
   stockMovements: StockMovement[] = [];
   stockAlerts: StockAlertRecord[] = [];
+  reactivationCampaigns: ReactivationCampaignRecord[] = [];
+  reactivationRecipients: ReactivationRecipientRecord[] = [];
+  reactivationRecipientAudits: ReactivationRecipientAuditRecord[] = [];
   stockAlertCycleStates = new Map<string, { cycle: number; active: boolean }>();
   aiWhatsappStockEntryPreviews = new Map<string, unknown>();
   inventoryCounts: StockInventoryCount[] = [];

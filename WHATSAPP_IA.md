@@ -29,6 +29,56 @@ Variáveis da integração:
 
 Valores reais, QR Codes, sessões, chaves e números completos são sensíveis e não devem entrar no Git ou nos logs de evidência.
 
+## Saída fail-closed no ambiente isolado
+
+`npm run dev:isolated` bloqueia toda mensagem de saída antes da chamada ao Evolution por padrão. A política fica na fronteira compartilhada `sendWhatsAppMessage`, portanto vale para campanhas, respostas do owner, opt-out, agendamentos e qualquer outro fluxo que use o envio comum.
+
+Variáveis exclusivas de `SERVER_MODE=isolated`:
+
+- `ISOLATED_WHATSAPP_OUTBOUND_MODE=disabled`: padrão quando ausente; bloqueia todos os destinatários.
+- `ISOLATED_WHATSAPP_OUTBOUND_MODE=allowlist`: permite somente destinatários presentes na lista explícita.
+- `ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST`: um ou mais números controlados, separados por vírgula, ponto e vírgula ou nova linha. Os números são normalizados com o mesmo contrato do payload enviado ao Evolution.
+
+O launcher recusa modo inválido e recusa `allowlist` ausente, vazia ou com entrada inválida. As variáveis são lidas do ambiente explícito que inicia `dev:isolated`, não de `.env.pilot.local`. Fora do modo isolado elas são ignoradas e o comportamento operacional existente é preservado.
+
+Inicialização segura padrão no PowerShell:
+
+```powershell
+Remove-Item Env:ISOLATED_WHATSAPP_OUTBOUND_MODE -ErrorAction SilentlyContinue
+Remove-Item Env:ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST -ErrorAction SilentlyContinue
+npm run dev:isolated
+```
+
+Habilitação explícita de um canário controlado:
+
+```powershell
+$env:ISOLATED_WHATSAPP_OUTBOUND_MODE='allowlist'
+$env:ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST='<numero-controlado-com-ddi>'
+npm run dev:isolated
+```
+
+Um bloqueio não chama `fetch` nem o Evolution, retorna erro determinístico e registra `whatsapp.outbound.blocked` apenas com o telefone mascarado.
+
+## Entrega recuperável da campanha de reativação
+
+O texto da campanha usa `PUBLIC_BOOKING_URL` como link oficial. A criação do rascunho falha de forma fechada se a URL estiver ausente ou não usar HTTPS, se apontar para host local/interno, se contiver credenciais, se não usar a rota pública `/agendamento` ou se o `unitId` não corresponder à unidade da campanha. O nome exibido usa `displayName`, depois `businessName` e por fim o nome da unidade. A prévia persiste exatamente o mesmo texto enviado e todas as mensagens incluem a instrução `SAIR`.
+
+A rota pública `/agendamento` já existe na aplicação. O valor real de `PUBLIC_BOOKING_URL` não fica versionado: ele será configurado na VPS com HTTPS e com o `unitId` da unidade correta. O canário final, já com o texto e o link definitivos, deve ser executado somente após o deploy e a validação dessa configuração na VPS.
+
+O fechamento técnico está dividido no mesmo escopo: a Etapa 3B entrega campanha, prévia estrita, confirmação e opt-out; a 3B.1 adiciona o guard isolado e a allowlist controlada; a 3B.2 cobre persistência recuperável, auditoria, idempotência e concorrência.
+
+Cada destinatário da campanha recebe um `attemptId` interno e estável antes do claim. O envio persiste separadamente o claim e o instante em que a chamada ao provedor começou. Claims antigos sem início de chamada podem voltar para `PENDING`; claims antigos com chamada iniciada tornam-se `UNCERTAIN`, exigem reconciliação manual e nunca são reenviados automaticamente.
+
+Na Evolution API `2.3.7` fixada por digest neste repositório, o DTO e o JSON Schema oficiais de `sendText` não expõem chave de idempotência. Por isso o backend não inventa header ou campo para transportar o `attemptId`; timeouts e falhas ambíguas depois do início da chamada são tratados de forma conservadora como entrega incerta.
+
+`REACTIVATION_RECIPIENT_CLAIM_TIMEOUT_MS` controla quando um claim em processamento pode ser recuperado; o padrão é 300000 ms.
+
+Existe somente uma campanha aberta (`DRAFT` ou `SENDING`) por owner e unidade. A criação é serializada por unidade no PostgreSQL; um `DRAFT` pode ser substituído, mas `SENDING` nunca é cancelado ou substituído automaticamente. Cada destinatário mantém ainda uma reserva única `openClientKey`, impedindo o mesmo cliente de participar de duas campanhas abertas do mesmo tenant. A reserva é liberada somente quando a campanha termina ou é cancelada.
+
+O opt-out compara o telefone pelo mesmo contrato normalizado do envio. Uma frase exata aceita marca todos os cadastros daquele telefone no tenant, ignora cadastros de outros tenants e retira de campanhas abertas os destinatários cuja chamada ao provedor ainda não começou. A análise também herda o opt-out entre cadastros duplicados do mesmo tenant, mesmo quando somente um deles já estava marcado.
+
+Cada transição por destinatário persiste auditoria sanitizada com tenant, `campaignId`, `recipientId`, `attemptId`, estado e motivo seguro. São cobertos claim, início do provedor, sucesso, falha, `UNCERTAIN`, skip, bloqueio do guard, recuperação de claim e opt-out. Telefone completo, mensagem, token e credencial não entram nessa tabela. No PostgreSQL, a mudança principal e sua auditoria usam a mesma transação. Se a auditoria falhar antes da chamada, a transição é revertida e o provedor não é chamado; se falhar depois de uma chamada potencialmente aceita, o registro permanece recuperável como `SENDING` com `providerCallStartedAt` e depois vira `UNCERTAIN`, nunca elegível para reenvio automático.
+
 ## Owner autorizado e identidade LID
 
 Somente o telefone configurado em `AI_WHATSAPP_OWNER_PHONE` pode emitir comandos.

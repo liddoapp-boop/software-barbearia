@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import type { InMemoryStore } from "../infrastructure/in-memory-store";
+import { normalizeWhatsappRecipient } from "../notifications";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_FUTURE_STATUSES = new Set(["SCHEDULED", "CONFIRMED", "IN_SERVICE"]);
@@ -87,6 +88,7 @@ export type ReactivationCandidate = {
 export type ReactivationAnalysisResult = {
   generatedAt: string;
   unitId: string;
+  unitName: string;
   analyzedClients: number;
   eligibleClients: number;
   excluded: Record<ReactivationExclusionReason, number>;
@@ -161,17 +163,36 @@ export function calculateTypicalReturnInterval(input: {
 }
 
 function normalizeWhatsapp(value: string | null) {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  if (digits.length < 10 || digits.length > 13 || /^(\d)\1+$/.test(digits)) return null;
-  return digits;
+  const normalized = normalizeWhatsappRecipient(String(value ?? ""));
+  if (!/^\d{12,13}$/.test(normalized) || /^(\d)\1+$/.test(normalized)) return null;
+  return normalized;
 }
 
 function maskWhatsapp(value: string) {
   return `(**) *****-${value.slice(-4)}`;
 }
 
-function firstName(value: string) {
-  return value.trim().split(/\s+/)[0]?.slice(0, 40) || "cliente";
+export function sanitizeReactivationFirstName(value: string) {
+  const firstToken = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .trim()
+    .split(/\s+/)[0] ?? "";
+  const sanitized = firstToken
+    .replace(/[^\p{L}\p{M}'’-]+/gu, "")
+    .replace(/^['’-]+|['’-]+$/g, "")
+    .slice(0, 40);
+  return sanitized || "cliente";
+}
+
+export function sanitizePublicBarbershopName(value: string) {
+  const sanitized = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return sanitized || "Barbearia";
 }
 
 function chooseVariant(variants: string[], clientId: string) {
@@ -229,7 +250,7 @@ export class ReactivationAnalysisService {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  async analyze(input: { unitId: string; now?: Date }): Promise<ReactivationAnalysisResult> {
+  async analyze(input: { unitId: string; now?: Date; generateMessageVariants?: boolean }): Promise<ReactivationAnalysisResult> {
     const now = input.now ?? new Date();
     const recentContactSince = new Date(now.getTime() - this.config.cooldownDays * DAY_MS);
     const dataset = await this.source.load({ unitId: input.unitId, recentContactSince });
@@ -302,7 +323,7 @@ export class ReactivationAnalysisService {
         : null;
       preliminaries.push({
         clientId: client.id,
-        firstName: firstName(client.fullName),
+        firstName: sanitizeReactivationFirstName(client.fullName),
         phoneMasked: maskWhatsapp(whatsapp),
         segment,
         completedVisits: completed.length,
@@ -318,7 +339,7 @@ export class ReactivationAnalysisService {
 
     const usedSegments = Array.from(new Set(preliminaries.map((item) => item.segment)));
     let generated: Partial<ReactivationMessageVariants> | undefined;
-    if (this.messageProvider && usedSegments.length) {
+    if (input.generateMessageVariants !== false && this.messageProvider && usedSegments.length) {
       try {
         generated = await this.messageProvider.generateVariants({ unitName: dataset.unitName, segments: usedSegments });
       } catch {
@@ -348,6 +369,7 @@ export class ReactivationAnalysisService {
     return {
       generatedAt: now.toISOString(),
       unitId: input.unitId,
+      unitName: dataset.unitName,
       analyzedClients: tenantClients.length,
       eligibleClients: candidates.length,
       excluded: exclusions,
@@ -374,14 +396,23 @@ export class MemoryReactivationAnalysisSource implements ReactivationAnalysisSou
   async load(input: { unitId: string; recentContactSince: Date }): Promise<ReactivationAnalysisDataset> {
     const unit = this.store.units.find((item) => item.id === input.unitId);
     if (!unit) throw new Error("Unidade nao encontrada");
-    const clients = this.store.clients
-      .filter((client) => (client.businessId ?? "unit-01") === input.unitId)
+    const settings = this.store.businessSettings.find((item) => item.unitId === input.unitId);
+    const tenantClients = this.store.clients
+      .filter((client) => (client.businessId ?? "unit-01") === input.unitId);
+    const optedOutPhones = new Set(tenantClients
+      .filter((client) => client.whatsappOptOut)
+      .map((client) => normalizeWhatsapp(client.phone ?? null))
+      .filter((phone): phone is string => Boolean(phone)));
+    const clients = tenantClients
       .map((client) => ({
         id: client.id,
         unitId: client.businessId ?? "unit-01",
         fullName: client.fullName,
         phone: client.phone ?? null,
-        whatsappOptOut: client.whatsappOptOut ?? false,
+        whatsappOptOut: Boolean(
+          client.whatsappOptOut
+          || (normalizeWhatsapp(client.phone ?? null) && optedOutPhones.has(normalizeWhatsapp(client.phone ?? null)!)),
+        ),
         preferredProfessionalId: client.preferredProfessionalId ?? null,
       }));
     const contactMap = new Map<string, Date>();
@@ -400,9 +431,18 @@ export class MemoryReactivationAnalysisSource implements ReactivationAnalysisSou
         setLatest(execution.clientId, execution.finishedAt ?? execution.startedAt);
       }
     }
+    for (const recipient of this.store.reactivationRecipients) {
+      const campaign = this.store.reactivationCampaigns.find((item) => item.id === recipient.campaignId);
+      const contactAt = recipient.status === "SENT"
+        ? recipient.sentAt
+        : recipient.status === "UNCERTAIN" ? recipient.providerCallStartedAt : null;
+      if (campaign?.unitId === input.unitId && contactAt) {
+        setLatest(recipient.clientId, contactAt);
+      }
+    }
     return {
       unitId: input.unitId,
-      unitName: unit.name,
+      unitName: sanitizePublicBarbershopName(settings?.displayName || settings?.businessName || unit.name),
       clients,
       appointments: this.store.appointments
         .filter((item) => item.unitId === input.unitId)
@@ -422,8 +462,11 @@ export class PrismaReactivationAnalysisSource implements ReactivationAnalysisSou
   constructor(private readonly prisma: PrismaClient) {}
 
   async load(input: { unitId: string; recentContactSince: Date }): Promise<ReactivationAnalysisDataset> {
-    const [unit, clients, appointments, services, professionals, events, executions] = await Promise.all([
-      this.prisma.unit.findUnique({ where: { id: input.unitId }, select: { id: true, name: true } }),
+    const [unit, clients, appointments, services, professionals, events, executions, campaignRecipients] = await Promise.all([
+      this.prisma.unit.findUnique({
+        where: { id: input.unitId },
+        select: { id: true, name: true, businessSettings: { select: { displayName: true, businessName: true } } },
+      }),
       this.prisma.client.findMany({
         where: { businessId: input.unitId },
         select: { id: true, businessId: true, fullName: true, phone: true, whatsappOptOut: true, preferredProfessionalId: true },
@@ -443,6 +486,21 @@ export class PrismaReactivationAnalysisSource implements ReactivationAnalysisSou
         where: { unitId: input.unitId, status: "SUCCESS", startedAt: { gte: input.recentContactSince }, clientId: { not: null } },
         select: { clientId: true, campaignType: true, payload: true, startedAt: true, finishedAt: true },
       }),
+      ((this.prisma as any).reactivationCampaignRecipient?.findMany({
+        where: {
+          campaign: { unitId: input.unitId },
+          OR: [
+            { status: "SENT", sentAt: { gte: input.recentContactSince } },
+            { status: "UNCERTAIN", providerCallStartedAt: { gte: input.recentContactSince } },
+          ],
+        },
+        select: { clientId: true, status: true, sentAt: true, providerCallStartedAt: true },
+      }) ?? Promise.resolve([])) as Promise<Array<{
+        clientId: string;
+        status: "SENT" | "UNCERTAIN";
+        sentAt: Date | null;
+        providerCallStartedAt: Date | null;
+      }>>,
     ]);
     if (!unit) throw new Error("Unidade nao encontrada");
     const contactMap = new Map<string, Date>();
@@ -455,15 +513,28 @@ export class PrismaReactivationAnalysisSource implements ReactivationAnalysisSou
     for (const execution of executions) {
       if (isRecentReactivationExecution(execution)) setLatest(execution.clientId, execution.finishedAt ?? execution.startedAt);
     }
+    for (const recipient of campaignRecipients) {
+      const contactAt = recipient.status === "SENT" ? recipient.sentAt : recipient.providerCallStartedAt;
+      if (contactAt) setLatest(recipient.clientId, contactAt);
+    }
+    const optedOutPhones = new Set(clients
+      .filter((client) => client.whatsappOptOut)
+      .map((client) => normalizeWhatsapp(client.phone))
+      .filter((phone): phone is string => Boolean(phone)));
     return {
       unitId: input.unitId,
-      unitName: unit.name,
+      unitName: sanitizePublicBarbershopName(
+        unit.businessSettings?.displayName || unit.businessSettings?.businessName || unit.name,
+      ),
       clients: clients.map((client) => ({
         id: client.id,
         unitId: client.businessId,
         fullName: client.fullName,
         phone: client.phone,
-        whatsappOptOut: client.whatsappOptOut,
+        whatsappOptOut: Boolean(
+          client.whatsappOptOut
+          || (normalizeWhatsapp(client.phone) && optedOutPhones.has(normalizeWhatsapp(client.phone)!)),
+        ),
         preferredProfessionalId: client.preferredProfessionalId,
       })),
       appointments: appointments.map((appointment) => ({ ...appointment, status: String(appointment.status) })),

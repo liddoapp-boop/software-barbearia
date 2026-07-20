@@ -35,6 +35,38 @@ const disabledRemoteAiKeys = [
   "GEMINI_MODEL",
   "SEMANTIC_PROVIDER",
 ];
+export const ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID =
+  "Modo isolado recusado: configuracao de saida WhatsApp invalida.";
+
+function normalizeWhatsappRecipient(phone) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  return digits.startsWith("55") ? digits : `55${digits}`;
+}
+
+function resolveIsolatedWhatsappOutboundEnv(baseEnv) {
+  const configuredMode = String(baseEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE ?? "").trim().toLowerCase();
+  const mode = configuredMode || "disabled";
+  if (mode === "disabled") {
+    return {
+      ISOLATED_WHATSAPP_OUTBOUND_MODE: "disabled",
+      ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "",
+    };
+  }
+  if (mode !== "allowlist") throw new Error(ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID);
+
+  const entries = String(baseEnv.ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST ?? "")
+    .split(/[,;\r\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const normalized = entries.map(normalizeWhatsappRecipient);
+  if (!normalized.length || normalized.some((entry) => !/^\d{12,13}$/.test(entry) || /^(\d)\1+$/.test(entry))) {
+    throw new Error(ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID);
+  }
+  return {
+    ISOLATED_WHATSAPP_OUTBOUND_MODE: "allowlist",
+    ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: [...new Set(normalized)].join(","),
+  };
+}
 
 function pickConfiguredEnv(keys, localEnv, baseEnv) {
   return Object.fromEntries(
@@ -60,11 +92,13 @@ export function isLocalWhisperConfigReady(env) {
 export function buildIsolatedChildEnv(localEnv, baseEnv = process.env, requestedPort = Number(baseEnv.PORT || 3334)) {
   const isolatedIntegrationEnv = pickConfiguredEnv(isolatedIntegrationKeys, localEnv, baseEnv);
   const isolatedLocalWhisperEnv = pickConfiguredEnv(isolatedLocalWhisperKeys, localEnv, baseEnv);
+  const isolatedWhatsappOutboundEnv = resolveIsolatedWhatsappOutboundEnv(baseEnv);
   return {
     ...baseEnv,
     ...Object.fromEntries(disabledRemoteAiKeys.map((key) => [key, ""])),
     ...isolatedIntegrationEnv,
     ...isolatedLocalWhisperEnv,
+    ...isolatedWhatsappOutboundEnv,
     NODE_ENV: "development",
     SERVER_MODE: "isolated",
     ALLOW_NON_PILOT_SERVER: "true",
@@ -104,7 +138,7 @@ export function startIsolatedLocal() {
   const localWhisperReady = isLocalWhisperConfigReady(childEnv);
 
   console.log(
-    `Modo isolado: backend em memoria, host 127.0.0.1, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}.`,
+    `Modo isolado: backend em memoria, host 127.0.0.1, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, saida WhatsApp ${childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}.`,
   );
 
   if (whatsappIntegrationReady && !runEvolutionBootstrapCheck({ env: childEnv })) {

@@ -15,6 +15,12 @@ import {
   PrismaReactivationAnalysisSource,
   ReactivationAnalysisService,
 } from "../src/application/reactivation-analysis";
+import {
+  MemoryReactivationCampaignRepository,
+  PrismaReactivationCampaignRepository,
+  ReactivationCampaignService,
+} from "../src/application/reactivation-campaign";
+import { WhatsappDeliveryError } from "../src/notifications";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -480,6 +486,281 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     });
     expect(persisted.messagesSent).toBe(0);
     expect(await prisma.automationExecution.count({ where: { unitId: scenario.unitId } })).toBe(0);
+  });
+
+  it("persiste campanha de reativacao e impede reenvio no replay de CONFIRMAR", async () => {
+    const scenario = await createScenario();
+    const now = new Date("2026-05-01T00:00:00.000Z");
+    await prisma.client.update({
+      where: { id: scenario.clientId },
+      data: { phone: "551197770001", whatsappOptOut: false },
+    });
+    const startsAt = new Date("2026-01-01T12:00:00.000Z");
+    await prisma.appointment.create({
+      data: {
+        id: uniqueId("reactivation-campaign-db"), unitId: scenario.unitId, clientId: scenario.clientId,
+        professionalId: scenario.professionalId, serviceId: scenario.serviceId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 45 * 60_000), status: "COMPLETED",
+        isFitting: false, totalPriceSnapshot: 75, effectiveDurationMinSnapshot: 45, durationCalculationMode: "SUM",
+      },
+    });
+    const send = vi.fn(async (_phone: string, _text: string) => undefined);
+    const repository = new PrismaReactivationCampaignRepository(prisma);
+    const service = new ReactivationCampaignService({
+      analysis: new ReactivationAnalysisService(new PrismaReactivationAnalysisSource(prisma)),
+      repository,
+      send,
+      now: () => now,
+      publicBookingUrl: (unitId) => `https://agenda.example.com/agendamento?unitId=${unitId}`,
+    });
+
+    const preview = await service.createDraft({ unitId: scenario.unitId, ownerId: "db-owner" });
+    const first = await service.confirm({ unitId: scenario.unitId, ownerId: "db-owner" });
+    const replay = await service.confirm({ unitId: scenario.unitId, ownerId: "db-owner" });
+
+    expect(preview).toMatchObject({ selected: 1, messagesSent: 0 });
+    expect(first).toMatchObject({ sent: 1, replay: false, duplicateMessages: 0, status: "COMPLETED" });
+    expect(replay).toMatchObject({ sent: 1, replay: true, duplicateMessages: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+    const persisted = await prisma.reactivationCampaign.findUniqueOrThrow({ where: { id: preview.campaignId }, include: { recipients: true } });
+    expect(persisted.status).toBe("COMPLETED");
+    expect(persisted.recipients).toHaveLength(1);
+    expect(persisted.recipients[0]).toMatchObject({
+      status: "SENT",
+      attempts: 1,
+      maxAttempts: 1,
+      idempotencyKey: `${preview.campaignId}:${scenario.clientId}`,
+      attemptId: expect.any(String),
+      providerCallStartedAt: now,
+    });
+    const audits = await repository.listAudits(preview.campaignId);
+    expect(audits.map((item) => item.event).sort()).toEqual([
+      "CLAIM_OBTAINED",
+      "PROVIDER_CALL_STARTED",
+      "SEND_CONFIRMED",
+    ].sort());
+    expect(audits.every((item) =>
+      item.unitId === scenario.unitId
+      && item.campaignId === preview.campaignId
+      && item.recipientId === persisted.recipients[0]!.id
+      && item.attemptId === persisted.recipients[0]!.attemptId)).toBe(true);
+    expect(JSON.stringify(audits)).not.toContain("551197770001");
+  });
+
+  it("mantem claim atomico e resultado incerto equivalente entre memoria e Prisma", async () => {
+    const scenario = await createScenario();
+    const now = new Date("2026-05-01T00:00:00.000Z");
+    await prisma.client.update({
+      where: { id: scenario.clientId },
+      data: { phone: "551197770002", whatsappOptOut: false },
+    });
+    const startsAt = new Date("2026-01-01T12:00:00.000Z");
+    await prisma.appointment.create({
+      data: {
+        id: uniqueId("reactivation-uncertain-db"), unitId: scenario.unitId, clientId: scenario.clientId,
+        professionalId: scenario.professionalId, serviceId: scenario.serviceId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 45 * 60_000), status: "COMPLETED",
+        isFitting: false, totalPriceSnapshot: 75, effectiveDurationMinSnapshot: 45, durationCalculationMode: "SUM",
+      },
+    });
+    const prismaRepository = new PrismaReactivationCampaignRepository(prisma);
+    const prismaService = new ReactivationCampaignService({
+      analysis: new ReactivationAnalysisService(new PrismaReactivationAnalysisSource(prisma)),
+      repository: prismaRepository,
+      send: vi.fn(async () => { throw new WhatsappDeliveryError("timeout"); }),
+      now: () => now,
+      publicBookingUrl: (unitId) => `https://agenda.example.com/agendamento?unitId=${unitId}`,
+    });
+    const prismaPreview = await prismaService.createDraft({ unitId: scenario.unitId, ownerId: "db-owner-uncertain" });
+    const prismaRecipient = (await prismaRepository.listRecipients(prismaPreview.campaignId))[0]!;
+    const prismaClaims = await Promise.all([
+      prismaRepository.claimRecipient(prismaRecipient.id, now),
+      prismaRepository.claimRecipient(prismaRecipient.id, now),
+    ]);
+    expect(prismaClaims.filter(Boolean)).toHaveLength(1);
+    await prismaRepository.markRecipientSkipped(prismaRecipient.id, "CLAIM_TEST_RESET", now);
+    await prismaRepository.cancelCampaign(prismaPreview.campaignId, now);
+
+    const secondPreview = await prismaService.createDraft({ unitId: scenario.unitId, ownerId: "db-owner-uncertain-final" });
+    const prismaSummary = await prismaService.confirm({ unitId: scenario.unitId, ownerId: "db-owner-uncertain-final" });
+
+    const memory = new InMemoryStore();
+    memory.clients = [{
+      id: "memory-client-uncertain", businessId: "unit-01", fullName: "Cliente Memoria",
+      phone: "551197770002", whatsappOptOut: false, tags: ["INACTIVE"],
+    }];
+    memory.appointments = [{
+      id: "memory-appointment-uncertain", unitId: "unit-01", clientId: "memory-client-uncertain",
+      professionalId: "pro-01", serviceId: "svc-corte", startsAt,
+      endsAt: new Date(startsAt.getTime() + 45 * 60_000), status: "COMPLETED",
+      isFitting: false, history: [],
+    }];
+    const memoryService = new ReactivationCampaignService({
+      analysis: new ReactivationAnalysisService(new MemoryReactivationAnalysisSource(memory)),
+      repository: new MemoryReactivationCampaignRepository(memory),
+      send: vi.fn(async () => { throw new WhatsappDeliveryError("timeout"); }),
+      now: () => now,
+      publicBookingUrl: (unitId) => `https://agenda.example.com/agendamento?unitId=${unitId}`,
+    });
+    await memoryService.createDraft({ unitId: "unit-01", ownerId: "memory-owner-uncertain" });
+    const memorySummary = await memoryService.confirm({ unitId: "unit-01", ownerId: "memory-owner-uncertain" });
+
+    const comparableSummary = (summary: NonNullable<typeof prismaSummary>) => ({
+      selected: summary.selected,
+      sent: summary.sent,
+      failed: summary.failed,
+      uncertain: summary.uncertain,
+      skipped: summary.skipped,
+      pending: summary.pending,
+      processing: summary.processing,
+      status: summary.status,
+    });
+    expect(comparableSummary(prismaSummary!)).toEqual(comparableSummary(memorySummary!));
+    expect(comparableSummary(prismaSummary!)).toEqual({
+      selected: 1, sent: 0, failed: 0, uncertain: 1, skipped: 0,
+      pending: 0, processing: 0, status: "PARTIAL",
+    });
+    const persisted = await prisma.reactivationCampaignRecipient.findFirstOrThrow({
+      where: { campaignId: secondPreview.campaignId },
+    });
+    expect(persisted).toMatchObject({
+      status: "UNCERTAIN",
+      attempts: 1,
+      attemptId: expect.any(String),
+      providerCallStartedAt: now,
+      sentAt: null,
+    });
+    expect(memory.reactivationRecipients[0]).toMatchObject({
+      status: "UNCERTAIN",
+      attempts: 1,
+      attemptId: expect.any(String),
+      providerCallStartedAt: now,
+      sentAt: null,
+    });
+    const prismaAudits = await prismaRepository.listAudits(secondPreview.campaignId);
+    expect(prismaAudits.map((item) => item.event).sort()).toEqual([
+      "CLAIM_OBTAINED",
+      "PROVIDER_CALL_STARTED",
+      "DELIVERY_UNCERTAIN",
+    ].sort());
+    const comparableAudits = (audits: Array<{ event: string; state: string | null; reason: string }>) =>
+      audits.map(({ event, state, reason }) => ({ event, state, reason }))
+        .sort((left, right) => left.event.localeCompare(right.event));
+    expect(comparableAudits(prismaAudits)).toEqual(comparableAudits(memory.reactivationRecipientAudits));
+  });
+
+  it("serializa criacao e confirmacao e preserva exclusividade real no PostgreSQL", async () => {
+    const scenario = await createScenario();
+    const now = new Date("2026-05-01T00:00:00.000Z");
+    await prisma.client.update({
+      where: { id: scenario.clientId },
+      data: { phone: "551197770003", whatsappOptOut: false },
+    });
+    const startsAt = new Date("2026-01-01T12:00:00.000Z");
+    await prisma.appointment.create({
+      data: {
+        id: uniqueId("reactivation-concurrency-db"), unitId: scenario.unitId, clientId: scenario.clientId,
+        professionalId: scenario.professionalId, serviceId: scenario.serviceId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 45 * 60_000), status: "COMPLETED",
+        isFitting: false, totalPriceSnapshot: 75, effectiveDurationMinSnapshot: 45, durationCalculationMode: "SUM",
+      },
+    });
+    let releaseSend!: () => void;
+    let signalStarted!: () => void;
+    const sendStarted = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const sendBlocked = new Promise<void>((resolve) => { releaseSend = resolve; });
+    const send = vi.fn(async () => {
+      signalStarted();
+      await sendBlocked;
+    });
+    const repository = new PrismaReactivationCampaignRepository(prisma);
+    const service = new ReactivationCampaignService({
+      analysis: new ReactivationAnalysisService(new PrismaReactivationAnalysisSource(prisma)),
+      repository,
+      send,
+      now: () => now,
+      publicBookingUrl: (unitId) => `https://agenda.example.com/agendamento?unitId=${unitId}`,
+    });
+
+    await Promise.all([
+      service.createDraft({ unitId: scenario.unitId, ownerId: "db-owner-concurrent" }),
+      service.createDraft({ unitId: scenario.unitId, ownerId: "db-owner-concurrent" }),
+    ]);
+    const open = await prisma.reactivationCampaign.findMany({
+      where: { unitId: scenario.unitId, ownerId: "db-owner-concurrent", status: { in: ["DRAFT", "SENDING"] } },
+      include: { recipients: true },
+    });
+    expect(open).toHaveLength(1);
+    expect(open[0]!.recipients).toHaveLength(1);
+    await expect(service.createDraft({ unitId: scenario.unitId, ownerId: "db-other-owner" }))
+      .rejects.toMatchObject({ reason: "CLIENT_IN_OPEN_CAMPAIGN" });
+
+    const firstConfirm = service.confirm({ unitId: scenario.unitId, ownerId: "db-owner-concurrent" });
+    await sendStarted;
+    const concurrentConfirm = await service.confirm({ unitId: scenario.unitId, ownerId: "db-owner-concurrent" });
+    await expect(service.createDraft({ unitId: scenario.unitId, ownerId: "db-owner-concurrent" }))
+      .rejects.toMatchObject({ reason: "CAMPAIGN_SENDING" });
+    releaseSend();
+    const completed = await firstConfirm;
+
+    expect(concurrentConfirm).toMatchObject({ status: "SENDING", replay: true, processing: 1 });
+    expect(completed).toMatchObject({ status: "COMPLETED", sent: 1, replay: false });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await prisma.reactivationCampaign.count({
+      where: { unitId: scenario.unitId, ownerId: "db-owner-concurrent", status: { in: ["DRAFT", "SENDING"] } },
+    })).toBe(0);
+  });
+
+  it("propaga opt-out para telefones duplicados somente no tenant e audita sem telefone completo", async () => {
+    const scenario = await createScenario();
+    const otherTenant = await createScenario();
+    const now = new Date("2026-05-01T00:00:00.000Z");
+    const duplicateClientId = uniqueId("reactivation-duplicate-phone");
+    await prisma.client.update({
+      where: { id: scenario.clientId },
+      data: { phone: "551197770004", whatsappOptOut: false },
+    });
+    await prisma.client.create({
+      data: {
+        id: duplicateClientId,
+        businessId: scenario.unitId,
+        fullName: "Cliente duplicado DB",
+        phone: "(11) 9777-0004",
+        whatsappOptOut: false,
+        tags: ["INACTIVE"],
+      },
+    });
+    await prisma.client.update({
+      where: { id: otherTenant.clientId },
+      data: { phone: "551197770004", whatsappOptOut: false },
+    });
+    const repository = new PrismaReactivationCampaignRepository(prisma);
+    const service = new ReactivationCampaignService({
+      analysis: new ReactivationAnalysisService(new PrismaReactivationAnalysisSource(prisma)),
+      repository,
+      send: vi.fn(async () => undefined),
+      now: () => now,
+    });
+
+    const first = await service.optOut({ unitId: scenario.unitId, phone: "+55 11 9777-0004" });
+    const replay = await service.optOut({ unitId: scenario.unitId, phone: "551197770004" });
+    const localClients = await prisma.client.findMany({
+      where: { id: { in: [scenario.clientId, duplicateClientId] } },
+      select: { whatsappOptOut: true },
+    });
+    const outside = await prisma.client.findUniqueOrThrow({
+      where: { id: otherTenant.clientId },
+      select: { whatsappOptOut: true },
+    });
+    const audits = await repository.listAudits();
+    const optOutAudits = audits.filter((item) => item.unitId === scenario.unitId && item.event === "OPT_OUT_RECEIVED");
+
+    expect(first).toMatchObject({ matchedClients: 2, changedClients: 2 });
+    expect(replay).toMatchObject({ matchedClients: 2, changedClients: 0 });
+    expect(localClients.every((client) => client.whatsappOptOut)).toBe(true);
+    expect(outside.whatsappOptOut).toBe(false);
+    expect(optOutAudits).toHaveLength(1);
+    expect(JSON.stringify(optOutAudits)).not.toContain("551197770004");
   });
 
   it("atualiza profissional e reconcilia TeamMember sem duplicacao", async () => {

@@ -114,6 +114,8 @@ describe("server environment guard", () => {
       AI_AUDIO_TRANSCRIPTION_PROVIDER: "gemini",
       AI_AUDIO_TRANSCRIPTION_API_KEY: "paid-key-must-not-be-loaded",
       AI_AUDIO_TRANSCRIPTION_MODEL: "remote-model-must-not-be-loaded",
+      ISOLATED_WHATSAPP_OUTBOUND_MODE: "allowlist",
+      ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "5511999999999",
       DATABASE_URL: "postgresql://hidden:hidden@localhost:5432/barbearia_pilot",
     };
     const childEnv = launcher.buildIsolatedChildEnv(localEnv, {
@@ -134,6 +136,8 @@ describe("server environment guard", () => {
       AI_WHATSAPP_AUDIO_ENABLED: "true",
       AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
       LOCAL_WHISPER_MODEL_PATH: "C:\\local\\ggml-large-v3-turbo-q5_0.bin",
+      ISOLATED_WHATSAPP_OUTBOUND_MODE: "disabled",
+      ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "",
     });
     expect(childEnv.DATABASE_URL).toContain("barbearia_isolated_not_used");
     expect(childEnv.DATABASE_URL).not.toContain("barbearia_pilot");
@@ -142,6 +146,41 @@ describe("server environment guard", () => {
     expect(childEnv.AI_AUDIO_TRANSCRIPTION_MODEL).toBe("");
     expect(childEnv.GEMINI_API_KEY).toBe("");
     expect(childEnv.SEMANTIC_PROVIDER).toBe("");
+  });
+
+  it("habilita allowlist isolada somente pelo ambiente explicito e normaliza os numeros", async () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts", "start-isolated-local.mjs")).href;
+    const launcher = await import(moduleUrl) as {
+      buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
+    };
+    const childEnv = launcher.buildIsolatedChildEnv(
+      {},
+      {
+        ISOLATED_WHATSAPP_OUTBOUND_MODE: "allowlist",
+        ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "+55 (11) 99999-8888, (21) 98888-7777",
+      },
+      3334,
+    );
+
+    expect(childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE).toBe("allowlist");
+    expect(childEnv.ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST).toBe("5511999998888,5521988887777");
+  });
+
+  it.each([
+    ["modo invalido", { ISOLATED_WHATSAPP_OUTBOUND_MODE: "enabled" }],
+    ["allowlist ausente", { ISOLATED_WHATSAPP_OUTBOUND_MODE: "allowlist" }],
+    ["allowlist invalida", { ISOLATED_WHATSAPP_OUTBOUND_MODE: "allowlist", ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "sem-numero" }],
+  ])("recusa %s no launcher isolado sem expor a configuracao", async (_label, outboundEnv) => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts", "start-isolated-local.mjs")).href;
+    const launcher = await import(moduleUrl) as {
+      buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
+      ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID: string;
+    };
+
+    expect(() => launcher.buildIsolatedChildEnv({}, outboundEnv, 3334)).toThrow(
+      launcher.ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID,
+    );
+    expect(launcher.ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID).not.toContain("sem-numero");
   });
 
   it("bloqueia a execucao direta antes do listener sem expor a URL", () => {

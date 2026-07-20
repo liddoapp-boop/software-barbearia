@@ -141,6 +141,23 @@ enum StockAlertDeliveryStatus {
   FAILED
 }
 
+enum ReactivationCampaignStatus {
+  DRAFT
+  SENDING
+  COMPLETED
+  PARTIAL
+  CANCELLED
+}
+
+enum ReactivationRecipientStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  UNCERTAIN
+  SKIPPED
+}
+
 model Unit {
   id                        String                     @id
   name                      String
@@ -176,6 +193,7 @@ model Unit {
   monthlyGoals              MonthlyGoal[]
   idempotencyRecords        IdempotencyRecord[]
   auditLogs                 AuditLog[]
+  reactivationRecipientAudits ReactivationRecipientAudit[]
   userAccesses              UserUnitAccess[]
   professionals             Professional[]
   appointmentBlocks         AppointmentBlock[]
@@ -183,6 +201,7 @@ model Unit {
   checkoutPayments          CheckoutPayment[]
   inventoryCounts           StockInventoryCount[]
   dailyClosings             DailyClosing[]
+  reactivationCampaigns     ReactivationCampaign[]
 }
 
 model User {
@@ -401,19 +420,19 @@ model CommissionRule {
 }
 
 model Client {
-  id                      String                   @id
-  businessId              String                   @default("unit-01")
+  id                      String                          @id
+  businessId              String                          @default("unit-01")
   fullName                String
   phone                   String?
-  whatsappOptOut          Boolean                  @default(false)
+  whatsappOptOut          Boolean                         @default(false)
   email                   String?
   birthDate               DateTime?
   notes                   String?
   preferredProfessionalId String?
   tags                    String[]
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  business                Unit                     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
+  business                Unit                            @relation(fields: [businessId], references: [id], onDelete: Restrict)
   appointments            Appointment[]
   productSales            ProductSale[]
   loyaltyLedger           LoyaltyLedger[]
@@ -422,55 +441,56 @@ model Client {
   retentionCases          RetentionCase[]
   automationExecutions    AutomationExecution[]
   retentionScoreSnapshots RetentionScoreSnapshot[]
+  reactivationRecipients  ReactivationCampaignRecipient[]
 
   @@index([businessId, fullName])
   @@index([businessId, phone])
 }
 
 model Product {
-  id                  String                    @id
-  businessId          String                    @default("unit-01")
-  name                String
-  category            String
-  salePrice           Decimal                   @db.Decimal(10, 2)
-  costPrice           Decimal                   @db.Decimal(10, 2)
-  stockQty            Int                       @default(0)
-  minStockAlert       Int                       @default(0)
-  stockAlertCycle     Int                       @default(0)
-  stockAlertCycleActive Boolean                 @default(false)
-  notes               String?
-  active              Boolean                   @default(true)
-  createdAt           DateTime                  @default(now())
-  updatedAt           DateTime                  @updatedAt
-  productSaleItems    ProductSaleItem[]
-  stockMovements      StockMovement[]
-  refundItems         RefundItem[]
-  serviceConsumptions ServiceStockConsumption[]
-  inventoryCounts     StockInventoryCount[]
-  stockAlerts         StockAlert[]
+  id                    String                    @id
+  businessId            String                    @default("unit-01")
+  name                  String
+  category              String
+  salePrice             Decimal                   @db.Decimal(10, 2)
+  costPrice             Decimal                   @db.Decimal(10, 2)
+  stockQty              Int                       @default(0)
+  minStockAlert         Int                       @default(0)
+  stockAlertCycle       Int                       @default(0)
+  stockAlertCycleActive Boolean                   @default(false)
+  notes                 String?
+  active                Boolean                   @default(true)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  productSaleItems      ProductSaleItem[]
+  stockMovements        StockMovement[]
+  refundItems           RefundItem[]
+  serviceConsumptions   ServiceStockConsumption[]
+  inventoryCounts       StockInventoryCount[]
+  stockAlerts           StockAlert[]
 
   @@index([businessId, active])
 }
 
 model StockAlert {
-  id              String                   @id
-  unitId          String
-  productId       String
-  alertType       StockAlertType
-  cycle           Int
-  status          StockAlertDeliveryStatus @default(PENDING)
-  quantity        Int
-  minimumStock    Int
-  attempts        Int                      @default(0)
-  maxAttempts     Int                      @default(3)
-  nextAttemptAt   DateTime?
-  claimedAt       DateTime?
-  sentAt          DateTime?
-  lastErrorCode   String?
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  unit            Unit                     @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  product         Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id            String                   @id
+  unitId        String
+  productId     String
+  alertType     StockAlertType
+  cycle         Int
+  status        StockAlertDeliveryStatus @default(PENDING)
+  quantity      Int
+  minimumStock  Int
+  attempts      Int                      @default(0)
+  maxAttempts   Int                      @default(3)
+  nextAttemptAt DateTime?
+  claimedAt     DateTime?
+  sentAt        DateTime?
+  lastErrorCode String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  unit          Unit                     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  product       Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, productId, alertType, cycle])
   @@index([status, nextAttemptAt, createdAt])
@@ -1096,6 +1116,82 @@ model AutomationExecution {
 
   @@unique([unitId, idempotencyKey])
   @@index([unitId, status, startedAt])
+}
+
+model ReactivationCampaign {
+  id              String                          @id
+  unitId          String
+  ownerId         String
+  status          ReactivationCampaignStatus      @default(DRAFT)
+  analyzedClients Int
+  eligibleClients Int
+  selectedCount   Int
+  segmentCounts   Json
+  exclusions      Json
+  maxRecipients   Int                             @default(20)
+  confirmedAt     DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+  unit            Unit                            @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  recipients      ReactivationCampaignRecipient[]
+  recipientAudits ReactivationRecipientAudit[]
+
+  @@index([unitId, ownerId, status, createdAt])
+}
+
+model ReactivationCampaignRecipient {
+  id             String                      @id
+  campaignId     String
+  clientId       String
+  segment        String
+  phoneSnapshot  String
+  phoneMasked    String
+  message        String
+  delayDays      Int
+  status         ReactivationRecipientStatus @default(PENDING)
+  attempts       Int                         @default(0)
+  maxAttempts    Int                         @default(1)
+  idempotencyKey String                      @unique
+  attemptId      String                      @unique
+  openClientKey  String?                     @unique
+  skipReason     String?
+  errorCode      String?
+  claimedAt      DateTime?
+  providerCallStartedAt DateTime?
+  sentAt         DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  campaign       ReactivationCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  client         Client                      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  audits         ReactivationRecipientAudit[]
+
+  @@unique([campaignId, clientId])
+  @@index([campaignId, status])
+  @@index([campaignId, status, claimedAt])
+  @@index([clientId, status, sentAt])
+}
+
+model ReactivationRecipientAudit {
+  id          String   @id
+  eventKey    String   @unique
+  unitId      String
+  campaignId  String?
+  recipientId String?
+  attemptId   String?
+  event       String
+  state       String?
+  reason      String
+  createdAt   DateTime @default(now())
+  unit        Unit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  campaign    ReactivationCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  recipient   ReactivationCampaignRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@index([unitId, createdAt])
+  @@index([campaignId, recipientId, createdAt])
+  @@index([attemptId])
+  @@index([event, createdAt])
 }
 
 model RetentionScoreSnapshot {

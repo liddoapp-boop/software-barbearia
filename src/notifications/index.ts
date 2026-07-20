@@ -6,14 +6,24 @@ const BARBER_NAME = process.env.BARBER_NAME ?? "Barbearia";
 
 // ─── WhatsApp ────────────────────────────────────────────────────────────────
 
-function formatPhone(phone: string): string {
+export function normalizeWhatsappRecipient(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   return digits.startsWith("55") ? digits : `55${digits}`;
 }
 
+export type WhatsappDeliveryFailureReason =
+  | "configuration"
+  | "timeout"
+  | "http"
+  | "network"
+  | "isolated_outbound_disabled"
+  | "isolated_outbound_invalid_mode"
+  | "isolated_outbound_allowlist_invalid"
+  | "isolated_outbound_not_allowlisted";
+
 export class WhatsappDeliveryError extends Error {
   constructor(
-    readonly reason: "configuration" | "timeout" | "http" | "network",
+    readonly reason: WhatsappDeliveryFailureReason,
     readonly httpStatus?: number,
     readonly durationMs = 0,
   ) {
@@ -22,14 +32,64 @@ export class WhatsappDeliveryError extends Error {
   }
 }
 
+function isValidNormalizedWhatsappRecipient(value: string) {
+  return /^\d{12,13}$/.test(value) && !/^(\d)\1+$/.test(value);
+}
+
+function parseIsolatedWhatsappAllowlist(raw: string | undefined) {
+  const entries = String(raw ?? "")
+    .split(/[,;\r\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!entries.length) return null;
+
+  const normalized = entries.map(normalizeWhatsappRecipient);
+  if (normalized.some((entry) => !isValidNormalizedWhatsappRecipient(entry))) return null;
+  return new Set(normalized);
+}
+
+function maskedWhatsappRecipient(normalized: string) {
+  return normalized.length >= 4 ? `(**) *****-${normalized.slice(-4)}` : "invalid";
+}
+
+function isolatedWhatsappOutboundBlockReason(
+  normalizedRecipient: string,
+): Extract<WhatsappDeliveryFailureReason, `isolated_outbound_${string}`> | null {
+  if (String(process.env.SERVER_MODE ?? "").trim().toLowerCase() !== "isolated") return null;
+
+  const configuredMode = String(process.env.ISOLATED_WHATSAPP_OUTBOUND_MODE ?? "").trim().toLowerCase();
+  const mode = configuredMode || "disabled";
+  if (mode === "disabled") return "isolated_outbound_disabled";
+  if (mode !== "allowlist") return "isolated_outbound_invalid_mode";
+
+  const allowlist = parseIsolatedWhatsappAllowlist(process.env.ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST);
+  if (!allowlist) return "isolated_outbound_allowlist_invalid";
+  return allowlist.has(normalizedRecipient) ? null : "isolated_outbound_not_allowlisted";
+}
+
+function recordIsolatedWhatsappOutboundBlock(reason: WhatsappDeliveryFailureReason, normalizedRecipient: string) {
+  console.warn(JSON.stringify({
+    event: "whatsapp.outbound.blocked",
+    serverMode: "isolated",
+    reason,
+    recipient: maskedWhatsappRecipient(normalizedRecipient),
+  }));
+}
+
 export async function sendWhatsAppMessage(phone: string, text: string): Promise<void> {
   const startedAt = Date.now();
+  const number = normalizeWhatsappRecipient(phone);
+  const isolatedBlockReason = isolatedWhatsappOutboundBlockReason(number);
+  if (isolatedBlockReason) {
+    recordIsolatedWhatsappOutboundBlock(isolatedBlockReason, number);
+    throw new WhatsappDeliveryError(isolatedBlockReason, undefined, Date.now() - startedAt);
+  }
+
   const evolutionUrl = (process.env.EVOLUTION_API_URL ?? "").replace(/\/$/, "");
   const evolutionKey = process.env.EVOLUTION_API_KEY ?? "";
   const evolutionInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "liddo-barber";
   if (!evolutionUrl || !evolutionKey) throw new WhatsappDeliveryError("configuration", undefined, Date.now() - startedAt);
 
-  const number = formatPhone(phone);
   const payload = JSON.stringify({ number, text });
   const configuredTimeout = Number(process.env.AI_WHATSAPP_SEND_TIMEOUT_MS ?? 10_000);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.trunc(configuredTimeout) : 10_000;
