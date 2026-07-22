@@ -32,6 +32,11 @@ export class WhatsappDeliveryError extends Error {
   }
 }
 
+export type WhatsappDeliveryAttemptContext = {
+  attemptId: string;
+  onProviderCallStarted: () => Promise<void>;
+};
+
 function isValidNormalizedWhatsappRecipient(value: string) {
   return /^\d{12,13}$/.test(value) && !/^(\d)\1+$/.test(value);
 }
@@ -76,7 +81,11 @@ function recordIsolatedWhatsappOutboundBlock(reason: WhatsappDeliveryFailureReas
   }));
 }
 
-export async function sendWhatsAppMessage(phone: string, text: string): Promise<void> {
+export async function sendWhatsAppMessage(
+  phone: string,
+  text: string,
+  attempt?: WhatsappDeliveryAttemptContext,
+): Promise<void> {
   const startedAt = Date.now();
   const number = normalizeWhatsappRecipient(phone);
   const isolatedBlockReason = isolatedWhatsappOutboundBlockReason(number);
@@ -93,6 +102,7 @@ export async function sendWhatsAppMessage(phone: string, text: string): Promise<
   const payload = JSON.stringify({ number, text });
   const configuredTimeout = Number(process.env.AI_WHATSAPP_SEND_TIMEOUT_MS ?? 10_000);
   const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.trunc(configuredTimeout) : 10_000;
+  await attempt?.onProviderCallStarted();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;

@@ -104,8 +104,30 @@ LOCAL_LLAMA_TIMEOUT_MS=15000
 Diagnóstico e benchmark:
 
 ```text
+npm run semantic:up
+npm run semantic:status
 npm run semantic:doctor
 npm run semantic:benchmark
+npm run semantic:down
 ```
+
+`semantic:up` localiza o `llama-server` instalado e o modelo esperado, confirma no
+`--help` do próprio binário todas as flags usadas, calcula o SHA-256 integral do
+GGUF e inicia o processo oculto somente em `127.0.0.1:11435`. O comando é
+idempotente e só retorna sucesso depois de `/health` e `/v1/models` confirmarem o
+modelo exato. PID, estado e logs ficam em `.runtime/local-semantic/`, diretório
+ignorado pelo Git.
+
+Se os artefatos estiverem em outro local, configure
+`LOCAL_LLAMA_SERVER_PATH` e `LOCAL_LLAMA_MODEL_PATH` com caminhos absolutos. O
+nome e o hash continuam obrigatoriamente iguais a `LOCAL_LLAMA_MODEL` e
+`LOCAL_LLAMA_MODEL_SHA256`.
+
+Para recuperação, execute primeiro `npm run semantic:status` e consulte os logs
+informados. Use `npm run semantic:down` e depois `npm run semantic:up` somente
+para reiniciar um processo criado pelo launcher. O encerramento valida PID,
+executável e linha de comando; se a porta ou o PID pertencerem a processo não
+reconhecido, o comando falha sem encerrar nada. Estado obsoleto de um processo
+que já terminou é removido com segurança pelo `semantic:down`.
 
 Os pesos e binários são artefatos locais externos ao repositório. Não devem ser adicionados ao Git.

@@ -22,6 +22,7 @@ export const isolatedLocalWhisperKeys = [
   "LOCAL_WHISPER_MODEL_PATH",
   "LOCAL_WHISPER_VAD_MODEL_PATH",
   "LOCAL_WHISPER_PROMPT",
+  "LOCAL_WHISPER_TIMEOUT_MS",
   "LOCAL_WHISPER_WARMUP_TIMEOUT_MS",
 ];
 
@@ -33,8 +34,14 @@ const disabledRemoteAiKeys = [
   "AI_AUDIO_TRANSCRIPTION_MODEL_FALLBACK_ENABLED",
   "GEMINI_API_KEY",
   "GEMINI_MODEL",
-  "SEMANTIC_PROVIDER",
 ];
+const isolatedLocalSemanticEnv = {
+  SEMANTIC_PROVIDER: "local_llama",
+  LOCAL_LLAMA_URL: "http://127.0.0.1:11435",
+  LOCAL_LLAMA_MODEL: "google_gemma-3-4b-it-Q4_K_M.gguf",
+  LOCAL_LLAMA_MODEL_SHA256: "4996030242583a40aa151ff93f49ed787ac8c25e4120c3ae4588b2e2a7d1ae94",
+  LOCAL_LLAMA_TIMEOUT_MS: "15000",
+};
 export const ISOLATED_WHATSAPP_OUTBOUND_CONFIG_INVALID =
   "Modo isolado recusado: configuracao de saida WhatsApp invalida.";
 
@@ -89,6 +96,10 @@ export function isLocalWhisperConfigReady(env) {
     ].every((key) => Boolean(env[key]));
 }
 
+export function isLocalSemanticConfigReady(env) {
+  return Object.entries(isolatedLocalSemanticEnv).every(([key, value]) => env[key] === value);
+}
+
 export function buildIsolatedChildEnv(localEnv, baseEnv = process.env, requestedPort = Number(baseEnv.PORT || 3334)) {
   const isolatedIntegrationEnv = pickConfiguredEnv(isolatedIntegrationKeys, localEnv, baseEnv);
   const isolatedLocalWhisperEnv = pickConfiguredEnv(isolatedLocalWhisperKeys, localEnv, baseEnv);
@@ -96,6 +107,7 @@ export function buildIsolatedChildEnv(localEnv, baseEnv = process.env, requested
   return {
     ...baseEnv,
     ...Object.fromEntries(disabledRemoteAiKeys.map((key) => [key, ""])),
+    ...isolatedLocalSemanticEnv,
     ...isolatedIntegrationEnv,
     ...isolatedLocalWhisperEnv,
     ...isolatedWhatsappOutboundEnv,
@@ -136,9 +148,10 @@ export function startIsolatedLocal() {
   const whatsappIntegrationReady = childEnv.AI_WHATSAPP_ENABLED?.toLowerCase() === "true"
     && isolatedIntegrationKeys.slice(1).every((key) => Boolean(childEnv[key]));
   const localWhisperReady = isLocalWhisperConfigReady(childEnv);
+  const localSemanticReady = isLocalSemanticConfigReady(childEnv);
 
   console.log(
-    `Modo isolado: backend em memoria, host 127.0.0.1, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, saida WhatsApp ${childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}.`,
+    `Modo isolado: backend em memoria, host 127.0.0.1, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, saida WhatsApp ${childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}, semantico local ${localSemanticReady ? "configurado" : "desabilitado"}.`,
   );
 
   if (whatsappIntegrationReady && !runEvolutionBootstrapCheck({ env: childEnv })) {

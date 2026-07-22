@@ -5,6 +5,9 @@ export type AudioTranscriptionFailureReason =
   | "audio_transcription_5xx"
   | "audio_transcription_timeout"
   | "audio_transcription_circuit_open"
+  | "audio_transcription_empty_file"
+  | "audio_transcription_ffmpeg_failed"
+  | "audio_transcription_whisper_failed"
   | "audio_transcription_empty"
   | "audio_transcription_no_speech"
   | "audio_transcription_failed";
@@ -16,6 +19,22 @@ export const GEMINI_AUDIO_TRANSCRIPTION_TOTAL_BUDGET_MS = 45_000;
 export const GEMINI_AUDIO_TRANSCRIPTION_MAX_RETRIES = 2;
 export const GEMINI_AUDIO_TRANSCRIPTION_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
 const GEMINI_AUDIO_TRANSCRIPTION_RECENT_CALL_WINDOW_MS = 60_000;
+export const DEFAULT_LOCAL_WHISPER_TIMEOUT_MS = 45_000;
+export const MIN_LOCAL_WHISPER_TIMEOUT_MS = 20_000;
+export const MAX_LOCAL_WHISPER_TIMEOUT_MS = 120_000;
+
+export type LocalAudioProcessDiagnostic = {
+  stage: "ffmpeg" | "whisper";
+  durationMs: number;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  stdoutBytes: number;
+  stderrBytes: number;
+  stdoutFingerprint?: string;
+  stderrFingerprint?: string;
+  safeReason: string;
+};
 
 export type AudioTranscriptionDiagnostics = {
   providerCalled: boolean;
@@ -38,6 +57,14 @@ export type AudioTranscriptionDiagnostics = {
   rateLimitKind?: "temporary" | "quota_exhausted";
   attempts?: ProviderAttemptDiagnostic[];
   fallbackUsed?: boolean;
+  failureStage?: "input" | "ffmpeg" | "whisper" | "transcript";
+  inputBytes?: number;
+  inputExtension?: string;
+  ffmpeg?: LocalAudioProcessDiagnostic;
+  whisper?: LocalAudioProcessDiagnostic;
+  gpuUsed?: boolean;
+  gpuFallback?: boolean;
+  tempFileId?: string;
 };
 
 export type AudioTranscriptionResponseFingerprint = {
@@ -136,6 +163,15 @@ export function getGeminiAudioTranscriptionTimeoutMsFromEnv() {
   return Math.min(
     MAX_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS,
     Math.max(MIN_GEMINI_AUDIO_TRANSCRIPTION_TIMEOUT_MS, Math.trunc(parsed)),
+  );
+}
+
+export function getLocalWhisperTimeoutMsFromEnv() {
+  const parsed = Number(process.env.LOCAL_WHISPER_TIMEOUT_MS);
+  if (!Number.isFinite(parsed)) return DEFAULT_LOCAL_WHISPER_TIMEOUT_MS;
+  return Math.min(
+    MAX_LOCAL_WHISPER_TIMEOUT_MS,
+    Math.max(MIN_LOCAL_WHISPER_TIMEOUT_MS, Math.trunc(parsed)),
   );
 }
 
@@ -555,6 +591,122 @@ function buildSilentPcmWav(durationMs = 500) {
   return wav;
 }
 
+function getLocalAudioExtension(mimetype: string) {
+  const normalized = mimetype.split(";", 1)[0].trim().toLowerCase();
+  const extensions: Record<string, string> = {
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/aac": ".aac",
+    "audio/webm": ".webm",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+  };
+  return extensions[normalized] ?? ".audio";
+}
+
+function classifyLocalProcessResult(
+  stage: LocalAudioProcessDiagnostic["stage"],
+  stderr: string,
+  exitCode: number | null,
+  timedOut: boolean,
+  spawnFailed: boolean,
+) {
+  if (timedOut) return `${stage}_timeout`;
+  if (spawnFailed) return `${stage}_spawn_failed`;
+  const normalized = stderr.toLowerCase();
+  if (stage === "ffmpeg") {
+    if (/invalid data|could not find codec parameters|error opening input/.test(normalized)) return "ffmpeg_invalid_media";
+    if (/permission denied|access is denied/.test(normalized)) return "ffmpeg_access_denied";
+    return exitCode === 0 ? "completed" : "ffmpeg_exit_nonzero";
+  }
+  if (/failed to load model|error loading model|cannot open model/.test(normalized)) return "whisper_model_load_failed";
+  if (/failed to load vad|error loading vad|cannot open vad/.test(normalized)) return "whisper_vad_load_failed";
+  if (/cuda.*(?:error|failed)|(?:error|failed).*cuda/.test(normalized)) return "whisper_cuda_failed";
+  if (exitCode !== 0) return "whisper_exit_nonzero";
+  const noSpeech = /no speech|vad[^\r\n]*(?:0 segments|no segments)|0 speech segments/.test(normalized);
+  const backend = /loaded cuda backend|ggml_cuda_init:\s*found\s+[1-9]/.test(normalized) ? "cuda" : "cpu";
+  return `completed_${backend}${noSpeech ? "_no_speech" : ""}`;
+}
+
+async function runLocalAudioProcess(input: {
+  executable: string;
+  args: string[];
+  stage: LocalAudioProcessDiagnostic["stage"];
+  timeoutMs: number;
+}): Promise<LocalAudioProcessDiagnostic> {
+  const startedAt = Date.now();
+  const captureLimit = 64 * 1024;
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let capturedStdoutBytes = 0;
+  let capturedStderrBytes = 0;
+  return await new Promise((resolve) => {
+    const child = spawn(input.executable, input.args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let settled = false;
+    let timedOut = false;
+    let spawnFailed = false;
+    const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks);
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+      resolve({
+        stage: input.stage,
+        durationMs: Date.now() - startedAt,
+        exitCode,
+        signal,
+        timedOut,
+        stdoutBytes,
+        stderrBytes,
+        stdoutFingerprint: stdout.length
+          ? createHash("sha256").update(stdout).digest("hex").slice(0, 12)
+          : undefined,
+        stderrFingerprint: stderr
+          ? createHash("sha256").update(stderr).digest("hex").slice(0, 12)
+          : undefined,
+        safeReason: classifyLocalProcessResult(input.stage, stderr, exitCode, timedOut, spawnFailed),
+      });
+    };
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      const bytes = Buffer.from(chunk);
+      stdoutBytes += bytes.length;
+      if (capturedStdoutBytes < captureLimit) {
+        const retained = bytes.subarray(0, captureLimit - capturedStdoutBytes);
+        stdoutChunks.push(retained);
+        capturedStdoutBytes += retained.length;
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      const bytes = Buffer.from(chunk);
+      stderrBytes += bytes.length;
+      if (capturedStderrBytes < captureLimit) {
+        const retained = bytes.subarray(0, captureLimit - capturedStderrBytes);
+        stderrChunks.push(retained);
+        capturedStderrBytes += retained.length;
+      }
+    });
+    child.once("error", () => {
+      spawnFailed = true;
+      finish(null, null);
+    });
+    child.once("close", (code, signal) => finish(code, signal));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, Math.max(1, input.timeoutMs));
+  });
+}
+
 export class LocalWhisperAudioTranscriptionService implements AudioTranscriptionService {
   private active = false;
   private warmupPromise?: Promise<AudioTranscriptionWarmupResult>;
@@ -597,7 +749,7 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
       };
     } catch (error) {
       if (error instanceof AudioTranscriptionError
-        && error.reason === "audio_transcription_no_speech"
+        && ["audio_transcription_no_speech", "audio_transcription_empty"].includes(error.reason)
         && error.diagnostics.providerCalled) {
         return {
           ready: true,
@@ -611,7 +763,22 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
   }
 
   private async runTranscription(input: AudioTranscriptionInput, timeoutLimitMs: number): Promise<AudioTranscriptionResult> {
-    if (!input.audio.length || !input.mimetype.trim()) throw new AudioTranscriptionError("audio_transcription_failed");
+    if (!input.audio.length) {
+      throw new AudioTranscriptionError("audio_transcription_empty_file", undefined, {
+        providerCalled: false,
+        durationMs: 0,
+        failureStage: "input",
+        inputBytes: 0,
+      });
+    }
+    if (!input.mimetype.trim()) {
+      throw new AudioTranscriptionError("audio_transcription_failed", undefined, {
+        providerCalled: false,
+        durationMs: 0,
+        failureStage: "input",
+        inputBytes: input.audio.length,
+      });
+    }
     if (this.active) throw new AudioTranscriptionError("audio_transcription_unavailable", "ASR local ocupado; concorrencia configurada em uma execucao.");
     this.active = true;
     const startedAt = Date.now();
@@ -621,58 +788,118 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
       .trim()
       .slice(0, 1_500);
     const workDir = path.join(os.tmpdir(), `software-barbearia-asr-${randomUUID()}`);
+    const inputExtension = getLocalAudioExtension(input.mimetype);
+    const inputPath = path.join(workDir, `input${inputExtension}`);
+    const normalizedPath = path.join(workDir, "normalized.wav");
     const outputBase = path.join(workDir, "transcript");
-    let ffmpeg: ChildProcessWithoutNullStreams | undefined;
-    let whisper: ChildProcessWithoutNullStreams | undefined;
+    const tempFileId = createHash("sha256").update(workDir).digest("hex").slice(0, 12);
+    let ffmpegDiagnostic: LocalAudioProcessDiagnostic | undefined;
+    let whisperDiagnostic: LocalAudioProcessDiagnostic | undefined;
+    const emitStage = (stage: string, details: Record<string, unknown>) => {
+      if (process.env.NODE_ENV === "test" && process.env.LOCAL_WHISPER_STRUCTURED_LOGS !== "true") return;
+      console.info(JSON.stringify({
+        event: "local_asr_stage",
+        correlationId: input.correlationId || null,
+        stage,
+        tempFileId,
+        ...details,
+      }));
+    };
+    const buildDiagnostics = (
+      failureStage?: AudioTranscriptionDiagnostics["failureStage"],
+    ): AudioTranscriptionDiagnostics => ({
+      providerCalled: Boolean(ffmpegDiagnostic || whisperDiagnostic),
+      durationMs: Date.now() - startedAt,
+      passCount: input.pass ?? 1,
+      vadResult: "unknown",
+      attemptCount: whisperDiagnostic ? 1 : 0,
+      totalBudgetMs: timeoutMs,
+      model: path.basename(this.modelPath),
+      endpoint: "local_process",
+      failureStage,
+      inputBytes: input.audio.length,
+      inputExtension,
+      ffmpeg: ffmpegDiagnostic,
+      whisper: whisperDiagnostic,
+      gpuUsed: whisperDiagnostic ? whisperDiagnostic.safeReason.includes("cuda") : undefined,
+      gpuFallback: whisperDiagnostic ? whisperDiagnostic.safeReason === "completed_cpu" : undefined,
+      tempFileId,
+    });
     try {
       await mkdir(workDir, { recursive: true });
-      ffmpeg = spawn(this.ffmpegPath, [
-        "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ar", "16000", "-ac", "1",
-        "-c:a", "pcm_s16le", "-f", "wav", "pipe:1",
-      ], { windowsHide: true });
+      await writeFile(inputPath, input.audio);
+      emitStage("input_ready", {
+        result: "ready",
+        durationMs: Date.now() - startedAt,
+        inputBytes: input.audio.length,
+        inputExtension,
+        mimetype: input.mimetype.split(";", 1)[0].trim().toLowerCase(),
+      });
+
+      ffmpegDiagnostic = await runLocalAudioProcess({
+        executable: this.ffmpegPath,
+        args: [
+          "-hide_banner", "-loglevel", "error", "-i", inputPath, "-ar", "16000", "-ac", "1",
+          "-c:a", "pcm_s16le", "-y", normalizedPath,
+        ],
+        stage: "ffmpeg",
+        timeoutMs: Math.max(1, timeoutMs - (Date.now() - startedAt)),
+      });
+      emitStage("ffmpeg", ffmpegDiagnostic);
+      if (ffmpegDiagnostic.timedOut) {
+        throw new AudioTranscriptionError("audio_transcription_timeout", undefined, buildDiagnostics("ffmpeg"));
+      }
+      if (ffmpegDiagnostic.exitCode !== 0) {
+        throw new AudioTranscriptionError("audio_transcription_ffmpeg_failed", undefined, buildDiagnostics("ffmpeg"));
+      }
+      const normalizedSize = await stat(normalizedPath).then((item) => item.size).catch(() => 0);
+      if (normalizedSize <= 44) {
+        throw new AudioTranscriptionError("audio_transcription_ffmpeg_failed", undefined, buildDiagnostics("ffmpeg"));
+      }
+
       const whisperArgs = buildLocalWhisperArgs({
         modelPath: this.modelPath,
         vadModelPath: this.vadModelPath,
         outputBase,
         initialPrompt,
+      }).map((argument, index, arguments_) =>
+        argument === "-" && arguments_[index - 1] === "-f" ? normalizedPath : argument,
+      );
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        throw new AudioTranscriptionError("audio_transcription_timeout", undefined, buildDiagnostics("whisper"));
+      }
+      whisperDiagnostic = await runLocalAudioProcess({
+        executable: this.whisperPath,
+        args: whisperArgs,
+        stage: "whisper",
+        timeoutMs: remainingMs,
       });
-      whisper = spawn(this.whisperPath, whisperArgs, { windowsHide: true });
-      ffmpeg.stderr.resume();
-      whisper.stdout.resume();
-      whisper.stderr.resume();
-      ffmpeg.stdout.pipe(whisper.stdin);
-      ffmpeg.stdin.end(input.audio);
-
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const finish = (error?: Error) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          error ? reject(error) : resolve();
-        };
-        const timer = setTimeout(() => {
-          ffmpeg?.kill();
-          whisper?.kill();
-          finish(Object.assign(new Error("ASR local timeout"), { code: "LOCAL_ASR_TIMEOUT" }));
-        }, timeoutMs);
-        ffmpeg?.once("error", finish);
-        whisper?.once("error", finish);
-        whisper?.once("close", (code) => code === 0 ? finish() : finish(new Error(`whisper.cpp exit ${code ?? "unknown"}`)));
-      });
+      emitStage("whisper", whisperDiagnostic);
+      if (whisperDiagnostic.timedOut) {
+        throw new AudioTranscriptionError("audio_transcription_timeout", undefined, buildDiagnostics("whisper"));
+      }
+      if (whisperDiagnostic.exitCode !== 0) {
+        throw new AudioTranscriptionError("audio_transcription_whisper_failed", undefined, buildDiagnostics("whisper"));
+      }
 
       const transcript = (await readFile(`${outputBase}.txt`, "utf8").catch(() => "")).trim().slice(0, 1000);
-      const diagnostics: AudioTranscriptionDiagnostics = {
-        providerCalled: true,
-        durationMs: Date.now() - startedAt,
-        passCount: input.pass ?? 1,
-        vadResult: transcript ? "speech" : "silence",
-        attemptCount: 1,
-        totalBudgetMs: timeoutMs,
-        model: path.basename(this.modelPath),
-        endpoint: "local_process",
-      };
-      if (!transcript) throw new AudioTranscriptionError("audio_transcription_no_speech", undefined, diagnostics);
+      const diagnostics = buildDiagnostics(transcript ? undefined : "transcript");
+      diagnostics.vadResult = transcript ? "speech" : "silence";
+      if (!transcript) {
+        const noSpeech = whisperDiagnostic.safeReason.includes("no_speech");
+        throw new AudioTranscriptionError(
+          noSpeech ? "audio_transcription_no_speech" : "audio_transcription_empty",
+          undefined,
+          diagnostics,
+        );
+      }
+      emitStage("transcript", {
+        result: "completed",
+        durationMs: diagnostics.durationMs,
+        transcriptLength: transcript.length,
+        transcriptFingerprint: createHash("sha256").update(transcript).digest("hex").slice(0, 12),
+      });
       return {
         transcript,
         provider: `local_whisper:${path.basename(this.modelPath)}`,
@@ -681,25 +908,21 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
       };
     } catch (error) {
       if (error instanceof AudioTranscriptionError) throw error;
-      const timedOut = error instanceof Error && (error as Error & { code?: string }).code === "LOCAL_ASR_TIMEOUT";
       throw new AudioTranscriptionError(
-        timedOut ? "audio_transcription_timeout" : "audio_transcription_unavailable",
+        "audio_transcription_unavailable",
         undefined,
-        {
-          providerCalled: Boolean(ffmpeg && whisper),
-          durationMs: Date.now() - startedAt,
-          passCount: input.pass ?? 1,
-          vadResult: "unknown",
-          attemptCount: ffmpeg && whisper ? 1 : 0,
-          totalBudgetMs: timeoutMs,
-          model: path.basename(this.modelPath),
-          endpoint: "local_process",
-        },
+        buildDiagnostics(whisperDiagnostic ? "whisper" : ffmpegDiagnostic ? "ffmpeg" : "input"),
       );
     } finally {
-      ffmpeg?.kill();
-      whisper?.kill();
-      await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+      const cleanupStartedAt = Date.now();
+      const cleanupSucceeded = await rm(workDir, { recursive: true, force: true })
+        .then(() => true)
+        .catch(() => false);
+      emitStage("cleanup", {
+        result: cleanupSucceeded ? "completed" : "failed",
+        durationMs: Date.now() - cleanupStartedAt,
+        safeReason: cleanupSucceeded ? "temporary_files_removed" : "temporary_files_cleanup_failed",
+      });
       this.active = false;
     }
   }
@@ -720,6 +943,9 @@ export function createAudioTranscriptionServiceFromEnv(): AudioTranscriptionServ
       "audio_transcription_quota_exhausted",
       "audio_transcription_5xx",
       "audio_transcription_timeout",
+      "audio_transcription_empty_file",
+      "audio_transcription_ffmpeg_failed",
+      "audio_transcription_whisper_failed",
       "audio_transcription_empty",
       "audio_transcription_no_speech",
       "audio_transcription_failed",
@@ -742,7 +968,7 @@ export function createAudioTranscriptionServiceFromEnv(): AudioTranscriptionServ
       whisperPath,
       modelPath,
       vadModelPath,
-      20_000,
+      getLocalWhisperTimeoutMsFromEnv(),
       process.env.LOCAL_WHISPER_PROMPT?.trim() || undefined,
       Math.max(20_000, Math.min(120_000, getPositiveInteger(process.env.LOCAL_WHISPER_WARMUP_TIMEOUT_MS, 90_000))),
     );
@@ -764,8 +990,8 @@ import {
   ResilientProviderError,
   ResilientProviderRuntime,
 } from "./resilient-provider";
-import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";

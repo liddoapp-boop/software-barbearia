@@ -412,12 +412,20 @@ async function runAuthenticatedOperationalFlow(cdp: Cdp, authSession: any) {
           return { status: response.status, data };
         };
         const suffix = String(Date.now()).slice(-8);
+        const operationAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        operationAt.setUTCHours(13, 0, 0, 0);
+        const completedAt = new Date(operationAt.getTime() + 60 * 60 * 1000);
+        const soldAt = new Date(operationAt.getTime() + 2 * 60 * 60 * 1000);
+        const financialStart = new Date(operationAt);
+        financialStart.setUTCHours(0, 0, 0, 0);
+        const financialEnd = new Date(operationAt);
+        financialEnd.setUTCHours(23, 59, 59, 999);
         const client = await call('/clients', 'POST', {
           unitId: 'unit-01', name: 'Cliente Headless ' + suffix, phone: '119' + suffix,
         });
         const appointment = await call('/appointments', 'POST', {
           unitId: 'unit-01', clientId: client.data?.client?.id, professionalId: 'pro-01',
-          serviceId: 'svc-corte', startsAt: '2026-07-20T13:00:00.000Z', changedBy: 'e2e-headless',
+          serviceId: 'svc-corte', startsAt: operationAt.toISOString(), changedBy: 'e2e-headless',
         });
         const appointmentId = appointment.data?.appointment?.id;
         const confirmed = await call('/appointments/' + appointmentId + '/status', 'PATCH',
@@ -425,19 +433,19 @@ async function runAuthenticatedOperationalFlow(cdp: Cdp, authSession: any) {
         const inService = await call('/appointments/' + appointmentId + '/status', 'PATCH',
           { status: 'IN_SERVICE', changedBy: 'e2e-headless' }, 'e2e-service-' + suffix);
         const checkout = await call('/appointments/' + appointmentId + '/checkout', 'POST', {
-          changedBy: 'e2e-headless', completedAt: '2026-07-20T14:00:00.000Z', paymentMethod: 'PIX',
+          changedBy: 'e2e-headless', completedAt: completedAt.toISOString(), paymentMethod: 'PIX',
           products: [{ productId: 'prd-pomada', quantity: 1 }],
         }, 'e2e-checkout-' + suffix);
         const sale = await call('/sales/products', 'POST', {
-          unitId: 'unit-01', soldAt: '2026-07-20T15:00:00.000Z', professionalId: 'pro-01',
+          unitId: 'unit-01', soldAt: soldAt.toISOString(), professionalId: 'pro-01',
           clientId: client.data?.client?.id, paymentMethod: 'PIX',
           items: [{ productId: 'prd-oleo-barba', quantity: 1 }],
         }, 'e2e-sale-' + suffix);
         const stock = await call('/stock/overview?unitId=unit-01');
-        const financial = await call('/financial/transactions?unitId=unit-01&start=2026-07-20T00:00:00.000Z&end=2026-07-20T23:59:59.999Z');
+        const financial = await call('/financial/transactions?unitId=unit-01&start=' + encodeURIComponent(financialStart.toISOString()) + '&end=' + encodeURIComponent(financialEnd.toISOString()));
         const audit = await call('/audit/events?unitId=unit-01&limit=50');
         const gone = await call('/appointments/' + appointmentId + '/complete', 'POST', {
-          changedBy: 'e2e-headless', completedAt: '2026-07-20T14:00:00.000Z',
+          changedBy: 'e2e-headless', completedAt: completedAt.toISOString(),
         });
         const logout = await call('/auth/logout', 'POST');
         const replay = await call('/auth/me');

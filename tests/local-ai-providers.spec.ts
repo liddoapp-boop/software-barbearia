@@ -8,6 +8,7 @@ import {
   LocalWhisperAudioTranscriptionService,
   buildLocalWhisperArgs,
   createAudioTranscriptionServiceFromEnv,
+  getLocalWhisperTimeoutMsFromEnv,
   isApprovedLocalWhisperModelPath,
 } from "../src/application/audio-transcription";
 
@@ -102,10 +103,36 @@ describe("provedores locais de IA", () => {
     const service = createAudioTranscriptionServiceFromEnv();
     expect(service).toBeInstanceOf(LocalWhisperAudioTranscriptionService);
     await expect(service?.transcribe({ audio: Buffer.from([1, 2, 3]), mimetype: "audio/ogg" }))
-      .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
+      .rejects.toMatchObject({
+        reason: "audio_transcription_ffmpeg_failed",
+        diagnostics: { failureStage: "ffmpeg", ffmpeg: { safeReason: "ffmpeg_spawn_failed" } },
+      });
     await expect(service?.warmUp?.())
-      .rejects.toMatchObject({ reason: "audio_transcription_unavailable" } satisfies Partial<AudioTranscriptionError>);
+      .rejects.toMatchObject({
+        reason: "audio_transcription_ffmpeg_failed",
+        diagnostics: { failureStage: "ffmpeg", ffmpeg: { safeReason: "ffmpeg_spawn_failed" } },
+      });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("usa 45 segundos por padrao e limita o timeout local a faixa segura", () => {
+    delete process.env.LOCAL_WHISPER_TIMEOUT_MS;
+    expect(getLocalWhisperTimeoutMsFromEnv()).toBe(45_000);
+    process.env.LOCAL_WHISPER_TIMEOUT_MS = "1000";
+    expect(getLocalWhisperTimeoutMsFromEnv()).toBe(20_000);
+    process.env.LOCAL_WHISPER_TIMEOUT_MS = "60000";
+    expect(getLocalWhisperTimeoutMsFromEnv()).toBe(60_000);
+    process.env.LOCAL_WHISPER_TIMEOUT_MS = "999999";
+    expect(getLocalWhisperTimeoutMsFromEnv()).toBe(120_000);
+  });
+
+  it("diferencia arquivo vazio antes de chamar FFmpeg ou Whisper", async () => {
+    const service = new LocalWhisperAudioTranscriptionService("ffmpeg", "whisper", "model", "vad");
+    await expect(service.transcribe({ audio: Buffer.alloc(0), mimetype: "audio/ogg" }))
+      .rejects.toMatchObject({
+        reason: "audio_transcription_empty_file",
+        diagnostics: { providerCalled: false, failureStage: "input", inputBytes: 0 },
+      });
   });
 
   it("fixa o perfil local em turbo Q5_0, GPU, portugues, VAD, temperatura zero e uma thread", () => {

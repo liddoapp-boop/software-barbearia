@@ -34,8 +34,12 @@
     "test:db": "tsx scripts/run-db-tests.ts",
     "test:migration:2290": "tsx scripts/test-migration-2290.ts",
     "test:stability": "tsx scripts/run-local-stability.ts",
+    "semantic:up": "node scripts/local-semantic-service.mjs up",
+    "semantic:status": "node scripts/local-semantic-service.mjs status",
+    "semantic:down": "node scripts/local-semantic-service.mjs down",
     "semantic:benchmark": "tsx scripts/benchmark-local-semantic.ts",
     "semantic:doctor": "node scripts/local-semantic-doctor.mjs",
+    "audio:doctor": "tsx scripts/local-audio-doctor.ts",
     "smoke:api": "node scripts/smoke-api-flow.mjs",
     "smoke:api:readonly": "node scripts/smoke-api-readonly.mjs",
     "smoke:api:ps": "powershell -ExecutionPolicy Bypass -File scripts/smoke-api-flow.ps1"

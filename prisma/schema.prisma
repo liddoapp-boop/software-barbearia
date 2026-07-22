@@ -139,6 +139,7 @@ enum StockAlertDeliveryStatus {
   SENDING
   SENT
   FAILED
+  UNCERTAIN
 }
 
 enum ReactivationCampaignStatus {
@@ -485,7 +486,11 @@ model StockAlert {
   maxAttempts   Int                      @default(3)
   nextAttemptAt DateTime?
   claimedAt     DateTime?
+  deliveryAttemptId String?              @unique
+  providerCallStartedAt DateTime?
   sentAt        DateTime?
+  failedAt      DateTime?
+  uncertainAt   DateTime?
   lastErrorCode String?
   createdAt     DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
@@ -493,6 +498,8 @@ model StockAlert {
   product       Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([unitId, productId, alertType, cycle])
+  @@index([unitId, status, nextAttemptAt, createdAt])
+  @@index([unitId, status, claimedAt])
   @@index([status, nextAttemptAt, createdAt])
   @@index([unitId, productId, cycle])
 }

@@ -1182,6 +1182,8 @@ export class ReactivationCampaignService {
 
   async findDraft(unitId: string, ownerId: string) { return await this.input.repository.findDraft(unitId, ownerId); }
 
+  async findLatest(unitId: string, ownerId: string) { return await this.input.repository.findLatest(unitId, ownerId); }
+
   async cancel(params: { unitId: string; ownerId: string }) {
     const draft = await this.input.repository.findDraft(params.unitId, params.ownerId);
     return draft ? await this.input.repository.cancelCampaign(draft.id, this.now()) : false;

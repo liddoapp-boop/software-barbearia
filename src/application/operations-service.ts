@@ -117,6 +117,8 @@ import {
   StockEntryFailureStage,
   StockEntryPreviewRecord,
   buildStockEntryPreviewStorageKey,
+  buildStockEntryBatchDraft,
+  stockEntryBatchDraftSchema,
   stockEntryDraftSchema,
 } from "./stock-entry";
 
@@ -3932,6 +3934,9 @@ export class OperationsService {
 
   private async executeStockEntryConfirmation(input: ConfirmStockEntryInput): Promise<StockEntryConfirmationResult> {
     const draft = stockEntryDraftSchema.parse(input.draft);
+    const batch = input.batch
+      ? stockEntryBatchDraftSchema.parse(input.batch)
+      : buildStockEntryBatchDraft([draft]);
     const storageKey = buildStockEntryPreviewStorageKey(input.unitId, input.previewAction);
     const record = this.store.aiWhatsappStockEntryPreviews.get(storageKey) as StockEntryPreviewRecord | undefined;
     const validRecord = record
@@ -3946,41 +3951,47 @@ export class OperationsService {
       throw new Error("A prévia expirou. Envie o pedido novamente.");
     }
     if (record.status !== "PENDING") throw new Error("A prévia não está disponível para confirmação.");
-    if (hashIdempotencyPayload(record.preview.draft) !== hashIdempotencyPayload(draft)) {
+    const storedBatch = record.preview.batch ?? buildStockEntryBatchDraft([record.preview.draft]);
+    if (hashIdempotencyPayload(storedBatch) !== hashIdempotencyPayload(batch)) {
       throw new Error("A prévia não corresponde aos dados confirmados.");
     }
 
-    const product = this.store.products.find((item) =>
-      item.id === draft.productId
-      && item.active
-      && ((item as Product & { businessId?: string }).businessId ?? "unit-01") === input.unitId);
-    if (!product) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+    const products = batch.items.map((item) => this.store.products.find((product) =>
+      product.id === item.productId
+      && product.active
+      && ((product as Product & { businessId?: string }).businessId ?? "unit-01") === input.unitId));
+    if (products.some((product) => !product)) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+    const resolvedProducts = products as Product[];
 
-    const previousStock = product.stockQty;
+    const previousStocks = new Map(resolvedProducts.map((product) => [product.id, product.stockQty]));
     const movementLength = this.store.stockMovements.length;
     const auditLength = this.store.auditEvents.length;
     const alertLength = this.store.stockAlerts.length;
-    const previousAlertCycleState = this.store.stockAlertCycleStates.get(product.id);
+    const previousAlertCycleStates = new Map(resolvedProducts.map((product) => [product.id, this.store.stockAlertCycleStates.get(product.id)]));
     record.status = "PROCESSING";
     try {
       await this.stockEntryFailureHook?.("after_claim");
       const operationId = input.previewId;
-      const occurredAt = new Date(draft.occurredAt);
-      product.stockQty += draft.quantity;
-      const movement: StockMovement = {
-        id: crypto.randomUUID(),
-        unitId: input.unitId,
-        productId: product.id,
-        movementType: "IN",
-        quantity: draft.quantity,
-        unitCost: draft.unitCost,
-        totalCost: draft.totalCost,
-        notes: draft.notes,
-        occurredAt,
-        referenceType: "STOCK_ENTRY",
-        referenceId: operationId,
-      };
-      this.store.stockMovements.push(movement);
+      const movements: StockMovement[] = [];
+      batch.items.forEach((item, index) => {
+        const product = resolvedProducts[index];
+        product.stockQty += item.quantity;
+        const movement: StockMovement = {
+          id: crypto.randomUUID(),
+          unitId: input.unitId,
+          productId: product.id,
+          movementType: "IN",
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          totalCost: item.totalCost,
+          notes: item.notes,
+          occurredAt: new Date(item.occurredAt),
+          referenceType: "STOCK_ENTRY",
+          referenceId: operationId,
+        };
+        movements.push(movement);
+        this.store.stockMovements.push(movement);
+      });
       await this.stockEntryFailureHook?.("after_stock");
 
       const audit = toAuditEvent({
@@ -3990,43 +4001,59 @@ export class OperationsService {
         action: "STOCK_ENTRY_CONFIRMED",
         entity: "stock_entry",
         entityId: operationId,
-        before: { productId: product.id, stockQty: previousStock },
+        before: { items: resolvedProducts.map((product) => ({ productId: product.id, stockQty: previousStocks.get(product.id) })) },
         after: {
-          productId: product.id,
-          stockQty: product.stockQty,
-          quantity: draft.quantity,
-          unitCost: draft.unitCost,
-          totalCost: draft.totalCost,
-          movementId: movement.id,
+          batchId: operationId,
+          itemCount: batch.items.length,
+          totalCost: batch.totalCost,
+          items: batch.items.map((item, index) => ({
+            productId: item.productId,
+            stockQty: resolvedProducts[index].stockQty,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            totalCost: item.totalCost,
+            movementId: movements[index].id,
+          })),
         },
-        metadata: { previewId: input.previewId, operationId },
+        metadata: { previewId: input.previewId, operationId, batchId: operationId },
       });
       this.store.auditEvents.push(audit);
-      this.recordStockTransition({ unitId: input.unitId, product, previousQuantity: previousStock });
+      resolvedProducts.forEach((product) => this.recordStockTransition({
+        unitId: input.unitId,
+        product,
+        previousQuantity: previousStocks.get(product.id)!,
+      }));
+      const movementResults = movements.map((movement, index) => ({
+        id: movement.id,
+        productId: movement.productId,
+        quantity: movement.quantity,
+        unitCost: batch.items[index].unitCost,
+        totalCost: batch.items[index].totalCost,
+        occurredAt: movement.occurredAt.toISOString(),
+      }));
+      const productResults = resolvedProducts.map((product) => ({ id: product.id, name: product.name, stockQty: product.stockQty }));
       const response: StockEntryConfirmationResult = {
         operationId,
         previewId: input.previewId,
-        movement: {
-          id: movement.id,
-          productId: product.id,
-          quantity: movement.quantity,
-          unitCost: draft.unitCost,
-          totalCost: draft.totalCost,
-          occurredAt: occurredAt.toISOString(),
-        },
-        product: { id: product.id, name: product.name, stockQty: product.stockQty },
+        movement: movementResults[0],
+        product: productResults[0],
+        movements: movementResults,
+        products: productResults,
+        totalCost: batch.totalCost,
         replay: false,
       };
       record.status = "SUCCEEDED";
       record.response = response;
       return response;
     } catch (error) {
-      product.stockQty = previousStock;
+      resolvedProducts.forEach((product) => { product.stockQty = previousStocks.get(product.id)!; });
       this.store.stockMovements.splice(movementLength);
       this.store.auditEvents.splice(auditLength);
       this.store.stockAlerts.splice(alertLength);
-      if (previousAlertCycleState) this.store.stockAlertCycleStates.set(product.id, previousAlertCycleState);
-      else this.store.stockAlertCycleStates.delete(product.id);
+      previousAlertCycleStates.forEach((state, productId) => {
+        if (state) this.store.stockAlertCycleStates.set(productId, state);
+        else this.store.stockAlertCycleStates.delete(productId);
+      });
       record.status = "PENDING";
       delete record.response;
       throw error;

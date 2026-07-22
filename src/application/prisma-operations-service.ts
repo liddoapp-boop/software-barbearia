@@ -111,6 +111,8 @@ import { RetentionAiScorer } from "./gemini-retention-scoring";
 import {
   ConfirmStockEntryInput,
   StockEntryFailureStage,
+  buildStockEntryBatchDraft,
+  stockEntryBatchDraftSchema,
   stockEntryConfirmationResultSchema,
   stockEntryDraftSchema,
   stockEntryPreviewSchema,
@@ -6145,6 +6147,9 @@ export class PrismaOperationsService {
 
   async confirmStockEntry(input: ConfirmStockEntryInput) {
     const draft = stockEntryDraftSchema.parse(input.draft);
+    const batch = input.batch
+      ? stockEntryBatchDraftSchema.parse(input.batch)
+      : buildStockEntryBatchDraft([draft]);
     return await this.prisma.$transaction(async (tx) => {
       const where = {
         unitId_action_idempotencyKey: {
@@ -6164,7 +6169,8 @@ export class PrismaOperationsService {
       if (preview.unitId !== input.unitId || preview.actorId !== input.actorId || preview.id !== input.previewId) {
         throw new Error("Prévia de entrada não pertence ao owner ou à unidade atual.");
       }
-      if (hashIdempotencyPayload(preview.draft) !== hashIdempotencyPayload(draft)) {
+      const storedBatch = preview.batch ?? buildStockEntryBatchDraft([preview.draft]);
+      if (hashIdempotencyPayload(storedBatch) !== hashIdempotencyPayload(batch)) {
         throw new Error("A prévia não corresponde aos dados confirmados.");
       }
       if (stored.status === "SUCCEEDED") {
@@ -6201,42 +6207,57 @@ export class PrismaOperationsService {
       }
       await this.stockEntryFailureHook?.("after_claim");
 
-      const product = await tx.product.findFirst({
-        where: { id: draft.productId, businessId: input.unitId, active: true },
+      const products = await tx.product.findMany({
+        where: { id: { in: batch.items.map((item) => item.productId) }, businessId: input.unitId, active: true },
         select: { id: true, name: true, stockQty: true },
       });
-      if (!product) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+      if (products.length !== batch.items.length) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+      const productById = new Map(products.map((product) => [product.id, product]));
       const operationId = input.previewId;
-      const occurredAt = new Date(draft.occurredAt);
-      const movement = await tx.stockMovement.create({
-        data: {
-          id: crypto.randomUUID(),
+      const movementResults: Array<{ id: string; productId: string; quantity: number; unitCost: number; totalCost: number; occurredAt: string }> = [];
+      const productResults: Array<{ id: string; name: string; stockQty: number }> = [];
+      for (const item of batch.items) {
+        const product = productById.get(item.productId)!;
+        const occurredAt = new Date(item.occurredAt);
+        const movement = await tx.stockMovement.create({
+          data: {
+            id: crypto.randomUUID(),
+            unitId: input.unitId,
+            productId: product.id,
+            movementType: "IN",
+            quantity: item.quantity,
+            unitCost: new Prisma.Decimal(item.unitCost),
+            totalCost: new Prisma.Decimal(item.totalCost),
+            notes: item.notes ?? null,
+            occurredAt,
+            referenceType: "STOCK_ENTRY",
+            referenceId: operationId,
+          },
+        });
+        const updated = await tx.product.updateMany({
+          where: { id: product.id, businessId: input.unitId, active: true },
+          data: { stockQty: { increment: item.quantity } },
+        });
+        if (updated.count !== 1) throw new Error("Produto não encontrado ou inativo nesta unidade.");
+        const updatedProduct = await tx.product.findUniqueOrThrow({
+          where: { id: product.id },
+          select: { id: true, name: true, stockQty: true },
+        });
+        await recordPrismaStockTransition(tx, {
           unitId: input.unitId,
           productId: product.id,
-          movementType: "IN",
-          quantity: draft.quantity,
-          unitCost: new Prisma.Decimal(draft.unitCost),
-          totalCost: new Prisma.Decimal(draft.totalCost),
-          notes: draft.notes ?? null,
-          occurredAt,
-          referenceType: "STOCK_ENTRY",
-          referenceId: operationId,
-        },
-      });
-      const updated = await tx.product.updateMany({
-        where: { id: product.id, businessId: input.unitId, active: true },
-        data: { stockQty: { increment: draft.quantity } },
-      });
-      if (updated.count !== 1) throw new Error("Produto não encontrado ou inativo nesta unidade.");
-      const updatedProduct = await tx.product.findUniqueOrThrow({
-        where: { id: product.id },
-        select: { id: true, name: true, stockQty: true },
-      });
-      await recordPrismaStockTransition(tx, {
-        unitId: input.unitId,
-        productId: product.id,
-        previousQuantity: product.stockQty,
-      });
+          previousQuantity: product.stockQty,
+        });
+        movementResults.push({
+          id: movement.id,
+          productId: movement.productId,
+          quantity: movement.quantity,
+          unitCost: Number(movement.unitCost),
+          totalCost: Number(movement.totalCost),
+          occurredAt: movement.occurredAt.toISOString(),
+        });
+        productResults.push(updatedProduct);
+      }
       await this.stockEntryFailureHook?.("after_stock");
 
       await this.recordCriticalAudit(tx, {
@@ -6246,29 +6267,30 @@ export class PrismaOperationsService {
         action: "STOCK_ENTRY_CONFIRMED",
         entity: "stock_entry",
         entityId: operationId,
-        before: { productId: product.id, stockQty: product.stockQty },
+        before: { items: products.map((product) => ({ productId: product.id, stockQty: product.stockQty })) },
         after: {
-          productId: product.id,
-          stockQty: updatedProduct.stockQty,
-          quantity: draft.quantity,
-          unitCost: draft.unitCost,
-          totalCost: draft.totalCost,
-          movementId: movement.id,
+          batchId: operationId,
+          itemCount: batch.items.length,
+          totalCost: batch.totalCost,
+          items: batch.items.map((item, index) => ({
+            productId: item.productId,
+            stockQty: productResults[index].stockQty,
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            totalCost: item.totalCost,
+            movementId: movementResults[index].id,
+          })),
         },
-        metadata: { previewId: input.previewId, operationId },
+        metadata: { previewId: input.previewId, operationId, batchId: operationId },
       });
       const response = stockEntryConfirmationResultSchema.parse({
         operationId,
         previewId: input.previewId,
-        movement: {
-          id: movement.id,
-          productId: movement.productId,
-          quantity: movement.quantity,
-          unitCost: Number(movement.unitCost),
-          totalCost: Number(movement.totalCost),
-          occurredAt: movement.occurredAt.toISOString(),
-        },
-        product: updatedProduct,
+        movement: movementResults[0],
+        product: productResults[0],
+        movements: movementResults,
+        products: productResults,
+        totalCost: batch.totalCost,
         replay: false,
       });
       await tx.idempotencyRecord.update({

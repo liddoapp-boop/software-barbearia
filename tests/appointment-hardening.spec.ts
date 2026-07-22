@@ -74,6 +74,20 @@ async function ownerHeaders(app: ReturnType<typeof createApp>) {
   return { authorization: `Bearer ${login.json().accessToken}` };
 }
 
+async function receptionHeaders(app: ReturnType<typeof createApp>) {
+  const login = await app.inject({
+    method: "POST",
+    url: "/auth/login",
+    payload: {
+      email: "recepcao@barbearia.local",
+      password: "recepcao123",
+      activeUnitId: "unit-01",
+    },
+  });
+  expect(login.statusCode).toBe(200);
+  return { authorization: `Bearer ${login.json().accessToken}` };
+}
+
 describe("blindagem de agendamentos", () => {
   beforeEach(() => {
     process.env.AUTH_ENFORCED = "false";
@@ -433,6 +447,37 @@ describe("blindagem de agendamentos", () => {
     const repeated = await patchAppointmentStatus(app, appointmentId, "NO_SHOW", "noshow-repeat-001", {}, headers);
     expect([400, 422]).toContain(repeated.statusCode);
     expect(repeated.json().error).toMatch(/terminal|falta/i);
+  });
+
+  it("rejeita NO_SHOW da recepcao com 403 sem alterar o agendamento", async () => {
+    const app = createApp();
+    await setUnit01WideWednesdayHours(app);
+    const created = await app.inject({
+      method: "POST",
+      url: "/appointments",
+      payload: appointmentPayload({ startsAt: "2026-04-22T12:30:00.000Z" }),
+    });
+    expect(created.statusCode).toBe(200);
+    const appointmentId = created.json().appointment.id;
+    vi.setSystemTime(new Date("2026-04-22T12:45:00.000Z"));
+
+    const denied = await patchAppointmentStatus(
+      app,
+      appointmentId,
+      "NO_SHOW",
+      "noshow-reception-denied-001",
+      {},
+      await receptionHeaders(app),
+    );
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error).toBe("Apenas owner pode marcar falta");
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/appointments/${appointmentId}`,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().appointment.status).toBe("SCHEDULED");
   });
 
   it("registra atraso sem alterar horario nem status e com replay idempotente", async () => {

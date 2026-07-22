@@ -24,6 +24,7 @@ Thumbs.db
 
 # Local test artifacts
 test-results/
+.runtime/
 scripts/capture-ai-pilot-baseline.ts
 scripts/probe-ai-providers.ts
 

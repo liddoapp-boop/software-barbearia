@@ -12,6 +12,7 @@ import {
 import { InMemoryStore } from "../src/infrastructure/in-memory-store.js";
 import { createApp } from "../src/http/app.js";
 import { OperationsService } from "../src/application/operations-service.js";
+import type { WhatsappDeliveryAttemptContext } from "../src/notifications/index.js";
 
 const originalEnv = { ...process.env };
 afterEach(() => {
@@ -166,8 +167,12 @@ describe("Etapa 2 - ciclo, deduplicacao e entrega", () => {
     recordMemoryStockTransition(memory, { unitId: "unit-01", product, previousQuantity: 6 });
     const deliveries: Array<{ phone: string; text: string }> = [];
     const options = {
+      unitId: "unit-01",
       store,
-      send: async (phone: string, text: string) => { deliveries.push({ phone, text }); },
+      send: async (phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+        await attempt?.onProviderCallStarted();
+        deliveries.push({ phone, text });
+      },
       resolveOwnerPhone: () => "5511999999999",
     };
     const first = new StockAlertDispatcher(options);
@@ -178,9 +183,11 @@ describe("Etapa 2 - ciclo, deduplicacao e entrega", () => {
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]).toMatchObject({ phone: "5511999999999" });
     expect(memory.stockAlerts[0]).toMatchObject({ status: "SENT", attempts: 1 });
+    expect(memory.stockAlerts[0].deliveryAttemptId).toBeTruthy();
+    expect(memory.stockAlerts[0].providerCallStartedAt).toBeInstanceOf(Date);
   });
 
-  it("falha nao remove a intencao e retry reutiliza o mesmo registro", async () => {
+  it("rejeicao HTTP explicita preserva a intencao e permite retry seguro", async () => {
     const { memory, product, store } = setup();
     product.stockQty = 5;
     const alert = recordMemoryStockTransition(memory, {
@@ -189,18 +196,20 @@ describe("Etapa 2 - ciclo, deduplicacao e entrega", () => {
     let now = new Date("2026-07-16T15:00:00.000Z");
     let shouldFail = true;
     const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
       store,
       now: () => now,
       baseBackoffMs: 1_000,
-      send: async () => {
-        if (shouldFail) throw Object.assign(new Error("segredo externo que nao pode ir ao log"), { reason: "timeout" });
+      send: async (_phone, _text, attempt) => {
+        await attempt?.onProviderCallStarted();
+        if (shouldFail) throw Object.assign(new Error("segredo externo que nao pode ir ao log"), { reason: "http" });
       },
       resolveOwnerPhone: () => "5511999999999",
     });
 
     await dispatcher.dispatchDue();
     expect(memory.stockAlerts).toHaveLength(1);
-    expect(memory.stockAlerts[0]).toMatchObject({ id: alert.id, status: "FAILED", attempts: 1, lastErrorCode: "timeout" });
+    expect(memory.stockAlerts[0]).toMatchObject({ id: alert.id, status: "FAILED", attempts: 1, lastErrorCode: "http" });
     expect(JSON.stringify(memory.auditEvents)).not.toContain("segredo externo");
 
     shouldFail = false;
@@ -221,10 +230,11 @@ describe("Etapa 2 - ciclo, deduplicacao e entrega", () => {
     let now = new Date("2026-07-16T15:00:00.000Z");
     let calls = 0;
     const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
       store,
       now: () => now,
       baseBackoffMs: 1,
-      send: async () => { calls += 1; throw Object.assign(new Error("offline"), { reason: "network" }); },
+      send: async () => { calls += 1; throw Object.assign(new Error("config local"), { reason: "configuration" }); },
       resolveOwnerPhone: () => "5511999999999",
     });
     await dispatcher.dispatchDue();
@@ -235,6 +245,276 @@ describe("Etapa 2 - ciclo, deduplicacao e entrega", () => {
     expect(calls).toBe(2);
     expect(memory.stockAlerts[0]).toMatchObject({ id: alert.id, status: "FAILED", attempts: 2 });
     expect(memory.stockAlerts[0].nextAttemptAt).toBeUndefined();
+  });
+
+  it("timeout depois do inicio vira incerto e ciclos posteriores nao reenviam", async () => {
+    const { memory, product, store } = setup();
+    product.stockQty = 5;
+    recordMemoryStockTransition(memory, { unitId: "unit-01", product, previousQuantity: 6 });
+    let calls = 0;
+    const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
+      store,
+      send: async (_phone, _text, attempt) => {
+        calls += 1;
+        await attempt?.onProviderCallStarted();
+        throw Object.assign(new Error("socket encerrado depois do POST"), { reason: "network" });
+      },
+      resolveOwnerPhone: () => "5511999999999",
+    });
+
+    await expect(dispatcher.dispatchDue()).resolves.toMatchObject({
+      processed: 1,
+      sent: 0,
+      failed: 0,
+      uncertain: 1,
+    });
+    await dispatcher.dispatchDue();
+    await dispatcher.dispatchDue();
+
+    expect(calls).toBe(1);
+    expect(memory.stockAlerts[0]).toMatchObject({ status: "UNCERTAIN", attempts: 1, lastErrorCode: "network" });
+    expect(memory.stockAlerts[0].nextAttemptAt).toBeUndefined();
+  });
+
+  it("claim antigo sem chamada iniciada e recuperado com seguranca", async () => {
+    const { memory, product, store } = setup();
+    product.stockQty = 5;
+    recordMemoryStockTransition(memory, { unitId: "unit-01", product, previousQuantity: 6 });
+    let now = new Date("2026-07-16T15:00:00.000Z");
+    const abandoned = await store.claimNext("unit-01", now);
+    expect(abandoned).toMatchObject({ status: "SENDING", attempts: 1 });
+    expect(abandoned?.providerCallStartedAt).toBeUndefined();
+
+    now = new Date(now.getTime() + 6 * 60_000);
+    let calls = 0;
+    const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
+      store,
+      now: () => now,
+      send: async (_phone, _text, attempt) => {
+        calls += 1;
+        await attempt?.onProviderCallStarted();
+      },
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(dispatcher.dispatchDue()).resolves.toMatchObject({ recovered: 1, sent: 1, uncertain: 0 });
+    expect(calls).toBe(1);
+    expect(memory.stockAlerts[0]).toMatchObject({ status: "SENT", attempts: 1 });
+    expect(memory.stockAlerts[0].deliveryAttemptId).not.toBe(abandoned?.deliveryAttemptId);
+  });
+
+  it("claim antigo com chamada iniciada vira incerto sem nova chamada", async () => {
+    const { memory, product, store } = setup();
+    product.stockQty = 5;
+    recordMemoryStockTransition(memory, { unitId: "unit-01", product, previousQuantity: 6 });
+    let now = new Date("2026-07-16T15:00:00.000Z");
+    const abandoned = (await store.claimNext("unit-01", now))!;
+    await store.markProviderCallStarted("unit-01", abandoned, now);
+
+    now = new Date(now.getTime() + 6 * 60_000);
+    const send = vi.fn();
+    const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
+      store,
+      now: () => now,
+      send,
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(dispatcher.dispatchDue()).resolves.toMatchObject({ processed: 0, uncertain: 1, recovered: 0 });
+    expect(send).not.toHaveBeenCalled();
+    expect(memory.stockAlerts[0]).toMatchObject({ status: "UNCERTAIN", lastErrorCode: "stale_provider_call" });
+  });
+
+  it("bloqueio local permanece falha confirmada e nao marca inicio do provider", async () => {
+    const { memory, product, store } = setup();
+    product.stockQty = 5;
+    recordMemoryStockTransition(memory, { unitId: "unit-01", product, previousQuantity: 6 });
+    const dispatcher = new StockAlertDispatcher({
+      unitId: "unit-01",
+      store,
+      send: async () => {
+        throw Object.assign(new Error("bloqueado localmente"), { reason: "isolated_outbound_not_allowlisted" });
+      },
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(dispatcher.dispatchDue()).resolves.toMatchObject({ sent: 0, failed: 1, uncertain: 0 });
+    expect(memory.stockAlerts[0]).toMatchObject({
+      status: "FAILED",
+      lastErrorCode: "isolated_outbound_not_allowlisted",
+    });
+    expect(memory.stockAlerts[0].providerCallStartedAt).toBeUndefined();
+  });
+});
+
+describe("Etapa 2 - isolamento da outbox por unidade", () => {
+  function setupTwoUnits() {
+    const memory = new InMemoryStore();
+    const template = memory.products.find((item) => item.id === "prd-pomada")!;
+    const productA = { ...template, id: "prd-unit-a", name: "Pomada A", stockQty: 5, minStockAlert: 5 };
+    const productB = { ...template, id: "prd-unit-b", name: "Pomada B", stockQty: 5, minStockAlert: 5 };
+    recordMemoryStockTransition(memory, { unitId: "unit-a", product: productA, previousQuantity: 6 });
+    recordMemoryStockTransition(memory, { unitId: "unit-b", product: productB, previousQuantity: 6 });
+    return { memory, store: new MemoryStockAlertStore(memory) };
+  }
+
+  function dispatcher(input: {
+    unitId: string;
+    store: MemoryStockAlertStore;
+    send: (phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => Promise<void>;
+    now?: () => Date;
+    resolveOwnerPhone?: (unitId: string) => string | undefined;
+  }) {
+    return new StockAlertDispatcher({
+      ...input,
+      resolveOwnerPhone: input.resolveOwnerPhone ?? (() => "5511999999999"),
+    });
+  }
+
+  it("dispatchers A e B processam apenas sua unidade mesmo com resolver permissivo", async () => {
+    const { memory, store } = setupTwoUnits();
+    const deliveries: string[] = [];
+    const send = async (_phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+      deliveries.push(text);
+    };
+
+    await expect(dispatcher({ unitId: "unit-a", store, send }).dispatchDue()).resolves.toMatchObject({
+      processed: 1,
+      sent: 1,
+    });
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]).toContain("Pomada A");
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-a")).toMatchObject({ status: "SENT", attempts: 1 });
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({ status: "PENDING", attempts: 0 });
+
+    await expect(dispatcher({ unitId: "unit-b", store, send }).dispatchDue()).resolves.toMatchObject({
+      processed: 1,
+      sent: 1,
+    });
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toContain("Pomada B");
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({ status: "SENT", attempts: 1 });
+  });
+
+  it("falha fechado sem unitId valido ou sem resolver", () => {
+    const { store } = setupTwoUnits();
+    const send = async () => undefined;
+    expect(() => new StockAlertDispatcher({
+      unitId: "",
+      store,
+      send,
+      resolveOwnerPhone: () => "5511999999999",
+    })).toThrow("valid unitId");
+    expect(() => new StockAlertDispatcher({
+      unitId: "../unit-a",
+      store,
+      send,
+      resolveOwnerPhone: () => "5511999999999",
+    })).toThrow("valid unitId");
+    expect(() => new StockAlertDispatcher({
+      unitId: "unit-a",
+      store,
+      send,
+      resolveOwnerPhone: undefined as unknown as (unitId: string) => string | undefined,
+    })).toThrow("owner resolver");
+  });
+
+  it("resolver sem telefone falha somente o alerta da unidade do dispatcher", async () => {
+    const { memory, store } = setupTwoUnits();
+    const send = vi.fn();
+    await expect(dispatcher({
+      unitId: "unit-a",
+      store,
+      send,
+      resolveOwnerPhone: () => undefined,
+    }).dispatchDue()).resolves.toMatchObject({ processed: 1, sent: 0, failed: 1 });
+    expect(send).not.toHaveBeenCalled();
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-a")).toMatchObject({
+      status: "FAILED",
+      attempts: 1,
+      lastErrorCode: "configuration",
+    });
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({ status: "PENDING", attempts: 0 });
+  });
+
+  it("nao chama o resolver se a store violar o escopo contratado", async () => {
+    const { memory, store } = setupTwoUnits();
+    const alertB = memory.stockAlerts.find((alert) => alert.unitId === "unit-b")!;
+    const claimNext = vi.spyOn(store, "claimNext").mockResolvedValue({
+      ...alertB,
+      status: "SENDING",
+      attempts: 1,
+      claimedAt: new Date(),
+      deliveryAttemptId: crypto.randomUUID(),
+    });
+    const resolver = vi.fn(() => "5511999999999");
+    const send = vi.fn();
+    await expect(dispatcher({ unitId: "unit-a", store, send, resolveOwnerPhone: resolver }).dispatchDue())
+      .rejects.toThrow("outside the dispatcher unit scope");
+    expect(claimNext).toHaveBeenCalledWith("unit-a", expect.any(Date));
+    expect(resolver).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(alertB).toMatchObject({ status: "PENDING", attempts: 0 });
+  });
+
+  it("recupera claim expirado sem atravessar unidade ou consumir tentativa alheia", async () => {
+    const { memory, store } = setupTwoUnits();
+    let now = new Date("2030-01-01T12:00:00.000Z");
+    const claimedB = await store.claimNext("unit-b", now);
+    expect(claimedB).toMatchObject({ unitId: "unit-b", status: "SENDING", attempts: 1 });
+    now = new Date(now.getTime() + 6 * 60_000);
+    const sendA = vi.fn(async (_phone, _text, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+    });
+    await expect(dispatcher({ unitId: "unit-a", store, send: sendA, now: () => now }).dispatchDue())
+      .resolves.toMatchObject({ recovered: 0, sent: 1 });
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({
+      status: "SENDING",
+      attempts: 1,
+      deliveryAttemptId: claimedB?.deliveryAttemptId,
+    });
+
+    const sendB = vi.fn(async (_phone, _text, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+    });
+    await expect(dispatcher({ unitId: "unit-b", store, send: sendB, now: () => now }).dispatchDue())
+      .resolves.toMatchObject({ recovered: 1, sent: 1 });
+    expect(sendB).toHaveBeenCalledOnce();
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({ status: "SENT", attempts: 1 });
+  });
+
+  it("finalizacoes recusam alerta de outra unidade sem alterar estado", async () => {
+    const { memory, store } = setupTwoUnits();
+    const now = new Date("2030-01-01T12:00:00.000Z");
+    const claimedB = (await store.claimNext("unit-b", now))!;
+    await expect(store.markProviderCallStarted("unit-a", claimedB, now)).resolves.toBe(false);
+    await expect(store.markSent("unit-a", claimedB, now)).resolves.toBe(false);
+    await expect(store.markFailed("unit-a", claimedB, { errorCode: "http", failedAt: now })).resolves.toBe(false);
+    await expect(store.markUncertain("unit-a", claimedB, { errorCode: "timeout", uncertainAt: now })).resolves.toBe(false);
+    expect(memory.stockAlerts.find((alert) => alert.unitId === "unit-b")).toMatchObject({
+      status: "SENDING",
+      attempts: 1,
+      providerCallStartedAt: undefined,
+    });
+  });
+
+  it("workers de unidades diferentes processam em paralelo sem perda ou duplicacao", async () => {
+    const { memory, store } = setupTwoUnits();
+    const deliveries: string[] = [];
+    const send = async (_phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+      deliveries.push(text);
+    };
+    const [resultA, resultB] = await Promise.all([
+      dispatcher({ unitId: "unit-a", store, send }).dispatchDue(),
+      dispatcher({ unitId: "unit-b", store, send }).dispatchDue(),
+    ]);
+    expect(resultA).toMatchObject({ processed: 1, sent: 1, failed: 0 });
+    expect(resultB).toMatchObject({ processed: 1, sent: 1, failed: 0 });
+    expect(deliveries).toHaveLength(2);
+    expect(memory.stockAlerts).toHaveLength(2);
+    expect(memory.stockAlerts.every((alert) => alert.status === "SENT" && alert.attempts === 1)).toBe(true);
   });
 });
 
@@ -255,7 +535,13 @@ describe("Etapa 2 - integracao HTTP pos-commit", () => {
   it("envia uma vez por transicao e reinicia o ciclo sem mensagem de recuperacao", async () => {
     const { memoryStore, product } = configure();
     const sent: string[] = [];
-    const app = createApp({ memoryStore, stockAlertSend: async (_phone, text) => { sent.push(text); } });
+    const app = createApp({
+      memoryStore,
+      stockAlertSend: async (_phone, text, attempt) => {
+        await attempt?.onProviderCallStarted();
+        sent.push(text);
+      },
+    });
 
     const adjust = async (type: "IN" | "OUT", quantity: number) => await app.inject({
       method: "PATCH",
@@ -285,17 +571,17 @@ describe("Etapa 2 - integracao HTTP pos-commit", () => {
     await app.close();
   });
 
-  it("falha da Evolution preserva movimento e retry envia o mesmo alerta", async () => {
+  it("timeout ambiguo preserva movimento e nunca reenvia LOW_STOCK", async () => {
     const { memoryStore, product } = configure();
     let now = new Date("2026-07-16T15:00:00.000Z");
-    let fail = true;
     let sends = 0;
     const app = createApp({
       memoryStore,
       stockAlertNow: () => now,
-      stockAlertSend: async () => {
+      stockAlertSend: async (_phone, _text, attempt) => {
         sends += 1;
-        if (fail) throw Object.assign(new Error("payload externo secreto"), { reason: "timeout" });
+        await attempt?.onProviderCallStarted();
+        throw Object.assign(new Error("payload externo secreto"), { reason: "timeout" });
       },
     });
 
@@ -308,14 +594,21 @@ describe("Etapa 2 - integracao HTTP pos-commit", () => {
     expect(product.stockQty).toBe(5);
     expect(memoryStore.stockAlerts).toHaveLength(1);
     const alertId = memoryStore.stockAlerts[0].id;
-    expect(memoryStore.stockAlerts[0]).toMatchObject({ status: "FAILED", attempts: 1 });
+    expect(memoryStore.stockAlerts[0]).toMatchObject({
+      status: "UNCERTAIN",
+      attempts: 1,
+      lastErrorCode: "timeout",
+    });
+    expect(memoryStore.stockAlerts[0].deliveryAttemptId).toBeTruthy();
+    expect(memoryStore.stockAlerts[0].providerCallStartedAt).toBeInstanceOf(Date);
 
-    fail = false;
     now = new Date(now.getTime() + 30_000);
     await app.inject({ method: "GET", url: "/health" });
-    expect(sends).toBe(2);
+    now = new Date(now.getTime() + 10 * 60_000);
+    await app.inject({ method: "GET", url: "/health" });
+    expect(sends).toBe(1);
     expect(memoryStore.stockAlerts).toHaveLength(1);
-    expect(memoryStore.stockAlerts[0]).toMatchObject({ id: alertId, status: "SENT", attempts: 2 });
+    expect(memoryStore.stockAlerts[0]).toMatchObject({ id: alertId, status: "UNCERTAIN", attempts: 1 });
     expect(JSON.stringify(memoryStore.auditEvents)).not.toContain("payload externo secreto");
     await app.close();
   });
@@ -361,30 +654,36 @@ describe("Etapa 2 - fontes de movimentacao em memoria", () => {
   });
 
   it("avalia uma vez o checkout combinado com produto e consumo por servico", () => {
-    const { store, product, operations } = serviceWithStock(7, 5);
-    const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
-    if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
-    const appointment = operations.schedule({
-      unitId: "unit-01",
-      clientId: "cli-01",
-      professionalId: "pro-01",
-      serviceId: "svc-corte",
-      startsAt: new Date("2026-07-20T12:00:00.000Z"),
-      changedBy: "owner",
-    });
-    operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "CONFIRMED", changedBy: "owner" });
-    operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "IN_SERVICE", changedBy: "owner" });
-    operations.checkoutAppointment({
-      appointmentId: appointment.id,
-      unitId: "unit-01",
-      changedBy: "owner",
-      completedAt: new Date("2026-07-20T12:45:00.000Z"),
-      paymentMethod: "PIX",
-      products: [{ productId: product.id, quantity: 1 }],
-    });
-    expect(product.stockQty).toBe(5);
-    expect(store.stockAlerts).toHaveLength(1);
-    expect(store.stockAlerts[0]).toMatchObject({ alertType: "LOW_STOCK", quantity: 5 });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T09:00:00.000Z"));
+    try {
+      const { store, product, operations } = serviceWithStock(7, 5);
+      const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
+      if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
+      const appointment = operations.schedule({
+        unitId: "unit-01",
+        clientId: "cli-01",
+        professionalId: "pro-01",
+        serviceId: "svc-corte",
+        startsAt: new Date(Date.now() + 3 * 60 * 60_000),
+        changedBy: "owner",
+      });
+      operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "CONFIRMED", changedBy: "owner" });
+      operations.updateStatus({ appointmentId: appointment.id, unitId: "unit-01", status: "IN_SERVICE", changedBy: "owner" });
+      operations.checkoutAppointment({
+        appointmentId: appointment.id,
+        unitId: "unit-01",
+        changedBy: "owner",
+        completedAt: new Date(Date.now() + 3 * 60 * 60_000 + 45 * 60_000),
+        paymentMethod: "PIX",
+        products: [{ productId: product.id, quantity: 1 }],
+      });
+      expect(product.stockQty).toBe(5);
+      expect(store.stockAlerts).toHaveLength(1);
+      expect(store.stockAlerts[0]).toMatchObject({ alertType: "LOW_STOCK", quantity: 5 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("devolucao recupera e reinicia o ciclo sem mensagem", () => {

@@ -109,6 +109,47 @@ describe("vocabulario assistido do audio por unidade", () => {
     expect(result.correctedCategories).not.toContain("product");
   });
 
+  it("canonicaliza a grafia fonetica mate no contexto de entrada de estoque", () => {
+    const vocabulary = buildBarbershopAudioVocabulary(context({
+      unitId: "unit-stock-matte",
+      products: [{ name: "Pomada Matte", category: "Finalizacao" }],
+    }));
+    const result = canonicalizeAudioTranscript(
+      "Entraram duas pomadas mate no estoque por R$5 cada uma.",
+      vocabulary,
+    );
+
+    expect(result.transcript).toContain("Pomada Matte");
+    expect(result.fields).toContainEqual(expect.objectContaining({
+      category: "product",
+      status: "GROUNDED",
+      canonical: "Pomada Matte",
+    }));
+    expect(result.correctedCategories).toContain("product");
+  });
+
+  it("aterra olhos para barba como produto quando o audio diz acabei de comprar", () => {
+    const vocabulary = buildBarbershopAudioVocabulary(context({
+      unitId: "unit-stock-oil",
+      products: [
+        { name: "Oleo para Barba", category: "Barba" },
+        { name: "Pomada Matte", category: "Finalizacao" },
+      ],
+    }));
+    const result = canonicalizeAudioTranscript(
+      "Acabei de comprar sete olhos para barba no valor de quatro reais cada um",
+      vocabulary,
+    );
+
+    expect(result.transcript).toBe("Acabei de comprar sete Oleo para Barba no valor de quatro reais cada um");
+    expect(result.fields).toContainEqual(expect.objectContaining({
+      category: "product",
+      status: "GROUNDED",
+      canonical: "Oleo para Barba",
+    }));
+    expect(result.fields.some((field) => field.category === "service")).toBe(false);
+  });
+
   it("gera prompt focado curto e estavel para segunda passagem", () => {
     const vocabulary = buildBarbershopAudioVocabulary(context());
     const prompt = buildFocusedWhisperPrompt(vocabulary, ["Pomada", "Gel", "Pomada"]);

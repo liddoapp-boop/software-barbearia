@@ -29,7 +29,7 @@ function baseDoctorSnapshot() {
     composeUsesLatest: false,
     composeDeclaresExpectedImage: true,
     containers: {
-      api: { running: true, status: "running", configuredImage: lock.runtimeImage, imageId: "sha256:runtime" },
+      api: { running: true, status: "running", health: "healthy", configuredImage: lock.runtimeImage, imageId: "sha256:runtime" },
       postgres: { running: true, health: "healthy" },
       redis: { running: true, health: "healthy" },
     },
@@ -124,6 +124,52 @@ describe("Evolution local hardening", () => {
 });
 
 describe("evolution:doctor", () => {
+  it("aprova somente o contrato integralmente healthy", async () => {
+    const common = await importMjs("scripts/evolution-common.mjs");
+    const result = common.evaluateEvolutionDoctorSnapshot(baseDoctorSnapshot(), {
+      expectedWebhookUrl: "http://host.docker.internal:3334/webhooks/evolution/whatsapp",
+    });
+    expect(result).toEqual({ ok: true, issues: [] });
+  });
+
+  it.each([
+    ["api", "unhealthy", "api_unhealthy"],
+    ["api", "starting", "api_unhealthy"],
+    ["api", undefined, "api_unhealthy"],
+    ["postgres", "unhealthy", "postgres_unhealthy"],
+    ["postgres", "starting", "postgres_unhealthy"],
+    ["postgres", undefined, "postgres_unhealthy"],
+    ["redis", "unhealthy", "redis_unhealthy"],
+    ["redis", "starting", "redis_unhealthy"],
+    ["redis", undefined, "redis_unhealthy"],
+  ])("reprova %s com health %s", async (service, health, expectedCode) => {
+    const common = await importMjs("scripts/evolution-common.mjs");
+    const snapshot = baseDoctorSnapshot();
+    const containers = snapshot.containers as Record<string, { running: boolean; health?: string }>;
+    containers[service].health = health;
+    const result = common.evaluateEvolutionDoctorSnapshot(snapshot, {
+      expectedWebhookUrl: "http://host.docker.internal:3334/webhooks/evolution/whatsapp",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue: { code: string }) => issue.code)).toContain(expectedCode);
+  });
+
+  it.each([
+    ["api", "api_not_running"],
+    ["postgres", "postgres_not_running"],
+    ["redis", "redis_not_running"],
+  ])("reprova %s parado", async (service, expectedCode) => {
+    const common = await importMjs("scripts/evolution-common.mjs");
+    const snapshot = baseDoctorSnapshot();
+    const containers = snapshot.containers as Record<string, { running: boolean; health?: string }>;
+    containers[service].running = false;
+    const result = common.evaluateEvolutionDoctorSnapshot(snapshot, {
+      expectedWebhookUrl: "http://host.docker.internal:3334/webhooks/evolution/whatsapp",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue: { code: string }) => issue.code)).toContain(expectedCode);
+  });
+
   it.each([
     ["latest_forbidden", { composeUsesLatest: true }],
     ["runtime_digest_mismatch", { containers: { ...baseDoctorSnapshot().containers, api: { ...baseDoctorSnapshot().containers.api, imageId: "sha256:other" } } }],

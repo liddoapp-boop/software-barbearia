@@ -121,6 +121,13 @@ function singularPluralAliases(value: string) {
   return [`${normalized}s`];
 }
 
+function productSpellingAliases(value: string) {
+  const normalized = normalizeAudioVocabularyText(value);
+  const aliases: string[] = [];
+  if (/\bmatte\b/.test(normalized)) aliases.push(normalized.replace(/\bmatte\b/g, "mate"));
+  return aliases;
+}
+
 function nameParts(value: string) {
   const parts = value.trim().split(/\s+/).filter((part) => normalizeAudioVocabularyText(part).length >= 3);
   return parts.length > 1 ? parts : [];
@@ -172,7 +179,7 @@ function buildTerms(context: OwnerCommandContext) {
     if (item.category) add("service", item.category, [], 70);
   });
   context.products.forEach((item) => {
-    add("product", item.name, [item.category, ...singularPluralAliases(item.name)], 95);
+    add("product", item.name, [item.category, ...singularPluralAliases(item.name), ...productSpellingAliases(item.name)], 95);
     if (item.category) add("product", item.category, [], 65);
   });
   context.paymentMethods.forEach((item) => add("payment", item.name, paymentAliases(item.name), 90));
@@ -268,7 +275,9 @@ export function canonicalizeAudioTranscript(transcript: string, vocabulary: Barb
       const ranked = entityTerms
         .filter((term) => {
           if (term.category === "professional") return /(?:^| )(?:com|profissional)$/.test(prefix);
-          if (term.category === "product") return /\b(?:vender|venda|vendi|levou|comprou|produto|unidade)\b/.test(normalizedTranscript);
+          if (term.category === "product") {
+            return /\b(?:vender|venda|vendi|levou|comprou|comprar|produto|unidade|estoque|entrada|entraram|entrou|chegaram|chegou|comprei|compramos|recebi|recebemos|adiciona|adiciono|adicione)\b/.test(normalizedTranscript);
+          }
           if (term.category === "payment") return /\b(?:pagamento|pagou|pix|dinheiro|cartao|debito|credito|venda|vender|vendi)\b/.test(normalizedTranscript);
           return /\b(?:agendar|agenda|marcar|encaixar|remarcar|servico|corte|barba)\b/.test(normalizedTranscript);
         })

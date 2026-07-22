@@ -24,6 +24,29 @@ export const stockEntryDraftSchema = z.object({
 
 export type StockEntryDraft = z.infer<typeof stockEntryDraftSchema>;
 
+export const stockEntryBatchDraftSchema = z.object({
+  items: z.array(stockEntryDraftSchema).min(1).max(50),
+  totalCost: z.number().positive().max(50_000_000),
+}).superRefine((batch, context) => {
+  const productIds = batch.items.map((item) => item.productId);
+  if (new Set(productIds).size !== productIds.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "O mesmo produto não pode aparecer duas vezes no lote.", path: ["items"] });
+  }
+  const expectedTotal = Math.round(batch.items.reduce((sum, item) => sum + item.totalCost, 0) * 100) / 100;
+  if (Math.round(batch.totalCost * 100) !== Math.round(expectedTotal * 100)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "O total geral do lote não corresponde aos itens.", path: ["totalCost"] });
+  }
+});
+
+export type StockEntryBatchDraft = z.infer<typeof stockEntryBatchDraftSchema>;
+
+export function buildStockEntryBatchDraft(items: StockEntryDraft[]): StockEntryBatchDraft {
+  return stockEntryBatchDraftSchema.parse({
+    items,
+    totalCost: Math.round(items.reduce((sum, item) => sum + item.totalCost, 0) * 100) / 100,
+  });
+}
+
 export const stockEntryPreviewSchema = z.object({
   version: z.literal(STOCK_ENTRY_PREVIEW_VERSION),
   id: z.string().uuid(),
@@ -31,11 +54,16 @@ export const stockEntryPreviewSchema = z.object({
   actorId: z.string().min(1),
   phoneFingerprint: z.string().min(8).max(128),
   draft: stockEntryDraftSchema,
+  batch: stockEntryBatchDraftSchema.optional(),
   createdAt: z.string().datetime({ offset: true }),
   expiresAt: z.string().datetime({ offset: true }),
 });
 
 export type StockEntryPreview = z.infer<typeof stockEntryPreviewSchema>;
+
+export function getStockEntryPreviewBatch(preview: Pick<StockEntryPreview, "draft" | "batch">) {
+  return preview.batch ?? buildStockEntryBatchDraft([preview.draft]);
+}
 
 export type StockEntryPreviewStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "CANCELLED" | "EXPIRED";
 
@@ -64,6 +92,20 @@ export const stockEntryConfirmationResultSchema = z.object({
     name: z.string().min(1),
     stockQty: z.number().int(),
   }),
+  movements: z.array(z.object({
+    id: z.string().min(1),
+    productId: z.string().min(1),
+    quantity: z.number().int().positive(),
+    unitCost: z.number().positive(),
+    totalCost: z.number().positive(),
+    occurredAt: z.string().datetime({ offset: true }),
+  })).optional(),
+  products: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    stockQty: z.number().int(),
+  })).optional(),
+  totalCost: z.number().positive().optional(),
   replay: z.boolean(),
 });
 
@@ -78,6 +120,7 @@ export type ConfirmStockEntryInput = {
   previewAction: string;
   previewPayloadHash: string;
   draft: StockEntryDraft;
+  batch?: StockEntryBatchDraft;
   audit: TransactionalAuditContext;
 };
 
@@ -102,7 +145,13 @@ export type StockEntryInterpretation =
       message: string;
       candidateNames?: string[];
     }
-  | { recognized: true; status: "ready"; draft: StockEntryDraft };
+  | { recognized: true; status: "ready"; draft: StockEntryDraft; batch: StockEntryBatchDraft };
+
+export type StockEntryBatchCorrectionInterpretation =
+  | { status: "not_correction" }
+  | { status: "clarification"; reason: "item_ambiguous" | "field_ambiguous"; message: string }
+  | { status: "invalid"; reason: "quantity_invalid" | "cost_invalid" | "cost_inconsistent" | "item_not_found" | "product_not_found" | "date_invalid" | "cannot_remove_only_item"; message: string }
+  | { status: "valid"; batch: StockEntryBatchDraft; draft: StockEntryDraft; changedFields: StockEntryCorrectionField[]; productId: string };
 
 export type StockEntryCorrectionField = "product" | "quantity" | "unitCost" | "totalCost" | "date";
 
@@ -162,11 +211,18 @@ function singularizeToken(token: string) {
   return token;
 }
 
+function normalizeProductSpellingToken(token: string) {
+  // "Matte" is commonly dictated and transcribed in Portuguese as "mate".
+  // Normalizing both sides keeps the match deterministic; duplicate normalized
+  // names still produce an ambiguous result in resolveProduct.
+  return token === "matte" ? "mate" : token;
+}
+
 function normalizeProductName(value: unknown) {
   return normalizedWords(value)
     .split(" ")
     .filter(Boolean)
-    .map(singularizeToken)
+    .map((token) => normalizeProductSpellingToken(singularizeToken(token)))
     .join(" ");
 }
 
@@ -202,18 +258,19 @@ const QUANTITY_TOKEN = "(?:\\d{1,6}|um|uma|dois|duas|tres|quatro|cinco|seis|sete
 
 export function looksLikeStockEntryCommand(message: string) {
   const text = normalizedWords(message);
-  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|entrada|entraram|entrou|chegaram|chegou|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text);
+  const hasEntryVerb = /\b(?:comprei|compramos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|entrada|entraram|entrou|entrar|entrando|chegaram|chegou|inclui|incluir|recebi|recebemos|repor|reposicao)\b/.test(text)
+    || /\b(?:acabei|acabamos)\s+de\s+comprar\b/.test(text);
   const hasStockCue = /\bestoque\b/.test(text);
   const hasAmbiguousPlacementVerb = /\b(?:coloca|coloco|colocar|coloque)\b/.test(text);
   const hasSaleCue = /\b(?:vendi|venda|cliente|pagamento)\b/.test(text);
   if (hasAmbiguousPlacementVerb && !hasStockCue) return false;
-  return hasEntryVerb && (!hasSaleCue || hasStockCue || /\b(?:comprei|compramos|recebi|recebemos|entraram|entrou|chegaram|chegou|reposicao)\b/.test(text));
+  return hasEntryVerb && (!hasSaleCue || hasStockCue || /\b(?:comprei|compramos|recebi|recebemos|entraram|entrou|entrar|entrando|chegaram|chegou|reposicao)\b/.test(text));
 }
 
 function extractProductDescriptor(text: string) {
   const normalized = normalizeText(text);
   const patterns = [
-    new RegExp(`\\b(?:comprei|compramos|recebi|recebemos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|inclui|incluir|repor)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
+    new RegExp(`\\b(?:comprei|compramos|(?:acabei|acabamos)\\s+de\\s+comprar|recebi|recebemos|adiciona|adiciono|adicionar|adicione|coloca|coloco|colocar|coloque|inclui|incluir|repor)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|no\\s+valor|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
     new RegExp(`\\b(?:entraram|entrou|chegaram|chegou)\\s+(?:no\\s+estoque\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|ao\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
     new RegExp(`\\b(?:da|dar|de)\\s+entrada\\s+(?:em|de)?\\s*(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
     new RegExp(`\\bentrada\\s+(?:de\\s+)?(${QUANTITY_TOKEN})\\s+(.+?)(?=\\s+(?:por|a\\s+|no\\s+estoque|com\\s+custo|custando|paguei|pagamos|cada|total|obs(?:ervacao)?\\s*:)|[.!?,;]|$)`, "i"),
@@ -401,6 +458,32 @@ function correctionProductTarget(text: string) {
   return undefined;
 }
 
+function correctionQuantityByContext(text: string, currentDraft: StockEntryDraft) {
+  const explicit = firstCorrectionNumber(text, [
+    new RegExp(`\\b(?:sao|foram)\\s+(${CORRECTION_NUMBER_TOKEN})\\s+(?:unidades?|itens?)\\b`, "i"),
+    new RegExp(`\\bquantidade(?:\\s+correta)?\\s*(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
+    new RegExp(`\\bcoloca\\s+(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
+    new RegExp(`\\bcorrig(?:e|ir)\\s+(?:a\\s+quantidade\\s+)?para\\s+(${CORRECTION_NUMBER_TOKEN})(?:\\s+(?:unidades?|itens?))?\\s*(?=[,.;!?]|$)`, "i"),
+  ]);
+  if (explicit !== undefined) return explicit;
+
+  const natural = text.match(new RegExp(
+    `\\b(?:sao|foram)\\s+(${CORRECTION_NUMBER_TOKEN})(?:\\s+([^,.;!?]+))?(?:[,.;!?]|$)`,
+    "i",
+  ));
+  if (!natural?.[1]) return undefined;
+  const suffix = normalizedWords(natural[2] ?? "");
+  if (!suffix) return parseCorrectionNumber(natural[1]);
+  if (/^(?:unidades?|itens?)$/.test(suffix)) return parseCorrectionNumber(natural[1]);
+
+  const productWords = normalizeProductName(currentDraft.productName).split(" ").filter(Boolean);
+  const suffixWords = normalizeProductName(suffix).split(" ").filter(Boolean);
+  const describesCurrentProduct = suffixWords.length > 0
+    && suffixWords.every((word) => productWords.includes(word))
+    && suffixWords[0] === productWords[0];
+  return describesCurrentProduct ? parseCorrectionNumber(natural[1]) : undefined;
+}
+
 export function interpretStockEntryCorrection(input: {
   message: string;
   currentDraft: StockEntryDraft;
@@ -455,12 +538,8 @@ export function interpretStockEntryCorrection(input: {
     changedFields.push("product");
   }
 
-  const quantityCue = /\b(?:sao|foram)\s+|\bquantidade\b|\bcoloca\b/.test(text);
-  quantity = firstCorrectionNumber(text, [
-    new RegExp(`\\b(?:sao|foram)\\s+(${CORRECTION_NUMBER_TOKEN})\\s+(?:unidades?|itens?)\\b`, "i"),
-    new RegExp(`\\bquantidade(?:\\s+correta)?\\s*(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
-    new RegExp(`\\bcoloca\\s+(${CORRECTION_NUMBER_TOKEN})\\b`, "i"),
-  ]);
+  const quantityCue = /\b(?:sao|foram)\s+|\bquantidade\b|\bcoloca\b|\bcorrig(?:e|ir)\s+(?:a\s+quantidade\s+)?para\b/.test(text);
+  quantity = correctionQuantityByContext(text, input.currentDraft);
   if (quantity !== undefined) {
     if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 100_000) {
       return { status: "invalid", reason: "quantity_invalid", message: "A quantidade deve ser um número inteiro positivo." };
@@ -570,7 +649,85 @@ export function parseStockEntryPreviewDecision(message: string) {
   return null;
 }
 
-export function interpretStockEntryCommand(input: {
+function stockEntryClarification(
+  reason: Extract<StockEntryInterpretation, { status: "clarification" }>["reason"],
+  candidateNames?: string[],
+): StockEntryInterpretation {
+  const messages = {
+    product_not_found: "Não encontrei esse produto cadastrado nesta unidade. Informe o nome exato de um produto existente.",
+    product_ambiguous: candidateNames?.length
+      ? `Encontrei mais de um produto parecido: ${candidateNames.join(", ")}. Qual é o produto exato?`
+      : "Encontrei mais de um produto parecido. Informe o nome exato de cada produto.",
+    quantity_missing: "Qual é a quantidade inteira de cada produto que entrou no estoque?",
+    quantity_ambiguous: "Não consegui associar cada quantidade a um único produto. Informe quantidade, produto e custo de cada item.",
+    cost_missing: "Informe o custo unitário ou total de cada produto do lote.",
+    cost_ambiguous: "Não consegui associar cada custo a um único produto. Informe o custo de cada item separadamente.",
+    cost_inconsistent: "Os valores de custo não fecham com as quantidades. Informe custos consistentes para todos os itens.",
+    date_invalid: "A data informada não é válida. Use dia/mês/ano.",
+  } as const;
+  return { recognized: true, status: "clarification", reason, message: messages[reason], candidateNames };
+}
+
+function parseStockEntryItem(input: {
+  clause: string;
+  products: StockEntryProductCandidate[];
+  occurredAt: string;
+  notes?: string;
+}): StockEntryInterpretation {
+  const command = looksLikeStockEntryCommand(input.clause) ? input.clause : `comprei ${input.clause}`;
+  const descriptor = extractProductDescriptor(command);
+  const product = resolveProduct(command, descriptor?.productText, input.products);
+  if (!product.match) {
+    return stockEntryClarification(
+      product.candidates.length > 1 ? "product_ambiguous" : "product_not_found",
+      product.candidates.map((item) => item.name),
+    );
+  }
+  const quantity = parseQuantity(command, descriptor?.quantityToken);
+  if (quantity.ambiguous) return stockEntryClarification("quantity_ambiguous");
+  if (!quantity.quantity) return stockEntryClarification("quantity_missing");
+  const costs = resolveCosts(command, quantity.quantity);
+  if ("reason" in costs && costs.reason) return stockEntryClarification(costs.reason);
+  const draft = stockEntryDraftSchema.parse({
+    productId: product.match.id,
+    productName: product.match.name,
+    salePrice: product.match.salePrice,
+    quantity: quantity.quantity,
+    unitCost: costs.unitCost,
+    totalCost: costs.totalCost,
+    occurredAt: input.occurredAt,
+    notes: input.notes,
+  });
+  return { recognized: true, status: "ready", draft, batch: buildStockEntryBatchDraft([draft]) };
+}
+
+function splitStockEntryItemClauses(message: string) {
+  const text = normalizeText(message).replace(/[.!?]+$/g, "").trim();
+  const withoutPrefix = text.replace(
+    new RegExp(`^.*?\\b(?:comprei|compramos|(?:acabei|acabamos)\\s+de\\s+comprar|recebi|recebemos|entraram|entrou|chegaram|chegou|entrada(?:\\s+de)?)\\s+(?:no\\s+estoque\\s+)?(?=${QUANTITY_TOKEN}\\s+)`, "i"),
+    "",
+  );
+  const marked = withoutPrefix.replace(
+    new RegExp(`\\s+e\\s+(?=${QUANTITY_TOKEN}\\s+)`, "gi"),
+    (separator, offset: number, source: string) => {
+      const leftEndsItem = /(?:reais?|cada|r\$)\s*$/i.test(source.slice(0, offset));
+      const rightLooksLikeItem = new RegExp(`^${QUANTITY_TOKEN}\\s+.+?\\s+(?:por|a|custando|com\\s+custo|no\\s+valor)\\b`, "i")
+        .test(source.slice(offset + separator.length));
+      return leftEndsItem || rightLooksLikeItem ? "\u0000" : separator;
+    },
+  ).replace(new RegExp(`\\s*;\\s*(?=${QUANTITY_TOKEN}\\s+)`, "gi"), "\u0000")
+    .replace(new RegExp(`\\s*,\\s*(?=${QUANTITY_TOKEN}\\s+)`, "gi"), (separator, offset: number, source: string) => {
+      const rightLooksLikeItem = new RegExp(`^${QUANTITY_TOKEN}\\s+.+?\\s+(?:por|a|custando|com\\s+custo|no\\s+valor)\\b`, "i")
+        .test(source.slice(offset + separator.length));
+      return rightLooksLikeItem ? "\u0000" : separator;
+    });
+  return marked
+    .split("\u0000")
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
+function interpretStockEntrySingleCommandLegacy(input: {
   message: string;
   products: StockEntryProductCandidate[];
   now?: Date;
@@ -629,7 +786,107 @@ export function interpretStockEntryCommand(input: {
     occurredAt,
     notes: extractNotes(input.message),
   });
-  return { recognized: true, status: "ready", draft };
+  return { recognized: true, status: "ready", draft, batch: buildStockEntryBatchDraft([draft]) };
+}
+
+export function interpretStockEntryCommand(input: {
+  message: string;
+  products: StockEntryProductCandidate[];
+  now?: Date;
+}): StockEntryInterpretation {
+  if (!looksLikeStockEntryCommand(input.message)) return { recognized: false };
+  const clauses = splitStockEntryItemClauses(input.message);
+  if (clauses.length <= 1) return interpretStockEntrySingleCommandLegacy(input);
+  const occurredAt = resolveOccurredAt(input.message, input.now ?? new Date());
+  if (!occurredAt) return stockEntryClarification("date_invalid");
+  const items: StockEntryDraft[] = [];
+  for (const clause of clauses) {
+    const parsed = parseStockEntryItem({
+      clause,
+      products: input.products,
+      occurredAt,
+      notes: extractNotes(input.message),
+    });
+    if (!parsed.recognized || parsed.status !== "ready") return parsed;
+    items.push(parsed.draft);
+  }
+  if (new Set(items.map((item) => item.productId)).size !== items.length) {
+    return stockEntryClarification("product_ambiguous", items.map((item) => item.productName));
+  }
+  const batch = buildStockEntryBatchDraft(items);
+  return { recognized: true, status: "ready", draft: items[0], batch };
+}
+
+function resolveBatchCorrectionTarget(message: string, batch: StockEntryBatchDraft) {
+  const text = normalizeProductName(message);
+  return batch.items.filter((item) => {
+    const words = normalizeProductName(item.productName).split(" ").filter(Boolean);
+    const fullName = words.join(" ");
+    if (fullName && new RegExp(`(?:^| )${fullName}(?: |$)`).test(text)) return true;
+    const meaningful = words.filter((word) => !["de", "da", "do", "para"].includes(word));
+    return meaningful.length > 0 && new RegExp(`(?:^| )${meaningful[0]}(?: |$)`).test(text);
+  });
+}
+
+export function interpretStockEntryBatchCorrection(input: {
+  message: string;
+  currentBatch: StockEntryBatchDraft;
+  products: StockEntryProductCandidate[];
+  now?: Date;
+}): StockEntryBatchCorrectionInterpretation {
+  const text = normalizeText(input.message);
+  const correctionCue = /\b(?:na verdade|corrig|custo|retira|retirar|remove|remover|exclui|excluir)\b/.test(text);
+  if (looksLikeStockEntryCommand(text) && !correctionCue) return { status: "not_correction" };
+  const targets = resolveBatchCorrectionTarget(text, input.currentBatch);
+  if (targets.length !== 1) {
+    return {
+      status: "clarification",
+      reason: "item_ambiguous",
+      message: targets.length > 1
+        ? "A correção menciona mais de um item. Informe qual produto deve ser alterado."
+        : "Não consegui identificar com segurança qual item do lote deve ser alterado. Informe o nome do produto.",
+    };
+  }
+  const target = targets[0];
+  if (/\b(?:retira|retirar|remove|remover|exclui|excluir)\b/.test(text)) {
+    if (input.currentBatch.items.length === 1) {
+      return { status: "invalid", reason: "cannot_remove_only_item", message: "Não é possível retirar o único item; cancele a entrada inteira." };
+    }
+    const batch = buildStockEntryBatchDraft(input.currentBatch.items.filter((item) => item.productId !== target.productId));
+    return { status: "valid", batch, draft: batch.items[0], changedFields: ["product"], productId: target.productId };
+  }
+
+  const productWord = normalizeProductName(target.productName).split(" ")[0];
+  const costMatch = text.match(new RegExp(
+    `\\b(?:o\\s+)?custo\\s+(?:d[oa]\\s+)?${productWord}.*?(?:e|era|foi|:)?\\s*(${CORRECTION_NUMBER_TOKEN})(?:\\s*reais?)?`,
+    "i",
+  ));
+  let corrected: StockEntryCorrectionInterpretation;
+  if (costMatch?.[1]) {
+    const amount = parseCorrectionNumber(costMatch[1]);
+    if (amount === undefined || amount <= 0) {
+      return { status: "invalid", reason: "cost_invalid", message: "O custo deve ser maior que zero." };
+    }
+    corrected = {
+      status: "valid",
+      draft: stockEntryDraftSchema.parse({
+        ...target,
+        unitCost: amount,
+        totalCost: Math.round(amount * target.quantity * 100) / 100,
+      }),
+      changedFields: ["unitCost"],
+    };
+  } else {
+    corrected = interpretStockEntryCorrection({ message: input.message, currentDraft: target, products: input.products, now: input.now });
+  }
+  if (corrected.status === "not_correction") return corrected;
+  if (corrected.status === "clarification") {
+    return { status: "clarification", reason: "field_ambiguous", message: corrected.message };
+  }
+  if (corrected.status === "invalid") return corrected;
+  const batch = buildStockEntryBatchDraft(input.currentBatch.items.map((item) =>
+    item.productId === target.productId ? corrected.draft : item));
+  return { status: "valid", batch, draft: batch.items[0], changedFields: corrected.changedFields, productId: target.productId };
 }
 
 function currencyBR(value: number) {
@@ -637,6 +894,29 @@ function currencyBR(value: number) {
 }
 
 export function formatStockEntryPreview(preview: StockEntryPreview, options: { updated?: boolean } = {}) {
+  const batch = getStockEntryPreviewBatch(preview);
+  if (batch.items.length > 1) {
+    const lines = [options.updated ? "Entrada de estoque em lote atualizada" : "Entrada de estoque em lote"];
+    batch.items.forEach((item, index) => {
+      lines.push(
+        "",
+        `Item ${index + 1}: ${item.productName}`,
+        `Quantidade: ${item.quantity}`,
+        `Custo unitário de compra: ${currencyBR(item.unitCost)}`,
+        `Custo total do item: ${currencyBR(item.totalCost)}`,
+        `Preço de venda atual: ${currencyBR(item.salePrice)}`,
+      );
+    });
+    const occurredAt = batch.items[0].occurredAt;
+    lines.push(
+      "",
+      `Total geral: ${currencyBR(batch.totalCost)}`,
+      `Data: ${occurredAt.slice(8, 10)}/${occurredAt.slice(5, 7)}/${occurredAt.slice(0, 4)}`,
+      "",
+      "CONFIRMAR ou CANCELAR",
+    );
+    return lines.join("\n");
+  }
   const draft = preview.draft;
   const lines = [
     options.updated ? "Entrada de estoque atualizada" : "Entrada de estoque",

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/http/app";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
@@ -176,6 +178,115 @@ describe("parser determinístico de entrada de estoque", () => {
   ])("interpreta custo unitário e total sem modelo: %s", (message, expected) => {
     const result = interpretStockEntryCommand({ message, products, now });
     expect(result).toMatchObject({ recognized: true, status: "ready", draft: expected });
+  });
+
+  it.each([
+    "Entraram duas Pomadas Matte no estoque por cinco reais cada.",
+    "Entraram duas pomadas mate no estoque por cinco reais cada.",
+  ])("resolve a variacao segura Matte/mate sem atravessar o catalogo: %s", (message) => {
+    expect(interpretStockEntryCommand({ message, products, now })).toMatchObject({
+      recognized: true,
+      status: "ready",
+      draft: {
+        productId: "prd-pomada",
+        productName: "Pomada Matte",
+        quantity: 2,
+        unitCost: 5,
+        totalCost: 10,
+        salePrice: 59,
+      },
+    });
+  });
+
+  it("interpreta acabei de comprar como nova entrada de Oleo para Barba", () => {
+    expect(interpretStockEntryCommand({
+      message: "Acabei de comprar tres Oleo para Barba no valor de quatro reais cada um.",
+      products: [
+        ...products,
+        { id: "prd-oleo-barba", name: "Oleo para Barba", salePrice: 39 },
+      ],
+      now,
+    })).toMatchObject({
+      recognized: true,
+      status: "ready",
+      draft: {
+        productId: "prd-oleo-barba",
+        productName: "Oleo para Barba",
+        quantity: 3,
+        unitCost: 4,
+        totalCost: 12,
+        salePrice: 39,
+      },
+    });
+  });
+
+  it.each([
+    [
+      "Entraram duas unidades de Óleo para Barba no estoque, por sete reais cada.",
+      { quantity: 2, unitCost: 7, totalCost: 14 },
+    ],
+    [
+      "Entraram duas unidades de Óleo para Barba no estoque, por sete reais por unidade.",
+      { quantity: 2, unitCost: 7, totalCost: 14 },
+    ],
+    [
+      "Entraram duas unidades de Óleo para Barba no estoque, por quatorze reais no total.",
+      { quantity: 2, unitCost: 7, totalCost: 14 },
+    ],
+    [
+      "Acabou de entrar duas unidades de óleo para barba no estoque e foi R$7 cada um.",
+      { quantity: 2, unitCost: 7, totalCost: 14 },
+    ],
+  ])("mantem custo de compra canonico e preco de venda apenas informativo: %s", (message, expected) => {
+    const result = interpretStockEntryCommand({
+      message,
+      products: [
+        ...products,
+        { id: "prd-oleo-barba", name: "Óleo para Barba", salePrice: 39 },
+      ],
+      now,
+    });
+
+    expect(result).toMatchObject({
+      recognized: true,
+      status: "ready",
+      draft: {
+        productId: "prd-oleo-barba",
+        salePrice: 39,
+        ...expected,
+      },
+    });
+  });
+
+  it("pede esclarecimento quando o custo nao informa se e unitario ou total", () => {
+    expect(interpretStockEntryCommand({
+      message: "Entraram duas unidades de Óleo para Barba no estoque, por sete reais.",
+      products: [
+        ...products,
+        { id: "prd-oleo-barba", name: "Óleo para Barba", salePrice: 39 },
+      ],
+      now,
+    })).toMatchObject({
+      recognized: true,
+      status: "clarification",
+      reason: "cost_ambiguous",
+    });
+  });
+
+  it("recusa Matte/mate quando dois produtos da unidade colidem apos normalizacao", () => {
+    expect(interpretStockEntryCommand({
+      message: "Entraram duas pomadas mate no estoque por cinco reais cada.",
+      products: [
+        { id: "prd-matte", name: "Pomada Matte", salePrice: 59 },
+        { id: "prd-mate", name: "Pomada Mate", salePrice: 55 },
+      ],
+      now,
+    })).toMatchObject({
+      recognized: true,
+      status: "clarification",
+      reason: "product_ambiguous",
+      candidateNames: ["Pomada Matte", "Pomada Mate"],
+    });
   });
 
   it.each([
@@ -592,6 +703,145 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     await app.close();
   });
 
+  it("texto canonico e transcript real do audio geram a mesma previa sem efeitos antes de CONFIRMAR", async () => {
+    const run = async (audio: boolean) => {
+      const store = new InMemoryStore();
+      const fetchMock = transportMock();
+      vi.stubGlobal("fetch", fetchMock);
+      const text = "Entraram duas unidades de Óleo para Barba no estoque, por sete reais cada.";
+      const realTranscript = "Acabou de entrar duas unidades de óleo para barba no estoque e foi R$7 cada um.";
+      const transcriber: AudioTranscriptionService = {
+        transcribe: vi.fn(async () => ({ transcript: realTranscript, provider: "local_whisper:real-canary" })),
+      };
+      const app = createApp({
+        memoryStore: store,
+        audioTranscriptionService: audio ? transcriber : undefined,
+        ownerCommandParser: null,
+      });
+      const product = store.products.find((item) => item.id === "prd-oleo-barba")!;
+      const stockBefore = product.stockQty;
+      const response = await webhook(
+        app,
+        audio
+          ? evolutionAudioPayload("stock-cost-contract-audio-001")
+          : evolutionTextPayload(text, "stock-cost-contract-text-001"),
+      );
+      const body = response.json();
+      const outgoing = sentTexts(fetchMock).at(-1) ?? "";
+
+      expect(product.stockQty).toBe(stockBefore);
+      expect(store.stockMovements).toHaveLength(0);
+      expect(store.financialEntries).toHaveLength(0);
+      expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(0);
+      await app.close();
+      return { body, outgoing };
+    };
+
+    const textResult = await run(false);
+    const audioResult = await run(true);
+
+    expect(audioResult.body.preview).toEqual(textResult.body.preview);
+    expect(textResult.body).toMatchObject({
+      intent: "stock_entry",
+      executed: false,
+      audio: false,
+      preview: {
+        productId: "prd-oleo-barba",
+        quantity: 2,
+        unitCost: 7,
+        totalCost: 14,
+        salePrice: 39,
+      },
+    });
+    expect(audioResult.body).toMatchObject({ intent: "stock_entry", executed: false, audio: true });
+    for (const outgoing of [textResult.outgoing, audioResult.outgoing]) {
+      expect(outgoing).toMatch(/Custo unitário de compra: R\$\s*7,00/);
+      expect(outgoing).toMatch(/Custo total: R\$\s*14,00/);
+      expect(outgoing).toMatch(/Preço de venda atual: R\$\s*39,00/);
+      expect(outgoing).not.toContain("não correspondem ao preço cadastrado");
+    }
+  });
+
+  it("gera, corrige e confirma um lote textual atomicamente sem duplicar ou criar financeiro", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp({ memoryStore: store });
+    const before = new Map(store.products.map((product) => [product.id, { stockQty: product.stockQty, salePrice: product.salePrice }]));
+
+    const preview = await webhook(app, evolutionTextPayload(
+      "Comprei 2 Pomadas Matte por 5 reais cada e 3 Óleos para Barba por 8 reais cada.",
+      "stock-batch-text-001",
+    ));
+    expect(preview.json()).toMatchObject({
+      intent: "stock_entry",
+      executed: false,
+      preview: {
+        items: [
+          { productId: "prd-pomada", quantity: 2, unitCost: 5, totalCost: 10, salePrice: 59 },
+          { productId: "prd-oleo-barba", quantity: 3, unitCost: 8, totalCost: 24, salePrice: 39 },
+        ],
+        totalCost: 34,
+      },
+    });
+    expect(sentTexts(fetchMock).at(-1)).toMatch(/Total geral: R\$\s*34,00/);
+    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.stockMovements).toHaveLength(0);
+
+    const quantity = await webhook(app, evolutionTextPayload("Na verdade, são 4 óleos.", "stock-batch-correction-qty-001"));
+    expect(quantity.json()).toMatchObject({
+      corrected: true,
+      preview: { items: [{ quantity: 2, unitCost: 5 }, { quantity: 4, unitCost: 8, totalCost: 32 }], totalCost: 42 },
+    });
+    const cost = await webhook(app, evolutionTextPayload("O custo da pomada é 6 reais.", "stock-batch-correction-cost-001"));
+    expect(cost.json()).toMatchObject({
+      corrected: true,
+      preview: { items: [{ quantity: 2, unitCost: 6, totalCost: 12 }, { quantity: 4, unitCost: 8, totalCost: 32 }], totalCost: 44 },
+    });
+    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.financialEntries).toHaveLength(0);
+
+    const confirmed = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-batch-confirm-001"));
+    const replay = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-batch-confirm-002"));
+    expect(confirmed.json()).toMatchObject({ executed: true, replay: false });
+    expect(replay.json()).toMatchObject({ executed: true, replay: true });
+    expect(store.products.map((product) => product.stockQty)).toEqual([17, 16]);
+    expect(store.products.map((product) => product.salePrice)).toEqual([
+      before.get("prd-pomada")?.salePrice,
+      before.get("prd-oleo-barba")?.salePrice,
+    ]);
+    expect(store.stockMovements).toHaveLength(2);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
+    await app.close();
+  });
+
+  it("áudio e texto usam o mesmo lote canônico e CANCELAR descarta o lote inteiro", async () => {
+    const store = new InMemoryStore();
+    const fetchMock = transportMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const transcript = "Comprei 2 Pomadas Matte por 5 reais cada e 3 Óleos para Barba por 8 reais cada.";
+    const transcriber: AudioTranscriptionService = {
+      transcribe: vi.fn(async () => ({ transcript, provider: "local_whisper:batch-test" })),
+    };
+    const app = createApp({ memoryStore: store, audioTranscriptionService: transcriber });
+    const audio = await webhook(app, evolutionAudioPayload("stock-batch-audio-001"));
+    expect(audio.json()).toMatchObject({
+      intent: "stock_entry",
+      audio: true,
+      preview: { items: [{ productId: "prd-pomada" }, { productId: "prd-oleo-barba" }], totalCost: 34 },
+    });
+    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.stockMovements).toHaveLength(0);
+
+    const cancelled = await webhook(app, evolutionTextPayload("CANCELAR", "stock-batch-cancel-001"));
+    expect(cancelled.json()).toMatchObject({ intent: "stock_entry", cancelled: true });
+    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.stockMovements).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    await app.close();
+  });
+
   it("atualiza a mesma prévia, resolve ambiguidade e confirma somente a versão mais recente", async () => {
     const store = new InMemoryStore();
     const fetchMock = transportMock();
@@ -969,6 +1219,72 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(product.stockQty).toBe(stockBefore + 2);
     expect(store.stockMovements).toHaveLength(1);
     expect(store.financialEntries).toHaveLength(0);
+    await app.close();
+  });
+
+  it("nao mistura o Ogg real de uma nova entrada de oleo com a previa pendente de pomada", async () => {
+    const fixture = readFileSync(path.resolve("tests/fixtures/evolution-stock-entry-oil-eyes-real.ogg"));
+    const store = new InMemoryStore();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/chat/getBase64FromMediaMessage/")) {
+        return { ok: true, headers: { get: () => null }, json: async () => ({ base64: fixture.toString("base64") }) };
+      }
+      if (url.includes("/message/sendText/")) return { ok: true, status: 200, text: async () => "" };
+      throw new Error(`Chamada externa inesperada: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const transcriber: AudioTranscriptionService = {
+      transcribe: vi.fn(async () => ({
+        transcript: "Acabei de comprar sete olhos para barba no valor de quatro reais cada um",
+        provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      })),
+    };
+    const app = createApp({ memoryStore: store, audioTranscriptionService: transcriber, ownerCommandParser: null });
+    const pomada = store.products.find((item) => item.id === "prd-pomada")!;
+    const oleo = store.products.find((item) => item.id === "prd-oleo-barba")!;
+    const stockBefore = { pomada: pomada.stockQty, oleo: oleo.stockQty };
+    const original = await webhook(app, evolutionTextPayload(
+      "Adiciona 3 Pomadas Matte no estoque por 5 reais cada.",
+      "stock-pending-oil-real-original-001",
+    ));
+    const payload = evolutionAudioPayload("stock-pending-oil-real-audio-001");
+    payload.data.message.audioMessage.fileLength = fixture.length;
+    payload.data.message.audioMessage.seconds = 7;
+
+    const blocked = await webhook(app, payload);
+    const replay = await webhook(app, payload);
+
+    expect(original.json()).toMatchObject({
+      preview: { productId: "prd-pomada", quantity: 3, unitCost: 5, totalCost: 15 },
+    });
+    expect(blocked.json()).toMatchObject({
+      intent: "stock_entry",
+      executed: false,
+      pendingPreserved: true,
+      newStockEntryBlocked: true,
+    });
+    expect(blocked.json()).not.toHaveProperty("corrected", true);
+    expect(replay.json()).toMatchObject({ replay: true, deduplicated: true, executed: false });
+    expect(sentTexts(fetchMock).at(-1)).toContain("antes de iniciar outra entrada");
+    const stored = [...store.aiWhatsappStockEntryPreviews.values()][0] as { preview: StockEntryPreview };
+    expect(stored.preview).toMatchObject({
+      id: original.json().previewId,
+      draft: {
+        productId: "prd-pomada",
+        productName: "Pomada Matte",
+        quantity: 3,
+        unitCost: 5,
+        totalCost: 15,
+        salePrice: 59,
+      },
+    });
+    expect(pomada.stockQty).toBe(stockBefore.pomada);
+    expect(oleo.stockQty).toBe(stockBefore.oleo);
+    expect(store.stockMovements).toHaveLength(0);
+    expect(store.financialEntries).toHaveLength(0);
+    expect(store.auditEvents.filter((event) => event.action === "AI_WHATSAPP_STOCK_ENTRY_PREVIEW_CORRECTED")).toHaveLength(0);
+    expect(transcriber.transcribe).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("getBase64FromMediaMessage"))).toHaveLength(1);
     await app.close();
   });
 

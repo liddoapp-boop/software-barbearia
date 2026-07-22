@@ -7,7 +7,7 @@ import { hashPassword } from "../src/http/security";
 import { buildServiceSetKey } from "../src/domain/appointment-services";
 import { PrismaOperationsService } from "../src/application/prisma-operations-service";
 import { StockEntryPreviewRepository } from "../src/application/stock-entry-preview-repository";
-import { STOCK_ENTRY_PREVIEW_VERSION, StockEntryPreview } from "../src/application/stock-entry";
+import { STOCK_ENTRY_PREVIEW_VERSION, StockEntryPreview, buildStockEntryBatchDraft } from "../src/application/stock-entry";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 import { PrismaStockAlertStore, StockAlertDispatcher } from "../src/application/stock-alert-outbox";
 import {
@@ -20,7 +20,7 @@ import {
   PrismaReactivationCampaignRepository,
   ReactivationCampaignService,
 } from "../src/application/reactivation-campaign";
-import { WhatsappDeliveryError } from "../src/notifications";
+import { WhatsappDeliveryError, type WhatsappDeliveryAttemptContext } from "../src/notifications";
 
 const SENSITIVE_DATABASE_URL_PATTERNS = [
   /(^|[^a-z])prod([^a-z]|$)/i,
@@ -3546,6 +3546,112 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     expect((await repository.find({ unitId: scenario.unitId, actorId: rollbackPreview.actorId, phoneFingerprint: rollbackPreview.phoneFingerprint }))?.status).toBe("PENDING");
   });
 
+  it("mantém equivalência Prisma para lote de estoque, replay e rollback integral", async () => {
+    const scenario = await createScenario();
+    const secondProductId = uniqueId("prd-batch-second");
+    await prisma.product.create({
+      data: {
+        id: secondProductId,
+        businessId: scenario.unitId,
+        name: "Oleo DB",
+        category: "BARBA",
+        salePrice: 39,
+        costPrice: 14,
+        stockQty: 12,
+        minStockAlert: 3,
+      },
+    });
+    const [firstBefore, secondBefore] = await Promise.all([
+      prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } }),
+      prisma.product.findUniqueOrThrow({ where: { id: secondProductId } }),
+    ]);
+    const batch = buildStockEntryBatchDraft([
+      {
+        productId: scenario.productId,
+        productName: firstBefore.name,
+        salePrice: Number(firstBefore.salePrice),
+        quantity: 2,
+        unitCost: 5,
+        totalCost: 10,
+        occurredAt: "2026-07-20T12:00:00.000-03:00",
+      },
+      {
+        productId: secondProductId,
+        productName: secondBefore.name,
+        salePrice: Number(secondBefore.salePrice),
+        quantity: 3,
+        unitCost: 8,
+        totalCost: 24,
+        occurredAt: "2026-07-20T12:00:00.000-03:00",
+      },
+    ]);
+    const repository = new StockEntryPreviewRepository({ backend: "prisma", memoryStore: new InMemoryStore(), prisma });
+    const makePreview = (): StockEntryPreview => ({
+      version: STOCK_ENTRY_PREVIEW_VERSION,
+      id: crypto.randomUUID(),
+      unitId: scenario.unitId,
+      actorId: "db-batch-owner",
+      phoneFingerprint: "db-batch-phone-fingerprint",
+      draft: batch.items[0],
+      batch,
+      createdAt: new Date("2026-07-20T15:00:00.000Z").toISOString(),
+      expiresAt: "2099-07-20T15:10:00.000Z",
+    });
+    const inputFor = async (preview: StockEntryPreview) => {
+      const record = await repository.save(preview);
+      return {
+        unitId: preview.unitId,
+        actorId: preview.actorId,
+        previewId: preview.id,
+        previewAction: record.action,
+        previewPayloadHash: record.payloadHash,
+        draft: preview.draft,
+        batch: preview.batch,
+        audit: {
+          actorId: preview.actorId,
+          actorRole: "owner" as const,
+          route: "/webhooks/evolution/whatsapp",
+          method: "POST",
+          requestId: uniqueId("db-batch-stock-entry"),
+          idempotencyKey: preview.id,
+        },
+      };
+    };
+
+    const preview = makePreview();
+    const input = await inputFor(preview);
+    const service = new PrismaOperationsService(prisma);
+    const result = await service.confirmStockEntry(input);
+    const replay = await service.confirmStockEntry(input);
+    expect(result).toMatchObject({ replay: false, totalCost: 34 });
+    expect(result.movements).toHaveLength(2);
+    expect(replay.replay).toBe(true);
+    const [firstAfter, secondAfter, movements, financial, audits] = await Promise.all([
+      prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } }),
+      prisma.product.findUniqueOrThrow({ where: { id: secondProductId } }),
+      prisma.stockMovement.findMany({ where: { referenceId: preview.id, referenceType: "STOCK_ENTRY" } }),
+      prisma.financialEntry.findMany({ where: { referenceId: preview.id, referenceType: "STOCK_ENTRY" } }),
+      prisma.auditLog.findMany({ where: { entityId: preview.id, action: "STOCK_ENTRY_CONFIRMED" } }),
+    ]);
+    expect(firstAfter).toMatchObject({ stockQty: firstBefore.stockQty + 2, salePrice: firstBefore.salePrice, costPrice: firstBefore.costPrice });
+    expect(secondAfter).toMatchObject({ stockQty: secondBefore.stockQty + 3, salePrice: secondBefore.salePrice, costPrice: secondBefore.costPrice });
+    expect(movements).toHaveLength(2);
+    expect(financial).toHaveLength(0);
+    expect(audits).toHaveLength(1);
+
+    const rollbackPreview = makePreview();
+    const rollbackInput = await inputFor(rollbackPreview);
+    const rollbackService = new PrismaOperationsService(prisma, undefined, undefined, (stage) => {
+      if (stage === "after_stock") throw new Error("db_batch_stock_entry_rollback");
+    });
+    await expect(rollbackService.confirmStockEntry(rollbackInput)).rejects.toThrow("db_batch_stock_entry_rollback");
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: scenario.productId } })).stockQty).toBe(firstAfter.stockQty);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: secondProductId } })).stockQty).toBe(secondAfter.stockQty);
+    expect(await prisma.stockMovement.count({ where: { referenceId: rollbackPreview.id } })).toBe(0);
+    expect(await prisma.financialEntry.count({ where: { referenceId: rollbackPreview.id } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { entityId: rollbackPreview.id, action: "STOCK_ENTRY_CONFIRMED" } })).toBe(0);
+  });
+
   it("persiste ciclo, deduplica concorrencia e despacha uma unica vez no Prisma", async () => {
     vi.useRealTimers();
     const scenario = await createScenario();
@@ -3581,8 +3687,12 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
 
     const sent: string[] = [];
     const options = {
+      unitId: scenario.unitId,
       store: new PrismaStockAlertStore(prisma),
-      send: async (_phone: string, text: string) => { sent.push(text); },
+      send: async (_phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+        await attempt?.onProviderCallStarted();
+        sent.push(text);
+      },
       resolveOwnerPhone: (unitId: string) => unitId === scenario.unitId ? "5511999999999" : undefined,
     };
     await Promise.all([
@@ -3610,6 +3720,229 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
     });
     expect(await prisma.stockAlert.count({ where: { productId: scenario.productId } })).toBe(2);
     expect(await prisma.auditLog.count({ where: { unitId: scenario.unitId, action: "STOCK_ALERT_CYCLE_RESET" } })).toBe(1);
+  });
+
+  it("isola claim, recuperacao, finalizacao e concorrencia entre tenants no Prisma", async () => {
+    vi.useRealTimers();
+    const [scenarioA, scenarioB] = await Promise.all([createScenario(), createScenario()]);
+    await Promise.all([
+      prisma.product.update({ where: { id: scenarioA.productId }, data: { stockQty: 6, minStockAlert: 5 } }),
+      prisma.product.update({ where: { id: scenarioB.productId }, data: { stockQty: 6, minStockAlert: 5 } }),
+    ]);
+    const service = new PrismaOperationsService(prisma);
+    await Promise.all([
+      service.registerStockManualMovement({
+        unitId: scenarioA.unitId,
+        productId: scenarioA.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-a"),
+      }),
+      service.registerStockManualMovement({
+        unitId: scenarioB.unitId,
+        productId: scenarioB.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-b"),
+      }),
+    ]);
+
+    const store = new PrismaStockAlertStore(prisma);
+    let now = new Date("2030-01-01T12:00:00.000Z");
+    const claimedB = (await store.claimNext(scenarioB.unitId, now))!;
+    expect(claimedB).toMatchObject({ unitId: scenarioB.unitId, status: "SENDING", attempts: 1 });
+
+    now = new Date(now.getTime() + 6 * 60_000);
+    const sent: string[] = [];
+    const send = async (_phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+      sent.push(text);
+    };
+    const dispatcherA = new StockAlertDispatcher({
+      unitId: scenarioA.unitId,
+      store,
+      now: () => now,
+      send,
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(dispatcherA.dispatchDue()).resolves.toMatchObject({ recovered: 0, processed: 1, sent: 1 });
+    expect(await prisma.stockAlert.findFirstOrThrow({ where: { unitId: scenarioB.unitId } })).toMatchObject({
+      status: "SENDING",
+      attempts: 1,
+      deliveryAttemptId: claimedB.deliveryAttemptId,
+    });
+    await expect(store.markSent(scenarioA.unitId, claimedB, now)).resolves.toBe(false);
+
+    const dispatcherB = new StockAlertDispatcher({
+      unitId: scenarioB.unitId,
+      store: new PrismaStockAlertStore(prisma),
+      now: () => now,
+      send,
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(dispatcherB.dispatchDue()).resolves.toMatchObject({ recovered: 1, processed: 1, sent: 1 });
+    expect(sent).toHaveLength(2);
+    expect(await prisma.stockAlert.findFirstOrThrow({ where: { unitId: scenarioA.unitId } })).toMatchObject({
+      status: "SENT",
+      attempts: 1,
+    });
+    expect(await prisma.stockAlert.findFirstOrThrow({ where: { unitId: scenarioB.unitId } })).toMatchObject({
+      status: "SENT",
+      attempts: 1,
+    });
+
+    await Promise.all([
+      service.registerStockManualMovement({
+        unitId: scenarioA.unitId,
+        productId: scenarioA.productId,
+        movementType: "IN",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-a-reset"),
+      }),
+      service.registerStockManualMovement({
+        unitId: scenarioB.unitId,
+        productId: scenarioB.productId,
+        movementType: "IN",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-b-reset"),
+      }),
+    ]);
+    await Promise.all([
+      service.registerStockManualMovement({
+        unitId: scenarioA.unitId,
+        productId: scenarioA.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-a-cycle-two"),
+      }),
+      service.registerStockManualMovement({
+        unitId: scenarioB.unitId,
+        productId: scenarioB.productId,
+        movementType: "OUT",
+        quantity: 1,
+        occurredAt: new Date(),
+        idempotencyKey: uniqueId("stock-alert-tenant-b-cycle-two"),
+      }),
+    ]);
+    const concurrentSent: string[] = [];
+    const concurrentSend = async (_phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => {
+      await attempt?.onProviderCallStarted();
+      concurrentSent.push(text);
+    };
+    await Promise.all([
+      new StockAlertDispatcher({
+        unitId: scenarioA.unitId,
+        store: new PrismaStockAlertStore(prisma),
+        send: concurrentSend,
+        resolveOwnerPhone: () => "5511999999999",
+      }).dispatchDue(),
+      new StockAlertDispatcher({
+        unitId: scenarioB.unitId,
+        store: new PrismaStockAlertStore(prisma),
+        send: concurrentSend,
+        resolveOwnerPhone: () => "5511999999999",
+      }).dispatchDue(),
+    ]);
+    expect(concurrentSent).toHaveLength(2);
+    expect(await prisma.stockAlert.count({
+      where: { unitId: { in: [scenarioA.unitId, scenarioB.unitId] }, status: "SENT" },
+    })).toBe(4);
+    expect(await prisma.stockAlert.count({
+      where: { unitId: { in: [scenarioA.unitId, scenarioB.unitId] }, attempts: { not: 1 } },
+    })).toBe(0);
+  });
+
+  it("persiste entrega incerta e recupera apenas claim Prisma sem chamada iniciada", async () => {
+    vi.useRealTimers();
+    const scenario = await createScenario();
+    await prisma.product.update({
+      where: { id: scenario.productId },
+      data: { stockQty: 6, minStockAlert: 5 },
+    });
+    const service = new PrismaOperationsService(prisma);
+    await service.registerStockManualMovement({
+      unitId: scenario.unitId,
+      productId: scenario.productId,
+      movementType: "OUT",
+      quantity: 1,
+      occurredAt: new Date(),
+      idempotencyKey: uniqueId("stock-alert-uncertain"),
+    });
+
+    let now = new Date("2026-07-20T15:00:00.000Z");
+    let providerCalls = 0;
+    const uncertainDispatcher = new StockAlertDispatcher({
+      unitId: scenario.unitId,
+      store: new PrismaStockAlertStore(prisma),
+      now: () => now,
+      send: async (_phone, _text, attempt) => {
+        providerCalls += 1;
+        await attempt?.onProviderCallStarted();
+        throw new WhatsappDeliveryError("timeout");
+      },
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(uncertainDispatcher.dispatchDue()).resolves.toMatchObject({
+      processed: 1,
+      sent: 0,
+      failed: 0,
+      uncertain: 1,
+    });
+    const uncertain = await prisma.stockAlert.findFirstOrThrow({ where: { productId: scenario.productId } });
+    expect(uncertain).toMatchObject({ status: "UNCERTAIN", attempts: 1, lastErrorCode: "timeout" });
+    expect(uncertain.deliveryAttemptId).toBeTruthy();
+    expect(uncertain.providerCallStartedAt).toBeInstanceOf(Date);
+    expect(uncertain.uncertainAt).toBeInstanceOf(Date);
+
+    now = new Date(now.getTime() + 10 * 60_000);
+    await uncertainDispatcher.dispatchDue();
+    expect(providerCalls).toBe(1);
+
+    await service.registerStockManualMovement({
+      unitId: scenario.unitId,
+      productId: scenario.productId,
+      movementType: "IN",
+      quantity: 1,
+      occurredAt: new Date(),
+      idempotencyKey: uniqueId("stock-alert-recover-reset"),
+    });
+    await service.registerStockManualMovement({
+      unitId: scenario.unitId,
+      productId: scenario.productId,
+      movementType: "OUT",
+      quantity: 1,
+      occurredAt: new Date(),
+      idempotencyKey: uniqueId("stock-alert-recover-pending"),
+    });
+    const store = new PrismaStockAlertStore(prisma);
+    const abandoned = await store.claimNext(scenario.unitId, now);
+    expect(abandoned).toMatchObject({ status: "SENDING", attempts: 1 });
+    expect(abandoned?.providerCallStartedAt).toBeUndefined();
+
+    now = new Date(now.getTime() + 6 * 60_000);
+    let recoveredCalls = 0;
+    const recoveryDispatcher = new StockAlertDispatcher({
+      unitId: scenario.unitId,
+      store,
+      now: () => now,
+      send: async (_phone, _text, attempt) => {
+        recoveredCalls += 1;
+        await attempt?.onProviderCallStarted();
+      },
+      resolveOwnerPhone: () => "5511999999999",
+    });
+    await expect(recoveryDispatcher.dispatchDue()).resolves.toMatchObject({ recovered: 1, sent: 1, uncertain: 0 });
+    expect(recoveredCalls).toBe(1);
+    const recovered = await prisma.stockAlert.findFirstOrThrow({
+      where: { productId: scenario.productId, status: "SENT" },
+    });
+    expect(recovered.attempts).toBe(1);
+    expect(recovered.deliveryAttemptId).not.toBe(abandoned?.deliveryAttemptId);
   });
 
   it("faz rollback comercial quando a intencao transacional do alerta falha", async () => {

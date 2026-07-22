@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createApp } from "../src/http/app";
 import {
   AudioTranscriptionError,
@@ -428,6 +430,100 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(45_000);
     process.env.AI_AUDIO_TRANSCRIPTION_TIMEOUT_MS = "60000";
     expect(getGeminiAudioTranscriptionTimeoutMsFromEnv()).toBe(45_000);
+  });
+
+  it("reproduz o Ogg Opus real da Evolution, falha sem efeitos e deduplica o mesmo messageId", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const fixture = readFileSync(path.resolve("tests/fixtures/evolution-stock-entry-opus.ogg"));
+    const transcribe = vi.fn(async (_input: AudioTranscriptionInput) => {
+      throw new AudioTranscriptionError("audio_transcription_timeout", undefined, {
+        providerCalled: true,
+        durationMs: 45_008,
+        totalBudgetMs: 45_000,
+        failureStage: "whisper",
+        inputBytes: fixture.length,
+        inputExtension: ".ogg",
+        ffmpeg: {
+          stage: "ffmpeg", durationMs: 90, exitCode: 0, signal: null, timedOut: false,
+          stdoutBytes: 0, stderrBytes: 0, safeReason: "completed",
+        },
+        whisper: {
+          stage: "whisper", durationMs: 44_900, exitCode: null, signal: "SIGTERM", timedOut: true,
+          stdoutBytes: 0, stderrBytes: 1200, stderrFingerprint: "safe-fingerprint", safeReason: "whisper_timeout",
+        },
+        gpuUsed: true,
+        gpuFallback: false,
+        tempFileId: "temporary-id",
+      });
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/chat/getBase64FromMediaMessage/")) {
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ base64: fixture.toString("base64") }) };
+      }
+      if (url.includes("/message/sendText/")) return { ok: true, status: 200, text: async () => "" };
+      throw new Error(`Chamada externa inesperada: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const token = await loginOwner(app);
+    const before = {
+      stock: store.products.map((product) => [product.id, product.stockQty]),
+      sales: store.productSales.length,
+      movements: store.stockMovements.length,
+      financial: store.financialEntries.length,
+      previews: store.aiWhatsappStockEntryPreviews.size,
+    };
+    const payload = {
+      instance: "test-instance",
+      data: {
+        key: {
+          id: "captured-evolution-opus-001",
+          remoteJid: "123456789012345@lid",
+          remoteJidAlt: `${ownerPhone}@s.whatsapp.net`,
+          addressingMode: "lid",
+          fromMe: false,
+        },
+        messageType: "audioMessage",
+        message: {
+          audioMessage: {
+            mimetype: "audio/ogg; codecs=opus",
+            fileLength: { low: fixture.length, high: 0, unsigned: true },
+            seconds: 5,
+            ptt: true,
+          },
+        },
+      },
+    };
+
+    const failed = await postWebhook(app, payload);
+    const retry = await postWebhook(app, payload);
+
+    expect(failed.json()).toMatchObject({ ok: true, audio: true, executed: false, reason: "audio_transcription_timeout" });
+    expect(failed.json()).not.toHaveProperty("previewId");
+    expect(retry.json()).toMatchObject({ ok: true, replay: true, deduplicated: true, executed: false });
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(transcribe.mock.calls[0]?.[0]).toMatchObject({
+      audio: fixture,
+      mimetype: "audio/ogg; codecs=opus",
+      pass: 1,
+      timeoutMs: 45_000,
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("getBase64FromMediaMessage"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/message/sendText/"))).toHaveLength(1);
+    expect(store.products.map((product) => [product.id, product.stockQty])).toEqual(before.stock);
+    expect(store.productSales).toHaveLength(before.sales);
+    expect(store.stockMovements).toHaveLength(before.movements);
+    expect(store.financialEntries).toHaveLength(before.financial);
+    expect(store.aiWhatsappStockEntryPreviews.size).toBe(before.previews);
+    const events = await audits(app, token);
+    expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_MEDIA_DOWNLOADED")?.afterJson)
+      .toMatchObject({ size: fixture.length, declaredSize: fixture.length, durationSeconds: 5, mimetype: "audio/ogg" });
+    expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_TRANSCRIPTION_FAILED")?.afterJson)
+      .toMatchObject({ reason: "audio_transcription_timeout", failureStage: "whisper", gpuUsed: true, gpuFallback: false });
+    expect(JSON.stringify(events)).not.toContain(ownerPhone);
+    await app.close();
   });
 
   it("reconhece audio, baixa em memoria, transcreve e gera somente previa de venda", async () => {
@@ -916,11 +1012,45 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect((after.json().sales as unknown[]).length).toBe((before.json().sales as unknown[]).length + 1);
   });
 
-  it("audio Pode confirmar usa o mesmo handler e replay nao duplica", async () => {
+  it.each(["Pode confirmar", "confirma", "confirmado"])("audio nao confirma com frase nao canonica: %s", async (transcript) => {
     process.env.ASR_PROVIDER = "local_whisper";
     delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
     const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
-      transcript: "Pode confirmar",
+      transcript,
+      provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
+      diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
+    }));
+    const fetchMock = mockTransport();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
+    const before = {
+      appointments: store.appointments.length,
+      sales: store.productSales.length,
+      financial: store.financialEntries.length,
+    };
+
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-confirm"));
+    const confirmationAudio = audioPayload({ data: {
+      key: { id: `audio-noncanonical-confirm-${transcript}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 1 } },
+    } });
+    const confirmation = await postWebhook(app, confirmationAudio);
+    const replay = await postWebhook(app, confirmationAudio);
+
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: false, pendingPreserved: true });
+    expect(replay.json()).toMatchObject({ ok: true, replay: true, deduplicated: true, executed: false });
+    expect(store.appointments).toHaveLength(before.appointments);
+    expect(store.productSales).toHaveLength(before.sales);
+    expect(store.financialEntries).toHaveLength(before.financial);
+    expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("audio CONFIRMAR exato usa o mesmo handler e executa uma unica vez", async () => {
+    process.env.ASR_PROVIDER = "local_whisper";
+    delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
+    const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
+      transcript: "CONFIRMAR",
       provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
       diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
     }));
@@ -930,9 +1060,9 @@ describe("audio do atendente IA via WhatsApp", () => {
     const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
     const before = store.productSales.length;
 
-    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-confirm"));
+    await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-exact-confirm"));
     const confirmationAudio = audioPayload({ data: {
-      key: { id: "audio-simple-confirm", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      key: { id: "audio-exact-confirm", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
       message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 1 } },
     } });
     const confirmation = await postWebhook(app, confirmationAudio);
@@ -944,11 +1074,11 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(transcribe).toHaveBeenCalledTimes(1);
   });
 
-  it("audio Pode cancelar usa o mesmo handler e invalida a previa", async () => {
+  it.each(["Pode cancelar", "cancela"])("audio nao cancela com frase nao canonica: %s", async (transcript) => {
     process.env.ASR_PROVIDER = "local_whisper";
     delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
     const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
-      transcript: "Pode cancelar",
+      transcript,
       provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
       diagnostics: { providerCalled: true, durationMs: 80, passCount: 1, vadResult: "speech" },
     }));
@@ -960,12 +1090,14 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     await postWebhook(app, textPayload("Registrar venda de 1 Pomada com pagamento Pix", "preview-audio-cancel"));
     const cancellation = await postWebhook(app, audioPayload({ data: {
-      key: { id: "audio-simple-cancel", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
+      key: { id: `audio-noncanonical-cancel-${transcript}`, remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
       message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 1 } },
     } }));
-    const confirmation = await postWebhook(app, textPayload("CONFIRMAR", "confirm-after-audio-cancel"));
+    const exactCancellation = await postWebhook(app, textPayload("CANCELAR", "exact-cancel-after-audio"));
+    const confirmation = await postWebhook(app, textPayload("CONFIRMAR", "confirm-after-exact-cancel"));
 
-    expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true, executed: false });
+    expect(cancellation.json()).toMatchObject({ ok: true, pendingPreserved: true, executed: false });
+    expect(exactCancellation.json()).toMatchObject({ ok: true, cancelled: true, executed: false });
     expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
     expect(store.productSales).toHaveLength(before);
     expect(transcribe).toHaveBeenCalledTimes(1);
@@ -1431,7 +1563,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 59,00");
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
     expect(transcribe).toHaveBeenCalledTimes(1);
-    expect(transcribe.mock.calls[0]?.[0]).toMatchObject({ pass: 1, timeoutMs: 20_000 });
+    expect(transcribe.mock.calls[0]?.[0]).toMatchObject({ pass: 1, timeoutMs: 45_000 });
     expect(String(transcribe.mock.calls[0]?.[0]?.initialPrompt).length).toBeLessThanOrEqual(1_500);
     expect(fetchMock.mock.calls.some(([url]) => /generativelanguage|llama/i.test(String(url)))).toBe(false);
     const events = await audits(app, token);

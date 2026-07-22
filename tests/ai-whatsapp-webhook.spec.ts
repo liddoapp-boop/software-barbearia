@@ -1519,13 +1519,9 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it.each([
-    "confirmar",
-    "confirma",
-    "pode confirmar",
-    "confirmado",
-    "sim, pode confirmar",
-    "confirma para mim",
-  ])("confirma a unica previa ativa sem codigo: %s", async (phrase) => {
+    "CONFIRMAR",
+    "  cOnFiRmAr  ",
+  ])("confirma a unica previa ativa somente com o token canonico: %s", async (phrase) => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
@@ -1543,6 +1539,57 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
     expect(store.productSales).toHaveLength(salesBefore + 1);
     expect(store.financialEntries).toHaveLength(financialBefore + 1);
+  });
+
+  it.each([
+    "confirma",
+    "pode confirmar",
+    "confirmado",
+    "sim, pode confirmar",
+    "confirma para mim",
+    "CONFIRMAR agora",
+    "CONFIRMAR 4321",
+  ])("nao confirma venda com frase nao canonica: %s", async (phrase) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = {
+      appointments: store.appointments.length,
+      sales: store.productSales.length,
+      financial: store.financialEntries.length,
+    };
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const confirmation = await postWebhook(app, evolutionPayload(phrase));
+
+    expect(confirmation.json()).toMatchObject({ executed: false, pendingPreserved: true });
+    expect(store.appointments).toHaveLength(before.appointments);
+    expect(store.productSales).toHaveLength(before.sales);
+    expect(store.financialEntries).toHaveLength(before.financial);
+  });
+
+  it.each(["confirma", "pode confirmar"])("nao confirma agendamento com frase nao canonica: %s", async (phrase) => {
+    const fetchMock = mockSemanticV2ScheduleAndWhatsapp({
+      clientName: "João Victor", clientEvidence: "João Victor", serviceName: "Corte", serviceEvidence: "corte",
+      date: "2026-12-15", dateEvidence: "15/12/2026", time: "11:00", timeEvidence: "as 11h",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = createApp();
+    const token = await loginOwner(app);
+    await createWhatsappTestClient(app, token, phrase === "confirma" ? "106" : "107");
+    await postWebhook(app, evolutionPayload("Agenda João Victor dia 15/12/2026 as 11h para corte."));
+    const before = await countCommercialState(app, token);
+
+    const confirmation = await postWebhook(app, evolutionPayload(phrase));
+    const after = await countCommercialState(app, token);
+
+    expect(confirmation.json()).toMatchObject({ executed: false, pendingPreserved: true });
+    expect(after.appointments).toBe(before.appointments);
+    expect(after.sales).toBe(before.sales);
+    expect(after.financialEntries).toBe(before.financialEntries);
+    expect(after.pomadaStock).toBe(before.pomadaStock);
+    expect(after.confirmedAudits).toBe(before.confirmedAudits);
   });
 
   it.each(["sim", "não", "ok", "beleza"])("nao executa resposta ambigua: %s", async (phrase) => {
@@ -1822,7 +1869,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(store.productSales).toHaveLength(before + 1);
   });
 
-  it.each(["cancelar", "cancela", "pode cancelar"])("cancela a unica previa sem codigo: %s", async (phrase) => {
+  it.each(["CANCELAR", "  cAnCeLaR  "])("cancela a unica previa somente com o token canonico: %s", async (phrase) => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
@@ -1836,6 +1883,22 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true, executed: false });
     expect(confirmation.json()).toMatchObject({ ok: true, executed: false });
     expect(store.productSales).toHaveLength(before);
+  });
+
+  it.each(["cancela", "pode cancelar", "CANCELAR agora"])("nao cancela a previa com frase nao canonica: %s", async (phrase) => {
+    const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new InMemoryStore();
+    const app = createApp({ memoryStore: store, ownerCommandParser: null });
+    const before = store.productSales.length;
+
+    await postWebhook(app, evolutionPayload("Registrar venda de 1 Pomada com pagamento Pix"));
+    const cancellation = await postWebhook(app, evolutionPayload(phrase));
+    const confirmation = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+
+    expect(cancellation.json()).toMatchObject({ ok: true, pendingPreserved: true, executed: false });
+    expect(confirmation.json()).toMatchObject({ ok: true, executed: true });
+    expect(store.productSales).toHaveLength(before + 1);
   });
 
   it("responde de forma segura quando nao ha previa ativa", async () => {
@@ -1901,7 +1964,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(store.productSales).toHaveLength(before);
   });
 
-  it("sintaxe antiga CONFIRMAR codigo continua executando uma vez pelo fluxo oficial", async () => {
+  it("sintaxe antiga CONFIRMAR codigo nao executa e preserva a previa", async () => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const app = createApp();
@@ -1915,7 +1978,7 @@ describe("Atendente IA WhatsApp-first", () => {
     await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos, ele pagou no Pix."));
     const code = "4321";
     expectPreviewWithoutVisibleCode(fetchMock);
-    const confirm = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`, ["55", "11", "99999", "9999"].join(""), {
+    const rejected = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`, ["55", "11", "99999", "9999"].join(""), {
       unitId: "unit-02",
       data: {
         unitId: "unit-02",
@@ -1924,8 +1987,17 @@ describe("Atendente IA WhatsApp-first", () => {
       },
     }));
 
-    expect(confirm.statusCode).toBe(200);
-    expect(confirm.json()).toMatchObject({ ok: true, executed: true });
+    expect(rejected.statusCode).toBe(200);
+    expect(rejected.json()).toMatchObject({ ok: true, executed: false, pendingPreserved: true });
+    const afterRejected = await countCommercialState(app, token);
+    expect(afterRejected.appointments).toBe(before.appointments);
+    expect(afterRejected.sales).toBe(before.sales);
+    expect(afterRejected.financialEntries).toBe(before.financialEntries);
+    expect(afterRejected.pomadaStock).toBe(before.pomadaStock);
+    expect(afterRejected.confirmedAudits).toBe(before.confirmedAudits);
+
+    const confirmed = await postWebhook(app, evolutionPayload("CONFIRMAR"));
+    expect(confirmed.json()).toMatchObject({ ok: true, executed: true });
     const after = await countCommercialState(app, token);
     expect(after.sales).toBe(before.sales + 1);
     expect(after.pomadaStock).toBe(before.pomadaStock - 1);
@@ -1933,7 +2005,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(after.appointments).toBe(before.appointments);
     expect(after.confirmedAudits).toBe(before.confirmedAudits + 1);
 
-    const duplicate = await postWebhook(app, evolutionPayload(`CONFIRMAR ${code}`));
+    const duplicate = await postWebhook(app, evolutionPayload("CONFIRMAR"));
     expect(duplicate.json()).toMatchObject({ ok: true, executed: false });
     const finalState = await countCommercialState(app, token);
     expect(finalState.sales).toBe(after.sales);

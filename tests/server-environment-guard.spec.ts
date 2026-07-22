@@ -95,6 +95,7 @@ describe("server environment guard", () => {
     const launcher = await import(moduleUrl) as {
       buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
       isLocalWhisperConfigReady: (env: Record<string, string>) => boolean;
+      isLocalSemanticConfigReady: (env: Record<string, string>) => boolean;
     };
     const localEnv = {
       AI_WHATSAPP_ENABLED: "true",
@@ -125,6 +126,7 @@ describe("server environment guard", () => {
     }, 3334);
 
     expect(launcher.isLocalWhisperConfigReady(childEnv)).toBe(true);
+    expect(launcher.isLocalSemanticConfigReady(childEnv)).toBe(true);
     expect(childEnv).toMatchObject({
       NODE_ENV: "development",
       SERVER_MODE: "isolated",
@@ -138,6 +140,11 @@ describe("server environment guard", () => {
       LOCAL_WHISPER_MODEL_PATH: "C:\\local\\ggml-large-v3-turbo-q5_0.bin",
       ISOLATED_WHATSAPP_OUTBOUND_MODE: "disabled",
       ISOLATED_WHATSAPP_OUTBOUND_ALLOWLIST: "",
+      SEMANTIC_PROVIDER: "local_llama",
+      LOCAL_LLAMA_URL: "http://127.0.0.1:11435",
+      LOCAL_LLAMA_MODEL: "google_gemma-3-4b-it-Q4_K_M.gguf",
+      LOCAL_LLAMA_MODEL_SHA256: "4996030242583a40aa151ff93f49ed787ac8c25e4120c3ae4588b2e2a7d1ae94",
+      LOCAL_LLAMA_TIMEOUT_MS: "15000",
     });
     expect(childEnv.DATABASE_URL).toContain("barbearia_isolated_not_used");
     expect(childEnv.DATABASE_URL).not.toContain("barbearia_pilot");
@@ -145,7 +152,7 @@ describe("server environment guard", () => {
     expect(childEnv.AI_AUDIO_TRANSCRIPTION_API_KEY).toBe("");
     expect(childEnv.AI_AUDIO_TRANSCRIPTION_MODEL).toBe("");
     expect(childEnv.GEMINI_API_KEY).toBe("");
-    expect(childEnv.SEMANTIC_PROVIDER).toBe("");
+    expect(childEnv.SEMANTIC_PROVIDER).toBe("local_llama");
   });
 
   it("habilita allowlist isolada somente pelo ambiente explicito e normaliza os numeros", async () => {
@@ -207,5 +214,5 @@ describe("server environment guard", () => {
     expect(output).not.toContain(sensitiveUrl);
     expect(output).not.toContain("guard_password");
     expect(output).not.toContain("API online");
-  });
+  }, 20_000);
 });

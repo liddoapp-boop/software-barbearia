@@ -217,6 +217,9 @@ export function evaluateEvolutionDoctorSnapshot(snapshot, config = loadEvolution
   check(snapshot.containers.api?.running, "api_not_running", "Evolution API container is not running.");
   check(snapshot.containers.postgres?.running, "postgres_not_running", "Evolution PostgreSQL container is not running.");
   check(snapshot.containers.redis?.running, "redis_not_running", "Evolution Redis container is not running.");
+  check(snapshot.containers.api?.health === "healthy", "api_unhealthy", "Evolution API container health is not healthy.");
+  check(snapshot.containers.postgres?.health === "healthy", "postgres_unhealthy", "Evolution PostgreSQL container health is not healthy.");
+  check(snapshot.containers.redis?.health === "healthy", "redis_unhealthy", "Evolution Redis container health is not healthy.");
   check(snapshot.containers.api?.configuredImage === lock.runtimeImage, "runtime_tag_mismatch", "Running container uses a different image tag.");
   check(snapshot.containers.api?.imageId === snapshot.expectedImage?.imageId, "runtime_digest_mismatch", "Running image ID differs from the locked local image.");
   check(snapshot.expectedImage?.labels?.["software-barbearia.evolution.base-ref"] === lock.baseRef, "base_digest_mismatch", "Local image base digest differs from image-lock.json.");

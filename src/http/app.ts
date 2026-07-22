@@ -30,6 +30,7 @@ import {
   GEMINI_AUDIO_TRANSCRIPTION_ENDPOINT,
   getGeminiAudioTranscriptionTotalBudgetMsFromEnv,
   getGeminiAudioTranscriptionTimeoutMsFromEnv,
+  getLocalWhisperTimeoutMsFromEnv,
   isAudioTranscriptionEnabledFromEnv,
 } from "../application/audio-transcription";
 import { AiWhatsappPipelineState, SingleWhatsappResponseGate } from "../application/ai-whatsapp-pipeline";
@@ -58,10 +59,13 @@ import {
 } from "../application/stock-alert-outbox";
 import {
   STOCK_ENTRY_PREVIEW_VERSION,
+  StockEntryBatchDraft,
   StockEntryCorrectionClarification,
   StockEntryFailureStage,
   StockEntryPreview,
   formatStockEntryPreview,
+  getStockEntryPreviewBatch,
+  interpretStockEntryBatchCorrection,
   interpretStockEntryCorrection,
   interpretStockEntryCommand,
   looksLikeStockEntryCommand,
@@ -136,6 +140,7 @@ import {
   connectWhatsApp,
   disconnectWhatsApp,
   WhatsappDeliveryError,
+  type WhatsappDeliveryAttemptContext,
   buildBookingWhatsApp,
   buildBookingEmailHtml,
 } from "../notifications";
@@ -930,7 +935,7 @@ export function createApp(options: {
   ownerCommandParser?: OwnerCommandParser | null;
   readinessProbe?: () => Promise<void>;
   stockEntryFailureHook?: (stage: StockEntryFailureStage) => void | Promise<void>;
-  stockAlertSend?: (phone: string, text: string) => Promise<void>;
+  stockAlertSend?: (phone: string, text: string, attempt?: WhatsappDeliveryAttemptContext) => Promise<void>;
   stockAlertNow?: () => Date;
   reactivationMessageProvider?: ReactivationMessageVariantProvider | null;
   reactivationSend?: (phone: string, text: string) => Promise<void>;
@@ -968,7 +973,7 @@ export function createApp(options: {
       : options.audioTranscriptionService
     : null;
   const configuredAsrTimeoutMs = configuredAsrProvider === "local_whisper"
-    ? 20_000
+    ? getLocalWhisperTimeoutMsFromEnv()
     : getGeminiAudioTranscriptionTimeoutMsFromEnv();
   const configuredAsrModel = configuredAsrProvider === "local_whisper"
     ? path.basename(process.env.LOCAL_WHISPER_MODEL_PATH?.trim() || "ggml-large-v3-turbo-q5_0.bin")
@@ -979,7 +984,7 @@ export function createApp(options: {
     ? "local_process"
     : configuredAsrProvider === "gemini" ? GEMINI_AUDIO_TRANSCRIPTION_ENDPOINT : "none";
   const configuredAsrTotalBudgetMs = configuredAsrProvider === "local_whisper"
-    ? Math.min(20_000, configuredAsrTimeoutMs)
+    ? configuredAsrTimeoutMs
     : getGeminiAudioTranscriptionTotalBudgetMsFromEnv();
   const operations =
     backend === "prisma"
@@ -1015,14 +1020,18 @@ export function createApp(options: {
     claimTimeoutMs: envPositiveInteger("REACTIVATION_RECIPIENT_CLAIM_TIMEOUT_MS", 300_000),
     publicBookingUrl: options.reactivationPublicBookingUrl ?? process.env.PUBLIC_BOOKING_URL,
   });
-  const stockAlertDispatcher = new StockAlertDispatcher({
-    store: backend === "prisma"
-      ? new PrismaStockAlertStore(prisma)
-      : new MemoryStockAlertStore(memoryStore),
-    send: options.stockAlertSend ?? sendWhatsAppMessage,
-    resolveOwnerPhone: resolveConfiguredStockAlertOwner,
-    now: options.stockAlertNow,
-  });
+  const stockAlertUnitId = String(process.env.AI_WHATSAPP_UNIT_ID ?? "").trim();
+  const stockAlertDispatcher = stockAlertUnitId
+    ? new StockAlertDispatcher({
+        unitId: stockAlertUnitId,
+        store: backend === "prisma"
+          ? new PrismaStockAlertStore(prisma)
+          : new MemoryStockAlertStore(memoryStore),
+        send: options.stockAlertSend ?? sendWhatsAppMessage,
+        resolveOwnerPhone: resolveConfiguredStockAlertOwner,
+        now: options.stockAlertNow,
+      })
+    : undefined;
   const stockEntryPreviews = new StockEntryPreviewRepository({
     backend: backend === "prisma" ? "prisma" : "memory",
     memoryStore,
@@ -2047,7 +2056,12 @@ export function createApp(options: {
   function getFirstFiniteNumber(record: Record<string, unknown> | null, paths: string[][]) {
     for (const path of paths) {
       const value = getRecordValue(record, path);
-      const parsed = typeof value === "number" ? value : Number(value);
+      const longValue = asRecord(value);
+      const parsed = longValue
+        && typeof longValue.low === "number"
+        && typeof longValue.high === "number"
+        ? (longValue.unsigned === true ? longValue.low >>> 0 : longValue.low) + longValue.high * 0x1_0000_0000
+        : typeof value === "number" ? value : Number(value);
       if (Number.isFinite(parsed) && parsed >= 0) return parsed;
     }
     return undefined;
@@ -2330,18 +2344,9 @@ export function createApp(options: {
   }
 
   function parseAiWhatsappPreviewDecision(value: string): { action: "confirm" | "cancel"; code?: string } | null {
-    const legacyConfirmation = value.trim().match(/^CONFIRMAR\s+(\d{4})$/i);
-    if (legacyConfirmation) return { action: "confirm", code: legacyConfirmation[1] };
-    const normalized = normalizeMatchText(value);
-    if ([
-      "confirmar",
-      "confirma",
-      "pode confirmar",
-      "confirmado",
-      "sim pode confirmar",
-      "confirma para mim",
-    ].includes(normalized)) return { action: "confirm" };
-    if (["cancelar", "cancela", "pode cancelar"].includes(normalized)) return { action: "cancel" };
+    const normalized = value.trim().toLocaleLowerCase("pt-BR");
+    if (normalized === "confirmar") return { action: "confirm" };
+    if (normalized === "cancelar") return { action: "cancel" };
     return null;
   }
 
@@ -3559,7 +3564,7 @@ export function createApp(options: {
   });
   app.addHook("onResponse", async () => {
     try {
-      await stockAlertDispatcher.dispatchDue();
+      await stockAlertDispatcher?.dispatchDue();
     } catch {
       app.log.error({ event: "stock.alert.dispatcher.unavailable" });
     }
@@ -6069,7 +6074,7 @@ export function createApp(options: {
     const body = statusSchema.parse(request.body);
     const req = request as RequestWithAuth;
     if (body.status === "NO_SHOW" && req.auth?.role !== "owner") {
-      throw new Error("Apenas owner pode marcar falta");
+      throw Object.assign(new Error("Apenas owner pode marcar falta"), { statusCode: 403 });
     }
     const idempotencyKey = requireIdempotencyKey(request, body.idempotencyKey);
 
@@ -8112,7 +8117,16 @@ export function createApp(options: {
         action: "AI_WHATSAPP_AUDIO_MEDIA_DOWNLOADED",
         entity: "ai_whatsapp_audio",
         entityId: audioEntityId,
-        after: { correlationId, stage: "media_download", result: "MEDIA_DOWNLOADED", size: audioBytes.length },
+        after: {
+          correlationId,
+          stage: "media_download",
+          result: "MEDIA_DOWNLOADED",
+          size: audioBytes.length,
+          declaredSize: message.audio.declaredSize ?? null,
+          durationSeconds: message.audio.durationSeconds ?? null,
+          mimetype: message.audio.mimetype.split(";", 1)[0].trim().toLowerCase(),
+          messageIdFingerprint: crypto.createHash("sha256").update(message.audio.messageId).digest("hex").slice(0, 12),
+        },
       });
       await safeAudit({
         unitId,
@@ -8152,7 +8166,7 @@ export function createApp(options: {
           correlationId,
           initialPrompt: vocabulary.prompt,
           pass: 1,
-          timeoutMs: Math.min(20_000, configuredAsrTotalBudgetMs),
+          timeoutMs: configuredAsrTotalBudgetMs,
         });
         audioTranscript = transcription.transcript.trim().slice(0, 1000);
         if (!audioTranscript) throw new AudioTranscriptionError("audio_transcription_empty");
@@ -8201,6 +8215,14 @@ export function createApp(options: {
             responseFingerprint: transcription.diagnostics?.responseFingerprint ?? null,
             attempts: transcription.diagnostics?.attempts ?? [],
             fallbackUsed: transcription.diagnostics?.fallbackUsed ?? false,
+            failureStage: transcription.diagnostics?.failureStage ?? null,
+            inputBytes: transcription.diagnostics?.inputBytes ?? null,
+            inputExtension: transcription.diagnostics?.inputExtension ?? null,
+            ffmpeg: transcription.diagnostics?.ffmpeg ?? null,
+            whisper: transcription.diagnostics?.whisper ?? null,
+            gpuUsed: transcription.diagnostics?.gpuUsed ?? null,
+            gpuFallback: transcription.diagnostics?.gpuFallback ?? null,
+            tempFileId: transcription.diagnostics?.tempFileId ?? null,
             phone: message.maskedPhone,
           },
         });
@@ -8256,6 +8278,14 @@ export function createApp(options: {
             responseFingerprint: diagnostics?.responseFingerprint ?? null,
             attempts: diagnostics?.attempts ?? [],
             fallbackUsed: diagnostics?.fallbackUsed ?? false,
+            failureStage: diagnostics?.failureStage ?? null,
+            inputBytes: diagnostics?.inputBytes ?? null,
+            inputExtension: diagnostics?.inputExtension ?? null,
+            ffmpeg: diagnostics?.ffmpeg ?? null,
+            whisper: diagnostics?.whisper ?? null,
+            gpuUsed: diagnostics?.gpuUsed ?? null,
+            gpuFallback: diagnostics?.gpuFallback ?? null,
+            tempFileId: diagnostics?.tempFileId ?? null,
             phone: message.maskedPhone,
           },
         });
@@ -8265,6 +8295,7 @@ export function createApp(options: {
           "audio_transcription_5xx",
           "audio_transcription_timeout",
           "audio_transcription_circuit_open",
+          "audio_transcription_whisper_failed",
           "audio_transcription_failed",
         ].includes(reason);
         const quotaExhausted = reason === "audio_transcription_quota_exhausted";
@@ -8298,6 +8329,9 @@ export function createApp(options: {
     const currentReactivationDraft = await reactivationCampaigns.findDraft(unitId, actorId);
     const strictReactivationDecision = parseStrictReactivationDecision(normalizedText);
     const activeGenericPending = getAiWhatsappActivePendingCommands(whatsappContext, message.senderPhone);
+    const currentStockEntryIsMutable = currentStockEntry
+      ? ["PENDING", "PROCESSING"].includes(currentStockEntry.status)
+      : false;
     if (currentReactivationDraft) {
       if (strictReactivationDecision === "CANCELAR") {
         const cancelled = await reactivationCampaigns.cancel({ unitId, ownerId: actorId });
@@ -8347,18 +8381,35 @@ export function createApp(options: {
       );
       return buildAiWhatsappPreviewOnlyResponse({ intent: "reactivation_campaign", pendingPreserved: true, responseDelivered });
     }
-    if (strictReactivationDecision === "CONFIRMAR" && !currentStockEntry && activeGenericPending.length === 0) {
-      const summary = await reactivationCampaigns.confirm({ unitId, ownerId: actorId });
-      if (summary) {
-        await safeAudit({
-          unitId,
-          action: "REACTIVATION_CAMPAIGN_REPLAYED",
-          entity: "reactivation_campaign",
-          entityId: summary.campaignId,
-          after: { status: summary.status, duplicateMessages: 0 },
-        });
-        const responseDelivered = await safeSend(formatReactivationCampaignSummary(summary), "confirmation_result");
-        return { ok: true, executed: true, intent: "reactivation_campaign", replay: true, responseDelivered };
+    if (strictReactivationDecision === "CONFIRMAR" && !currentStockEntryIsMutable && activeGenericPending.length === 0) {
+      const latestReactivationCampaign = await reactivationCampaigns.findLatest(unitId, actorId);
+      const stockEntryRoutingTimestamp = currentStockEntry
+        ? Date.parse(currentStockEntry.status === "EXPIRED"
+            ? currentStockEntry.preview.expiresAt
+            : currentStockEntry.preview.createdAt)
+        : Number.NEGATIVE_INFINITY;
+      const campaignRoutingTimestamp = latestReactivationCampaign
+        ? (latestReactivationCampaign.completedAt
+            ?? latestReactivationCampaign.confirmedAt
+            ?? latestReactivationCampaign.createdAt
+            ?? latestReactivationCampaign.updatedAt).getTime()
+        : Number.NEGATIVE_INFINITY;
+      const campaignCanReplay = latestReactivationCampaign
+        && ["SENDING", "COMPLETED", "PARTIAL"].includes(latestReactivationCampaign.status)
+        && campaignRoutingTimestamp >= stockEntryRoutingTimestamp;
+      if (campaignCanReplay) {
+        const summary = await reactivationCampaigns.confirm({ unitId, ownerId: actorId });
+        if (summary) {
+          await safeAudit({
+            unitId,
+            action: "REACTIVATION_CAMPAIGN_REPLAYED",
+            entity: "reactivation_campaign",
+            entityId: summary.campaignId,
+            after: { status: summary.status, duplicateMessages: 0 },
+          });
+          const responseDelivered = await safeSend(formatReactivationCampaignSummary(summary), "confirmation_result");
+          return { ok: true, executed: true, intent: "reactivation_campaign", replay: true, responseDelivered };
+        }
       }
     }
     const storedStockEntryCorrectionClarification = stockEntryCorrectionClarifications.get(stockEntryCorrectionKey);
@@ -8370,7 +8421,7 @@ export function createApp(options: {
     if (storedStockEntryCorrectionClarification && !stockEntryCorrectionClarification) {
       stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
     }
-    if (stockEntryDecision && currentStockEntry) {
+    if (stockEntryDecision && currentStockEntry && (currentStockEntryIsMutable || activeGenericPending.length === 0)) {
       if (!webhookReplayKey) {
         await safeAudit({
           unitId,
@@ -8430,6 +8481,7 @@ export function createApp(options: {
           previewAction: currentStockEntry.action,
           previewPayloadHash: currentStockEntry.payloadHash,
           draft: currentStockEntry.preview.draft,
+          batch: currentStockEntry.preview.batch,
           audit: {
             actorId,
             actorRole: "owner",
@@ -8459,10 +8511,17 @@ export function createApp(options: {
           },
         });
         await finalize("SUCCEEDED");
+        const resultProducts = result.products ?? [result.product];
+        const stockSummary = resultProducts.map((product) => `${product.name}: ${product.stockQty}`).join("; ");
+        const confirmationMessage = resultProducts.length === 1
+          ? (result.replay
+              ? `Esta entrada já foi confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.`
+              : `Entrada confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.`)
+          : (result.replay
+              ? `Esta entrada em lote já foi confirmada. Estoques atuais: ${stockSummary}.`
+              : `Entrada em lote confirmada. Estoques atuais: ${stockSummary}.`);
         const responseDelivered = await safeSend(
-          result.replay
-            ? `Esta entrada já foi confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.`
-            : `Entrada confirmada. Estoque atual de ${result.product.name}: ${result.product.stockQty}.`,
+          confirmationMessage,
           "confirmation_result",
         );
         return { ok: true, executed: true, intent: "stock_entry", replay: result.replay, operationId: result.operationId, responseDelivered };
@@ -8490,17 +8549,22 @@ export function createApp(options: {
 
     if (currentStockEntry?.status === "PENDING") {
       const products = await operations.listStockEntryProducts({ unitId });
-      const correction = interpretStockEntryCorrection({
-        message: normalizedText,
-        currentDraft: currentStockEntry.preview.draft,
-        products,
-        clarification: stockEntryCorrectionClarification?.clarification,
-      });
+      const currentBatch = getStockEntryPreviewBatch(currentStockEntry.preview);
+      const isBatchCorrection = currentBatch.items.length > 1;
+      const correction = isBatchCorrection
+        ? interpretStockEntryBatchCorrection({ message: normalizedText, currentBatch, products })
+        : interpretStockEntryCorrection({
+            message: normalizedText,
+            currentDraft: currentStockEntry.preview.draft,
+            products,
+            clarification: stockEntryCorrectionClarification?.clarification,
+          });
       if (correction.status === "clarification") {
-        if (correction.clarification) {
+        const correctionClarification = "clarification" in correction ? correction.clarification : undefined;
+        if (correctionClarification) {
           stockEntryCorrectionClarifications.set(stockEntryCorrectionKey, {
             previewId: currentStockEntry.preview.id,
-            clarification: correction.clarification,
+            clarification: correctionClarification,
             expiresAt: Date.now() + getAiWhatsappTtlMs(),
           });
         }
@@ -8512,7 +8576,7 @@ export function createApp(options: {
           after: {
             result: "AMBIGUOUS",
             reason: correction.reason,
-            candidateCount: correction.candidateNames?.length ?? 0,
+            candidateCount: "candidateNames" in correction ? correction.candidateNames?.length ?? 0 : 0,
             previewPreserved: true,
           },
         });
@@ -8554,7 +8618,8 @@ export function createApp(options: {
           return buildAiWhatsappPreviewOnlyResponse({ intent: "stock_entry", corrected: false, unavailable: true, pendingPreserved: true, responseDelivered });
         }
         stockEntryCorrectionClarifications.delete(stockEntryCorrectionKey);
-        const draftChanged = JSON.stringify(correction.draft) !== JSON.stringify(currentStockEntry.preview.draft);
+        const nextBatch = ("batch" in correction ? correction.batch : undefined) as StockEntryBatchDraft | undefined;
+        const draftChanged = JSON.stringify(nextBatch ?? correction.draft) !== JSON.stringify(currentStockEntry.preview.batch ?? currentStockEntry.preview.draft);
         let updatedPreview = currentStockEntry.preview;
         if (draftChanged) {
           const now = new Date();
@@ -8562,6 +8627,7 @@ export function createApp(options: {
             ...currentStockEntry.preview,
             id: crypto.randomUUID(),
             draft: correction.draft,
+            batch: nextBatch,
             createdAt: now.toISOString(),
             expiresAt: new Date(now.getTime() + getAiWhatsappTtlMs()).toISOString(),
           };
@@ -8584,6 +8650,28 @@ export function createApp(options: {
             changedFields: correction.changedFields,
             previousPreviewInvalidated: draftChanged,
             previousPreviewFingerprint: crypto.createHash("sha256").update(currentStockEntry.preview.id).digest("hex").slice(0, 12),
+            canonicalDraft: updatedPreview.batch
+              ? {
+                  itemCount: updatedPreview.batch.items.length,
+                  totalCost: updatedPreview.batch.totalCost,
+                  items: updatedPreview.batch.items.map((item) => ({
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    unitCost: item.unitCost,
+                    totalCost: item.totalCost,
+                    salePrice: item.salePrice,
+                    occurredAt: item.occurredAt,
+                  })),
+                }
+              : {
+                  productId: updatedPreview.draft.productId,
+                  quantity: updatedPreview.draft.quantity,
+                  unitCost: updatedPreview.draft.unitCost,
+                  totalCost: updatedPreview.draft.totalCost,
+                  salePrice: updatedPreview.draft.salePrice,
+                  occurredAt: updatedPreview.draft.occurredAt,
+                },
+            semanticProviderInvoked: false,
           },
         });
         const responseDelivered = await safeSend(
@@ -8594,7 +8682,7 @@ export function createApp(options: {
           intent: "stock_entry",
           corrected: true,
           previewId: updatedPreview.id,
-          preview: updatedPreview.draft,
+          preview: updatedPreview.batch ?? updatedPreview.draft,
           audio: Boolean(audioTranscript),
           responseDelivered,
         });
@@ -8904,6 +8992,7 @@ export function createApp(options: {
           actorId,
           phoneFingerprint: whatsappContext.phoneFingerprint,
           draft: interpretation.draft,
+          batch: interpretation.batch.items.length > 1 ? interpretation.batch : undefined,
           createdAt: now.toISOString(),
           expiresAt: new Date(now.getTime() + getAiWhatsappTtlMs()).toISOString(),
         };
@@ -8912,17 +9001,20 @@ export function createApp(options: {
           event: "stock.entry.preview.created",
           unitId,
           previewId: preview.id,
-          productId: preview.draft.productId,
+          productIds: interpretation.batch.items.map((item) => item.productId),
+          itemCount: interpretation.batch.items.length,
           origin: audioTranscript ? "audio" : "text",
           durationMs: Date.now() - stockEntryStartedAt,
         });
-        await safeAudit({
-          unitId,
-          action: "AI_WHATSAPP_STOCK_ENTRY_PRODUCT_RESOLVED",
-          entity: "product",
-          entityId: preview.draft.productId,
-          after: { result: "RESOLVED", previewId: preview.id },
-        });
+        for (const item of interpretation.batch.items) {
+          await safeAudit({
+            unitId,
+            action: "AI_WHATSAPP_STOCK_ENTRY_PRODUCT_RESOLVED",
+            entity: "product",
+            entityId: item.productId,
+            after: { result: "RESOLVED", previewId: preview.id, batchId: preview.id },
+          });
+        }
         await safeAudit({
           unitId,
           action: "AI_WHATSAPP_STOCK_ENTRY_PREVIEW_CREATED",
@@ -8943,7 +9035,7 @@ export function createApp(options: {
         return buildAiWhatsappPreviewOnlyResponse({
           intent: "stock_entry",
           previewId: preview.id,
-          preview: preview.draft,
+          preview: preview.batch ?? preview.draft,
           audio: Boolean(audioTranscript),
           responseDelivered,
         });

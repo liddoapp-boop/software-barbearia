@@ -16,15 +16,23 @@ describe("notificacoes WhatsApp", () => {
     process.env.EVOLUTION_API_KEY = "test-key";
     process.env.EVOLUTION_INSTANCE_NAME = "test-instance";
 
-    const fetchMock = vi.fn(async () => ({ ok: true }));
+    const lifecycle: string[] = [];
+    const fetchMock = vi.fn(async () => {
+      lifecycle.push("fetch");
+      return { ok: true };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { sendWhatsAppMessage } = await import("../src/notifications/index.js");
     const text = "Teste interno Liddo Barber: integração, confirmação, horário e serviço.";
 
-    await sendWhatsAppMessage("11999998888", text);
+    await sendWhatsAppMessage("11999998888", text, {
+      attemptId: "attempt-stable-01",
+      onProviderCallStarted: async () => { lifecycle.push("provider-started"); },
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lifecycle).toEqual(["provider-started", "fetch"]);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://evolution.local/message/sendText/test-instance");
     expect(init.headers).toMatchObject({
@@ -61,8 +69,13 @@ describe("notificacoes WhatsApp", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { sendWhatsAppMessage } = await import("../src/notifications/index.js");
 
-    await expect(sendWhatsAppMessage("11999998888", "nao enviar")).rejects.toMatchObject({ reason });
+    const onProviderCallStarted = vi.fn();
+    await expect(sendWhatsAppMessage("11999998888", "nao enviar", {
+      attemptId: "blocked-attempt",
+      onProviderCallStarted,
+    })).rejects.toMatchObject({ reason });
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(onProviderCallStarted).not.toHaveBeenCalled();
     expect(warning).toHaveBeenCalledTimes(1);
   });
 
@@ -97,13 +110,21 @@ describe("notificacoes WhatsApp", () => {
     process.env.EVOLUTION_API_KEY = "test-key";
     process.env.EVOLUTION_INSTANCE_NAME = "test-instance";
 
-    const fetchMock = vi.fn(async () => ({ ok: true }));
+    const lifecycle: string[] = [];
+    const fetchMock = vi.fn(async () => {
+      lifecycle.push("fetch");
+      return { ok: true };
+    });
     vi.stubGlobal("fetch", fetchMock);
     const { sendWhatsAppMessage } = await import("../src/notifications/index.js");
 
-    await sendWhatsAppMessage("(11) 99999-8888", "canario controlado");
+    await sendWhatsAppMessage("(11) 99999-8888", "canario controlado", {
+      attemptId: "allowlisted-attempt",
+      onProviderCallStarted: async () => { lifecycle.push("provider-started"); },
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lifecycle).toEqual(["provider-started", "fetch"]);
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     const body = Buffer.isBuffer(init.body)
       ? init.body.toString("utf8")

@@ -99,6 +99,68 @@ describe("campanha de reativacao no WhatsApp do owner", () => {
     await app.close();
   });
 
+  it("replay usa o ciclo da campanha quando updatedAt do banco esta em outro relogio", async () => {
+    const store = controlledStore();
+    const send = vi.fn(async (_phone: string, _text: string) => undefined);
+    const app = createApp({ memoryStore: store, ownerCommandParser: null, reactivationSend: send });
+
+    const oldStock = await post(app, textPayload(
+      ownerPhone,
+      "Entraram duas unidades de Óleo para Barba no estoque, por sete reais cada.",
+      "old-stock-preview",
+    ));
+    expect(oldStock.json()).toMatchObject({ intent: "stock_entry", executed: false });
+    const oldStockRecord = [...store.aiWhatsappStockEntryPreviews.values()][0] as {
+      preview: { createdAt: string; expiresAt: string };
+    };
+    oldStockRecord.preview.createdAt = "2026-01-10T12:00:00.000Z";
+    oldStockRecord.preview.expiresAt = "2026-01-10T12:10:00.000Z";
+    const expired = await post(app, textPayload(ownerPhone, "CONFIRMAR", "old-stock-expired"));
+    expect(expired.json()).toMatchObject({ intent: "stock_entry", executed: false, expired: true });
+    oldStockRecord.preview.createdAt = "2026-08-12T12:00:00.000Z";
+    oldStockRecord.preview.expiresAt = "2026-08-12T12:10:00.000Z";
+
+    await post(app, textPayload(ownerPhone, "Prepare uma campanha de reativação", "new-campaign-draft"));
+    const campaignConfirmation = await post(app, textPayload(ownerPhone, "CONFIRMAR", "new-campaign-confirm"));
+    const campaign = store.reactivationCampaigns[0]!;
+    campaign.createdAt = new Date("2026-08-19T12:00:00.000Z");
+    campaign.confirmedAt = new Date("2026-08-19T12:01:00.000Z");
+    campaign.completedAt = new Date("2026-08-19T12:02:00.000Z");
+    campaign.updatedAt = new Date("2026-07-22T12:00:00.000Z");
+    const campaignReplay = await post(app, textPayload(ownerPhone, "CONFIRMAR", "new-campaign-replay"));
+
+    expect(campaignConfirmation.json()).toMatchObject({ intent: "reactivation_campaign", executed: true, replay: false });
+    expect(campaign.updatedAt.getTime()).toBeLessThan(Date.parse(oldStockRecord.preview.expiresAt));
+    expect(campaign.completedAt!.getTime()).toBeGreaterThan(Date.parse(oldStockRecord.preview.expiresAt));
+    expect(campaignReplay.json()).toMatchObject({ intent: "reactivation_campaign", executed: true, replay: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("preserva replay de estoque quando ele e mais novo que a campanha concluida", async () => {
+    const store = controlledStore();
+    const send = vi.fn(async (_phone: string, _text: string) => undefined);
+    const app = createApp({ memoryStore: store, ownerCommandParser: null, reactivationSend: send });
+
+    await post(app, textPayload(ownerPhone, "Prepare uma campanha de reativação", "old-campaign-draft"));
+    await post(app, textPayload(ownerPhone, "CONFIRMAR", "old-campaign-confirm"));
+    store.reactivationCampaigns[0]!.createdAt = new Date("2026-01-10T12:00:00.000Z");
+    store.reactivationCampaigns[0]!.updatedAt = new Date("2026-01-10T12:01:00.000Z");
+
+    await post(app, textPayload(
+      ownerPhone,
+      "Entraram duas unidades de Óleo para Barba no estoque, por sete reais cada.",
+      "new-stock-preview",
+    ));
+    const stockConfirmation = await post(app, textPayload(ownerPhone, "CONFIRMAR", "new-stock-confirm"));
+    const stockReplay = await post(app, textPayload(ownerPhone, "CONFIRMAR", "new-stock-replay"));
+
+    expect(stockConfirmation.json()).toMatchObject({ intent: "stock_entry", executed: true, replay: false });
+    expect(stockReplay.json()).toMatchObject({ intent: "stock_entry", executed: true, replay: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
   it("falha fechado com erro seguro quando o link publico oficial esta ausente", async () => {
     delete process.env.PUBLIC_BOOKING_URL;
     const store = controlledStore();

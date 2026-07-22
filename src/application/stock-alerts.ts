@@ -1,6 +1,6 @@
 export type StockSituation = "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
 export type StockAlertType = "LOW_STOCK" | "OUT_OF_STOCK";
-export type StockAlertDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAILED";
+export type StockAlertDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAILED" | "UNCERTAIN";
 
 export type StockAlertRecord = {
   id: string;
@@ -16,7 +16,11 @@ export type StockAlertRecord = {
   maxAttempts: number;
   nextAttemptAt?: Date;
   claimedAt?: Date;
+  deliveryAttemptId?: string;
+  providerCallStartedAt?: Date;
   sentAt?: Date;
+  failedAt?: Date;
+  uncertainAt?: Date;
   lastErrorCode?: string;
   createdAt: Date;
   updatedAt: Date;
