@@ -29,11 +29,47 @@ describe("Macro 234 - release candidate owner-only", () => {
     const menu = await import(pathToFileURL(`${process.cwd()}/public/components/menu-config.js`).href);
     const visible = menu.MENU_GROUPS.flatMap((group: any) => group.modules.map((module: any) => module.id));
 
-    expect(visible).toEqual(["agenda", "clientes", "financeiro", "estoque", "atendente-ia", "configuracoes", "servicos", "auditoria"]);
+    expect(visible).toEqual(["agenda", "clientes", "financeiro", "estoque", "atendente-ia", "servicos", "configuracoes", "auditoria"]);
     expect(visible).not.toEqual(expect.arrayContaining(["dashboard", "operacao", "profissionais", "comissoes", "metas", "fidelizacao", "automacoes", "relatorios", "whatsapp", "agendamento-link"]));
     expect(menu.MOBILE_TABS.map((tab: any) => tab.moduleId)).toEqual(["agenda", "clientes", null]);
     expect(menu.MOBILE_TABS.map((tab: any) => tab.label)).not.toContain("Hoje");
     expect(menu.getDefaultModuleForRole("owner")).toBe("agenda");
+  });
+
+  it("organiza navegacao principal, administracao e perfil sem alterar os contratos dos itens", async () => {
+    const menu = await import(pathToFileURL(`${process.cwd()}/public/components/menu-config.js`).href);
+    const sidebar = await import(pathToFileURL(`${process.cwd()}/public/components/sidebar.js`).href);
+    const groups = menu.filterMenuGroupsByRole(menu.MENU_GROUPS, "owner");
+    const html = sidebar.renderSidebar({
+      groups,
+      activeModule: "servicos",
+      user: { name: "Geovane Borges", role: "owner" },
+    });
+
+    const primary = html.slice(
+      html.indexOf('data-sidebar-area="primary"'),
+      html.indexOf('data-sidebar-area="administrative"'),
+    );
+    const administrative = html.slice(
+      html.indexOf('data-sidebar-area="administrative"'),
+      html.indexOf('<div class="sb-footer">'),
+    );
+
+    expect(
+      [...primary.matchAll(/data-sidebar-module="([^"]+)"/g)].map((match) => match[1]),
+    ).toEqual(["agenda", "clientes", "financeiro", "estoque", "servicos"]);
+    expect(
+      [...administrative.matchAll(/data-sidebar-module="([^"]+)"/g)].map((match) => match[1]),
+    ).toEqual(["configuracoes", "auditoria"]);
+    expect(html).toContain("Geovane Borges");
+    expect(html).toContain("Proprietário");
+    expect(html.match(/data-sidebar-module="servicos"/g)).toHaveLength(1);
+    expect(html).toContain('data-sidebar-module="servicos"');
+    expect(html).toContain("sb-brand-kicker");
+    expect(html).toContain("LIDDO / BARBER OS");
+    expect(html).toContain("sb-item-index");
+    expect(html).toContain("sb-item-terminus");
+    expect(html).toContain("sb-account-chevron");
   });
 
   it("Agenda usa uma acao principal e secundarias em Mais opcoes", () => {
@@ -82,14 +118,13 @@ describe("Macro 234 - release candidate owner-only", () => {
       operationName: "Barbearia Geovane Borges",
     });
 
-    expect(sidebarHtml).toContain("Liddo Barber");
     expect(sidebarHtml).not.toContain("Sistema de gestao");
     expect(sidebarHtml).toContain("Barbearia Geovane Borges");
     expect(app).toContain("function normalizeOperationName");
     expect(app).toContain('placeholder === "unidade padrao"');
     expect(booking).toContain("Barbearia Geovane Borges");
     expect(booking).toContain("Tecnologia Liddo");
-    expect(login).toContain("<div class=\"logo\">Liddo Barber</div>");
+    expect(login).toContain('class="auth-provider-name">LIDDO SYSTEM</div>');
     expect(login).not.toContain("Sistema de gestao");
     expect([sidebarHtml, booking, login, settings].join("\n")).not.toMatch(/LIDDO BARBER|Barbearia Premium/);
   });
@@ -130,5 +165,108 @@ describe("Macro 234 - release candidate owner-only", () => {
     expect(css).toContain("max-height: 100dvh !important");
     expect(css).not.toContain(".today-first-fold");
     expect(css).not.toContain(".today-workbench");
+  });
+
+  it("renderiza cabecalhos operacionais com identidade e contratos preservados", async () => {
+    const operationalUi = await import(
+      pathToFileURL(`${process.cwd()}/public/components/operational-ui.js`).href
+    );
+    const attendant = source("public/modules/atendente-ia.js");
+    const whatsapp = source("public/components/whatsapp.js");
+    const settings = source("public/modules/configuracoes.js");
+    const index = source("public/index.html");
+    const agenda = operationalUi.renderPageHeader({
+      variant: "agenda",
+      title: "Agenda",
+      context: "Operacao diaria",
+      breadcrumb: "Liddo System / Agenda",
+      action: '<button id="agendaNewAppointmentBtn" data-action="new">Novo agendamento</button>',
+    });
+    const financeiro = operationalUi.renderPageHeader({
+      variant: "financeiro",
+      title: "Financeiro",
+    });
+
+    expect(agenda).toContain('data-header-module="agenda"');
+    expect(agenda).toContain("TEMPO / FLUXO");
+    expect(agenda).toContain("Semana operacional");
+    expect(agenda).toContain('id="agendaNewAppointmentBtn"');
+    expect(agenda).toContain('data-action="new"');
+    expect(financeiro).toContain('data-header-module="financeiro"');
+    expect(financeiro).toContain("CAIXA / COMPETÊNCIA");
+    expect(financeiro).toContain("Resultado do período");
+    expect(attendant).toContain('variant: "atendente-ia"');
+    expect(whatsapp).toContain('variant: "whatsapp"');
+    expect(settings).toContain('data-header-module="configuracoes"');
+    expect(index).not.toContain('data-header-module="agendamento-link"');
+    expect(index).not.toContain('id="bookingLinkOpen"');
+    expect(settings).toContain('id: "channels"');
+    expect(settings).toContain('id="bookingLinkOpen"');
+    expect(agenda).not.toContain("op-header-coordinate");
+    expect(financeiro).not.toContain("op-header-title-index");
+  });
+
+  it("transforma resumos numericos em instrumentos sem alterar seus contratos", () => {
+    const index = source("public/index.html");
+    const agenda = source("public/modules/agenda.js");
+    const clients = source("public/modules/clientes.js");
+    const inventory = source("public/modules/estoque.js");
+    const financial = source("public/modules/financeiro.js");
+    const services = source("public/modules/servicos.js");
+    const professionals = source("public/modules/profissionais.js");
+    const motion = source("public/modules/motion-effects.js");
+    const css = source("public/styles/liddo-identity.css");
+
+    expect(index).toContain('id="agendaMetricsGrid"');
+    expect(index).toContain('id="financialSummary"');
+    expect(index).toContain('id="inventorySummaryCards"');
+    expect(index).toContain('id="saleTotalValue"');
+    expect(index).toContain('data-kpi-context="agenda"');
+    expect(index).toContain('data-kpi-context="financeiro"');
+    expect(agenda).toContain('data-kpi-kind="next"');
+    expect(clients).toContain('data-kpi-kind="relationship"');
+    expect(inventory).toContain('card.title === "Valor estimado"');
+    expect(financial).toContain('"balance"');
+    expect(financial).toContain('"projection"');
+    expect(services).toContain('data-kpi-kind="${escapeHtml(kind)}"');
+    expect(professionals).toContain('data-kpi-kind="${escapeHtml(kind)}"');
+    expect(css).toContain("Liddo Operational Instruments");
+    expect(css).toContain("#financialSummary");
+    expect(css).toContain("#estoqueSection #inventorySummaryCards");
+    expect(css).toContain("@keyframes liddo-instrument-enter");
+    expect(css).toContain("@keyframes liddo-instrument-value");
+    expect(motion).toContain("function animateKpiUpdate");
+    expect(motion).toContain('"is-kpi-updating"');
+  });
+
+  it("carrega a identidade definitiva Liddo com assinatura visual e motion acessivel", () => {
+    const index = source("public/index.html");
+    const css = source("public/styles/liddo-identity.css");
+    const motion = source("public/modules/motion-effects.js");
+
+    expect(index).toContain(
+      '/styles/liddo-identity.css?v=20260725-visual-fixes1',
+    );
+    expect(css).toContain("--liddo-bronze:");
+    expect(css).toContain("--liddo-emerald:");
+    expect(css).toContain(".sb-brand-axis");
+    expect(css).toContain(".sb-brand-kicker");
+    expect(css).toContain(".sb-item-index");
+    expect(css).toContain(".sb-item-terminus");
+    expect(css).toContain("@keyframes liddo-sidebar-shell-in");
+    expect(css).toContain("@keyframes liddo-sidebar-item-in");
+    expect(css).toContain(".op-page-header::after");
+    expect(css).toContain(".op-header-link-rail");
+    expect(css).toContain(".op-page-header-agenda");
+    expect(css).toContain(".op-page-header-financeiro");
+    expect(css).toContain(".op-page-header-estoque");
+    expect(css).toContain("@keyframes liddo-header-enter");
+    expect(css).toContain("@keyframes liddo-header-context-update");
+    expect(motion).toContain("function animateHeaderContext");
+    expect(motion).toContain('"is-context-updating"');
+    expect(css).toContain(".agenda-appt-card");
+    expect(css).toContain(".ds-modal-panel");
+    expect(css).toContain(".ds-skeleton");
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
   });
 });

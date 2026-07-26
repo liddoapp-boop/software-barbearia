@@ -2,8 +2,9 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Entrar - Liddo Barber</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090a0b" />
+    <title>Entrar — Barbearia Geovane Borges</title>
     <script>
       (function () {
         var mode = localStorage.getItem("sb.themeMode") || "dark";
@@ -11,173 +12,253 @@
         document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
       })();
     </script>
-    <style>
-      :root[data-theme="light"] {
-        --bg:             #0b0c0e;
-        --surface:        #131518;
-        --text-primary:   #f3f1ec;
-        --text-secondary: #aaa7a0;
-        --text-tertiary:  #74726d;
-        --border-default: #292c32;
-        --accent:         #c89b5d;
-        --error:          #cf2d56;
-        --error-soft:     rgba(207, 45, 86, 0.08);
-        --error-border:   rgba(207, 45, 86, 0.20);
-        --shadow-card:    rgba(0,0,0,0.14) 0px 28px 70px 0px, rgba(0,0,0,0.1) 0px 14px 32px 0px, rgba(38,37,30,0.1) 0px 0px 0px 1px;
-        --btn-bg:         #26251e;
-        --btn-bg-hover:   #141410;
-        --btn-tx:         #f2f1ed;
-        --spinner-track:  rgba(242, 241, 237, 0.35);
-        --spinner-head:   #f2f1ed;
-      }
-
-      :root[data-theme="dark"] {
-        --bg:             #0b0c0e;
-        --surface:        #131518;
-        --text-primary:   #f3f1ec;
-        --text-secondary: #aaa7a0;
-        --text-tertiary:  #74726d;
-        --border-default: #292c32;
-        --accent:         #c89b5d;
-        --error:          #e04a6f;
-        --error-soft:     rgba(224, 74, 111, 0.10);
-        --error-border:   rgba(224, 74, 111, 0.30);
-        --shadow-card:    rgba(0,0,0,0.4) 0px 28px 70px 0px, rgba(0,0,0,0.3) 0px 14px 32px 0px, rgba(230,229,224,0.08) 0px 0px 0px 1px;
-        --btn-bg:         #e6e5e0;
-        --btn-bg-hover:   #ffffff;
-        --btn-tx:         #1a1915;
-        --spinner-track:  rgba(26, 25, 21, 0.30);
-        --spinner-head:   #1a1915;
-      }
-
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-      body {
-        font-family: system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        background: var(--bg);
-        color: var(--text-primary);
-        min-height: 100svh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        -webkit-font-smoothing: antialiased;
-      }
-
-      .card {
-        background: var(--surface);
-        border-radius: 8px;
-        width: 100%;
-        max-width: 360px;
-        padding: 32px;
-        box-shadow: var(--shadow-card);
-      }
-
-      .logo {
-        font-family: system-ui, -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-        font-size: 30px;
-        letter-spacing: 0;
-        color: var(--text-primary);
-        text-align: center;
-        margin-bottom: 4px;
-      }
-
-      .subtitle {
-        display: none;
-        text-align: center;
-        color: var(--text-secondary);
-        font-size: 14px;
-        margin-bottom: 28px;
-      }
-
-      label {
-        display: block;
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-primary);
-        margin-bottom: 6px;
-        margin-top: 16px;
-      }
-
-      input {
-        width: 100%;
-        background: var(--surface);
-        border: 1px solid var(--border-default);
-        border-radius: 4px;
-        color: var(--text-primary);
-        font-family: inherit;
-        font-size: 14px;
-        padding: 8px 10px;
-        outline: none;
-        transition: border-color .15s;
-      }
-      input::placeholder { color: var(--text-tertiary); }
-      input:focus { border-color: var(--accent); }
-
-      .btn {
-        display: block;
-        width: 100%;
-        margin-top: 20px;
-        padding: 10px 20px;
-        background: var(--btn-bg);
-        color: var(--btn-tx);
-        border: none;
-        border-radius: 8px;
-        font-family: inherit;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: background .15s, opacity .15s;
-      }
-      .btn:hover:not(:disabled) { background: var(--btn-bg-hover); }
-      .btn:disabled { opacity: .5; cursor: not-allowed; }
-
-      .error {
-        margin-top: 16px;
-        background: var(--error-soft);
-        border: 1px solid var(--error-border);
-        border-radius: 4px;
-        color: var(--error);
-        font-size: 13px;
-        padding: 8px 10px;
-        display: none;
-      }
-      .error.show { display: block; }
-
-      .spinner {
-        display: inline-block;
-        width: 14px; height: 14px;
-        border: 2px solid var(--spinner-track);
-        border-top-color: var(--spinner-head);
-        border-radius: 50%;
-        animation: spin .6s linear infinite;
-        vertical-align: middle;
-        margin-right: 6px;
-      }
-      @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
     <link rel="stylesheet" href="/styles/design-system.css" />
+    <style id="login-mobile-failsafe">
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { width: 100%; min-height: 100%; margin: 0; }
+      body.auth-screen {
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        background: #090a0b;
+        color: #f3eee6;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      [hidden] { display: none !important; }
+      .auth-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 58fr) minmax(320px, 42fr);
+        width: 100%;
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+      .auth-identity, .auth-access { min-width: 0; }
+      .auth-identity {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 32px;
+      }
+      .auth-provider-name { font-size: 13px; font-weight: 800; letter-spacing: .2em; }
+      .auth-provider p, .auth-identity-footer, .subtitle { color: #b8b1a7; }
+      .auth-provider p { margin: 5px 0 0; font-size: 12px; }
+      .auth-brand-stage { display: grid; min-height: 0; place-items: center; }
+      .auth-brand-image {
+        display: block;
+        width: min(100%, 760px);
+        height: auto;
+        object-fit: contain;
+      }
+      .auth-brand-fallback { text-align: center; }
+      .auth-brand-fallback strong { display: block; font: 600 48px Georgia, serif; }
+      .auth-identity-footer { font-size: 11px; }
+      .auth-access {
+        display: grid;
+        align-items: center;
+        padding: 32px clamp(28px, 4vw, 64px);
+      }
+      .auth-form-shell { width: 100%; max-width: 420px; margin-inline: auto; }
+      .auth-card-kicker { color: #d0a66d; font-size: 10px; font-weight: 800; letter-spacing: .2em; }
+      #accessTitle { margin: 13px 0 10px; font: 500 clamp(30px, 3vw, 40px)/1.1 Georgia, serif; }
+      .subtitle { margin: 0; font-size: 14px; line-height: 1.6; }
+      #loginForm { margin-top: 30px; }
+      .auth-field + .auth-field { margin-top: 18px; }
+      .auth-field label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 700; }
+      .auth-input-wrap { position: relative; }
+      .auth-input-icon {
+        position: absolute;
+        top: 50%;
+        left: 15px;
+        width: 18px;
+        height: 18px;
+        transform: translateY(-50%);
+        pointer-events: none;
+      }
+      .auth-input-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; }
+      .auth-input-password input { padding-right: 52px; }
+      .auth-password-toggle {
+        position: absolute;
+        top: 50%;
+        right: 5px;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #aaa39a;
+        transform: translateY(-50%);
+      }
+      .auth-password-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; }
+      body.auth-screen input {
+        width: 100%;
+        min-height: 52px;
+        padding: 0 15px 0 44px;
+        border: 1px solid #343536;
+        border-radius: 10px;
+        background: #101112;
+        color: #f3eee6;
+        font: inherit;
+        font-size: 16px;
+      }
+      body.auth-screen .btn {
+        width: 100%;
+        min-height: 52px;
+        margin-top: 24px;
+        border: 0;
+        border-radius: 10px;
+        background: #a87540;
+        color: #1b120b;
+        font: inherit;
+        font-weight: 800;
+      }
+      .error:not(.show), .auth-success:not(.show) { display: none; }
+      .error.show, .auth-success.show { display: block; margin-top: 14px; }
+      .auth-card-footer { margin-top: 22px; color: #918b82; font-size: 11px; text-align: center; }
+      @media (max-width: 767px) {
+        .auth-layout { display: flex; min-height: 100dvh; flex-direction: column; }
+        .auth-identity {
+          width: min(100%, 560px);
+          min-height: 0;
+          margin-inline: auto;
+          padding: max(18px, env(safe-area-inset-top)) 16px 0;
+          gap: 8px;
+        }
+        .auth-brand-image { width: min(88vw, 390px); }
+        .auth-identity-footer { display: none; }
+        .auth-access {
+          display: flex;
+          width: 100%;
+          flex: 1;
+          align-items: flex-start;
+          padding: 4px 16px max(22px, env(safe-area-inset-bottom));
+        }
+        .auth-form-shell { max-width: 500px; }
+        #loginForm { margin-top: 22px; }
+      }
+    </style>
+    <link rel="stylesheet" href="/styles/login.css?v=20260726-finish1" />
   </head>
   <body class="auth-screen">
-    <div class="card">
-      <div class="logo">Liddo Barber</div>
+    <main class="auth-layout">
+      <section class="auth-identity" aria-label="Identidade da Barbearia Geovane Borges e Liddo System">
+        <header class="auth-provider">
+          <div class="auth-provider-name">LIDDO SYSTEM</div>
+          <p>Tecnologia para gestão</p>
+        </header>
 
-      <form id="loginForm">
-        <label for="email">Email</label>
-        <input type="email" id="email" placeholder="seu@email.com" required autocomplete="email" />
+        <div class="auth-brand-stage">
+          <div class="auth-brand-visual">
+            <img
+              class="auth-brand-image"
+              id="brandImage"
+              src="/assets/brand/geovane-borges-3d.png"
+              width="1536"
+              height="1024"
+              alt="Barbearia Geovane Borges"
+              decoding="async"
+              fetchpriority="high"
+            />
+            <div class="auth-brand-fallback" id="brandFallback" role="img" aria-label="Barbearia Geovane Borges" hidden>
+              <strong>GB</strong>
+              <span>GEOVANE BORGES</span>
+              <small>BARBEARIA</small>
+            </div>
+          </div>
+        </div>
 
-        <label for="password">Senha</label>
-        <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password" />
+        <footer class="auth-identity-footer">Ambiente privado <span aria-hidden="true">•</span> Software por Liddo System</footer>
+      </section>
 
-        <button type="submit" class="btn" id="submitBtn">Entrar</button>
-      </form>
+      <section class="auth-access" aria-labelledby="accessTitle">
+        <div class="card auth-form-shell" id="loginCard">
+          <div class="auth-card-head">
+            <span class="auth-card-kicker">ÁREA RESTRITA</span>
+            <h1 class="logo" id="accessTitle">Bem-vindo de volta</h1>
+            <p class="subtitle" id="loginSupport">Acesse o painel operacional da Barbearia Geovane Borges.</p>
+          </div>
 
-      <div class="error" id="errorMsg"></div>
-    </div>
+          <form id="loginForm" novalidate>
+            <div class="auth-field">
+              <label for="email">Email</label>
+              <div class="auth-input-wrap">
+                <span class="auth-input-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z" /><path d="m4 7 8 6 8-6" /></svg>
+                </span>
+                <input
+                  type="email"
+                  id="email"
+                  placeholder="seu@email.com"
+                  required
+                  autocomplete="email"
+                  aria-describedby="loginSupport errorMsg"
+                />
+              </div>
+            </div>
+
+            <div class="auth-field">
+              <label for="password">Senha</label>
+              <div class="auth-input-wrap auth-input-password">
+                <span class="auth-input-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+                </span>
+                <input
+                  type="password"
+                  id="password"
+                  placeholder="••••••••"
+                  required
+                  autocomplete="current-password"
+                  aria-describedby="loginSupport errorMsg"
+                />
+                <button
+                  type="button"
+                  class="auth-password-toggle"
+                  id="passwordToggle"
+                  aria-label="Mostrar senha"
+                  aria-pressed="false"
+                  aria-controls="password"
+                >
+                  <svg class="auth-eye-show" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2.5 12s3.4-5 9.5-5 9.5 5 9.5 5-3.4 5-9.5 5-9.5-5-9.5-5Z" />
+                    <circle cx="12" cy="12" r="2.5" />
+                  </svg>
+                  <svg class="auth-eye-hide" viewBox="0 0 24 24" aria-hidden="true" hidden>
+                    <path d="M3 3 21 21" />
+                    <path d="M10.6 7.1A10.9 10.9 0 0 1 12 7c6.1 0 9.5 5 9.5 5a15.8 15.8 0 0 1-2.3 2.7" />
+                    <path d="M6.2 6.2C3.8 7.8 2.5 12 2.5 12s3.4 5 9.5 5a10.7 10.7 0 0 0 3-.4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">
+              <span class="btn-label">Entrar no sistema</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </button>
+          </form>
+
+          <div class="error" id="errorMsg" role="alert" aria-live="polite" aria-atomic="true"></div>
+          <div class="auth-success" id="successMsg" role="status" aria-live="polite" aria-atomic="true">
+            <span class="auth-success-icon" aria-hidden="true">✓</span>
+            <span>Acesso confirmado. Abrindo seu painel…</span>
+          </div>
+
+          <div class="auth-card-footer">
+            <span class="auth-security-icon" aria-hidden="true"></span>
+            Sessão protegida e monitorada.
+          </div>
+        </div>
+      </section>
+    </main>
 
     <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-      import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+      const brandImage = document.getElementById("brandImage");
+      const brandFallback = document.getElementById("brandFallback");
+      brandImage.addEventListener("error", () => {
+        brandImage.hidden = true;
+        brandFallback.hidden = false;
+      });
 
       const firebaseConfig = {
         apiKey: "AIzaSyCXtxVz8lYUGdiTNBCkXX7ynOUSBJRUouw",
@@ -188,20 +269,83 @@
         appId: "1:924661107864:web:f0f3014844e0e2555814ed",
       };
 
-      const fbApp = initializeApp(firebaseConfig);
-      const auth = getAuth(fbApp);
-
       const form = document.getElementById("loginForm");
       const submitBtn = document.getElementById("submitBtn");
       const errorMsg = document.getElementById("errorMsg");
+      const successMsg = document.getElementById("successMsg");
+      const loginCard = document.getElementById("loginCard");
+      const emailInput = document.getElementById("email");
+      const passwordInput = document.getElementById("password");
+      const passwordToggle = document.getElementById("passwordToggle");
+      const passwordShowIcon = passwordToggle.querySelector(".auth-eye-show");
+      const passwordHideIcon = passwordToggle.querySelector(".auth-eye-hide");
+
+      passwordToggle.addEventListener("click", () => {
+        const shouldShowPassword = passwordInput.type === "password";
+        passwordInput.type = shouldShowPassword ? "text" : "password";
+        passwordToggle.setAttribute("aria-pressed", String(shouldShowPassword));
+        passwordToggle.setAttribute("aria-label", shouldShowPassword ? "Ocultar senha" : "Mostrar senha");
+        passwordShowIcon.hidden = shouldShowPassword;
+        passwordHideIcon.hidden = !shouldShowPassword;
+        passwordInput.focus({ preventScroll: true });
+        const caretPosition = passwordInput.value.length;
+        passwordInput.setSelectionRange(caretPosition, caretPosition);
+      });
 
       function showError(msg) {
         errorMsg.textContent = msg;
         errorMsg.classList.add("show");
+        loginCard.classList.remove("is-success");
+        loginCard.classList.add("has-error");
+        emailInput.setAttribute("aria-invalid", "true");
+        passwordInput.setAttribute("aria-invalid", "true");
+      }
+
+      function showValidationError(msg, input) {
+        hideError();
+        errorMsg.textContent = msg;
+        errorMsg.classList.add("show");
+        loginCard.classList.add("has-error");
+        input.setAttribute("aria-invalid", "true");
+        input.focus({ preventScroll: true });
+      }
+
+      function isLocalNetworkHost(hostname = window.location.hostname) {
+        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
+        if (/^10\./.test(hostname) || /^192\.168\./.test(hostname)) return true;
+        const private172 = hostname.match(/^172\.(\d{1,2})\./);
+        return Boolean(private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31);
+      }
+
+      function friendlyLoginError(error) {
+        const message = String(error?.message ?? "").trim();
+        if (/load failed|failed to fetch|networkerror|network request failed/i.test(message)) {
+          return "Não foi possível conectar ao sistema. Verifique a rede Wi-Fi e tente novamente.";
+        }
+        return message || "Email ou senha incorretos.";
       }
 
       function hideError() {
         errorMsg.classList.remove("show");
+        loginCard.classList.remove("has-error");
+        emailInput.removeAttribute("aria-invalid");
+        passwordInput.removeAttribute("aria-invalid");
+      }
+
+      function showSuccess() {
+        hideError();
+        successMsg.classList.add("show");
+        loginCard.classList.add("is-success");
+        submitBtn.classList.remove("is-loading");
+        submitBtn.classList.add("is-success");
+        submitBtn.removeAttribute("aria-busy");
+        submitBtn.innerHTML = '<span class="btn-check" aria-hidden="true">✓</span><span class="btn-label">Acesso confirmado</span>';
+      }
+
+      function finishLogin(data) {
+        persistSession(data);
+        showSuccess();
+        window.setTimeout(() => window.location.replace("/"), 420);
       }
 
       function persistSession(data) {
@@ -220,8 +364,23 @@
         localStorage.removeItem("authToken");
       }
 
+      async function fetchWithTimeout(url, options, timeoutMs = 12_000) {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(url, { ...options, signal: controller.signal });
+        } catch (error) {
+          if (error?.name === "AbortError") {
+            throw new Error("A conexão demorou mais que o esperado. Tente novamente.");
+          }
+          throw error;
+        } finally {
+          window.clearTimeout(timeoutId);
+        }
+      }
+
       async function loginWithBackend(email, password) {
-        const res = await fetch("/auth/login", {
+        const res = await fetchWithTimeout("/auth/login", {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
@@ -236,6 +395,41 @@
         return await res.json();
       }
 
+      let firebaseClientPromise;
+      async function getFirebaseClient() {
+        firebaseClientPromise ??= Promise.all([
+          import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
+          import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
+        ]).then(([appModule, authModule]) => {
+          const app = appModule.initializeApp(firebaseConfig);
+          return {
+            auth: authModule.getAuth(app),
+            signInWithEmailAndPassword: authModule.signInWithEmailAndPassword,
+          };
+        });
+        return firebaseClientPromise;
+      }
+
+      async function loginWithFirebase(email, password) {
+        const firebase = await getFirebaseClient();
+        const credential = await firebase.signInWithEmailAndPassword(firebase.auth, email, password);
+        const idToken = await credential.user.getIdToken();
+
+        const res = await fetchWithTimeout("/auth/firebase", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error ?? "Erro ao autenticar");
+        }
+
+        return await res.json();
+      }
+
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         hideError();
@@ -243,43 +437,47 @@
         const email = document.getElementById("email").value.trim();
         const password = document.getElementById("password").value;
 
+        if (!emailInput.validity.valid) {
+          showValidationError("Informe um email válido.", emailInput);
+          return;
+        }
+        if (!password) {
+          showValidationError("Digite sua senha.", passwordInput);
+          return;
+        }
+
         submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="spinner"></span>Entrando...';
+        submitBtn.classList.remove("is-success");
+        submitBtn.classList.add("is-loading");
+        submitBtn.setAttribute("aria-busy", "true");
+        submitBtn.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="btn-label">Validando acesso…</span>';
 
+        let firebaseError;
         try {
-          const credential = await signInWithEmailAndPassword(auth, email, password);
-          const idToken = await credential.user.getIdToken();
-
-          const res = await fetch("/auth/firebase", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken }),
-          });
-
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.error ?? "Erro ao autenticar");
+          let data;
+          if (isLocalNetworkHost()) {
+            data = await loginWithBackend(email, password);
+          } else {
+            try {
+              data = await loginWithFirebase(email, password);
+            } catch (error) {
+              firebaseError = error;
+              data = await loginWithBackend(email, password);
+            }
           }
-
-          const data = await res.json();
-          persistSession(data);
-
-          window.location.href = "/";
-        } catch (err) {
-          try {
-            const data = await loginWithBackend(email, password);
-            persistSession(data);
-            window.location.href = "/";
-          } catch (backendErr) {
-            const msg = err?.code === "auth/too-many-requests"
-              ? "Muitas tentativas. Aguarde alguns minutos."
-              : backendErr?.message ?? "Email ou senha incorretos.";
-            showError(msg);
-          }
+          finishLogin(data);
+        } catch (error) {
+          const msg = firebaseError?.code === "auth/too-many-requests"
+            ? "Muitas tentativas. Aguarde alguns minutos."
+            : friendlyLoginError(error);
+          showError(msg);
         } finally {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Entrar";
+          if (!loginCard.classList.contains("is-success")) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove("is-loading");
+            submitBtn.removeAttribute("aria-busy");
+            submitBtn.innerHTML = '<span class="btn-label">Entrar no sistema</span><span class="btn-arrow" aria-hidden="true">→</span>';
+          }
         }
       });
     </script>
