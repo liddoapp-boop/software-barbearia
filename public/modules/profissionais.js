@@ -67,9 +67,9 @@ function pendingCommissionFor(professionalId = "", commissions = []) {
     .reduce((acc, item) => acc + toNumber(item.amount || item.commissionAmount || item.value), 0);
 }
 
-function renderKpi(title, value, subtitle = "", tone = "") {
+function renderKpi(title, value, subtitle = "", tone = "", kind = "performance") {
   return `
-    <article class="team-kpi ${tone}">
+    <article class="team-kpi liddo-kpi ${tone}" data-kpi-kind="${escapeHtml(kind)}">
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(value)}</strong>
       ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
@@ -83,8 +83,10 @@ function renderProfessionalCard(item = {}, context = {}) {
   const pendingCommission = showCommissions ? pendingCommissionFor(item.professionalId, context.commissions) : 0;
   const name = item.name || "Profissional";
   return `
-    <article class="team-row">
-      <div class="team-row-main" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}">
+    <article class="team-row" data-record-surface="professional">
+      <div class="team-row-main" data-professional-action="detail" data-professional-id="${escapeHtml(item.professionalId)}"
+           data-record-interactive="true" role="button" tabindex="0"
+           aria-label="Abrir profissional ${escapeHtml(name)}">
         <div class="team-avatar">${escapeHtml(initials(name))}</div>
         <div class="team-copy">
           <strong>${escapeHtml(name)}</strong>
@@ -205,10 +207,10 @@ export function renderProfessionalsData(elements, payload, context = {}) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="team-kpi-grid">
-        ${renderKpi("Producao", money(summary.totalRevenue), "Receita no recorte")}
-        ${renderKpi("Atendimentos", String(toNumber(summary.totalCompleted)), "Concluidos no periodo")}
-        ${renderKpi("Destaque", summary.bestRevenue?.name || "-", summary.bestRevenue ? money(summary.bestRevenue.revenue) : "Sem historico", "team-kpi-positive")}
+      <div class="team-kpi-grid liddo-instruments liddo-instruments-profissionais">
+        ${renderKpi("Producao", money(summary.totalRevenue), "Receita no recorte", "", "monetary")}
+        ${renderKpi("Atendimentos", String(toNumber(summary.totalCompleted)), "Concluidos no periodo", "", "throughput")}
+        ${renderKpi("Destaque", summary.bestRevenue?.name || "-", summary.bestRevenue ? money(summary.bestRevenue.revenue) : "Sem historico", "team-kpi-positive", "leader")}
       </div>
     `;
   }

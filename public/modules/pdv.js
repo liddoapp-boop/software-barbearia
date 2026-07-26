@@ -6,7 +6,10 @@ function toNumber(value, fallback = 0) {
 }
 
 function toMoney(value) {
-  return `R$ ${toNumber(value).toFixed(2)}`;
+  return toNumber(value).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
 }
 
 function escapeHtml(value) {

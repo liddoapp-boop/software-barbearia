@@ -136,8 +136,10 @@ function renderClientCard(client = {}) {
     client.daysWithoutReturn == null ? "—" : `${toNumber(client.daysWithoutReturn)}d`;
 
   return `
-    <article class="cl-row cl-row-${escapeHtml(statusKey)}">
-      <div class="cl-row-body" data-clients-action="detail" data-client-id="${escapeHtml(clientId)}">
+    <article class="cl-row cl-row-${escapeHtml(statusKey)}" data-record-surface="client" data-record-tone="${escapeHtml(statusKey)}">
+      <div class="cl-row-body" data-clients-action="detail" data-client-id="${escapeHtml(clientId)}"
+           data-record-interactive="true" role="button" tabindex="0"
+           aria-label="Abrir cliente ${escapeHtml(client.fullName || "Cliente")}">
         <div class="cl-avatar cl-avatar-${escapeHtml(statusKey)}">${escapeHtml(initials)}</div>
         <div class="cl-identity">
           <strong class="cl-name">${escapeHtml(client.fullName || "Cliente")}</strong>
@@ -214,18 +216,18 @@ export function renderClientsData(elements, payload, options = {}) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="cl-kpi-strip">
-        <article class="ux-kpi cl-kpi cl-kpi-main">
+      <div class="cl-kpi-strip liddo-instruments liddo-instruments-clientes">
+        <article class="ux-kpi liddo-kpi cl-kpi cl-kpi-main" data-kpi-kind="relationship">
           <div class="ux-label">Carteira ativa</div>
           <div class="ux-value-sm">${toNumber(summary.active)}</div>
           <div class="ux-hint">${toNumber(summary.vip)} VIP · ${toNumber(summary.totalClients)} clientes no recorte</div>
         </article>
-        <article class="ux-kpi cl-kpi">
+        <article class="ux-kpi liddo-kpi cl-kpi" data-kpi-kind="attention">
           <div class="ux-label">Atenção</div>
           <div class="ux-value-sm ${toNumber(summary.atRisk) + toNumber(summary.inactive) > 0 ? "ds-kpi-tone-warning" : ""}">${toNumber(summary.atRisk) + toNumber(summary.inactive)}</div>
           <div class="ux-hint">${toNumber(summary.atRisk)} em risco · ${toNumber(summary.inactive)} inativos</div>
         </article>
-        <article class="ux-kpi cl-kpi">
+        <article class="ux-kpi liddo-kpi cl-kpi" data-kpi-kind="monetary">
           <div class="ux-label">Potencial</div>
           <div class="ux-value-sm">${money(summary.potentialReactivationRevenue)}</div>
           <div class="ux-hint">Ticket médio ${money(summary.averageTicket)}</div>

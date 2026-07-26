@@ -149,7 +149,7 @@ function groupByProfessional(entries = [], payload = {}) {
 
 function renderKpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="comm-kpi ${tone}">
+    <article class="comm-kpi liddo-kpi ${tone}" data-kpi-kind="monetary">
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(value)}</strong>
       ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
@@ -181,7 +181,8 @@ function renderCommissionRow(entry = {}, options = {}) {
   const age = daysSince(entry.occurredAt);
   const isOldPending = entry.status === "PENDING" && age >= 7;
   return `
-    <article class="commission-row ${isOldPending ? "commission-row-stale" : ""}">
+    <article class="commission-row ${isOldPending ? "commission-row-stale" : ""}"
+             data-record-surface="commission" data-record-tone="${isOldPending ? "attention" : String(entry.status || "pending").toLowerCase()}">
       <div class="commission-row-main">
         <div class="commission-row-copy">
           <div class="commission-row-meta">
@@ -303,7 +304,7 @@ export function renderCommissionsData(elements, payload, options = {}) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="comm-kpi-grid">
+      <div class="comm-kpi-grid liddo-instruments liddo-instruments-comissoes">
         ${renderKpi("Pendente", money(totals.pending), "Valor a pagar", "comm-kpi-warning")}
         ${renderKpi("Pago no periodo", money(totals.paid), "Comissoes liquidadas", "comm-kpi-success")}
         ${renderKpi("Profissionais pendentes", String(totals.professionalsPending), "Quem precisa receber")}

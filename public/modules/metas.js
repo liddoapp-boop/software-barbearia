@@ -53,7 +53,7 @@ function paceMeta(status) {
 
 function kpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="performance">
       <div class="ux-label">${escapeHtml(title)}</div>
       <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
       ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
@@ -123,7 +123,7 @@ export function renderMetasData(elements, payload = {}) {
 
   if (elements.cards) {
     elements.cards.innerHTML = `
-      <div class="ds-kpi-row">
+      <div class="ds-kpi-row liddo-instruments liddo-instruments-metas">
         ${kpi("Meta mensal", money(goal.revenueTarget), `${goal.month}/${goal.year}`)}
         ${kpi("Faturamento atual", money(metrics.revenueCurrent), "Receita de atendimentos + vendas", "ds-kpi-tone-success")}
         ${kpi("Percentual atingido", pct(metrics.goalProgressPercent), "Progresso da meta")}

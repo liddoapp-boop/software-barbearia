@@ -18,9 +18,17 @@
         } catch (_) { window.location.replace("/login"); }
       })();
     </script>
-    <title>Liddo Barber | Painel Operacional</title>
+    <title>Liddo System | Painel Operacional</title>
     <link rel="stylesheet" href="/styles/layout.css" />
     <link rel="stylesheet" href="/styles/design-system.css" />
+    <link rel="stylesheet" href="/styles/liddo-identity.css?v=20260725-visual-fixes1" />
+    <link rel="stylesheet" href="/styles/record-surfaces.css?v=20260725-record-surfaces1" />
+    <link rel="stylesheet" href="/styles/agenda-surface.css?v=20260725-agenda-surface1" />
+    <link rel="stylesheet" href="/styles/commerce-surfaces.css?v=20260725-visual-fixes1" />
+    <link rel="stylesheet" href="/styles/finance-surface.css?v=20260726-finance-native-period1" />
+    <link rel="stylesheet" href="/styles/header-surface.css?v=20260725-header-surface1" />
+    <link rel="stylesheet" href="/styles/mobile-density.css?v=20260725-mobile-density1" />
+    <link rel="stylesheet" href="/styles/interaction-surfaces.css?v=20260726-overlay-recovery1" />
   </head>
   <body class="overflow-x-hidden">
     <script>
@@ -34,7 +42,7 @@
         document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
         document.body.classList.add(isDark ? "theme-dark" : "theme-light");
         var themeMeta = document.querySelector('meta[name="theme-color"]');
-        if (themeMeta) themeMeta.setAttribute("content", isDark ? "#0B0F14" : "#f2f1ed");
+        if (themeMeta) themeMeta.setAttribute("content", "#080a0b");
       })();
     </script>
     <div id="appShell">
@@ -47,7 +55,7 @@
             <div id="agendaHeaderMount" class="ds-mb"></div>
 
             <div id="agendaCardsMode">
-              <section id="agendaMetricsGrid" class="agenda-next-strip ds-mb"></section>
+              <section id="agendaMetricsGrid" class="agenda-next-strip ds-mb liddo-instruments liddo-instruments-agenda" data-kpi-context="agenda"></section>
             </div>
 
             <div class="wc-nav ds-mb">
@@ -59,6 +67,13 @@
                   <button id="viewGridBtn" type="button" class="wc-view-btn c-button-group-item is-active">Semana</button>
                   <button id="viewListBtn" type="button" class="wc-view-btn c-button-group-item">Lista</button>
                 </div>
+              </div>
+              <div class="wc-mobile-date-nav">
+                <button id="wcTodayBtn" type="button" class="wc-nav-btn wc-nav-today">Hoje</button>
+                <label class="wc-date-jump" for="wcGoToDate">
+                  <span>Ir para data</span>
+                  <input id="wcGoToDate" type="date" />
+                </label>
               </div>
               <div class="agenda-owner-actions">
                 <button id="agendaNewAppointmentBtn" type="button" class="wc-add-btn">
@@ -122,7 +137,7 @@
               <select id="appointmentsFilterService"></select>
               <select id="appointmentsFilterClient"></select>
               <input id="appointmentsFilterSearch" type="search" />
-              <div id="appointmentsSummaryGrid"></div>
+              <div id="appointmentsSummaryGrid" class="liddo-instruments liddo-instruments-agenda" data-kpi-context="agenda-period"></div>
               <div id="appointmentsHeaderDate"></div>
               <div id="appointmentsPeriodSummary"></div>
               <div id="appointmentsFeedback"></div>
@@ -178,9 +193,17 @@
                       <select id="professionalId" required class="sched-select sr-only"></select>
                       <div id="professionalSelectionMount" class="professional-auto-box" aria-live="polite"></div>
                     </section>
-                    <label class="sched-label" style="display:block;margin-top:14px">Data e Hora
-                      <input type="datetime-local" id="startsAt" required class="sched-input" style="margin-top:6px" />
-                    </label>
+                    <div class="appointment-datetime-fields">
+                      <label class="sched-label appointment-datetime-desktop">Data e Hora
+                        <input type="datetime-local" id="startsAt" required class="sched-input" />
+                      </label>
+                      <label class="sched-label appointment-date-mobile">Data
+                        <input type="date" id="appointmentDate" required disabled class="sched-input" />
+                      </label>
+                      <label class="sched-label appointment-time-mobile">Hora
+                        <input type="time" id="appointmentTime" required disabled class="sched-input" />
+                      </label>
+                    </div>
                     <section class="appointment-summary-step" aria-labelledby="appointmentSummaryTitle">
                       <div class="appointment-step-head">
                         <div>
@@ -190,22 +213,16 @@
                       </div>
                       <div id="appointmentSummaryMount" aria-live="polite"></div>
                     </section>
-                    <div id="clientInsights" class="sched-info-block" style="margin-top:14px">
-                      Selecione um cliente para ver historico resumido e perfil.
-                    </div>
-                    <div id="serviceSuggestions" class="sched-info-block" style="margin-top:10px">
-                      Sugestoes de servicos relacionados aparecerao aqui.
-                    </div>
-                    <div id="appointmentFeedback" class="sched-info-block" style="margin-top:10px">
-                      Selecione cliente, profissional, servico e horario para validar disponibilidade.
-                    </div>
-                    <div id="alternativeSlots" class="sched-info-block" style="margin-top:10px">
-                      Horarios alternativos serao sugeridos aqui em caso de conflito.
-                    </div>
-                    <button type="submit" class="sched-submit-btn" style="margin-top:18px">Confirmar Agendamento</button>
+                    <div id="clientInsights" class="sched-info-block" hidden></div>
+                    <div id="serviceSuggestions" class="sched-info-block" hidden></div>
+                    <div id="appointmentFeedback" class="sched-info-block" hidden></div>
+                    <div id="alternativeSlots" class="sched-info-block" hidden></div>
                   </form>
                 </article>
               </div>
+              <footer class="sched-drawer-footer">
+                <button type="submit" form="appointmentForm" class="sched-submit-btn">Confirmar Agendamento</button>
+              </footer>
             </div>
           </div>
 
@@ -226,7 +243,14 @@
               <div class="pdv-mkt-layout">
 
                 <!-- LEFT: catálogo de produtos -->
-                <div class="pdv-mkt-browser">
+                <section class="pdv-mkt-browser commerce-zone commerce-zone-selection" aria-labelledby="pdvSelectionTitle">
+                  <header class="commerce-zone-head">
+                    <div>
+                      <p class="commerce-zone-kicker">Seleção</p>
+                      <h2 id="pdvSelectionTitle">Produtos disponíveis</h2>
+                      <p>Localize o item, confira o estoque e acople à venda.</p>
+                    </div>
+                  </header>
                   <div class="pdv-mkt-search-row">
                     <input
                       type="search"
@@ -234,16 +258,22 @@
                       placeholder="Buscar produto..."
                       class="ds-input pdv-mkt-search"
                       autocomplete="off"
+                      aria-label="Buscar produto no catálogo do PDV"
                     />
                   </div>
                   <div id="saleCategoryList" class="pdv-category-list pdv-mkt-cats"></div>
                   <div id="saleProductRail" class="pdv-mkt-grid"></div>
-                </div>
+                </section>
 
                 <!-- RIGHT: carrinho -->
-                <aside class="pdv-mkt-cart ux-card">
+                <aside class="pdv-mkt-cart ux-card commerce-zone commerce-zone-review" aria-labelledby="pdvReviewTitle">
                   <div class="pdv-mkt-cart-head">
-                    <p class="ux-label">Carrinho</p>
+                    <div class="commerce-zone-title">
+                      <div>
+                        <p class="commerce-zone-kicker">Conferência</p>
+                        <h2 id="pdvReviewTitle">Itens da venda</h2>
+                      </div>
+                    </div>
                     <span id="saleTotalItems" class="pdv-mkt-cart-badge">0 item(ns)</span>
                   </div>
 
@@ -258,14 +288,22 @@
                     </label>
                   </div>
 
-                  <div id="saleTotal" class="pdv-mkt-cart-total">
-                    <span class="ds-cell-secondary">Total</span>
-                    <span id="saleTotalValue" class="pdv-total-value">R$ 0,00</span>
-                  </div>
-
-                  <div class="pdv-mkt-cart-foot">
-                    <button type="button" id="saleClearCartBtn" class="ux-btn ux-btn-muted">Limpar</button>
-                    <span id="saleCheckoutActionMount"></span>
+                  <div class="pdv-liquidation-zone" aria-labelledby="pdvLiquidationTitle">
+                    <div class="pdv-liquidation-label">
+                      <div>
+                        <p class="commerce-zone-kicker">Liquidação</p>
+                        <h2 id="pdvLiquidationTitle">Fechamento da venda</h2>
+                      </div>
+                    </div>
+                    <div id="saleTotal" class="pdv-mkt-cart-total liddo-kpi liddo-kpi-pdv-total" data-kpi-kind="monetary">
+                      <span class="ds-cell-secondary">Total a cobrar</span>
+                      <span id="saleTotalValue" class="pdv-total-value">R$ 0,00</span>
+                    </div>
+                    <p class="pdv-operation-consequence">Ao cobrar, a venda registra a receita e a baixa dos itens conforme as regras atuais.</p>
+                    <div class="pdv-mkt-cart-foot">
+                      <button type="button" id="saleClearCartBtn" class="ux-btn ux-btn-muted">Limpar venda</button>
+                      <span id="saleCheckoutActionMount"></span>
+                    </div>
                   </div>
 
                   <div id="saleFeedback" class="panel-msg-host"></div>
@@ -297,10 +335,12 @@
             <div id="financialHeaderMount"></div>
 
             <div id="financialFeedback" class="panel-msg-host"></div>
-            <section id="financialSummary"></section>
-            <section id="financialToolbarMount"></section>
+            <section class="fn-operational-bar" aria-label="Controles financeiros">
+              <section id="financialFilterMount"></section>
+              <section id="financialToolbarMount"></section>
+            </section>
+            <section id="financialSummary" class="liddo-instruments liddo-instruments-financeiro" data-kpi-context="financeiro"></section>
             <section id="financialCashflow"></section>
-            <section id="financialFilterMount"></section>
             <section id="financialEntriesList"></section>
 
             <div id="financialCommissionsList" class="hidden"></div>
@@ -336,7 +376,7 @@
                   <label class="fn-field">Valor
                     <input id="financialTransactionAmount" type="number" step="0.01" min="0.01" required class="fn-input" placeholder="0,00" />
                   </label>
-                  <label class="fn-field">Data
+                  <label class="fn-field fn-entry-date-field">Data
                     <input id="financialTransactionDate" type="date" required class="fn-input" />
                   </label>
                   <label class="fn-field">Metodo de pagamento
@@ -390,7 +430,7 @@
           <section id="estoqueSection" data-section="estoque" class="module-section hidden">
             <div id="inventoryHeaderMount"></div>
 
-            <section id="inventorySummaryCards" class="inv-kpi-grid"></section>
+            <section id="inventorySummaryCards" class="inv-kpi-grid liddo-instruments liddo-instruments-estoque" data-kpi-context="estoque"></section>
 
             <div id="inventoryFilterMount"></div>
 
@@ -425,7 +465,7 @@
           <section id="clientsSection" data-section="clientes" class="module-section hidden">
             <div id="clientsHeaderMount"></div>
             <div id="clientsFeedback"></div>
-            <div id="clientsSummary"></div>
+            <div id="clientsSummary" class="liddo-instruments-host" data-kpi-context="clientes"></div>
             <div id="clientsToolbarMount"></div>
             <div id="clientsFilterMount"></div>
             <div id="clientsReactivationQueue"></div>
@@ -436,7 +476,7 @@
 
           <section id="professionalsSection" data-section="profissionais" class="module-section hidden">
             <div id="professionalsHeaderMount"></div>
-            <section id="professionalsSummary"></section>
+            <section id="professionalsSummary" class="liddo-instruments-host" data-kpi-context="profissionais"></section>
             <section id="professionalsFilterMount"></section>
             <section id="professionalsTable"></section>
             <div id="professionalsDrawerHost" class="hidden"></div>
@@ -444,7 +484,7 @@
 
           <section id="servicesSection" data-section="servicos" class="module-section hidden">
             <div id="servicesHeaderMount"></div>
-            <section id="servicesSummaryGrid"></section>
+            <section id="servicesSummaryGrid" class="liddo-instruments-host" data-kpi-context="servicos"></section>
             <section id="servicesFilterMount"></section>
             <div id="servicesFeedback"></div>
             <div id="servicesEmptyState" class="hidden"></div>
@@ -454,7 +494,7 @@
 
           <section id="commissionsSection" data-section="comissoes" class="module-section hidden">
             <div id="commissionsHeaderMount"></div>
-            <section id="commissionsSummary"></section>
+            <section id="commissionsSummary" class="liddo-instruments-host" data-kpi-context="comissoes"></section>
             <section id="commissionsFilterMount"></section>
             <div id="commissionsFeedback"></div>
             <section id="commissionsTable"></section>
@@ -474,7 +514,7 @@
               <div id="fidelizacaoHeaderMount"></div>
               <section id="fidelizacaoFilterMount" class="ds-mt-lg"></section>
 
-              <div id="fidelizacaoSummary" class="ds-mb"></div>
+              <div id="fidelizacaoSummary" class="ds-mb liddo-instruments-host" data-kpi-context="fidelizacao"></div>
 
               <section class="grid grid-cols-1 xl:grid-cols-2 gap-3">
                 <article class="ux-card">
@@ -567,7 +607,7 @@
                 <div id="automacoesRulesList" class="ds-gap-top"></div>
               </section>
 
-              <div id="automacoesSummary" class="ds-mb"></div>
+              <div id="automacoesSummary" class="ds-mb liddo-instruments-host" data-kpi-context="automacoes"></div>
 
               <section class="grid grid-cols-1 xl:grid-cols-3 gap-3">
                 <article class="ux-card">
@@ -592,7 +632,7 @@
               <div id="metasFeedback" class="ds-mt-lg"></div>
             </article>
 
-            <section id="metasSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"></section>
+            <section id="metasSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 liddo-instruments-host" data-kpi-context="metas"></section>
 
             <section class="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-3">
               <article class="ux-card">
@@ -635,80 +675,6 @@
 
           <section id="whatsappSection" data-section="whatsapp" class="module-section hidden">
             <div id="whatsappMount"></div>
-          </section>
-
-          <section id="agendamento-linkSection" data-section="agendamento-link" class="module-section hidden">
-            <div class="bkl-page">
-
-              <!-- Page header -->
-              <header class="op-page-header">
-                <div class="op-page-header-main">
-                  <h1 class="op-page-title">Link de Agendamento</h1>
-                  <p class="op-page-subtitle">
-                    Compartilhe no Instagram ou WhatsApp para clientes agendarem online sem precisar ligar.
-                  </p>
-                </div>
-                <div class="op-page-action">
-                  <a id="bookingLinkOpen" href="/agendamento" target="_blank" class="op-primary-action" style="gap:8px">
-                    Abrir página
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  </a>
-                </div>
-              </header>
-
-              <!-- Link card -->
-              <div class="bkl-card">
-                <div class="bkl-card-head">
-                  <span class="bkl-card-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                  </span>
-                  <div>
-                    <strong>Link público de agendamento</strong>
-                    <span>Página acessível sem login — qualquer cliente pode agendar</span>
-                  </div>
-                </div>
-                <div class="bkl-link-row">
-                  <span id="bookingLinkText" class="bkl-link-text"></span>
-                  <button id="copyBookingLink" type="button" class="bkl-copy-btn">
-                    <svg class="bkl-copy-icon bkl-copy-icon-default" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    <svg class="bkl-copy-icon bkl-copy-icon-success" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                    <span class="bkl-copy-label">Copiar link</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Tips grid -->
-              <div class="bkl-tips-grid">
-                <div class="bkl-tip-item">
-                  <span class="bkl-tip-icon" aria-hidden="true">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"/></svg>
-                  </span>
-                  <div>
-                    <strong>Bio do Instagram</strong>
-                    <span>Cole o link na bio e direcione seguidores para agendar diretamente</span>
-                  </div>
-                </div>
-                <div class="bkl-tip-item">
-                  <span class="bkl-tip-icon" aria-hidden="true">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  </span>
-                  <div>
-                    <strong>WhatsApp e Stories</strong>
-                    <span>Envie para clientes agendarem sem precisar ligar ou mandar mensagem</span>
-                  </div>
-                </div>
-                <div class="bkl-tip-item">
-                  <span class="bkl-tip-icon" aria-hidden="true">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="m9 16 2 2 4-4"/></svg>
-                  </span>
-                  <div>
-                    <strong>Agendamento automático</strong>
-                    <span>O cliente escolhe serviço, data e horário disponível em tempo real</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
           </section>
 
           <section id="placeholderSection" class="module-section hidden"></section>
@@ -802,6 +768,8 @@
                 <option value="IN">Entrada de reposicao</option>
                 <option value="OUT">Saida manual</option>
                 <option value="ADJUSTMENT">Ajustar saldo final</option>
+                <option value="INTERNAL_USE">Uso interno</option>
+                <option value="LOSS">Perda</option>
               </select>
             </label>
           </div>
@@ -970,7 +938,7 @@
               <input id="clientsBirthDate" type="date" class="ds-input" />
             </label>
           </div>
-          <div class="cl-modal-row">
+          <div class="cl-modal-row cl-modal-row-status">
             <label class="ds-form-label">Status
               <select id="clientsStatus" class="ds-input">
                 <option value="NEW">Novo</option>
@@ -978,9 +946,6 @@
                 <option value="VIP">VIP</option>
                 <option value="INACTIVE">Inativo</option>
               </select>
-            </label>
-            <label class="ds-form-label">Tags (separadas por vírgula)
-              <input id="clientsTags" type="text" maxlength="200" placeholder="NEW, VIP" class="ds-input" />
             </label>
           </div>
           <label class="ds-form-label">Observações
@@ -1035,6 +1000,6 @@
 
     <nav id="appMobileTabs" aria-label="Navegacao mobile"></nav>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260726-finance-native-period1"></script>
   </body>
 </html>

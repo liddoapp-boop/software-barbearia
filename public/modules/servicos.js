@@ -92,9 +92,9 @@ function renderProfessionalsCell(service = {}) {
   `;
 }
 
-function renderKpi(title, value, subtitle = "", tone = "") {
+function renderKpi(title, value, subtitle = "", tone = "", kind = "catalog") {
   return `
-    <article class="svc-kpi ${tone}">
+    <article class="svc-kpi liddo-kpi ${tone}" data-kpi-kind="${escapeHtml(kind)}">
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(value)}</strong>
       ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
@@ -115,8 +115,11 @@ function renderServiceCard(service = {}) {
   const marginPct = toNumber(service.estimatedMarginPct);
 
   return `
-    <article class="svc-row ${isActive ? "" : "svc-row-inactive"}">
-      <div class="svc-row-main" data-service-action="detail" data-service-id="${escapeHtml(service.id)}">
+    <article class="svc-row ${isActive ? "" : "svc-row-inactive"}"
+             data-record-surface="service" data-record-tone="${isActive ? "active" : "inactive"}">
+      <div class="svc-row-main" data-service-action="detail" data-service-id="${escapeHtml(service.id)}"
+           data-record-interactive="true" role="button" tabindex="0"
+           aria-label="Abrir servico ${escapeHtml(service.name || "Servico")}">
         <div class="svc-row-copy">
           <div class="svc-row-chips">
             ${renderStatusChip(status, { label: isActive ? "Ativo" : "Inativo" })}
@@ -218,13 +221,13 @@ export function renderServicesData(elements, payload = {}) {
       ? summary.priceAdjustmentCandidates.length
       : 0;
     elements.summary.innerHTML = `
-      <div class="svc-kpi-grid">
-        ${renderKpi("Serviços", String(toNumber(summary.totalServices)), "Catalogo total")}
-        ${renderKpi("Ativos", String(toNumber(summary.activeServices)), "Vendaveis na agenda", "svc-kpi-success")}
-        ${renderKpi("Inativos", String(toNumber(summary.inactiveServices)), "Fora da venda")}
-        ${renderKpi("Ticket medio", money(summary.averageTicket), "Preco medio atual")}
-        ${renderKpi("Mais vendido", summary.bestSellingService?.name || "-", summary.bestSellingService ? `${toNumber(summary.bestSellingService.salesCount)} venda(s)` : "Sem historico", "svc-kpi-highlight")}
-        ${renderKpi("Precisam ajuste", String(adjustment), "Preco ou margem em atencao", adjustment ? "svc-kpi-warning" : "")}
+      <div class="svc-kpi-grid liddo-instruments liddo-instruments-servicos">
+        ${renderKpi("Serviços", String(toNumber(summary.totalServices)), "Catalogo total", "", "catalog")}
+        ${renderKpi("Ativos", String(toNumber(summary.activeServices)), "Vendaveis na agenda", "svc-kpi-success", "active")}
+        ${renderKpi("Inativos", String(toNumber(summary.inactiveServices)), "Fora da venda", "", "inactive")}
+        ${renderKpi("Ticket medio", money(summary.averageTicket), "Preco medio atual", "", "monetary")}
+        ${renderKpi("Mais vendido", summary.bestSellingService?.name || "-", summary.bestSellingService ? `${toNumber(summary.bestSellingService.salesCount)} venda(s)` : "Sem historico", "svc-kpi-highlight", "demand")}
+        ${renderKpi("Precisam ajuste", String(adjustment), "Preco ou margem em atencao", adjustment ? "svc-kpi-warning" : "", "attention")}
       </div>
     `;
   }
@@ -521,6 +524,7 @@ export function renderServiceEditPanel(elements, service = {}, professionals = [
 
   elements.drawerHost.classList.remove("hidden");
   bindImageFailureFallbacks(elements.drawerHost);
+  bindEntityDrawers(elements.drawerHost);
 
   const imgInput = elements.drawerHost.querySelector("#svcEditImageUrl");
   const imgPreview = elements.drawerHost.querySelector(`#${imagePreviewId}`);

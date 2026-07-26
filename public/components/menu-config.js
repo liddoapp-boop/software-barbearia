@@ -1,27 +1,21 @@
 export const MENU_GROUPS = [
   {
-    id: "operacao",
-    label: "Operacao",
+    id: "principal",
+    label: "Navegacao principal",
     modules: [
       { id: "agenda", label: "Agenda" },
       { id: "clientes", label: "Clientes" },
-    ],
-  },
-  {
-    id: "gestao",
-    label: "Gestao",
-    modules: [
       { id: "financeiro", label: "Financeiro" },
       { id: "estoque", label: "Estoque" },
+      { id: "atendente-ia", label: "Atendente IA" },
+      { id: "servicos", label: "Servicos" },
     ],
   },
   {
     id: "administracao",
     label: "Administracao",
     modules: [
-      { id: "atendente-ia", label: "Atendente IA" },
       { id: "configuracoes", label: "Configuracoes" },
-      { id: "servicos", label: "Servicos" },
       { id: "auditoria", label: "Auditoria" },
     ],
   },

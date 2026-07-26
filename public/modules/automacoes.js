@@ -45,7 +45,7 @@ function ruleTargetLabel(target) {
 
 function kpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="automation">
       <div class="ux-label">${escapeHtml(title)}</div>
       <div class="ux-value-sm ${tone}">${escapeHtml(String(value))}</div>
       ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
@@ -117,7 +117,7 @@ export function renderAutomacoesData(elements, payload) {
 
   if (elements.summary) {
     elements.summary.innerHTML = `
-      <div class="ds-kpi-row">
+      <div class="ds-kpi-row liddo-instruments liddo-instruments-automacoes">
         ${kpi("Regras", rulesRows.length, "Cadastradas")}
         ${kpi("Ativas", rulesRows.filter((row) => row.isActive).length, "", "ds-kpi-tone-success")}
         ${kpi("Execucoes", toNumber(executionsSummary.total), "No periodo")}

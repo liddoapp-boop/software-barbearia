@@ -250,7 +250,11 @@ function moduleBadgeColor() {
 function renderTimelineEvent(event = {}) {
   const sensitive = isSensitive(event);
   return `
-    <article class="aud-event-card ${sensitive ? "aud-event-sensitive" : ""}" data-audit-action="detail" data-audit-event-id="${escapeHtml(event.id)}">
+    <article class="aud-event-card ${sensitive ? "aud-event-sensitive" : ""}"
+             data-audit-action="detail" data-audit-event-id="${escapeHtml(event.id)}"
+             data-record-surface="audit" data-record-tone="${sensitive ? "sensitive" : "trace"}"
+             data-record-interactive="true" role="button" tabindex="0"
+             aria-label="Abrir evento ${escapeHtml(actionLabel(event.action))}">
       <div class="aud-event-left">
         <span class="aud-event-time">${escapeHtml(formatDateTime(event.createdAt))}</span>
         <span class="aud-module-badge ${moduleBadgeColor(event.entity)}">${escapeHtml(moduleLabel(event.entity))}</span>

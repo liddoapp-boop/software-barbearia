@@ -10,6 +10,14 @@ import {
 } from "./components/menu-config.js";
 import { renderSidebar } from "./components/sidebar.js";
 import { renderMobileTabs } from "./components/mobile-tabs.js";
+import { bindRecordSurfaceKeyboard } from "./components/record-surfaces.js";
+import {
+  closeInteractionSurface,
+  confirmInteraction,
+  initInteractionSurfaces,
+  openInteractionSurface,
+  promptInteraction,
+} from "./components/interaction-surfaces.js";
 import { renderWhatsAppSection } from "./components/whatsapp.js";
 import {
   filterAgendaItems,
@@ -128,7 +136,17 @@ import {
   renderSettingsLoading,
   renderSettingsSidebar,
 } from "./modules/configuracoes.js";
-import { animateSettingsScreen } from "./modules/motion-effects.js";
+import {
+  animateAgendaView,
+  animateModuleScreen,
+  animateSettingsScreen,
+  animateSidebarIndicator,
+  hideMotionLayer,
+  hideMotionPopover,
+  initMotionSystem,
+  showMotionLayer,
+  showMotionPopover,
+} from "./modules/motion-effects.js";
 import {
   renderMetasData,
   renderMetasError,
@@ -302,12 +320,6 @@ function renderOperationalChrome() {
       eyebrow: "Produtos e reposicao",
       title: "Estoque",
       subtitle: "Produtos criticos primeiro, reposicao clara e historico tecnico apenas no detalhe.",
-      secondaryActions: `
-        <div class="pdv-module-tabs pdv-header-tabs" role="tablist" aria-label="Modulo PDV">
-          <button type="button" class="pdv-tab-btn" data-pdv-target="operacao">Venda</button>
-          <button type="button" class="pdv-tab-btn is-active" data-pdv-target="estoque">Estoque</button>
-        </div>
-      `,
     });
   }
 
@@ -351,27 +363,25 @@ function renderOperationalChrome() {
   if (financialFilterMount) {
     financialFilterMount.innerHTML = `
       <div class="fn-filter-bar" id="financialOperationalFilters">
-        <div class="fn-picker-wrap" id="fnPickerWrap">
-          <input id="financialCustomStart" type="hidden" />
-          <input id="financialCustomEnd" type="hidden" />
-          <button type="button" id="financialDateTrigger" class="shf-trigger">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-            <span id="financialDateLabel">Este mês</span>
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <div id="fnPickerPopover" class="shf-popover hidden" role="dialog" aria-label="Selecionar período">
-            <div class="shf-presets">
-              <button type="button" class="shf-preset" data-fn-preset="today">Hoje</button>
-              <button type="button" class="shf-preset" data-fn-preset="7d">Últimos 7 dias</button>
-              <button type="button" class="shf-preset" data-fn-preset="30d">Últimos 30 dias</button>
-              <button type="button" class="shf-preset is-active" data-fn-preset="month">Este mês</button>
-              <button type="button" class="shf-preset" data-fn-preset="prev-month">Mês anterior</button>
-            </div>
-            <div class="shf-cals" id="fnCals"></div>
-            <div class="shf-popover-foot">
-              <span id="fnRangeLabel" class="shf-range-label"></span>
-              <button type="button" id="fnApplyBtn" class="shf-apply-btn">Aplicar</button>
-            </div>
+        <div class="fn-period-filter">
+          <select id="financialPeriod" class="fn-filter-select" aria-label="Período financeiro">
+            <option value="today">Hoje</option>
+            <option value="week">Últimos 7 dias</option>
+            <option value="thirty_days">Últimos 30 dias</option>
+            <option value="month" selected>Este mês</option>
+            <option value="previous_month">Mês anterior</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <div id="financialCustomRange" class="fn-inline-period hidden">
+            <label>
+              <span>Data inicial</span>
+              <input id="financialCustomStart" type="date" />
+            </label>
+            <label>
+              <span>Data final</span>
+              <input id="financialCustomEnd" type="date" />
+            </label>
+            <button type="button" id="financialCustomApply" class="ux-btn">Aplicar</button>
           </div>
         </div>
         <select id="financialTypeFilter" class="fn-filter-select" aria-label="Tipo de lancamento">
@@ -385,7 +395,6 @@ function renderOperationalChrome() {
         </div>
       </div>
     `;
-    initFinancialDatePicker();
   }
 
   const commissionsHeaderMount = document.getElementById("commissionsHeaderMount");
@@ -731,6 +740,7 @@ function renderOperationalChrome() {
 
 const appShell = document.getElementById("appShell");
 const appSidebar = document.getElementById("appSidebar");
+const appMain = document.getElementById("appMain");
 const appContent = document.getElementById("appContent");
 const appMobileTabs = document.getElementById("appMobileTabs");
 const mobileSidebarBackdrop = document.getElementById("mobileSidebarBackdrop");
@@ -765,8 +775,10 @@ const financialReports = document.getElementById("financialReports");
 const financialDrawerHost = document.getElementById("financialDrawerHost");
 const financialFeedback = document.getElementById("financialFeedback");
 const financialPeriod = document.getElementById("financialPeriod");
+const financialCustomRange = document.getElementById("financialCustomRange");
 const financialCustomStart = document.getElementById("financialCustomStart");
 const financialCustomEnd = document.getElementById("financialCustomEnd");
+const financialCustomApply = document.getElementById("financialCustomApply");
 const financialSearch = document.getElementById("financialSearch");
 const financialTypeFilter = document.getElementById("financialTypeFilter");
 const financialAddTransactionBtn = document.getElementById("financialAddTransactionBtn");
@@ -1025,7 +1037,6 @@ const sectionsByModule = {
   configuracoes: document.getElementById("settingsSection"),
   relatorios: document.getElementById("reportsSection"),
   whatsapp: document.getElementById("whatsappSection"),
-  "agendamento-link": document.getElementById("agendamento-linkSection"),
 };
 
 const allModuleIds = new Set([
@@ -1042,6 +1053,8 @@ const serviceId = document.getElementById("serviceId");
 const serviceSelectionMount = document.getElementById("serviceSelectionMount");
 const appointmentSummaryMount = document.getElementById("appointmentSummaryMount");
 const startsAt = document.getElementById("startsAt");
+const appointmentDate = document.getElementById("appointmentDate");
+const appointmentTime = document.getElementById("appointmentTime");
 const filterProfessional = document.getElementById("filterProfessional");
 const filterStatus = document.getElementById("filterStatus");
 const filterService = document.getElementById("filterService");
@@ -1075,7 +1088,6 @@ const clientsPhone = document.getElementById("clientsPhone");
 const clientsEmail = document.getElementById("clientsEmail");
 const clientsBirthDate = document.getElementById("clientsBirthDate");
 const clientsStatus = document.getElementById("clientsStatus");
-const clientsTags = document.getElementById("clientsTags");
 const clientsNotes = document.getElementById("clientsNotes");
 const clientsSubmitBtn = document.getElementById("clientsSubmitBtn");
 const clientsDrawerHost = document.getElementById("clientsDrawerHost");
@@ -1213,9 +1225,11 @@ function normalizeAgendaViewPreference(value) {
 
 function restoreAgendaViewPreference() {
   try {
-    return normalizeAgendaViewPreference(localStorage.getItem(STORAGE_AGENDA_VIEW));
+    const stored = localStorage.getItem(STORAGE_AGENDA_VIEW);
+    if (stored) return normalizeAgendaViewPreference(stored);
+    return Number(window.innerWidth || 0) <= 767 ? "list" : "cards";
   } catch {
-    return "cards";
+    return Number(window.innerWidth || 0) <= 767 ? "list" : "cards";
   }
 }
 
@@ -1362,6 +1376,7 @@ const actionLabel = {
   DELAY: "Registrar atraso",
   PAYMENT: "Registrar Pagamento",
   SELL: "Vender Produto",
+  DETAIL: "Abrir detalhes",
 };
 
 const SLOT_BLOCKING_STATUSES = new Set(["SCHEDULED", "CONFIRMED", "IN_SERVICE", "BLOCKED"]);
@@ -1629,14 +1644,17 @@ if (systemThemeQuery) {
 
 applyThemeMode(localStorage.getItem(STORAGE_THEME_MODE) || "dark", { persist: false });
 
-startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
+setAppointmentStartsAtValue(new Date(Date.now() + 30 * 60000));
+configureAppointmentTemporalControls();
 if (reportsCustomStart) reportsCustomStart.value = asDateInputValue(new Date());
 if (reportsCustomEnd) reportsCustomEnd.value = asDateInputValue(new Date());
 if (metasGoalMonth) metasGoalMonth.value = asMonthInputValue(new Date());
 if (financialPeriod && financialCustomStart && financialCustomEnd) {
+  const now = new Date();
+  financialCustomStart.value = asDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1));
+  financialCustomEnd.value = asDateInputValue(now);
   const isCustomPeriod = financialPeriod.value === "custom";
-  financialCustomStart.classList.toggle("hidden", !isCustomPeriod);
-  financialCustomEnd.classList.toggle("hidden", !isCustomPeriod);
+  financialCustomRange?.classList.toggle("hidden", !isCustomPeriod);
 }
 if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
   const isCustomPeriod = reportsPeriod.value === "custom";
@@ -1893,7 +1911,7 @@ function normalizeOperationName(business = {}) {
   return normalized;
 }
 
-function renderShell() {
+function renderShell({ previousSidebarOffset = null } = {}) {
   const roleMenuGroups = getRoleMenuGroups();
   const secondaryModules = getSecondaryModulesForRole();
   const mobileTabs = getMobileTabsForRole();
@@ -1929,15 +1947,70 @@ function renderShell() {
     activeModule: state.activeModule,
   });
 
+  animateSidebarIndicator(appSidebar, previousSidebarOffset);
   bindShellEvents();
   syncAgendaFilterPanel();
   syncAgendaOwnerActionsVisibility();
 }
 
+let mobileSidebarTrigger = null;
+const mobileSidebarInertedElements = new Set();
+
+function clearMobileSidebarInert() {
+  mobileSidebarInertedElements.forEach((element) => {
+    element.removeAttribute("data-mobile-navigation-inert");
+    if (
+      !element.hasAttribute("data-motion-overlay-inert")
+      && !element.hasAttribute("data-module-transition-inert")
+    ) {
+      element.removeAttribute("inert");
+    }
+  });
+  mobileSidebarInertedElements.clear();
+  appMain?.removeAttribute("inert");
+}
+
+function applyMobileSidebarInert(trigger) {
+  clearMobileSidebarInert();
+  if (!(trigger instanceof HTMLElement) || !appMain?.contains(trigger)) return;
+  let pathNode = trigger;
+  while (pathNode.parentElement && pathNode !== appMain) {
+    [...pathNode.parentElement.children].forEach((sibling) => {
+      if (sibling === pathNode || sibling.hasAttribute("data-mobile-navigation-inert")) return;
+      sibling.setAttribute("inert", "");
+      sibling.setAttribute("data-mobile-navigation-inert", "");
+      mobileSidebarInertedElements.add(sibling);
+    });
+    pathNode = pathNode.parentElement;
+  }
+}
+
+function visibleMobileSidebarTrigger() {
+  return [...document.querySelectorAll("[data-mobile-sidebar-toggle]")].find((button) => {
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(button).display !== "none";
+  }) || null;
+}
+
 function setMobileSidebarOpen(open) {
+  const wasOpen = state.mobileSidebarOpen;
   state.mobileSidebarOpen = Boolean(open) && state.viewport !== "desktop";
   appShell?.classList.toggle("mobile-sidebar-open", state.mobileSidebarOpen);
+  mobileSidebarBackdrop?.setAttribute("aria-hidden", state.mobileSidebarOpen ? "false" : "true");
+  if (state.mobileSidebarOpen) {
+    mobileSidebarTrigger = mobileSidebarTrigger || visibleMobileSidebarTrigger();
+    applyMobileSidebarInert(mobileSidebarTrigger);
+  } else {
+    clearMobileSidebarInert();
+  }
   syncMobileHeaderButtons();
+  if (!wasOpen && state.mobileSidebarOpen) {
+    requestAnimationFrame(() => appSidebar?.querySelector("button")?.focus({ preventScroll: true }));
+  } else if (wasOpen && !state.mobileSidebarOpen) {
+    const returnTarget = mobileSidebarTrigger;
+    requestAnimationFrame(() => returnTarget?.focus({ preventScroll: true }));
+    mobileSidebarTrigger = null;
+  }
 }
 
 function renderMobileHeaderButton() {
@@ -1988,6 +2061,7 @@ function bindShellEvents() {
         professionals: Object.values(professionalsById),
         services: allServices,
       }, settingsActiveSection);
+      initBookingLinkSection();
       animateSettingsScreen(settingsRoot);
       const hoursForm = settingsRoot?.querySelector("#settingsHoursForm");
       if (hoursForm instanceof HTMLFormElement) {
@@ -2036,6 +2110,7 @@ function bindShellEvents() {
             professionals: Object.values(professionalsById),
             services: allServices,
           }, settingsActiveSection);
+          initBookingLinkSection();
           animateSettingsScreen(settingsRoot);
         }
         return;
@@ -2051,6 +2126,7 @@ function bindShellEvents() {
             professionals: Object.values(professionalsById),
             services: allServices,
           }, settingsActiveSection);
+          initBookingLinkSection();
           animateSettingsScreen(settingsRoot);
         }
         return;
@@ -2105,7 +2181,11 @@ function bindShellEvents() {
 }
 
 document.addEventListener("click", (event) => {
-  if (event.target instanceof Element && event.target.closest("[data-mobile-sidebar-toggle]")) {
+  const sidebarToggle = event.target instanceof Element
+    ? event.target.closest("[data-mobile-sidebar-toggle]")
+    : null;
+  if (sidebarToggle instanceof HTMLElement) {
+    mobileSidebarTrigger = sidebarToggle;
     setMobileSidebarOpen(!state.mobileSidebarOpen);
     return;
   }
@@ -2142,6 +2222,14 @@ function navigate(moduleId, options = {}) {
     return;
   }
 
+  const outgoingSection = sectionsByModule[state.activeModule];
+  const previousSidebarOffset = appSidebar
+    ?.querySelector(".sb-item.is-active")
+    ?.offsetTop ?? null;
+  outgoingSection?.setAttribute("inert", "");
+  outgoingSection?.setAttribute("data-module-transition-inert", "");
+  outgoingSection?.setAttribute("aria-busy", "true");
+
   if (normalizedModuleId === "configuracoes" && state.activeModule !== "configuracoes") {
     settingsReturnModule = state.activeModule || firstAllowedModule();
   }
@@ -2151,8 +2239,22 @@ function navigate(moduleId, options = {}) {
   if (normalizedModuleId !== "agenda") state.agendaFiltersOpen = false;
 
   persistNavigationState();
-  renderShell();
+  renderShell({ previousSidebarOffset });
   applySectionVisibility();
+  const incomingSection = sectionsByModule[state.activeModule];
+  Object.values(sectionsByModule).forEach((section) => {
+    if (section.hasAttribute("data-module-transition-inert")) {
+      section.removeAttribute("data-module-transition-inert");
+      if (
+        !section.hasAttribute("data-motion-overlay-inert")
+        && !section.hasAttribute("data-mobile-navigation-inert")
+      ) {
+        section.removeAttribute("inert");
+      }
+    }
+    section.removeAttribute("aria-busy");
+  });
+  animateModuleScreen(incomingSection);
 
   if (options.scrollTop !== false) {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2291,9 +2393,6 @@ function applySectionVisibility() {
     if (state.activeModule === "whatsapp") {
       initWhatsAppSection();
     }
-    if (state.activeModule === "agendamento-link") {
-      initBookingLinkSection();
-    }
     if (state.activeModule === "atendente-ia") {
       initAtendenteIaSection();
     }
@@ -2339,6 +2438,8 @@ function rangeFromPeriod(period) {
     }
   }
   const now = new Date();
+  const endToday = new Date(now);
+  endToday.setHours(23, 59, 59, 999);
   if (period === "month") {
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -2346,22 +2447,21 @@ function rangeFromPeriod(period) {
   }
   if (period === "week") {
     const start = new Date(now);
-    const day = start.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    start.setDate(start.getDate() + diffToMonday);
+    start.setDate(start.getDate() - 6);
     start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
+    return { start, end: endToday };
   }
-  if (period === "quarter") {
+  if (period === "thirty_days") {
     const start = new Date(now);
-    start.setDate(start.getDate() - 89);
+    start.setDate(start.getDate() - 29);
     start.setHours(0, 0, 0, 0);
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
+    return { start, end: endToday };
+  }
+  if (period === "previous_month") {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0),
+      end: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999),
+    };
   }
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
@@ -2417,6 +2517,42 @@ function asDateTimeLocalInputValue(date = new Date()) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+function syncAppointmentTemporalControlsFromStartsAt() {
+  if (!startsAt || !appointmentDate || !appointmentTime) return;
+  const [dateValue = "", timeValue = ""] = String(startsAt.value || "").split("T");
+  appointmentDate.value = dateValue;
+  appointmentTime.value = timeValue.slice(0, 5);
+}
+
+function setAppointmentStartsAtValue(value) {
+  if (!startsAt) return;
+  const date = value instanceof Date ? value : new Date(value);
+  startsAt.value = Number.isNaN(date.getTime()) ? String(value || "") : asDateTimeLocalInputValue(date);
+  syncAppointmentTemporalControlsFromStartsAt();
+}
+
+function syncStartsAtFromMobileTemporalControls(options = {}) {
+  if (!startsAt || !appointmentDate || !appointmentTime) return;
+  startsAt.value = appointmentDate.value && appointmentTime.value
+    ? `${appointmentDate.value}T${appointmentTime.value}`
+    : "";
+  if (options.notify) {
+    startsAt.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
+function configureAppointmentTemporalControls() {
+  if (!startsAt || !appointmentDate || !appointmentTime) return;
+  const mobile = window.matchMedia?.("(max-width: 760px)")?.matches ?? false;
+  if (mobile) syncAppointmentTemporalControlsFromStartsAt();
+  startsAt.disabled = mobile;
+  startsAt.required = !mobile;
+  appointmentDate.disabled = !mobile;
+  appointmentDate.required = mobile;
+  appointmentTime.disabled = !mobile;
+  appointmentTime.required = mobile;
+}
+
 function asMonthInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -2470,41 +2606,122 @@ function rangeFromAppointmentFilters() {
 }
 
 let _clientsForSearch = [];
+let clientSearchActiveIndex = -1;
+
+function closeClientSearchDropdown() {
+  if (!clientSearch || !clientSearchDropdown) return;
+  clientSearchActiveIndex = -1;
+  clientSearchDropdown.classList.add("hidden");
+  clientSearch.setAttribute("aria-expanded", "false");
+  clientSearch.removeAttribute("aria-activedescendant");
+}
+
+function selectClientSearchOption(option) {
+  if (!option || option.getAttribute("aria-disabled") === "true") return;
+  clientId.value = option.dataset.id || "";
+  clientSearch.value = option.dataset.name || "";
+  closeClientSearchDropdown();
+  clientId.dispatchEvent(new Event("change"));
+}
+
+function setClientSearchActiveIndex(nextIndex) {
+  const options = [...clientSearchDropdown.querySelectorAll(".cs-opt:not(.cs-opt-empty)")];
+  if (!options.length) {
+    clientSearchActiveIndex = -1;
+    return;
+  }
+  clientSearchActiveIndex = (nextIndex + options.length) % options.length;
+  options.forEach((option, index) => {
+    const active = index === clientSearchActiveIndex;
+    option.classList.toggle("is-active", active);
+    option.setAttribute("aria-selected", String(active));
+    if (active) {
+      clientSearch.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function renderClientSearchResults() {
+  const q = clientSearch.value.trim().toLocaleLowerCase("pt-BR");
+  const selectedClient = clientsById[clientId.value];
+  if (selectedClient && selectedClient.fullName !== clientSearch.value.trim()) {
+    clientId.value = "";
+    clientId.dispatchEvent(new Event("change"));
+  }
+  if (!q) {
+    clientId.value = "";
+    closeClientSearchDropdown();
+    return;
+  }
+
+  const digits = q.replace(/\D/g, "");
+  const matches = _clientsForSearch
+    .filter((client) =>
+      String(client.fullName || "").toLocaleLowerCase("pt-BR").includes(q)
+      || (digits && String(client.phone || "").replace(/\D/g, "").includes(digits))
+    )
+    .slice(0, 8);
+
+  clientSearchActiveIndex = -1;
+  clientSearchDropdown.innerHTML = matches.length
+    ? matches.map((client, index) =>
+      `<li class="cs-opt" id="clientSearchOption-${index}" role="option" aria-selected="false" tabindex="-1" data-id="${escapeHtml(client.id)}" data-name="${escapeHtml(client.fullName)}">
+        <span class="cs-name">${escapeHtml(client.fullName)}</span>
+        <span class="cs-phone">${escapeHtml(client.phone || "Telefone nao informado")}</span>
+      </li>`
+    ).join("")
+    : `<li class="cs-opt cs-opt-empty" role="option" aria-disabled="true">Nenhum cliente encontrado.</li>`;
+
+  clientSearchDropdown.classList.remove("hidden");
+  clientSearch.setAttribute("aria-expanded", "true");
+}
+
 function initClientSearch(clients) {
   _clientsForSearch = clients || [];
   if (!clientSearch || !clientSearchDropdown) return;
-  clientSearch.oninput = () => {
-    const q = clientSearch.value.trim().toLowerCase();
-    const selectedClient = clientsById[clientId.value];
-    if (selectedClient && selectedClient.fullName !== clientSearch.value.trim()) {
-      clientId.value = "";
-      clientId.dispatchEvent(new Event("change"));
+  if (clientSearch.dataset.autocompleteBound === "true") return;
+  clientSearch.dataset.autocompleteBound = "true";
+  clientSearch.setAttribute("role", "combobox");
+  clientSearch.setAttribute("aria-autocomplete", "list");
+  clientSearch.setAttribute("aria-controls", clientSearchDropdown.id);
+  clientSearch.setAttribute("aria-expanded", "false");
+  clientSearchDropdown.setAttribute("role", "listbox");
+  clientSearchDropdown.setAttribute("aria-label", "Clientes encontrados");
+
+  clientSearch.addEventListener("input", renderClientSearchResults);
+  clientSearch.addEventListener("keydown", (event) => {
+    const open = !clientSearchDropdown.classList.contains("hidden");
+    if (event.key === "Escape") {
+      if (open) {
+        event.stopPropagation();
+        closeClientSearchDropdown();
+      }
+      return;
     }
-    if (!q) { clientSearchDropdown.classList.add("hidden"); clientId.value = ""; return; }
-    const matches = _clientsForSearch.filter(c =>
-      c.fullName.toLowerCase().includes(q) || (c.phone || "").replace(/\D/g,"").includes(q.replace(/\D/g,""))
-    ).slice(0, 8);
-    if (!matches.length) { clientSearchDropdown.classList.add("hidden"); return; }
-    clientSearchDropdown.innerHTML = matches.map(c =>
-      `<li class="cs-opt" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.fullName)}">
-        <span class="cs-name">${escapeHtml(c.fullName)}</span>
-        ${c.phone ? `<span class="cs-phone">${escapeHtml(c.phone)}</span>` : ""}
-      </li>`
-    ).join("");
-    clientSearchDropdown.querySelectorAll(".cs-opt").forEach(li => {
-      li.addEventListener("click", () => {
-        clientId.value = li.dataset.id;
-        clientSearch.value = li.dataset.name;
-        clientSearchDropdown.classList.add("hidden");
-        clientId.dispatchEvent(new Event("change"));
-      });
-    });
-    clientSearchDropdown.classList.remove("hidden");
-  };
-  document.addEventListener("click", e => {
-    if (clientSearch && !clientSearch.contains(e.target) && !clientSearchDropdown.contains(e.target))
-      clientSearchDropdown.classList.add("hidden");
-  }, { once: false });
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) renderClientSearchResults();
+      setClientSearchActiveIndex(
+        event.key === "ArrowDown" ? clientSearchActiveIndex + 1 : clientSearchActiveIndex - 1,
+      );
+      return;
+    }
+    if (event.key === "Enter" && open && clientSearchActiveIndex >= 0) {
+      event.preventDefault();
+      selectClientSearchOption(
+        clientSearchDropdown.querySelectorAll(".cs-opt:not(.cs-opt-empty)")[clientSearchActiveIndex],
+      );
+    }
+  });
+  clientSearchDropdown.addEventListener("click", (event) => {
+    selectClientSearchOption(event.target.closest(".cs-opt"));
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!clientSearch.contains(event.target) && !clientSearchDropdown.contains(event.target)) {
+      closeClientSearchDropdown();
+    }
+  });
 }
 
 function money(value) {
@@ -2843,6 +3060,7 @@ function refreshScheduleAssist(feedback = null) {
 }
 
 function renderSaleCart() {
+  const previousTotal = saleTotalValue?.textContent || "";
   renderCart(saleCart, cartElements, {
     onIncrease: (productId) => {
       const item = saleCart.find((row) => row.productId === productId);
@@ -2871,6 +3089,22 @@ function renderSaleCart() {
       renderSaleCart();
       renderSaleProductCatalog();
     },
+  });
+  if (saleTotalValue?.textContent !== previousTotal) {
+    signalCommerceValue(saleTotalValue);
+  }
+}
+
+function signalCommerceValue(element) {
+  if (!element || typeof element.classList?.add !== "function") return;
+  element.classList.remove("is-commerce-updating");
+  if (typeof requestAnimationFrame !== "function") {
+    element.classList.add("is-commerce-updating");
+    return;
+  }
+  requestAnimationFrame(() => {
+    element.classList.add("is-commerce-updating");
+    window.setTimeout(() => element.classList.remove("is-commerce-updating"), 260);
   });
 }
 
@@ -3077,7 +3311,7 @@ function renderSaleDrawer(sale) {
                   <span>Vendido: ${item.quantity}</span>
                   <span>Devolvido: ${item.refundedQuantity || 0}</span>
                   <span>Disponivel para devolucao: ${item.refundableQuantity || 0}</span>
-                  <span>Subtotal: R$ ${Number(item.unitPrice * item.quantity || 0).toFixed(2)}</span>
+                  <span>Subtotal: ${money(item.unitPrice * item.quantity || 0)}</span>
                 </div>
               `,
             )
@@ -3090,7 +3324,7 @@ function renderSaleDrawer(sale) {
         <li><strong>Venda registrada</strong><span>${escapeHtml(sale.soldAtLabel)}</span></li>
         ${
           sale.totalRefundedAmount > 0
-          ? `<li><strong>Devolucao registrada</strong><span>Total devolvido: R$ ${Number(sale.totalRefundedAmount).toFixed(2)}</span></li>`
+          ? `<li><strong>Devolucao registrada</strong><span>Total devolvido: ${money(sale.totalRefundedAmount)}</span></li>`
             : "<li><strong>Sem devolucao registrada</strong><span>Todos os itens seguem como venda ativa.</span></li>"
         }
       </ol>
@@ -3144,7 +3378,7 @@ function normalizeProductSaleHistory(payload) {
     return {
       id: sale.id,
       label: `${totalItems} item(ns)`,
-      amount: `R$ ${Number(sale.grossAmount || 0).toFixed(2)}`,
+      amount: money(sale.grossAmount || 0),
       clientLabel: sale.clientName || "Nao vinculado",
       professionalLabel: sale.professionalName || "Sem profissional",
       items,
@@ -3333,10 +3567,12 @@ function renderAppointmentServiceSelection() {
   const selectedIds = getSelectedServiceIds(appointmentSelectedServices);
   if (serviceId) serviceId.value = selectedIds[0] || "";
   const selectedRows = appointmentSelectedServices.length
-    ? appointmentSelectedServices.map((service, index) => `
+      ? appointmentSelectedServices.map((service, index) => `
         <li class="svc-selected-item">
-          <span><em>${index + 1}</em>${escapeHtml(service.name || "Servico")}</span>
-          <small>${money(Number(service.price || 0))} - ${serviceDuration(service)} min</small>
+          <div class="svc-selected-copy">
+            <span class="svc-selected-name"><em>${index + 1}</em><b>${escapeHtml(service.name || "Servico")}</b></span>
+            <small>${money(Number(service.price || 0))} - ${serviceDuration(service)} min</small>
+          </div>
           <button type="button" class="svc-remove-btn" data-service-remove="${escapeHtml(service.id)}" aria-label="Remover ${escapeHtml(service.name || "servico")}">Remover</button>
         </li>
       `).join("")
@@ -3495,7 +3731,7 @@ async function loadAlternativeSlots() {
 function handleAlternativeSlotSelect(iso) {
   const selected = new Date(iso);
   if (Number.isNaN(selected.getTime())) return;
-  startsAt.value = asDateTimeLocalInputValue(selected);
+  setAppointmentStartsAtValue(selected);
   renderAlternativeSlots([], null, alternativeSlots);
   setScheduleFeedback("success", "Horario alternativo aplicado. Confirme para agendar.");
 }
@@ -3569,7 +3805,7 @@ async function loadCatalog() {
   fillSelect(
     saleProductId,
     data.products,
-    (item) => `${item.name} (estoque: ${item.stockQty}) - R$ ${item.salePrice}`,
+    (item) => `${item.name} (estoque: ${item.stockQty}) - ${money(item.salePrice)}`,
   );
   const firstProduct = saleProductsList()[0];
   if (firstProduct) setSaleSelectedProduct(saleProductId.value || firstProduct.id);
@@ -3719,13 +3955,14 @@ function extractApiErrorMessage(response, payload, fallbackMessage) {
 }
 
 function closeAgendaMoreOptionsMenu() {
-  agendaMoreOptionsMenu?.classList.add("hidden");
-  if (agendaMoreOptionsBtn) agendaMoreOptionsBtn.setAttribute("aria-expanded", "false");
+  hideMotionPopover(agendaMoreOptionsMenu, () => {
+    if (agendaMoreOptionsBtn) agendaMoreOptionsBtn.setAttribute("aria-expanded", "false");
+  });
 }
 
 function openAgendaMoreOptionsMenu() {
   if (!canUseOwnerAgendaFlows()) return;
-  agendaMoreOptionsMenu?.classList.remove("hidden");
+  showMotionPopover(agendaMoreOptionsMenu);
   if (agendaMoreOptionsBtn) agendaMoreOptionsBtn.setAttribute("aria-expanded", "true");
 }
 
@@ -4453,37 +4690,64 @@ function ensureCheckoutModal() {
     <div class="ds-modal-panel checkout-modal" style="max-width:660px" role="dialog" aria-modal="true" aria-labelledby="appointmentCheckoutTitle" tabindex="-1">
       <div class="checkout-modal-header ds-modal-head">
         <div>
-          <p class="ux-label">Pagamento</p>
+          <p class="ux-label">Fechamento seguro</p>
           <h3 id="appointmentCheckoutTitle" class="ux-section-label">Concluir atendimento</h3>
         </div>
         <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Fechar</button>
       </div>
-      <form id="appointmentCheckoutForm" class="ds-form-grid">
-        <div class="ds-form-full" id="checkoutSummary"></div>
-        <div class="ds-form-full checkout-total-panel">
-          <span>Total a pagar</span>
-          <strong id="checkoutTotalDisplay">R$ 0,00</strong>
-        </div>
-        <details class="ds-form-full checkout-products-panel">
-          <summary>Produtos vendidos durante o atendimento</summary>
-          <div id="checkoutProductsList"></div>
-          <button type="button" id="checkoutAddProduct" class="ux-btn ux-btn-muted">Adicionar produto</button>
-          <div class="checkout-products-subtotal ds-cell-secondary">Subtotal dos produtos: <strong id="checkoutProductsSubtotal">R$ 0,00</strong></div>
-        </details>
-        <label class="ds-form-label ds-form-full">Forma de pagamento
-          <select id="checkoutPaymentMethod" class="ds-input" required></select>
-        </label>
-        <label class="ds-form-label">Total calculado
-          <input id="checkoutTotal" type="text" readonly class="ds-input" />
-        </label>
-        <label class="ds-form-label ds-form-full">Observacoes
-          <textarea id="checkoutNotes" rows="2" maxlength="500" class="ds-input"></textarea>
-        </label>
-        <div id="checkoutFeedback" class="ds-form-full panel-msg-host"></div>
-        <div class="ds-form-full catalog-row-actions">
-          <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Cancelar</button>
-          ${renderPrimaryAction({ label: CHECKOUT_FINAL_BUTTON_LABEL, id: "checkoutSubmitBtn", type: "submit" })}
-        </div>
+      <div class="checkout-flow-rail" aria-label="Fluxo de checkout">
+        <span class="is-complete"><b>01</b> Seleção</span>
+        <span class="is-current"><b>02</b> Conferência</span>
+        <span><b>03</b> Liquidação</span>
+      </div>
+      <form id="appointmentCheckoutForm" class="ds-form-grid checkout-workbench">
+        <section class="checkout-zone checkout-zone-review" aria-labelledby="checkoutReviewTitle">
+          <header class="checkout-zone-head">
+            <div>
+              <p class="commerce-zone-kicker">Conferência</p>
+              <h4 id="checkoutReviewTitle">Atendimento e itens</h4>
+              <p>Confira quem foi atendido, os serviços e os produtos incluídos.</p>
+            </div>
+          </header>
+          <div id="checkoutSummary"></div>
+          <details class="checkout-products-panel">
+            <summary>Produtos vendidos durante o atendimento</summary>
+            <div id="checkoutProductsList"></div>
+            <button type="button" id="checkoutAddProduct" class="ux-btn ux-btn-muted">Adicionar produto</button>
+            <div class="checkout-products-subtotal ds-cell-secondary">Subtotal dos produtos <strong id="checkoutProductsSubtotal">R$ 0,00</strong></div>
+          </details>
+        </section>
+        <section class="checkout-zone checkout-zone-settlement" aria-labelledby="checkoutSettlementTitle">
+          <header class="checkout-zone-head">
+            <div>
+              <p class="commerce-zone-kicker">Liquidação</p>
+              <h4 id="checkoutSettlementTitle">Pagamento e conclusão</h4>
+              <p>Defina o pagamento e confirme o encerramento operacional.</p>
+            </div>
+          </header>
+          <div class="checkout-total-panel">
+            <span>Total a pagar</span>
+            <strong id="checkoutTotalDisplay">R$ 0,00</strong>
+          </div>
+          <label class="ds-form-label checkout-payment-field">Forma de pagamento
+            <select id="checkoutPaymentMethod" class="ds-input" required></select>
+          </label>
+          <label class="ds-form-label checkout-calculated-field">Total calculado
+            <input id="checkoutTotal" type="text" readonly class="ds-input" />
+          </label>
+          <label class="ds-form-label checkout-notes-field">Observacoes
+            <textarea id="checkoutNotes" rows="2" maxlength="500" class="ds-input"></textarea>
+          </label>
+          <div class="checkout-consequence">
+            <strong>Ao concluir este checkout</strong>
+            <p>O atendimento será encerrado e a cobrança será registrada com os reflexos atuais em estoque, financeiro e comissões.</p>
+          </div>
+          <div id="checkoutFeedback" class="panel-msg-host" aria-live="polite"></div>
+          <div class="catalog-row-actions checkout-final-actions">
+            <button type="button" data-checkout-close class="ux-btn ux-btn-muted">Cancelar</button>
+            ${renderPrimaryAction({ label: CHECKOUT_FINAL_BUTTON_LABEL, id: "checkoutSubmitBtn", type: "submit" })}
+          </div>
+        </section>
       </form>
     </div>
   `;
@@ -4504,6 +4768,10 @@ function ensureCheckoutModal() {
     checkoutModalState.products.push({ productId: "", quantity: 1 });
     renderCheckoutProducts();
     recomputeCheckoutTotal();
+  });
+  modal.querySelector("#checkoutPaymentMethod")?.addEventListener("change", (event) => {
+    modal.classList.toggle("is-payment-selected", Boolean(String(event.currentTarget?.value || "").trim()));
+    signalCommerceValue(modal.querySelector("#checkoutTotalDisplay"));
   });
   modal.querySelector("#appointmentCheckoutForm")?.addEventListener("submit", submitCheckoutModal);
   return modal;
@@ -4570,7 +4838,16 @@ function removeAgendaBlockLocal(blockId) {
 async function cancelAgendaBlock(blockId) {
   const id = String(blockId || "");
   if (!id || !canUseOwnerAgendaFlows()) return;
-  const reason = window.prompt("Motivo para desbloquear este horario", "Agenda liberada");
+  const reason = await promptInteraction({
+    eyebrow: "Agenda · desbloqueio",
+    title: "Liberar este horario?",
+    message: "O bloqueio deixara de reservar o periodo e o horario voltara a aceitar agendamentos.",
+    confirmLabel: "Liberar horario",
+    tone: "destructive",
+    inputLabel: "Motivo do desbloqueio",
+    inputValue: "Agenda liberada",
+    inputMinLength: 3,
+  });
   if (reason === null) return;
   const cleanReason = String(reason || "").trim();
   if (cleanReason.length < 3) {
@@ -4660,15 +4937,18 @@ function renderCheckoutProducts() {
       (row, index) => {
         const product = productsById[row.productId];
         const subtotal = Number(product?.salePrice || 0) * Number(row.quantity || 0);
+        const stockQty = Number(product?.stockQty || 0);
+        const stockInsufficient = Boolean(product) && Number(row.quantity || 0) > stockQty;
         return `
-      <div class="checkout-product-row">
-        <select data-checkout-product="${index}" class="ds-input">
+      <div class="checkout-product-row${stockInsufficient ? " is-stock-insufficient" : ""}" data-checkout-product-row="${index}">
+        <select data-checkout-product="${index}" class="ds-input" aria-label="Produto ${index + 1}">
           <option value="">Selecione</option>
           ${productOptions}
         </select>
-        <input data-checkout-qty="${index}" type="number" min="1" max="99" value="${row.quantity}" class="ds-input" />
-        <button type="button" data-checkout-remove="${index}" class="ux-btn ux-btn-danger">X</button>
-        <div class="checkout-product-subtotal ds-cell-secondary">Subtotal: ${subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</div>
+        <input data-checkout-qty="${index}" type="number" min="1" max="99" value="${row.quantity}" class="ds-input" aria-label="Quantidade do produto ${index + 1}" ${stockInsufficient ? 'aria-invalid="true"' : ""} />
+        <button type="button" data-checkout-remove="${index}" class="ux-btn ux-btn-danger" aria-label="Remover produto ${index + 1}">Remover</button>
+        <div class="checkout-product-subtotal ds-cell-secondary">Subtotal <strong data-checkout-line-subtotal="${index}">${subtotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong></div>
+        <p class="checkout-product-stock-risk" data-checkout-stock-risk="${index}" aria-live="polite">${stockInsufficient ? `Estoque insuficiente. Disponível: ${stockQty}.` : ""}</p>
       </div>
     `;
       },
@@ -4707,7 +4987,12 @@ function recomputeCheckoutTotal() {
   const totalInput = modal.querySelector("#checkoutTotal");
   if (totalInput) totalInput.value = totals.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const totalDisplay = modal.querySelector("#checkoutTotalDisplay");
-  if (totalDisplay) totalDisplay.textContent = totals.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  if (totalDisplay) {
+    const nextTotal = totals.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const changed = totalDisplay.textContent !== nextTotal;
+    totalDisplay.textContent = nextTotal;
+    if (changed) signalCommerceValue(totalDisplay);
+  }
   const subtotalDisplay = modal.querySelector("#checkoutProductsSubtotal");
   if (subtotalDisplay) {
     subtotalDisplay.textContent = totals.productsSubtotal.toLocaleString("pt-BR", {
@@ -4715,10 +5000,32 @@ function recomputeCheckoutTotal() {
       currency: "BRL",
     });
   }
+  modal.querySelectorAll("[data-checkout-product-row]").forEach((rowElement) => {
+    const index = Number(rowElement.getAttribute("data-checkout-product-row"));
+    const row = checkoutModalState.products[index];
+    const product = productsById[row?.productId];
+    const quantity = Math.max(1, Number(row?.quantity || 1));
+    const stockQty = Number(product?.stockQty || 0);
+    const stockInsufficient = Boolean(product) && quantity > stockQty;
+    const lineSubtotal = Number(product?.salePrice || 0) * quantity;
+    const lineDisplay = rowElement.querySelector(`[data-checkout-line-subtotal="${index}"]`);
+    if (lineDisplay) {
+      lineDisplay.textContent = lineSubtotal.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      });
+    }
+    rowElement.classList.toggle("is-stock-insufficient", stockInsufficient);
+    const quantityInput = rowElement.querySelector(`[data-checkout-qty="${index}"]`);
+    if (quantityInput) quantityInput.setAttribute("aria-invalid", String(stockInsufficient));
+    const risk = rowElement.querySelector(`[data-checkout-stock-risk="${index}"]`);
+    if (risk) risk.textContent = stockInsufficient ? `Estoque insuficiente. Disponível: ${stockQty}.` : "";
+  });
 }
 
 function openCheckoutModal(appointment, options = {}) {
   const modal = ensureCheckoutModal();
+  delete modal.dataset.commerceState;
   checkoutModalState = {
     appointment,
     products: [],
@@ -4777,6 +5084,7 @@ function openCheckoutModal(appointment, options = {}) {
   if (notes) notes.value = "";
   const payment = modal.querySelector("#checkoutPaymentMethod");
   renderCheckoutPaymentMethodSelect(payment, checkoutDefaultPaymentMethod());
+  modal.classList.toggle("is-payment-selected", Boolean(String(payment?.value || "").trim()));
   renderCheckoutProducts();
   recomputeCheckoutTotal();
   modal.classList.remove("hidden");
@@ -5002,6 +5310,7 @@ async function submitAppointmentDelayModal(event) {
 
 async function submitCheckoutModal(event) {
   event.preventDefault();
+  if (checkoutModalState.submitting) return;
   const modal = ensureCheckoutModal();
   const submitBtn = modal.querySelector("#checkoutSubmitBtn");
   const feedback = modal.querySelector("#checkoutFeedback");
@@ -5030,6 +5339,8 @@ async function submitCheckoutModal(event) {
   }
   try {
     checkoutModalState.submitting = true;
+    modal.dataset.commerceState = "processing";
+    modal.querySelector("#appointmentCheckoutForm")?.setAttribute("aria-busy", "true");
     if (submitBtn) submitBtn.disabled = true;
     if (submitBtn) submitBtn.textContent = "Concluindo...";
     const result = await callJson(`${API}/appointments/${appointment.id}/checkout`, "POST", {
@@ -5055,11 +5366,14 @@ async function submitCheckoutModal(event) {
     await loadAll();
   } catch (error) {
     checkoutModalState.submitting = false;
+    modal.dataset.commerceState = "error";
     if (feedback) {
       feedback.innerHTML = `<p class="panel-msg panel-msg-error">${escapeHtml(error.message || "Falha ao finalizar atendimento.")}</p>`;
     }
   } finally {
     checkoutModalState.submitting = false;
+    modal.querySelector("#appointmentCheckoutForm")?.setAttribute("aria-busy", "false");
+    if (modal.dataset.commerceState === "processing") delete modal.dataset.commerceState;
     if (submitBtn) submitBtn.disabled = false;
     if (submitBtn) submitBtn.textContent = CHECKOUT_FINAL_BUTTON_LABEL;
   }
@@ -5230,7 +5544,7 @@ function openProductRefundModal(sale) {
         <label class="ux-kpi" style="display:grid;grid-template-columns:1fr 120px;gap:8px;align-items:center">
           <span>
             <strong class="ds-cell-primary">${escapeHtml(item.name)}</strong>
-            <span class="ds-cell-secondary">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: R$ ${Number(item.unitPrice || 0).toFixed(2)}</span>
+            <span class="ds-cell-secondary">Vendido: ${item.quantity} | Devolvido: ${item.refundedQuantity || 0} | Disponivel: ${item.refundableQuantity ?? item.quantity} | Unitario: ${money(item.unitPrice || 0)}</span>
             <span class="ds-cell-secondary">Quantidade para devolver</span>
           </span>
           <input data-product-refund-product="${escapeHtml(item.productId)}" type="number" min="0" max="${Number(item.refundableQuantity ?? item.quantity ?? 0)}" step="1" value="0" class="ds-input" />
@@ -5518,12 +5832,12 @@ function getAgendaWorkingHoursSummaryHtml() {
   `;
 }
 
-function getAgendaListFilteredItems() {
+function getAgendaListFilteredItems(sourceOverride = null) {
   const statusFilter = String(alFilterStatus?.value || "").trim();
   const professionalFilter = String(alFilterProfessional?.value || "").trim();
   const searchFilter = String(alFilterSearch?.value || "").trim().toLowerCase();
 
-  const source = getAgendaListSourceItems();
+  const source = Array.isArray(sourceOverride) ? sourceOverride : getAgendaListSourceItems();
   return source
     .filter((item) => {
       const itemStatus = normalizeAgendaStatus(item.status);
@@ -5600,7 +5914,12 @@ function renderAgendaListMode(filteredItems) {
         const professionalLabel = item.professional || professionalsById?.[item.professionalId]?.name || "Todos os profissionais";
         const reason = item.reason || "Sem motivo informado";
         return `
-        <article class="al-card al-card-operational" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar.BLOCKED};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
+        <article class="al-card al-card-operational" data-al-appt-id="${item.id}" data-al-open="${item.id}"
+                 data-agenda-status="blocked"
+                 data-record-surface="appointment" data-record-tone="blocked"
+                 data-record-interactive="true" role="button" tabindex="0"
+                 aria-label="Abrir bloqueio ${title}"
+                 style="--al-accent:${statusColorVar.BLOCKED};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
           <div class="al-card-time">
             <strong>${item.isFullDay ? startsAtText : timeLabel}</strong>
             <span class="al-dur">Ativo</span>
@@ -5613,7 +5932,7 @@ function renderAgendaListMode(filteredItems) {
             <div class="al-card-sub al-card-muted">${professionalLabel}</div>
           </div>
           <div class="al-card-right">
-            <span class="al-chip">Bloqueio</span>
+            <span class="al-chip" data-agenda-status="blocked"><i aria-hidden="true"></i>Bloqueio</span>
             <div class="al-card-actions">
               ${canUseOwnerAgendaFlows() ? `<button class="al-btn" data-al-block-action="CANCEL_BLOCK" data-al-id="${item.id}">Desbloquear</button>` : ""}
             </div>
@@ -5640,7 +5959,12 @@ function renderAgendaListMode(filteredItems) {
         (action) => action !== "NO_SHOW" || now.getTime() >= item.startsAt.getTime() + 15 * 60 * 1000,
       );
       return `
-        <article class="al-card ${isLate ? "is-late" : ""}" data-al-appt-id="${item.id}" data-al-open="${item.id}" style="--al-accent:${statusColorVar[item.status] || "#26251e"};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
+        <article class="al-card ${isLate ? "is-late" : ""}" data-al-appt-id="${item.id}" data-al-open="${item.id}"
+                 data-agenda-status="${String(item.status || "SCHEDULED").toLowerCase()}"
+                 data-record-surface="appointment" data-record-tone="${isLate ? "late" : String(item.status || "scheduled").toLowerCase()}"
+                 data-record-interactive="true" role="button" tabindex="0"
+                 aria-label="Abrir agendamento de ${escapeHtml(item.client || "Cliente")}"
+                 style="--al-accent:${statusColorVar[item.status] || "#26251e"};${isFocused ? "box-shadow:0 0 0 1px rgba(38,37,30,0.2) inset;" : ""}">
           <div class="al-card-time">
             <strong>${startsAtText}</strong>
             <span class="al-dur">${duration} min</span>
@@ -5656,7 +5980,7 @@ function renderAgendaListMode(filteredItems) {
             ${delayInfo?.minutes ? `<div class="al-card-sub al-card-muted">Atraso: ${delayInfo.minutes} min</div>` : ""}
           </div>
           <div class="al-card-right">
-            <span class="al-chip">${statusLabelMap[item.status] || item.status}</span>
+            <span class="al-chip" data-agenda-status="${String(item.status || "SCHEDULED").toLowerCase()}"><i aria-hidden="true"></i>${statusLabelMap[item.status] || item.status}</span>
             <div class="al-card-actions">
               ${renderAgendaActionHierarchy(item, actions)}
             </div>
@@ -5865,11 +6189,16 @@ async function handleAppointmentsAction(appointmentId, action, options = {}) {
   }
 
   if (action === "CANCELLED" || action === "NO_SHOW") {
-    const ok = window.confirm(
-      action === "CANCELLED"
-        ? "Confirma o cancelamento deste agendamento?"
-        : "Confirma marcar este agendamento como falta?",
-    );
+    const isCancellation = action === "CANCELLED";
+    const ok = await confirmInteraction({
+      eyebrow: isCancellation ? "Agenda · cancelamento" : "Agenda · ausência",
+      title: isCancellation ? "Cancelar este agendamento?" : "Registrar falta?",
+      message: isCancellation
+        ? "O horario sera liberado e o cancelamento ficara registrado no historico do atendimento."
+        : "O atendimento sera marcado como falta e permanecera rastreavel no historico.",
+      confirmLabel: isCancellation ? "Confirmar cancelamento" : "Registrar falta",
+      tone: "destructive",
+    });
     if (!ok) return;
   }
 
@@ -6065,13 +6394,7 @@ async function loadAppointmentsByFilters() {
 }
 
 async function loadFinancialEntries() {
-  const startIn = document.getElementById("financialCustomStart");
-  const endIn = document.getElementById("financialCustomEnd");
-  const startVal = startIn?.value;
-  const endVal = endIn?.value;
-  const range = (startVal && endVal)
-    ? { start: new Date(`${startVal}T00:00:00`), end: new Date(`${endVal}T23:59:59.999`) }
-    : rangeFromPeriod("month");
+  const range = rangeFromPeriod(financialPeriod?.value || "month");
   const previous = previousRangeFromCurrent(range);
   const transactionsQuery = new URLSearchParams({
     unitId,
@@ -6364,9 +6687,9 @@ function renderServiceDetailPanel() {
 
 function hideProfessionalsModal() {
   if (!professionalsModal) return;
-  professionalsModal.classList.add("hidden");
-  professionalsModal.classList.remove("flex");
-  if (professionalsFormFeedback) professionalsFormFeedback.innerHTML = "";
+  hideMotionLayer(professionalsModal, () => {
+    if (professionalsFormFeedback) professionalsFormFeedback.innerHTML = "";
+  });
 }
 
 function showProfessionalsModal(professional = null) {
@@ -6381,15 +6704,13 @@ function showProfessionalsModal(professional = null) {
   if (professionalsFormPhone) professionalsFormPhone.value = editing ? (professional.phone || "") : "";
   if (professionalsFormEmail) professionalsFormEmail.value = editing ? (professional.email || "") : "";
   if (professionalsFormFeedback) professionalsFormFeedback.innerHTML = "";
-  professionalsModal.classList.remove("hidden");
-  professionalsModal.classList.add("flex");
+  showMotionLayer(professionalsModal);
   setTimeout(() => professionalsFormName?.focus(), 50);
 }
 
 function hideServicesModal() {
   if (!servicesModal) return;
-  servicesModal.classList.add("hidden");
-  servicesModal.classList.remove("flex");
+  closeInteractionSurface(servicesModal);
 }
 
 function showServicesModal(service = null) {
@@ -6416,8 +6737,7 @@ function showServicesModal(service = null) {
     option.selected = selectedIds.has(option.value);
   });
 
-  servicesModal.classList.remove("hidden");
-  servicesModal.classList.add("flex");
+  openInteractionSurface(servicesModal, { focusSelector: "#servicesName" });
 }
 
 function servicePayloadFromForm() {
@@ -6553,61 +6873,60 @@ function showInventoryProductModal(product = null) {
       .map((category) => `<option value="${escapeHtml(category)}"></option>`)
       .join("");
   }
-  inventoryProductModal.classList.remove("hidden");
-  inventoryProductModal.classList.add("flex");
+  openInteractionSurface(inventoryProductModal, { focusSelector: "#inventoryProductName" });
 }
 
 function hideInventoryProductModal() {
   if (!inventoryProductModal) return;
-  inventoryProductModal.classList.add("hidden");
-  inventoryProductModal.classList.remove("flex");
+  closeInteractionSurface(inventoryProductModal);
 }
 
 function showInventoryStockModal({ productId, productName, type }) {
   if (!inventoryStockModal) return;
   const isAdd = type === "IN";
   const isAdjustment = type === "ADJUSTMENT";
+  const isInternalUse = type === "INTERNAL_USE";
+  const isLoss = type === "LOSS";
   if (inventoryStockModalTitle) inventoryStockModalTitle.textContent = isAdjustment
     ? "Ajustar saldo"
-    : isAdd
-      ? "Registrar entrada"
-      : "Registrar saida";
+    : isInternalUse
+      ? "Registrar uso interno"
+      : isLoss
+        ? "Registrar perda"
+        : isAdd
+          ? "Registrar entrada"
+          : "Registrar saida";
   if (inventoryStockModalSubtitle) inventoryStockModalSubtitle.textContent = productName || "";
   inventoryStockSubmitBtn.textContent = isAdjustment
     ? "Confirmar saldo"
-    : isAdd
-      ? "Confirmar entrada"
-      : "Confirmar saida";
+    : isInternalUse
+      ? "Confirmar uso interno"
+      : isLoss
+        ? "Confirmar perda"
+        : isAdd
+          ? "Confirmar entrada"
+          : "Confirmar saida";
   inventoryStockProductId.value = productId || "";
   inventoryStockType.value = type || "IN";
   inventoryStockQuantity.value = "";
   inventoryStockReason.value = isAdjustment
     ? "Ajuste manual de saldo"
-    : isAdd
-      ? "Reposicao manual"
-      : "Baixa manual";
-  inventoryStockModal.classList.remove("hidden");
-  inventoryStockModal.classList.add("flex");
+    : isInternalUse
+      ? "Uso interno"
+      : isLoss
+        ? "Perda de estoque"
+        : isAdd
+          ? "Reposicao manual"
+          : "Baixa manual";
+  openInteractionSurface(inventoryStockModal, { focusSelector: "#inventoryStockQuantity" });
 }
 
 function hideInventoryStockModal() {
   if (!inventoryStockModal) return;
-  inventoryStockModal.classList.add("hidden");
-  inventoryStockModal.classList.remove("flex");
+  closeInteractionSurface(inventoryStockModal);
 }
 
-const CLIENT_TAG_OPTIONS = new Set(["NEW", "RECURRING", "VIP", "INACTIVE"]);
 const CLIENT_STATUS_OPTIONS = new Set(["NEW", "ACTIVE", "VIP", "INACTIVE"]);
-
-function parseClientTagsInput(value) {
-  if (!String(value || "").trim()) return [];
-  const tags = String(value)
-    .split(",")
-    .map((item) => item.trim().toUpperCase())
-    .filter(Boolean)
-    .filter((item) => CLIENT_TAG_OPTIONS.has(item));
-  return Array.from(new Set(tags));
-}
 
 function mapClientStatusToTags(status) {
   if (status === "VIP") return ["VIP"];
@@ -6624,15 +6943,12 @@ function showClientsModal() {
     clientsSubmitBtn.disabled = false;
     clientsSubmitBtn.textContent = "Salvar cliente";
   }
-  clientsModal.classList.remove("hidden");
-  clientsModal.classList.add("flex");
-  clientsName?.focus();
+  openInteractionSurface(clientsModal, { focusSelector: "#clientsName" });
 }
 
 function hideClientsModal() {
   if (!clientsModal) return;
-  clientsModal.classList.add("hidden");
-  clientsModal.classList.remove("flex");
+  closeInteractionSurface(clientsModal);
 }
 
 function formatClientPhoneInput(value) {
@@ -6986,7 +7302,7 @@ async function loadFidelizacaoData() {
 
   const packageRows = Array.isArray(packages.packages) ? packages.packages : [];
   if (packageRows.length) {
-    fillSelect(packageId, packageRows, (item) => `${item.name} - R$ ${Number(item.price).toFixed(2)}`);
+    fillSelect(packageId, packageRows, (item) => `${item.name} - ${money(item.price)}`);
   } else {
     packageId.innerHTML = "<option value=''>Sem pacotes</option>";
   }
@@ -6995,7 +7311,7 @@ async function loadFidelizacaoData() {
     fillSelect(
       subscriptionPlanId,
       planRows,
-      (item) => `${item.name} - R$ ${Number(item.priceMonthly).toFixed(2)}/mes`,
+      (item) => `${item.name} - ${money(item.priceMonthly)}/mes`,
     );
   } else {
     subscriptionPlanId.innerHTML = "<option value=''>Sem planos</option>";
@@ -7142,15 +7458,13 @@ function openMetasGoalModal(mode = "create") {
     if (metasGoalSubmitBtn) metasGoalSubmitBtn.textContent = "Salvar alteracoes";
   }
 
-  metasGoalModal.classList.remove("hidden");
-  metasGoalModal.classList.add("flex");
+  showMotionLayer(metasGoalModal);
   metasGoalMonth?.focus();
 }
 
 function closeMetasGoalModal() {
   if (!metasGoalModal) return;
-  metasGoalModal.classList.add("hidden");
-  metasGoalModal.classList.remove("flex");
+  hideMotionLayer(metasGoalModal);
 }
 
 async function loadMetasModule() {
@@ -7496,6 +7810,7 @@ async function loadAll() {
       professionals: Object.values(professionalsById),
       services: allServices,
     }, settingsActiveSection);
+    initBookingLinkSection();
     animateSettingsScreen(settingsRoot);
     applyThemeFromSettingsPayload(currentSettingsPayload);
   } else {
@@ -7582,6 +7897,7 @@ async function refreshSettingsScreen(successMessage) {
       professionals: Object.values(professionalsById),
       services: allServices,
     }, settingsActiveSection);
+    initBookingLinkSection();
     animateSettingsScreen(settingsRoot);
     applyThemeFromSettingsPayload(currentSettingsPayload);
     renderSaleFeedback("success", successMessage, settingsFeedback);
@@ -7861,6 +8177,7 @@ if (settingsRoot) {
           professionals: Object.values(professionalsById),
           services: allServices,
         }, settingsActiveSection);
+        initBookingLinkSection();
         animateSettingsScreen(settingsRoot);
         const hoursForm = settingsRoot.querySelector("#settingsHoursForm");
         if (hoursForm instanceof HTMLFormElement) {
@@ -8524,296 +8841,22 @@ function initAuditDatePicker() {
   labelEl.textContent = "Últimos 30 dias";
 }
 
-/* ── Financial date range picker ──────────────────────────────
-   Shopify-style: trigger button → popover with 2-month calendar
-   + preset shortcuts. Updates hidden #financialCustomStart /
-   #financialCustomEnd inputs and triggers loadAll.
-   ─────────────────────────────────────────────────────────── */
-function initFinancialDatePicker() {
-  const wrap     = document.getElementById("fnPickerWrap");
-  const trigger  = document.getElementById("financialDateTrigger");
-  const popover  = document.getElementById("fnPickerPopover");
-  const calsEl   = document.getElementById("fnCals");
-  const labelEl  = document.getElementById("financialDateLabel");
-  const rangeLbl = document.getElementById("fnRangeLabel");
-  const applyBtn = document.getElementById("fnApplyBtn");
-  const startIn  = document.getElementById("financialCustomStart");
-  const endIn    = document.getElementById("financialCustomEnd");
-  if (!trigger || !popover || !calsEl || !startIn || !endIn || !labelEl) return;
 
-  const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-                  "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-
-  let pickerStart = null;
-  let pickerEnd = null;
-  let hoverDate = null;
-  let phase = 0;
-  let leftYear, leftMonth;
-
-  function toYMD(d) {
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  }
-  function fromYMD(value) {
-    if (!value) return null;
-    const [year, month, day] = String(value).split("-").map(Number);
-    if (!year || !month || !day) return null;
-    const date = new Date(year, month - 1, day);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  function startOfToday() {
-    const date = new Date();
-    date.setHours(0,0,0,0);
-    return date;
-  }
-  function sameDay(a, b) { return toYMD(a) === toYMD(b); }
-  function rangeBounds(start, end) {
-    if (!start || !end) return { start, end };
-    return start <= end ? { start, end } : { start: end, end: start };
-  }
-
-  function setPresetActive(key) {
-    popover.querySelectorAll(".shf-preset").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.fnPreset === key);
-    });
-  }
-
-  function applyPreset(key) {
-    const now = startOfToday();
-    let s, e;
-    if (key === "today") {
-      s = new Date(now); e = new Date(now);
-    } else if (key === "7d") {
-      s = new Date(now); s.setDate(s.getDate() - 6); e = new Date(now);
-    } else if (key === "30d") {
-      s = new Date(now); s.setDate(s.getDate() - 29); e = new Date(now);
-    } else if (key === "month") {
-      s = new Date(now.getFullYear(), now.getMonth(), 1);
-      e = new Date(now);
-    } else if (key === "prev-month") {
-      const m = now.getMonth() - 1;
-      const y = m < 0 ? now.getFullYear() - 1 : now.getFullYear();
-      const mm = (m + 12) % 12;
-      s = new Date(y, mm, 1);
-      e = new Date(y, mm + 1, 0);
-    }
-    pickerStart = s; pickerEnd = e; phase = 0;
-    setPresetActive(key);
-    updateRangeLabel();
-    renderCals();
-  }
-
-  function presetKeyForRange() {
-    if (!pickerStart || !pickerEnd) return "";
-    const today = startOfToday();
-    const s = pickerStart, e = pickerEnd;
-    const diff = Math.round((e - s) / 864e5);
-    if (sameDay(s, today) && sameDay(e, today)) return "today";
-    if (diff === 6 && sameDay(e, today)) return "7d";
-    if (diff === 29 && sameDay(e, today)) return "30d";
-    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    if (sameDay(s, thisMonthStart) && sameDay(e, today)) return "month";
-    const m = today.getMonth() - 1;
-    const y = m < 0 ? today.getFullYear() - 1 : today.getFullYear();
-    const mm = (m + 12) % 12;
-    const prevMonthStart = new Date(y, mm, 1);
-    const prevMonthEnd = new Date(y, mm + 1, 0);
-    if (sameDay(s, prevMonthStart) && sameDay(e, prevMonthEnd)) return "prev-month";
-    return "";
-  }
-
-  function updateRangeLabel() {
-    if (!pickerStart) { rangeLbl && (rangeLbl.textContent = ""); return; }
-    const fmt = d => d.toLocaleDateString("pt-BR", { day:"2-digit", month:"short" });
-    rangeLbl && (rangeLbl.textContent = pickerEnd && !sameDay(pickerStart, pickerEnd)
-      ? `${fmt(pickerStart)} → ${fmt(pickerEnd)}`
-      : fmt(pickerStart));
-  }
-
-  function renderCal(year, month) {
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const today = startOfToday();
-
-    let html = `<div class="shf-cal">
-      <div class="shf-cal-head">
-        <button type="button" class="shf-cal-nav" data-fn-nav="-1">&#8249;</button>
-        <span class="shf-cal-title">${MONTHS[month]} ${year}</span>
-        <button type="button" class="shf-cal-nav" data-fn-nav="1">&#8250;</button>
-      </div>
-      <div class="shf-cal-grid">
-        ${["D","S","T","Q","Q","S","S"].map(d=>`<span class="shf-cal-dow">${d}</span>`).join("")}`;
-
-    for (let i = 0; i < firstDay; i++) html += `<span></span>`;
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const date = new Date(year, month, d);
-      const ymd = toYMD(date);
-      const isToday = sameDay(date, today);
-      const isStart = pickerStart && sameDay(date, pickerStart);
-      const isEnd   = pickerEnd   && sameDay(date, pickerEnd);
-      const endRef  = phase === 1 && hoverDate ? hoverDate : pickerEnd;
-      const inRange = pickerStart && endRef &&
-        (pickerStart <= date) && (date <= endRef);
-      const isFuture = date > today;
-
-      let cls = "shf-cal-day";
-      if (isFuture) cls += " is-future";
-      if (isToday)  cls += " is-today";
-      if (isStart)  cls += " is-start";
-      if (isEnd && !sameDay(pickerStart, date)) cls += " is-end";
-      if (inRange && !isStart && !isEnd) cls += " in-range";
-      if (isStart && isEnd) cls += " is-single";
-
-      html += `<button type="button" class="${cls}" data-fn-date="${ymd}"${isFuture?" disabled":""}>${d}</button>`;
-    }
-    html += `</div></div>`;
-    return html;
-  }
-
-  function renderCals() {
-    const rightYear  = leftMonth === 11 ? leftYear + 1 : leftYear;
-    const rightMonth = leftMonth === 11 ? 0 : leftMonth + 1;
-    calsEl.innerHTML = renderCal(leftYear, leftMonth) + renderCal(rightYear, rightMonth);
-  }
-
-  function formatTriggerLabel() {
-    if (!pickerStart) return "Este mês";
-    const today = startOfToday();
-    const s = pickerStart, e = pickerEnd || pickerStart || today;
-    const diff = Math.round((e - s) / 864e5);
-    if (sameDay(s, today) && sameDay(e, today)) return "Hoje";
-    if (diff === 6  && sameDay(e, today)) return "Últimos 7 dias";
-    if (diff === 29 && sameDay(e, today)) return "Últimos 30 dias";
-    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    if (sameDay(s, thisMonthStart) && sameDay(e, today)) return "Este mês";
-    const m = today.getMonth() - 1;
-    const y = m < 0 ? today.getFullYear() - 1 : today.getFullYear();
-    const mm = (m + 12) % 12;
-    const prevMonthStart = new Date(y, mm, 1);
-    const prevMonthEnd = new Date(y, mm + 1, 0);
-    if (sameDay(s, prevMonthStart) && sameDay(e, prevMonthEnd)) return "Mês anterior";
-    const opts = { day:"2-digit", month:"short" };
-    const sStr = s.toLocaleDateString("pt-BR", opts);
-    const eStr = e.toLocaleDateString("pt-BR", opts);
-    return sameDay(s, e) ? sStr : `${sStr} – ${eStr}`;
-  }
-
-  function openPicker() {
-    pickerStart = fromYMD(startIn.value);
-    pickerEnd = fromYMD(endIn.value) || pickerStart;
-    hoverDate = null;
-    phase = 0;
-    const anchor = pickerEnd || pickerStart || startOfToday();
-    leftYear  = anchor.getFullYear();
-    leftMonth = anchor.getMonth() - 1;
-    if (leftMonth < 0) { leftMonth = 11; leftYear--; }
-    setPresetActive(presetKeyForRange());
-    updateRangeLabel();
-    renderCals();
-    positionPopoverAdaptive(trigger, popover);
-    popover.classList.remove("hidden");
-    trigger.classList.add("is-active");
-  }
-
-  function closePicker() {
-    popover.classList.add("hidden");
-    trigger.classList.remove("is-active");
-  }
-
-  trigger.addEventListener("click", (e) => {
-    e.stopPropagation();
-    popover.classList.contains("hidden") ? openPicker() : closePicker();
-  });
-
-  popover.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const preset = event.target.closest("[data-fn-preset]");
-    if (preset) {
-      applyPreset(preset.dataset.fnPreset);
-    }
-  });
-
-  calsEl.addEventListener("click", (event) => {
-    const nav = event.target.closest("[data-fn-nav]");
-    if (nav) {
-      const dir = Number(nav.dataset.fnNav);
-      leftMonth += dir;
-      if (leftMonth < 0)  { leftMonth = 11; leftYear--; }
-      if (leftMonth > 11) { leftMonth = 0;  leftYear++; }
-      renderCals();
-      return;
-    }
-
-    const day = event.target.closest("[data-fn-date]");
-    if (!day || day.disabled) return;
-    const clicked = fromYMD(day.dataset.fnDate);
-    if (!clicked) return;
-    if (phase === 0) {
-      pickerStart = clicked;
-      pickerEnd = null;
-      hoverDate = null;
-      phase = 1;
-      setPresetActive("");
-    } else {
-      if (clicked < pickerStart) {
-        pickerEnd = pickerStart;
-        pickerStart = clicked;
-      } else {
-        pickerEnd = clicked;
-      }
-      hoverDate = null;
-      phase = 0;
-    }
-    updateRangeLabel();
-    renderCals();
-  });
-
-  calsEl.addEventListener("mouseover", (event) => {
-    const day = event.target.closest("[data-fn-date]");
-    if (phase !== 1 || !day || day.disabled) return;
-    const nextHoverDate = fromYMD(day.dataset.fnDate);
-    if (!nextHoverDate || (hoverDate && sameDay(hoverDate, nextHoverDate))) return;
-    hoverDate = nextHoverDate;
-    renderCals();
-  });
-
-  calsEl.addEventListener("mouseleave", () => {
-    if (phase !== 1 || !hoverDate) return;
-    hoverDate = null;
-    renderCals();
-  });
-
-  applyBtn?.addEventListener("click", () => {
-    if (!pickerStart) return;
-    const e = pickerEnd || pickerStart;
-    startIn.value = toYMD(pickerStart);
-    endIn.value   = toYMD(e);
-    labelEl.textContent = formatTriggerLabel();
-    closePicker();
-    loadAll();
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!wrap?.contains(e.target)) closePicker();
-  });
-
-  // Init with month preset (Mês atual)
-  applyPreset("month");
-  const now = startOfToday();
-  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  startIn.value = toYMD(startMonth);
-  endIn.value   = toYMD(now);
-  labelEl.textContent = "Este mês";
-}
+let saleSubmitting = false;
 
 saleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (saleSubmitting) return;
   try {
     if (!saleCart.length) {
       renderSaleFeedback("warning", "Adicione ao menos um produto no carrinho.", saleFeedback);
       return;
     }
 
+    saleSubmitting = true;
+    saleForm.dataset.commerceState = "processing";
+    saleForm.setAttribute("aria-busy", "true");
+    if (saleCheckoutBtn) saleCheckoutBtn.disabled = true;
     const idempotencyKey = buildOperationIdempotencyKey("product-sale");
     const result = await callJson(`${API}/sales/products`, "POST", {
       idempotencyKey,
@@ -8830,14 +8873,14 @@ saleForm.addEventListener("submit", async (event) => {
     const totals = computeCartTotals(saleCart);
     renderSaleFeedback(
       "success",
-      `Venda registrada. Receita: R$ ${Number(result.revenue.amount).toFixed(2)} (${totals.totalItems} itens).`,
+      `Venda registrada. Receita: ${money(result.revenue.amount)} (${totals.totalItems} itens).`,
       saleFeedback,
     );
     productSalesHistory = [
       {
         id: result.sale.id,
         label: `${totals.totalItems} item(ns)`,
-        amount: `R$ ${Number(result.revenue.amount).toFixed(2)}`,
+        amount: money(result.revenue.amount),
         clientLabel: saleClientId.options[saleClientId.selectedIndex]?.textContent || "Nao vinculado",
         professionalLabel: saleProfessionalId.options[saleProfessionalId.selectedIndex]?.textContent || "Sem profissional",
         items: saleCart.map((item) => ({
@@ -8865,7 +8908,13 @@ saleForm.addEventListener("submit", async (event) => {
     await loadProductSalesHistory();
     await loadAll();
   } catch (error) {
+    saleForm.dataset.commerceState = "error";
     renderSaleFeedback("error", error.message || "Nao foi possivel registrar venda.", saleFeedback);
+  } finally {
+    saleSubmitting = false;
+    saleForm.setAttribute("aria-busy", "false");
+    if (saleForm.dataset.commerceState === "processing") delete saleForm.dataset.commerceState;
+    if (saleCheckoutBtn) saleCheckoutBtn.disabled = saleCart.length === 0;
   }
 });
 
@@ -8944,14 +8993,14 @@ function showFinancialTransactionModal(transaction = null) {
   if (financialTransactionNotes) {
     financialTransactionNotes.value = transaction?.notes || "";
   }
-  financialTransactionModal.classList.remove("hidden");
-  financialTransactionModal.classList.add("flex");
+  openInteractionSurface(financialTransactionModal, {
+    focusSelector: "#financialTransactionType",
+  });
 }
 
 function hideFinancialTransactionModal() {
   if (!financialTransactionModal) return;
-  financialTransactionModal.classList.add("hidden");
-  financialTransactionModal.classList.remove("flex");
+  closeInteractionSurface(financialTransactionModal);
 }
 
 financialAddTransactionBtn?.addEventListener("click", () => {
@@ -9060,11 +9109,6 @@ clientsForm?.addEventListener("submit", async (event) => {
   }
 
   const selectedStatus = clientsStatus?.value || "NEW";
-  const explicitTags = String(clientsTags?.value || "")
-    .split(",")
-    .map((tag) => tag.trim().toUpperCase())
-    .filter((tag) => ["NEW", "RECURRING", "VIP", "INACTIVE"].includes(tag))
-    .slice(0, 6);
   const payload = {
     unitId,
     name,
@@ -9073,7 +9117,7 @@ clientsForm?.addEventListener("submit", async (event) => {
     birthDate: clientsBirthDate?.value || undefined,
     notes: String(clientsNotes?.value || "").trim() || undefined,
     status: selectedStatus,
-    tags: explicitTags.length ? explicitTags : mapClientStatusToTags(selectedStatus),
+    tags: mapClientStatusToTags(selectedStatus),
   };
 
   if (clientsSubmitBtn) {
@@ -9270,12 +9314,28 @@ inventoryStockForm?.addEventListener("submit", async (event) => {
     return;
   }
   try {
-    await callJson(`${API}/inventory/${productId}/stock`, "PATCH", {
-      unitId,
-      type: inventoryStockType.value || "IN",
-      quantity,
-      reason: String(inventoryStockReason.value || "").trim() || undefined,
-    });
+    const movementType = inventoryStockType.value || "IN";
+    const reason = String(inventoryStockReason.value || "").trim();
+    if (movementType === "LOSS" || movementType === "INTERNAL_USE") {
+      await callJson(`${API}/stock/movements/manual`, "POST", {
+        unitId,
+        productId,
+        movementType,
+        quantity,
+        reason: reason || (movementType === "LOSS" ? "Perda de estoque" : "Uso interno"),
+        responsible: getCurrentActorId(),
+        changedBy: getCurrentActorId(),
+        referenceType: "INTERNAL",
+        idempotencyKey: buildOperationIdempotencyKey(`stock-${movementType.toLowerCase()}`),
+      });
+    } else {
+      await callJson(`${API}/inventory/${productId}/stock`, "PATCH", {
+        unitId,
+        type: movementType,
+        quantity,
+        reason: reason || undefined,
+      });
+    }
     hideInventoryStockModal();
     lastDrawerProductId = null;
     await refreshInventoryAndCatalog("Estoque ajustado com sucesso.");
@@ -9365,11 +9425,25 @@ function bindInventoryActionHandlers(container) {
       return;
     }
 
+    if (action === "internal-use" || action === "loss") {
+      closeInventoryDrawer(productId);
+      showInventoryStockModal({
+        productId,
+        productName,
+        type: action === "loss" ? "LOSS" : "INTERNAL_USE",
+      });
+      return;
+    }
+
     if (action === "delete") {
       closeInventoryDrawer(productId);
-      const confirmed = window.confirm(
-        `Deseja excluir o produto ${productName || "selecionado"} do estoque?`,
-      );
+      const confirmed = await confirmInteraction({
+        eyebrow: "Estoque · exclusao",
+        title: `Excluir ${productName || "produto selecionado"}?`,
+        message: "O produto deixara o catalogo de estoque. Movimentacoes ja registradas permanecerao rastreaveis.",
+        confirmLabel: "Excluir produto",
+        tone: "destructive",
+      });
       if (!confirmed) return;
       try {
         await callJson(`${API}/inventory/${productId}`, "DELETE", { unitId });
@@ -9715,11 +9789,27 @@ if (appointmentsFilterSearch) appointmentsFilterSearch.addEventListener("input",
 if (alFilterStatus) alFilterStatus.addEventListener("change", renderAgendaView);
 if (alFilterProfessional) alFilterProfessional.addEventListener("change", renderAgendaView);
 if (alFilterSearch) alFilterSearch.addEventListener("input", renderAgendaView);
-if (financialPeriod) financialPeriod.addEventListener("change", loadAll);
+if (financialPeriod) {
+  financialPeriod.addEventListener("change", () => {
+    const isCustom = financialPeriod.value === "custom";
+    financialCustomRange?.classList.toggle("hidden", !isCustom);
+    if (!isCustom) loadAll();
+  });
+}
 if (financialSearch) financialSearch.addEventListener("input", debouncedLoadAll);
 if (financialTypeFilter) financialTypeFilter.addEventListener("change", loadAll);
-if (financialCustomStart) financialCustomStart.addEventListener("change", loadAll);
-if (financialCustomEnd) financialCustomEnd.addEventListener("change", loadAll);
+financialCustomApply?.addEventListener("click", () => {
+  const start = new Date(`${financialCustomStart?.value || ""}T00:00:00`);
+  const end = new Date(`${financialCustomEnd?.value || ""}T23:59:59.999`);
+  const valid = !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start;
+  financialCustomStart?.setCustomValidity(Number.isNaN(start.getTime()) ? "Informe a data inicial." : "");
+  financialCustomEnd?.setCustomValidity(valid ? "" : "A data final deve ser igual ou posterior à inicial.");
+  if (!valid) {
+    (Number.isNaN(start.getTime()) ? financialCustomStart : financialCustomEnd)?.reportValidity();
+    return;
+  }
+  loadAll();
+});
 if (reportsPeriod && reportsCustomStart && reportsCustomEnd) {
   reportsPeriod.addEventListener("change", () => {
     const isCustom = reportsPeriod.value === "custom";
@@ -9921,14 +10011,6 @@ if (auditEventsList) {
     renderAuditEventDrawer(auditElements, auditEvent);
   });
 }
-if (financialPeriod && financialCustomStart && financialCustomEnd) {
-  financialPeriod.addEventListener("change", () => {
-    const isCustom = financialPeriod.value === "custom";
-    financialCustomStart.classList.toggle("hidden", !isCustom);
-    financialCustomEnd.classList.toggle("hidden", !isCustom);
-  });
-}
-
 if (financialEntriesList) {
   financialEntriesList.addEventListener("click", async (event) => {
     const emptyAddTarget = event.target.closest("#financialEmptyAddBtn");
@@ -9959,7 +10041,13 @@ if (financialEntriesList) {
     if (action === "delete") {
       const id = actionTarget.getAttribute("data-financial-transaction-id");
       if (!id) return;
-      const confirmed = window.confirm("Deseja excluir este lancamento manual?");
+      const confirmed = await confirmInteraction({
+        eyebrow: "Financeiro · exclusao",
+        title: "Excluir lancamento manual?",
+        message: "O lancamento sera removido da apuracao e a exclusao permanecera registrada para auditoria.",
+        confirmLabel: "Excluir lancamento",
+        tone: "destructive",
+      });
       if (!confirmed) return;
       try {
         await callJson(`${API}/financial/transactions/${id}`, "DELETE", {
@@ -9994,7 +10082,13 @@ if (financialDrawerHost) {
     }
 
     if (action === "delete") {
-      const confirmed = window.confirm("Deseja excluir este lancamento manual?");
+      const confirmed = await confirmInteraction({
+        eyebrow: "Financeiro · exclusao",
+        title: "Excluir lancamento manual?",
+        message: "O lancamento sera removido da apuracao e a exclusao permanecera registrada para auditoria.",
+        confirmLabel: "Excluir lancamento",
+        tone: "destructive",
+      });
       if (!confirmed) return;
       try {
         await callJson(`${API}/financial/transactions/${id}`, "DELETE", {
@@ -10115,7 +10209,7 @@ function openClientScheduling(clientIdValue) {
     refreshScheduleAssist();
   }
   openScheduleDrawer({ mode: "create" });
-  startsAt?.focus();
+  (startsAt?.disabled ? appointmentDate : startsAt)?.focus();
 }
 
 async function payCurrentCommission(commissionId, button) {
@@ -10126,7 +10220,13 @@ async function payCurrentCommission(commissionId, button) {
     renderSaleFeedback("info", "Esta comissao ja foi paga.", commissionsFeedback || financialFeedback);
     return;
   }
-  const confirmed = window.confirm("Confirmar pagamento desta comissao?");
+  const confirmed = await confirmInteraction({
+    eyebrow: "Comissoes · pagamento",
+    title: "Confirmar pagamento?",
+    message: "A comissao sera marcada como paga com a data atual e refletida nos registros financeiros.",
+    confirmLabel: "Confirmar pagamento",
+    tone: "confirm",
+  });
   if (!confirmed) return;
   try {
     if (button) button.disabled = true;
@@ -10224,6 +10324,18 @@ professionalId?.addEventListener("change", async () => {
 startsAt?.addEventListener("change", async () => {
   await validateScheduleSlot();
 });
+appointmentDate?.addEventListener("input", () => {
+  syncStartsAtFromMobileTemporalControls();
+});
+appointmentTime?.addEventListener("input", () => {
+  syncStartsAtFromMobileTemporalControls();
+});
+appointmentDate?.addEventListener("change", () => {
+  syncStartsAtFromMobileTemporalControls({ notify: true });
+});
+appointmentTime?.addEventListener("change", () => {
+  syncStartsAtFromMobileTemporalControls({ notify: true });
+});
 
 if (appointmentsDetailClose) {
   appointmentsDetailClose.addEventListener("click", () => {
@@ -10291,11 +10403,21 @@ if (appointmentsEmptyState) {
 viewListBtn.addEventListener("click", () => {
   persistAgendaViewPreference("list");
   renderAgendaView();
+  animateAgendaView("list", {
+    cards: agendaCardsMode,
+    calendar: agendaCalendarMode,
+    list: agendaListMode,
+  });
 });
 
 viewGridBtn.addEventListener("click", () => {
   persistAgendaViewPreference("cards");
   renderAgendaView();
+  animateAgendaView("cards", {
+    cards: agendaCardsMode,
+    calendar: agendaCalendarMode,
+    list: agendaListMode,
+  });
 });
 persistAgendaViewPreference(currentView);
 
@@ -10343,16 +10465,24 @@ window.addEventListener("resize", () => {
     state.mobileMoreOpen = false;
     state.agendaFiltersOpen = false;
     state.mobileSidebarOpen = false;
+    clearMobileSidebarInert();
+    mobileSidebarBackdrop?.setAttribute("aria-hidden", "true");
   }
 
   renderShell();
   applySectionVisibility();
+  animateModuleScreen(sectionsByModule[state.activeModule]);
+  configureAppointmentTemporalControls();
   scheduleWeekCalendarDensityRefresh();
 });
 
 async function init() {
+  initMotionSystem();
+  bindRecordSurfaceKeyboard(document);
+  initInteractionSurfaces(document);
   renderShell();
   applySectionVisibility();
+  animateModuleScreen(sectionsByModule[state.activeModule]);
   renderSaleCart();
   renderRecentSales();
   try {
@@ -10385,7 +10515,7 @@ function setScheduleDrawerMode(mode = "create") {
   const editing = mode === "edit";
   const title = document.querySelector(".sched-drawer-title");
   const sub = document.querySelector(".sched-drawer-sub");
-  const submit = appointmentForm?.querySelector('button[type="submit"]');
+  const submit = document.querySelector("#scheduleDrawer .sched-submit-btn");
   if (title) title.textContent = editing ? "Editar Agendamento" : "Novo Agendamento";
   if (sub) sub.textContent = editing ? "Revise os campos antes de salvar" : "Preencha os campos para confirmar";
   if (submit) submit.textContent = editing ? "Salvar Alteracoes" : "Confirmar Agendamento";
@@ -10399,7 +10529,7 @@ function resetScheduleFormForCreate() {
   appointmentServiceSummaryMessage = "";
   if (clientId) clientId.value = "";
   if (clientSearch) clientSearch.value = "";
-  if (startsAt) startsAt.value = asDateTimeLocalInputValue(new Date(Date.now() + 30 * 60000));
+  setAppointmentStartsAtValue(new Date(Date.now() + 30 * 60000));
   renderAlternativeSlots([], null, alternativeSlots);
   refreshProfessionalOptionsForSelection();
   renderAppointmentServiceSelection();
@@ -10429,7 +10559,7 @@ async function openAppointmentEdit(item) {
       active: true,
     }));
   }
-  if (startsAt) startsAt.value = asDateTimeLocalInputValue(loaded.startsAt);
+  setAppointmentStartsAtValue(loaded.startsAt);
   appointmentServiceSummary = null;
   appointmentServiceSummaryState = appointmentSelectedServices.length ? "loading" : "incomplete";
   renderAppointmentServiceSelection();
@@ -10446,15 +10576,13 @@ function openScheduleDrawer(options = {}) {
   const drawer = document.getElementById("scheduleDrawer");
   if (!drawer) return;
   setScheduleDrawerMode(options.mode || (editingAppointmentId ? "edit" : "create"));
-  drawer.classList.add("is-open");
-  drawer.setAttribute("aria-hidden", "false");
+  openInteractionSurface(drawer, { focusSelector: "#clientSearch" });
 }
 
 function closeScheduleDrawer() {
   const drawer = document.getElementById("scheduleDrawer");
   if (!drawer) return;
-  drawer.classList.remove("is-open");
-  drawer.setAttribute("aria-hidden", "true");
+  closeInteractionSurface(drawer);
 }
 
 document.getElementById("scheduleDrawerClose")?.addEventListener("click", closeScheduleDrawer);
@@ -10466,7 +10594,32 @@ document.addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") setMobileSidebarOpen(false);
+  if (!state.mobileSidebarOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setMobileSidebarOpen(false);
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...appSidebar.querySelectorAll(
+    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  )].filter((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !appSidebar.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !appSidebar.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
 });
 
 // ============================================================
@@ -10510,6 +10663,29 @@ function animateWeekCalendarTransition(container, direction = 0) {
       },
     );
   });
+}
+
+function scrollWeekCalendarToCurrentTime(container) {
+  const body = container?.querySelector?.(".wc-body-scroll");
+  const nowLine = container?.querySelector?.(".wc-now-line");
+  if (!body || !nowLine) return;
+
+  const lineTop = Number.parseFloat(nowLine.style?.top || "");
+  const viewportHeight = Number(body.clientHeight || 0);
+  if (!Number.isFinite(lineTop) || viewportHeight <= 0) return;
+
+  const currentTop = Number(body.scrollTop || 0);
+  const visibleStart = currentTop + 56;
+  const visibleEnd = currentTop + viewportHeight - 88;
+  if (lineTop >= visibleStart && lineTop <= visibleEnd) return;
+
+  const targetTop = Math.max(0, lineTop - viewportHeight * 0.36);
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  if (typeof body.scrollTo === "function") {
+    body.scrollTo({ top: targetTop, behavior: reducedMotion ? "auto" : "smooth" });
+  } else {
+    body.scrollTop = targetTop;
+  }
 }
 
 function getWeekCalendarDensity(container, hours) {
@@ -10582,6 +10758,9 @@ async function loadWeekCalendar(options = {}) {
   wcLoaded = true;
   container.classList.remove("wc-is-loading");
   renderWeekCalendar({ direction });
+  if (currentView === "list") {
+    renderAgendaListMode(getAgendaListFilteredItems(wcItems));
+  }
 }
 
 function assignWcColumns(items) {
@@ -10612,6 +10791,15 @@ function assignWcColumns(items) {
 function renderWeekCalendar(options = {}) {
   const container = document.getElementById("weekCalContainer");
   if (!container || !wcWeekStart) return;
+  updateWcWeekLabel();
+  const safeText = typeof escapeHtml === "function"
+    ? escapeHtml
+    : (value) => String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const { startHour: HOUR_START, endHour: HOUR_END } = getWeekCalendarBounds();
@@ -10643,23 +10831,23 @@ function renderWeekCalendar(options = {}) {
     `<div class="wc-time-slot" style="position:absolute;top:${minuteToY(hour * 60)}px;height:${TIME_LABEL_H}px;transform:translateY(-50%);">${String(hour).padStart(2, "0")}h</div>`
   ).join("");
 
-  const _isDark = !document.body.classList.contains("theme-light");
-  const COLORS = _isDark ? {
-    SCHEDULED:  { b: "rgba(230,229,224,0.35)", bg: "rgba(230,229,224,0.08)" },
-    CONFIRMED:  { b: "rgba(230,229,224,0.45)", bg: "rgba(230,229,224,0.11)" },
-    IN_SERVICE: { b: "#c08532",                bg: "rgba(192,133,50,0.20)"  },
-    COMPLETED:  { b: "#1f8a65",                bg: "rgba(31,138,101,0.18)" },
-    CANCELLED:  { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
-    NO_SHOW:    { b: "#cf2d56",                bg: "rgba(207,45,86,0.14)"  },
-    BLOCKED:    { b: "#6b5b2e",                bg: "rgba(192,133,50,0.16)" },
-  } : {
-    SCHEDULED:  { b: "#26251e", bg: "#e6e5e0" },
-    CONFIRMED:  { b: "#26251e", bg: "#e1e0db" },
-    IN_SERVICE: { b: "#c08532", bg: "#eadfcd" },
-    COMPLETED:  { b: "#1f8a65", bg: "#dce8df" },
-    CANCELLED:  { b: "#cf2d56", bg: "#eadbe0" },
-    NO_SHOW:    { b: "#cf2d56", bg: "#eadbe0" },
-    BLOCKED:    { b: "#6b5b2e", bg: "#eee3c9" },
+  const COLORS = {
+    SCHEDULED:  { b: "#8b8f91", bg: "rgba(139,143,145,0.12)" },
+    CONFIRMED:  { b: "#b4a88f", bg: "rgba(180,168,143,0.14)" },
+    IN_SERVICE: { b: "#c08a4a", bg: "rgba(192,138,74,0.17)" },
+    COMPLETED:  { b: "#4f8f78", bg: "rgba(79,143,120,0.15)" },
+    CANCELLED:  { b: "#8f6e68", bg: "rgba(143,110,104,0.13)" },
+    NO_SHOW:    { b: "#8a725f", bg: "rgba(138,114,95,0.14)" },
+    BLOCKED:    { b: "#756c5c", bg: "rgba(117,108,92,0.14)" },
+  };
+  const STATUS_LABELS = {
+    SCHEDULED: "Agendado",
+    CONFIRMED: "Confirmado",
+    IN_SERVICE: "Em atendimento",
+    COMPLETED: "Concluido",
+    CANCELLED: "Cancelado",
+    NO_SHOW: "Falta",
+    BLOCKED: "Bloqueio",
   };
 
   const dayCols = days.map((d) => {
@@ -10728,28 +10916,57 @@ function renderWeekCalendar(options = {}) {
       const lp = (col / total) * 100;
       const wp = (1 / total) * 100;
       const horizontalInset = total > 1 ? 3 : 6;
-      const c = COLORS[item.status] || COLORS.SCHEDULED;
+      const normalizedStatus = normalizeAgendaStatus(item.status);
+      const c = COLORS[normalizedStatus] || COLORS.SCHEDULED;
+      const statusLabel = STATUS_LABELS[normalizedStatus] || normalizedStatus;
       const timeStr = item.startsAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      const firstName = String(item.client || "Cliente").split(" ")[0];
       const priceLabel = Number(item.servicePrice || 0) > 0
         ? Number(item.servicePrice || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
         : "";
       const delayInfo = getAppointmentDelayInfo(item);
+      const densityClass = ht < 38 ? " wc-appt-compact" : ht < 66 ? " wc-appt-dense" : "";
       if (isBlock) {
         const label = agendaBlockTitle(item);
         const rangeLabel = isFullDayBlock ? label : `${agendaEventTimeRange(item)} - ${label}`;
         const reasonLabel = String(item.reason || "").trim();
-        return `<div class="wc-appt wc-appt-operational${isFullDayBlock ? " wc-appt-full-day" : ""}" data-wc-appt-id="${item.id}"
-        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
-        title="${rangeLabel}${reasonLabel ? ` - ${reasonLabel}` : ""}">
-        <span class="wc-appt-name">${rangeLabel}</span>
-        ${reasonLabel && !isFullDayBlock ? `<span class="wc-appt-time">${reasonLabel}</span>` : ""}
+        const professionalDirectory = typeof professionalsById !== "undefined" ? professionalsById : {};
+        const professionalLabel = item.professional || professionalDirectory?.[item.professionalId]?.name || "";
+        return `<div class="wc-appt wc-appt-operational${isFullDayBlock ? " wc-appt-full-day" : ""}${densityClass}" data-wc-appt-id="${safeText(item.id)}"
+        data-agenda-status="blocked" data-record-surface="appointment" data-record-tone="blocked"
+        data-record-interactive="true" role="button" tabindex="0"
+        aria-label="Abrir bloqueio ${safeText(rangeLabel)}"
+        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);--agenda-status:${c.b};--agenda-tint:${c.bg};"
+        title="${safeText(rangeLabel)}${reasonLabel ? ` - ${safeText(reasonLabel)}` : ""}">
+        <span class="wc-appt-top"><span class="wc-appt-clock">${safeText(isFullDayBlock ? "Dia" : agendaEventTimeRange(item))}</span><span class="wc-appt-status"><i aria-hidden="true"></i>${statusLabel}</span></span>
+        <span class="wc-appt-name">${safeText(label)}</span>
+        ${reasonLabel && !isFullDayBlock && ht >= 38 ? `<span class="wc-appt-svc">${safeText(reasonLabel)}</span>` : ""}
+        ${professionalLabel && ht >= 66 ? `<span class="wc-appt-professional">${safeText(professionalLabel)}</span>` : ""}
       </div>`;
       }
-      return `<div class="wc-appt" data-wc-appt-id="${item.id}"
-        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);background:${c.bg};border-left-color:${c.b};"
-        title="${timeStr} — ${item.client} — ${item.service}${priceLabel ? ` — ${priceLabel}` : ""}">
-        <span class="wc-appt-name">${timeStr} · ${firstName}</span>
+      let nextActionLabel = "Abrir detalhes";
+      if (
+        typeof agendaListActionsForStatus === "function"
+        && typeof agendaPrimaryActionForStatus === "function"
+        && typeof agendaActionLabelForStatus === "function"
+      ) {
+        const actions = agendaListActionsForStatus(normalizedStatus);
+        const primaryAction = agendaPrimaryActionForStatus(normalizedStatus);
+        const nextAction = actions.includes(primaryAction) ? primaryAction : actions[0];
+        nextActionLabel = agendaActionLabelForStatus(nextAction || "DETAIL", normalizedStatus);
+      }
+      const clientLabel = item.client || "Cliente sem nome";
+      const serviceLabel = item.service || "Servico";
+      const professionalLabel = item.professional || "Profissional";
+      return `<div class="wc-appt${densityClass}" data-wc-appt-id="${safeText(item.id)}"
+        data-agenda-status="${normalizedStatus.toLowerCase()}" data-record-surface="appointment" data-record-tone="${normalizedStatus.toLowerCase()}"
+        data-record-interactive="true" role="button" tabindex="0"
+        aria-label="Abrir agendamento de ${safeText(clientLabel)}, ${safeText(serviceLabel)}, ${statusLabel}"
+        style="top:${top}px;height:${ht}px;left:calc(${lp}% + ${horizontalInset}px);width:calc(${wp}% - ${horizontalInset * 2}px);--agenda-status:${c.b};--agenda-tint:${c.bg};"
+        title="${timeStr} — ${safeText(clientLabel)} — ${safeText(serviceLabel)}${priceLabel ? ` — ${priceLabel}` : ""}">
+        <span class="wc-appt-top"><span class="wc-appt-clock">${timeStr}</span><span class="wc-appt-status"><i aria-hidden="true"></i>${statusLabel}</span></span>
+        <span class="wc-appt-name">${safeText(clientLabel)}</span>
+        ${ht >= 38 ? `<span class="wc-appt-svc">${safeText(serviceLabel)}</span>` : ""}
+        ${ht >= 66 ? `<span class="wc-appt-bottom"><span class="wc-appt-professional">${safeText(professionalLabel)}</span><span class="wc-appt-next">${safeText(nextActionLabel)}</span></span>` : ""}
         ${delayInfo?.minutes ? `<span class="wc-appt-time">+${delayInfo.minutes} min</span>` : ""}
       </div>`;
     }).join("");
@@ -10772,6 +10989,10 @@ function renderWeekCalendar(options = {}) {
     </div>`;
 
   animateWeekCalendarTransition(container, Number(options.direction || 0));
+  const scheduleScroll = window.requestAnimationFrame || ((callback) => callback());
+  if (typeof scrollWeekCalendarToCurrentTime === "function") {
+    scheduleScroll(() => scrollWeekCalendarToCurrentTime(container));
+  }
 
   container.querySelectorAll("[data-wc-appt-id]").forEach((el) => {
     el.addEventListener("click", async () => {
@@ -10796,11 +11017,30 @@ function changeWeekCalendar(delta) {
   loadWeekCalendar({ direction: delta > 0 ? 1 : -1 });
 }
 
+function goToWeekCalendarDate(value) {
+  const selected = new Date(`${String(value || "")}T12:00:00`);
+  if (Number.isNaN(selected.getTime())) return;
+  const previous = wcWeekStart instanceof Date ? wcWeekStart.getTime() : selected.getTime();
+  wcWeekStart = getWeekMonday(selected);
+  wcLoaded = false;
+  const direction = wcWeekStart.getTime() === previous ? 0 : wcWeekStart.getTime() > previous ? 1 : -1;
+  loadWeekCalendar({ direction });
+}
+
 document.getElementById("wcPrevWeekBtn")?.addEventListener("click", () => {
   changeWeekCalendar(-1);
 });
 document.getElementById("wcNextWeekBtn")?.addEventListener("click", () => {
   changeWeekCalendar(1);
+});
+document.getElementById("wcTodayBtn")?.addEventListener("click", () => {
+  const today = new Date();
+  const goToDate = document.getElementById("wcGoToDate");
+  if (goToDate) goToDate.value = asDateInputValue(today);
+  goToWeekCalendarDate(asDateInputValue(today));
+});
+document.getElementById("wcGoToDate")?.addEventListener("change", (event) => {
+  goToWeekCalendarDate(event.currentTarget.value);
 });
 
 let whatsappMounted = false;

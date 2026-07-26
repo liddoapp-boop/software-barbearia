@@ -1,5 +1,9 @@
 import { escapeHtml } from "../modules/sanitize.js";
 import { statusLanguage } from "../modules/operational-language.js";
+import {
+  closeInteractionSurface,
+  openInteractionSurface,
+} from "./interaction-surfaces.js";
 
 export {
   escapeHtml,
@@ -27,6 +31,121 @@ function normalizeStatus(status, fallbackLabel = "") {
   const key = String(status || "").trim().toUpperCase();
   const { label, tone } = statusLanguage(key, fallbackLabel || key || "Status");
   return { label, tone, key };
+}
+
+const HEADER_PROFILES = Object.freeze({
+  agenda: {
+    system: "TEMPO / FLUXO",
+    focus: "Semana operacional",
+    signal: "Grade ativa",
+  },
+  clientes: {
+    system: "RELAÇÃO / RETENÇÃO",
+    focus: "Base de relacionamento",
+    signal: "Busca unificada",
+  },
+  financeiro: {
+    system: "CAIXA / COMPETÊNCIA",
+    focus: "Resultado do período",
+    signal: "Leitura monetária",
+  },
+  estoque: {
+    system: "DISPONIBILIDADE / GIRO",
+    focus: "Controle de reposição",
+    signal: "Saldo operacional",
+  },
+  pdv: {
+    system: "BALCÃO / CONVERSÃO",
+    focus: "Venda assistida",
+    signal: "Caixa preparado",
+  },
+  servicos: {
+    system: "CATÁLOGO / TEMPO",
+    focus: "Gestão do catálogo",
+    signal: "Oferta operacional",
+  },
+  profissionais: {
+    system: "EQUIPE / CAPACIDADE",
+    focus: "Produção da equipe",
+    signal: "Escala operacional",
+  },
+  auditoria: {
+    system: "TRILHA / CONTROLE",
+    focus: "Rastreabilidade",
+    signal: "Registro íntegro",
+  },
+  configuracoes: {
+    system: "SISTEMA / GOVERNANÇA",
+    focus: "Parâmetros da operação",
+    signal: "Configuração ativa",
+  },
+  relatorios: {
+    system: "LEITURA / HISTÓRICO",
+    focus: "Análise gerencial",
+    signal: "Período consolidado",
+  },
+  comissoes: {
+    system: "REPASSE / CONTROLE",
+    focus: "Ciclo de pagamento",
+    signal: "Regra operacional",
+  },
+  fidelizacao: {
+    system: "VÍNCULO / RECORRÊNCIA",
+    focus: "Retenção da base",
+    signal: "Relacionamento ativo",
+  },
+  automacoes: {
+    system: "FLUXO / ASSISTÊNCIA",
+    focus: "Operação assistida",
+    signal: "Regras monitoradas",
+  },
+  metas: {
+    system: "RITMO / PERFORMANCE",
+    focus: "Progresso do período",
+    signal: "Meta operacional",
+  },
+  "atendente-ia": {
+    system: "IA / REVISÃO HUMANA",
+    focus: "Comando assistido",
+    signal: "Prévia obrigatória",
+  },
+  whatsapp: {
+    system: "CANAL / AUTOMAÇÃO",
+    focus: "Comunicação com clientes",
+    signal: "Conexão monitorada",
+  },
+  "agendamento-link": {
+    system: "ACESSO / CONVERSÃO",
+    focus: "Agenda pública",
+    signal: "Canal compartilhável",
+  },
+});
+
+function normalizeHeaderKey(value = "") {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function resolveHeaderProfile(title = "", variant = "") {
+  const normalized = normalizeHeaderKey(variant || title);
+  const aliases = {
+    "venda-de-produtos": "pdv",
+    venda: "pdv",
+    equipe: "profissionais",
+    "metas-e-performance": "metas",
+  };
+  const key = aliases[normalized] || normalized || "operacao";
+  return {
+    key,
+    system: "LIDDO / OPERAÇÃO",
+    focus: "Controle operacional",
+    signal: "Ambiente ativo",
+    ...(HEADER_PROFILES[key] || {}),
+  };
 }
 
 export function renderStatusChip(status, options = {}) {
@@ -74,21 +193,43 @@ export function renderPageHeader({
   action = "",
   secondaryActions = "",
   meta = "",
+  variant = "",
+  system = "",
+  focus = "",
+  signal = "",
 } = {}) {
+  const profile = resolveHeaderProfile(title, variant);
+  const headerSystem = system || profile.system;
+  const headerFocus = focus || profile.focus;
+  const headerSignal = signal || profile.signal;
+  const contextLabel = eyebrow || context;
   return `
-    <header class="op-page-header">
-      <div class="op-page-header-main">
+    <header class="op-page-header op-page-header-${escapeHtml(profile.key)}" data-header-module="${escapeHtml(profile.key)}" data-motion-item>
+      <span class="op-header-link-rail" aria-hidden="true"></span>
+      <div class="op-header-context-row">
+        ${contextLabel ? `<p class="op-page-context">${escapeHtml(contextLabel)}</p>` : ""}
         ${breadcrumb ? `<p class="op-page-breadcrumb">${escapeHtml(breadcrumb)}</p>` : ""}
-        ${context || eyebrow ? `<p class="op-page-context">${escapeHtml(eyebrow || context)}</p>` : ""}
-        <h1 class="op-page-title">${escapeHtml(title || "Tela")}</h1>
-        ${subtitle ? `<p class="op-page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-        ${meta ? `<div class="op-page-meta">${meta}</div>` : ""}
+        <span class="op-header-system">${escapeHtml(headerSystem)}</span>
       </div>
-      ${
-        action || secondaryActions
-          ? `<div class="op-page-action">${secondaryActions || ""}${action || ""}</div>`
-          : ""
-      }
+      <div class="op-header-layout">
+        <div class="op-page-header-main">
+          <div class="op-header-title-lockup">
+            <h1 class="op-page-title">${escapeHtml(title || "Tela")}</h1>
+          </div>
+          ${subtitle ? `<p class="op-page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
+          ${meta ? `<div class="op-page-meta">${meta}</div>` : ""}
+        </div>
+        <div class="op-header-focus" data-header-context>
+          <span>Leitura principal</span>
+          <strong>${escapeHtml(headerFocus)}</strong>
+          <small><i aria-hidden="true"></i>${escapeHtml(headerSignal)}</small>
+        </div>
+        ${
+          action || secondaryActions
+            ? `<div class="op-page-action"><span class="op-header-action-label">Comandos</span>${secondaryActions || ""}${action || ""}</div>`
+            : ""
+        }
+      </div>
     </header>
   `;
 }
@@ -105,7 +246,7 @@ export function renderFilterBar({
   const essentialFields = essential.map(normalizeFilterFieldMarkup).join("");
   const advancedFields = advanced.map(normalizeFilterFieldMarkup).join("");
   return `
-    <section class="op-filter-bar" ${id ? `id="${escapeHtml(id)}"` : ""}>
+    <section class="op-filter-bar" data-motion-item ${id ? `id="${escapeHtml(id)}"` : ""}>
       <div class="op-filter-essential">
         ${essentialFields}
         ${
@@ -167,7 +308,7 @@ export function renderEntityDrawer({
   actions = "",
 } = {}) {
   return `
-    <aside class="op-drawer ${open ? "is-open" : ""}" id="${escapeHtml(id || "entityDrawer")}" aria-hidden="${open ? "false" : "true"}">
+    <aside class="op-drawer ${open ? "is-open" : ""}" id="${escapeHtml(id || "entityDrawer")}" aria-hidden="${open ? "false" : "true"}" tabindex="-1">
       <div class="op-drawer-backdrop" data-drawer-close></div>
       <article class="op-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="${escapeHtml(id || "entityDrawer")}-title">
         <header class="op-drawer-header">
@@ -177,16 +318,18 @@ export function renderEntityDrawer({
           </div>
           <div class="op-drawer-header-actions">
             ${status ? renderStatusChip(status) : ""}
-            <button class="op-drawer-close" type="button" data-drawer-close>Fechar</button>
+            <button class="op-drawer-close" type="button" data-drawer-close aria-label="Fechar detalhes">Fechar</button>
           </div>
         </header>
-        <section class="op-drawer-section">
-          <h3>Resumo</h3>
-          ${summary || "<p>Sem resumo disponivel.</p>"}
-        </section>
-        ${details ? `<section class="op-drawer-section"><h3>Detalhes operacionais</h3>${details}</section>` : ""}
-        ${history ? `<section class="op-drawer-section"><h3>Historico</h3>${history}</section>` : ""}
-        ${technicalTrace ? `<section class="op-drawer-section op-drawer-technical">${technicalTrace}</section>` : ""}
+        <div class="op-drawer-body">
+          <section class="op-drawer-section">
+            <h3>Resumo</h3>
+            ${summary || "<p>Sem resumo disponivel.</p>"}
+          </section>
+          ${details ? `<section class="op-drawer-section"><h3>Detalhes operacionais</h3>${details}</section>` : ""}
+          ${history ? `<section class="op-drawer-section"><h3>Historico</h3>${history}</section>` : ""}
+          ${technicalTrace ? `<section class="op-drawer-section op-drawer-technical">${technicalTrace}</section>` : ""}
+        </div>
         ${actions ? `<footer class="op-drawer-footer">${actions}</footer>` : ""}
       </article>
     </aside>
@@ -194,12 +337,16 @@ export function renderEntityDrawer({
 }
 
 export function bindEntityDrawers(root = document) {
+  root.querySelectorAll(".op-drawer.is-open").forEach((drawer) => {
+    openInteractionSurface(drawer);
+  });
   root.querySelectorAll(".op-drawer [data-drawer-close]").forEach((button) => {
+    if (button.dataset.interactionCloseBound === "true") return;
+    button.dataset.interactionCloseBound = "true";
     button.addEventListener("click", () => {
       const drawer = button.closest(".op-drawer");
       if (!drawer) return;
-      drawer.classList.remove("is-open");
-      drawer.setAttribute("aria-hidden", "true");
+      closeInteractionSurface(drawer);
     });
   });
 }

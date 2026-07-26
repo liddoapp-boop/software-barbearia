@@ -23,6 +23,7 @@ const SETTINGS_SECTIONS = [
   { id: "business", title: "Empresa", description: "Dados institucionais e identidade pública da operação." },
   { id: "hours", title: "Horários", description: "Funcionamento semanal usado pela agenda." },
   { id: "payments", title: "Pagamentos", description: "Métodos aceitos, status e padrão de recebimento." },
+  { id: "channels", title: "Canais", description: "Acessos públicos e pontos de contato com clientes." },
   { id: "team", title: "Equipe", description: "Pessoas, funções e perfis de acesso cadastrados." },
   { id: "schedule", title: "Agenda", description: "Preferências operacionais de duração, antecedência e encaixes." },
   { id: "operations", title: "Parâmetros", description: "Clientes em risco, inativos, lembretes e sobreposições." },
@@ -30,7 +31,7 @@ const SETTINGS_SECTIONS = [
 ];
 
 const SETTINGS_GROUPS = [
-  { title: "Operação", sections: ["business", "hours", "schedule", "operations"] },
+  { title: "Operação", sections: ["business", "hours", "schedule", "operations", "channels"] },
   { title: "Recebimento", sections: ["payments"] },
   { title: "Conta e sistema", sections: ["team", "usuario"] },
 ];
@@ -41,6 +42,7 @@ const SETTINGS_ICONS = {
   schedule:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
   operations:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>`,
   payments:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>`,
+  channels:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
   commissions: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>`,
   team:        `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21a8 8 0 0 0-16 0"/><circle cx="9" cy="7" r="4"/><path d="M23 21a8 8 0 0 0-5.4-7.5"/><circle cx="19" cy="5" r="3"/></svg>`,
   usuario:     `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`,
@@ -205,7 +207,7 @@ function settingsSectionRow({ id, title, description, status = "", facts = [], w
 
 function renderSettingsNavigator(sectionMap = {}, business = {}) {
   const groups = [
-    { title: "Operação", count: 4, sections: ["business", "hours", "schedule", "operations"] },
+    { title: "Operação", count: 5, sections: ["business", "hours", "schedule", "operations", "channels"] },
     { title: "Recebimento", count: 1, sections: ["payments"] },
     { title: "Time e sistema", count: 3, sections: ["team", "security", "appearance"] },
   ];
@@ -447,23 +449,23 @@ function renderHoursForm(hours = []) {
   ];
   return `
     <form id="settingsHoursForm" class="cfg-form">
-      <div class="cfg-kpi-strip">
-        <article class="cfg-kpi">
+      <div class="cfg-kpi-strip liddo-instruments liddo-instruments-configuracoes">
+        <article class="cfg-kpi liddo-kpi" data-kpi-kind="availability">
           <span>Dias abertos</span>
           <strong>${summary.openDays}</strong>
           <small>de 7 dias</small>
         </article>
-        <article class="cfg-kpi">
+        <article class="cfg-kpi liddo-kpi" data-kpi-kind="duration">
           <span>Carga semanal</span>
           <strong>${summary.weeklyWindow}</strong>
           <small>total aberto</small>
         </article>
-        <article class="cfg-kpi">
+        <article class="cfg-kpi liddo-kpi" data-kpi-kind="opening">
           <span>Primeiro horário</span>
           <strong>${summary.earliestOpen}</strong>
           <small>mais cedo</small>
         </article>
-        <article class="cfg-kpi">
+        <article class="cfg-kpi liddo-kpi" data-kpi-kind="closing">
           <span>Ultimo horario</span>
           <strong>${summary.latestClose}</strong>
           <small>mais tarde</small>
@@ -845,6 +847,40 @@ function renderBusinessTrace(business = {}) {
   });
 }
 
+function renderChannelsPanel() {
+  return `
+    <section class="bkl-page settings-channels-page" aria-labelledby="settingsBookingLinkTitle">
+      <div class="bkl-card">
+        <div class="bkl-card-head">
+          <span class="bkl-card-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </span>
+          <div>
+            <strong id="settingsBookingLinkTitle">Link de agendamento</strong>
+            <span>Página pública para o cliente escolher serviço, data e horário sem login.</span>
+          </div>
+        </div>
+        <div class="bkl-link-row">
+          <span id="bookingLinkText" class="bkl-link-text"></span>
+          <button id="copyBookingLink" type="button" class="bkl-copy-btn">
+            <svg class="bkl-copy-icon bkl-copy-icon-default" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg class="bkl-copy-icon bkl-copy-icon-success" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            <span class="bkl-copy-label">Copiar link</span>
+          </button>
+        </div>
+        <div class="bkl-card-actions">
+          <a id="bookingLinkOpen" href="/agendamento" target="_blank" rel="noopener" class="bkl-open-btn">Abrir página</a>
+        </div>
+      </div>
+      <div class="bkl-tips-grid">
+        <div class="bkl-tip-item"><strong>Instagram</strong><span>Use o link na bio para receber agendamentos.</span></div>
+        <div class="bkl-tip-item"><strong>WhatsApp</strong><span>Compartilhe diretamente com clientes.</span></div>
+        <div class="bkl-tip-item"><strong>Atendimento online</strong><span>A disponibilidade é consultada na página pública.</span></div>
+      </div>
+    </section>
+  `;
+}
+
 function sectionContent(section, payload = {}, context = {}) {
   const business = payload.business || {};
   const hours = Array.isArray(payload.businessHours) ? payload.businessHours : [];
@@ -887,6 +923,14 @@ function sectionContent(section, payload = {}, context = {}) {
         businessSettingsId: business.id,
         metadataJson: { paymentMethods },
       }),
+    },
+    channels: {
+      title: "Canais",
+      subtitle: "Link de agendamento e acessos públicos da operação.",
+      status: "ACTIVE",
+      summary: `<dl class="op-summary-grid">${field("Canal", "Link de agendamento")}${field("Acesso", "Público")}</dl>`,
+      details: renderChannelsPanel(),
+      technicalTrace: "",
     },
     team: {
       title: "Equipe",
@@ -965,14 +1009,16 @@ export function renderSettingsSidebar({
   const userName = String(user?.name || user?.displayName || user?.fullName || user?.email || "Usuario").split("@")[0];
   const userInitial = userName.charAt(0).toUpperCase() || "U";
   const menu = SETTINGS_GROUPS.flatMap((group) => group.sections)
-    .map((sectionId) => {
+    .map((sectionId, index) => {
       const section = SETTINGS_SECTIONS.find((item) => item.id === sectionId);
       if (!section) return "";
       const isActive = section.id === selectedSection;
       return `
         <button type="button" class="sb-item ${isActive ? "is-active" : ""}" data-settings-action="select-settings-section" data-settings-section="${escapeHtml(section.id)}" data-motion-item title="${escapeHtml(section.title)}">
+          <span class="sb-item-index" aria-hidden="true">S${String(index + 1).padStart(2, "0")}</span>
           <span class="sb-item-icon" aria-hidden="true">${SETTINGS_ICONS[section.id] || ""}</span>
           <span class="sb-label">${escapeHtml(section.title)}</span>
+          <span class="sb-item-terminus" aria-hidden="true"></span>
         </button>
       `;
     })
@@ -980,23 +1026,39 @@ export function renderSettingsSidebar({
 
   return `
     <div class="sidebar-wrap settings-sidebar-wrap">
-      <div class="sb-brand" aria-label="Liddo Barber">
+      <div class="sb-brand" aria-label="Liddo System">
+        <span class="sb-brand-axis" aria-hidden="true"></span>
         <div class="sb-brand-inner">
-          <span class="sb-brand-name">Liddo Barber</span>
+          <span class="sb-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <path d="M8.5 5v18.2a3.8 3.8 0 0 0 3.8 3.8H24" />
+              <path d="M12.5 5v15.5a2 2 0 0 0 2 2H24" />
+              <path d="M8 10h5M8 16h5" />
+            </svg>
+          </span>
+          <span class="sb-brand-copy">
+            <span class="sb-brand-kicker">LIDDO / BARBER OS</span>
+            <span class="sb-brand-name">Liddo System</span>
+            <span class="sb-brand-signature">GestÃ£o de excelÃªncia</span>
+          </span>
+          <span class="sb-brand-edition" aria-hidden="true">01—26</span>
         </div>
         <div class="sb-operation" aria-label="Estabelecimento atual">
-          <span class="sb-operation-label">Estabelecimento</span>
+          <span class="sb-operation-label"><i aria-hidden="true"></i> Estabelecimento</span>
           <strong>${escapeHtml(operationName || "Barbearia Geovane Borges")}</strong>
         </div>
       </div>
 
       <div class="sb-scroll">
         <nav class="sb-nav" aria-label="Menu de configuracoes">
+          <span class="sb-active-indicator" aria-hidden="true"></span>
           <button type="button" class="sb-item settings-back-item" data-settings-shell-action="back" title="Voltar">
+            <span class="sb-item-index" aria-hidden="true">00</span>
             <span class="sb-item-icon" aria-hidden="true">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
             </span>
             <span class="sb-label">Voltar</span>
+            <span class="sb-item-terminus" aria-hidden="true"></span>
           </button>
           ${menu}
         </nav>
@@ -1026,6 +1088,9 @@ export function renderSettingsSidebar({
               <span class="sb-user-name">${escapeHtml(userName || "Usuario")}</span>
               <span class="sb-user-subtitle">Conta e operacao</span>
             </span>
+            <span class="sb-account-chevron" aria-hidden="true">
+              <svg viewBox="0 0 16 16"><path d="m5 6 3 3 3-3"/></svg>
+            </span>
           </button>
         </div>
       </div>
@@ -1042,13 +1107,27 @@ function renderSettingsAdminLayout(payload = {}, context = {}, activeSection = "
 
   return `
     <div class="settings-page" data-settings-screen data-motion-item>
-      <header class="settings-page-head">
-        <div>
-          <p class="ux-label">${escapeHtml(currentMeta.title)}</p>
-          <h2>${escapeHtml(content.title)}</h2>
-          <span>${escapeHtml(content.subtitle)}</span>
+      <header class="settings-page-head op-page-header op-page-header-configuracoes" data-header-module="configuracoes">
+        <span class="op-header-link-rail" aria-hidden="true"></span>
+        <div class="op-header-context-row">
+          <p class="op-page-context">${escapeHtml(currentMeta.title)}</p>
+          <p class="op-page-breadcrumb">Liddo System / Configurações</p>
+          <span class="op-header-system">SISTEMA / GOVERNANÇA</span>
         </div>
-        ${renderStatusChip(content.status)}
+        <div class="op-header-layout">
+          <div class="op-page-header-main">
+            <div class="op-header-title-lockup">
+              <h2 class="settings-page-title op-page-title">${escapeHtml(content.title)}</h2>
+            </div>
+            <p class="settings-page-subtitle op-page-subtitle">${escapeHtml(content.subtitle)}</p>
+          </div>
+          <div class="op-header-focus" data-header-context>
+            <span>Seção ativa</span>
+            <strong>${escapeHtml(currentMeta.title)}</strong>
+            <small><i aria-hidden="true"></i>Configuração operacional</small>
+            ${renderStatusChip(content.status)}
+          </div>
+        </div>
       </header>
       <div class="settings-page-body" data-settings-panel data-settings-active-section="${escapeHtml(selectedSection)}">
         ${content.details || ""}

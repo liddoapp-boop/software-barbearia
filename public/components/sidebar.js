@@ -1,11 +1,11 @@
 const MODULE_ICONS = {
-  agenda:            `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
+  agenda:            `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 7.5h14v11H5z"/><path d="M8 4.5v5M16 4.5v5M5 11h14"/><path d="M9 14h2M13 14h2M9 16.5h2"/></svg>`,
   operacao:          `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>`,
-  clientes:          `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21a8 8 0 0 0-16 0"/><circle cx="9" cy="7" r="4"/><path d="M23 21a8 8 0 0 0-5.4-7.5"/><circle cx="19" cy="5" r="3"/></svg>`,
-  financeiro:        `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`,
+  clientes:          `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="8" r="3.5"/><path d="M4.5 19c.6-3.4 2.4-5 5.5-5s4.9 1.6 5.5 5"/><path d="M16 7.5h3.5M17.75 5.75v3.5M17 14.5h3"/></svg>`,
+  financeiro:        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 18.5V12M9.5 18.5V8M14 18.5v-4M18.5 18.5V5"/><path d="M4 18.5h16M5 8l4.5-3 4.5 4 5-5"/></svg>`,
   profissionais:     `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21a8 8 0 0 0-16 0"/><circle cx="9" cy="7" r="4"/><path d="M23 21a8 8 0 0 0-5.4-7.5"/><circle cx="19" cy="5" r="3"/></svg>`,
-  servicos:          `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9c0 3.314 2.686 6 6 6s6-2.686 6-6"/><path d="M3 9h18"/><path d="M12 3v6"/><path d="M8 21h8"/><path d="M12 15v6"/></svg>`,
-  auditoria:         `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
+  servicos:          `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 6.5h14M7 6.5v3a5 5 0 0 0 10 0v-3M12 14.5v5M8.5 19.5h7"/><path d="M9.5 4h5"/></svg>`,
+  auditoria:         `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 4.5h9l3 3v12H6z"/><path d="M15 4.5v3h3M9 11h6M9 14h6M9 17h3"/><path d="m8.5 7.5.8.8 1.7-2"/></svg>`,
   whatsapp:          `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
   "agendamento-link":`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
   relatorios:        `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
@@ -13,8 +13,9 @@ const MODULE_ICONS = {
   metas:             `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
   fidelizacao:       `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
   automacoes:        `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
-  estoque:           `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>`,
+  estoque:           `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m5 8 7-3.5L19 8v9l-7 3.5L5 17z"/><path d="m5 8 7 3.5L19 8M12 11.5v9M8.5 6.2l7 3.5"/></svg>`,
   configuracoes:     `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 0 1 22.4 6.1l-.06.06A1.65 1.65 0 0 0 22 7.98a1.65 1.65 0 0 0 1.51 1H24a2 2 0 0 1 0 4h-.49a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+  "atendente-ia":    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 6.5h14v10H9l-4 3z"/><path d="M8.5 10.5h7M8.5 13.5H13"/><path d="M16.5 4v5M14 6.5h5"/></svg>`,
 };
 
 const ICON_SETTINGS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
@@ -22,6 +23,7 @@ const ICON_SETTINGS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="non
 const ICON_USER = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>`;
 
 const ICON_LOGOUT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`;
+const ADMIN_MODULE_IDS = new Set(["configuracoes", "auditoria"]);
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -33,9 +35,20 @@ function escapeHtml(value) {
 }
 
 function getUserDisplayName(user) {
-  const rawName = user?.name || user?.displayName || user?.fullName || user?.email || "Usuário";
+  const explicitName = user?.name || user?.displayName || user?.fullName;
+  if (!explicitName && user?.role === "owner") return "Geovane Borges";
+  const rawName = explicitName || user?.email || "Usuário";
   const emailName = String(rawName).includes("@") ? String(rawName).split("@")[0] : rawName;
   return String(emailName || "Usuário").trim();
+}
+
+function getUserRoleLabel(user) {
+  const labels = {
+    owner: "Proprietário",
+    recepcao: "Recepção",
+    profissional: "Profissional",
+  };
+  return labels[user?.role] || "Perfil da operação";
 }
 
 export function renderSidebar({
@@ -48,7 +61,10 @@ export function renderSidebar({
   operationName = "Barbearia Geovane Borges",
 }) {
   const modules = groups.flatMap((group) => group.modules);
+  const primaryModules = modules.filter((module) => !ADMIN_MODULE_IDS.has(module.id));
+  const administrativeModules = modules.filter((module) => ADMIN_MODULE_IDS.has(module.id));
   const userName = getUserDisplayName(user);
+  const userRole = getUserRoleLabel(user);
   const userInitial = userName.charAt(0).toUpperCase() || "U";
   const accountMenuMarkup = canOpenSettings
     ? `
@@ -72,37 +88,63 @@ export function renderSidebar({
             </button>
     `;
 
-  const itemsMarkup = modules
-    .map((module) => {
+  const renderItems = (items, namespace = "") => items
+    .map((module, index) => {
       const active = module.id === activeModule;
       const badgeValue = Number(badges[module.id] || 0);
       const showBadge = Number.isFinite(badgeValue) && badgeValue > 0;
       const icon = MODULE_ICONS[module.id] || "";
+      const itemIndex = `${namespace}${String(index + 1).padStart(2, "0")}`;
       return `
         <button type="button" class="sb-item ${active ? "is-active" : ""}" data-sidebar-module="${escapeHtml(module.id)}" title="${escapeHtml(module.label)}">
+          <span class="sb-item-index" aria-hidden="true">${itemIndex}</span>
           ${icon ? `<span class="sb-item-icon" aria-hidden="true">${icon}</span>` : ""}
           <span class="sb-label">${escapeHtml(module.label)}</span>
           ${showBadge ? `<span class="sb-badge">${badgeValue}</span>` : ""}
+          <span class="sb-item-terminus" aria-hidden="true"></span>
         </button>
       `;
     })
     .join("");
+  const primaryItemsMarkup = renderItems(primaryModules);
+  const administrativeItemsMarkup = renderItems(administrativeModules, "A");
 
   return `
     <div class="sidebar-wrap">
-      <div class="sb-brand" aria-label="Liddo Barber">
+      <div class="sb-brand" aria-label="Liddo System">
+        <span class="sb-brand-axis" aria-hidden="true"></span>
         <div class="sb-brand-inner">
-          <span class="sb-brand-name">Liddo Barber</span>
+          <span class="sb-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <path d="M8.5 5v18.2a3.8 3.8 0 0 0 3.8 3.8H24" />
+              <path d="M12.5 5v15.5a2 2 0 0 0 2 2H24" />
+              <path d="M8 10h5M8 16h5" />
+            </svg>
+          </span>
+          <span class="sb-brand-copy">
+            <span class="sb-brand-kicker">LIDDO / BARBER OS</span>
+            <span class="sb-brand-name">Liddo System</span>
+            <span class="sb-brand-signature">Gestão de excelência</span>
+          </span>
+          <span class="sb-brand-edition" aria-hidden="true">01—26</span>
         </div>
         <div class="sb-operation" aria-label="Estabelecimento atual">
-          <span class="sb-operation-label">Estabelecimento</span>
+          <span class="sb-operation-label"><i aria-hidden="true"></i> Estabelecimento</span>
           <strong>${escapeHtml(operationName || "Barbearia Geovane Borges")}</strong>
         </div>
       </div>
 
       <div class="sb-scroll">
         <nav class="sb-nav" aria-label="Menu principal">
-          ${itemsMarkup}
+          <span class="sb-active-indicator" aria-hidden="true"></span>
+          <div class="sb-nav-section sb-nav-primary" data-sidebar-area="primary" aria-label="Navegação principal">
+            ${primaryItemsMarkup}
+          </div>
+          ${administrativeModules.length ? `
+            <div class="sb-nav-section sb-nav-administrative" data-sidebar-area="administrative" aria-label="Administração">
+              ${administrativeItemsMarkup}
+            </div>
+          ` : ""}
         </nav>
       </div>
 
@@ -117,7 +159,10 @@ export function renderSidebar({
             </span>
             <span class="sb-user-info">
               <span class="sb-user-name">${escapeHtml(userName)}</span>
-              <span class="sb-user-subtitle">Conta e operacao</span>
+              <span class="sb-user-subtitle">${escapeHtml(userRole)}</span>
+            </span>
+            <span class="sb-account-chevron" aria-hidden="true">
+              <svg viewBox="0 0 16 16"><path d="m5 6 3 3 3-3"/></svg>
             </span>
           </button>
         </div>

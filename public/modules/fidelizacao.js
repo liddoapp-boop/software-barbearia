@@ -24,7 +24,7 @@ function escapeHtml(value) {
 
 function kpi(title, value, subtitle = "", tone = "") {
   return `
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="relationship">
       <div class="ux-label">${escapeHtml(title)}</div>
       <div class="ux-value-sm ${tone}">${escapeHtml(value)}</div>
       ${subtitle ? `<div class="ux-hint">${escapeHtml(subtitle)}</div>` : ""}
@@ -67,7 +67,7 @@ export function renderFidelizacaoData(elements, payload) {
       ? `${loyalty.program.type} — taxa ${toNumber(loyalty.program.conversionRate).toFixed(2)}`
       : "Nao configurado";
     elements.summary.innerHTML = `
-      <div class="ds-kpi-row">
+      <div class="ds-kpi-row liddo-instruments liddo-instruments-fidelizacao">
         ${kpi("Programa", loyalty.program?.name || "Nao configurado", programInfo)}
         ${kpi("Pontos creditados", toNumber(loyalty.summary.earned).toFixed(2), "Pontos acumulados", "ds-kpi-tone-success")}
         ${kpi("Pontos resgatados", toNumber(loyalty.summary.redeemed).toFixed(2), "Pontos utilizados", "ds-kpi-tone-warning")}

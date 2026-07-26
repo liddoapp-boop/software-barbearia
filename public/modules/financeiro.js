@@ -125,9 +125,9 @@ function summarizeOrigins(transactions = []) {
     .slice(0, 4);
 }
 
-function renderCard(title, value, tone = "", subtitle = "") {
+function renderCard(title, value, tone = "", subtitle = "", kind = "monetary") {
   return `
-    <article class="fn-kpi ${tone}">
+    <article class="fn-kpi liddo-kpi ${tone}" data-kpi-kind="${escapeHtml(kind)}">
       <span>${escapeHtml(title)}</span>
       <strong>${escapeHtml(value)}</strong>
       ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
@@ -188,6 +188,7 @@ function renderFinancialCharts(transactions = [], cashFlow = {}) {
   const incoming = toNumber(cashFlow.incoming);
   const outgoing = toNumber(cashFlow.outgoing);
   const balance = toNumber(cashFlow.balance);
+  const hasFlow = transactions.length > 0 || incoming !== 0 || outgoing !== 0 || balance !== 0;
   const maxFlow = Math.max(Math.abs(incoming), Math.abs(outgoing), Math.abs(balance), 1);
   const origins = summarizeOrigins(transactions);
   const maxOrigin = Math.max(...origins.map((item) => Math.abs(toNumber(item.amount))), 1);
@@ -199,23 +200,27 @@ function renderFinancialCharts(transactions = [], cashFlow = {}) {
           <span>Fluxo de caixa</span>
           <strong>Entradas, saidas e saldo</strong>
         </div>
-        <div class="fn-flow-bars">
-          <div class="fn-flow-row fn-flow-income">
-            <span>Entradas</span>
-            <div><i style="width:${barPercent(incoming, maxFlow)}%"></i></div>
-            <strong>${escapeHtml(money(incoming))}</strong>
-          </div>
-          <div class="fn-flow-row fn-flow-expense">
-            <span>Saidas</span>
-            <div><i style="width:${barPercent(outgoing, maxFlow)}%"></i></div>
-            <strong>${escapeHtml(money(outgoing))}</strong>
-          </div>
-          <div class="fn-flow-row ${balance >= 0 ? "fn-flow-income" : "fn-flow-expense"}">
-            <span>Saldo</span>
-            <div><i style="width:${barPercent(balance, maxFlow)}%"></i></div>
-            <strong>${escapeHtml(money(balance))}</strong>
-          </div>
-        </div>
+        ${
+          hasFlow
+            ? `<div class="fn-flow-bars">
+                <div class="fn-flow-row fn-flow-income">
+                  <span>Entradas</span>
+                  <div><i style="width:${barPercent(incoming, maxFlow)}%"></i></div>
+                  <strong>${escapeHtml(money(incoming))}</strong>
+                </div>
+                <div class="fn-flow-row fn-flow-expense">
+                  <span>Saidas</span>
+                  <div><i style="width:${barPercent(outgoing, maxFlow)}%"></i></div>
+                  <strong>${escapeHtml(money(outgoing))}</strong>
+                </div>
+                <div class="fn-flow-row ${balance >= 0 ? "fn-flow-income" : "fn-flow-expense"}">
+                  <span>Saldo</span>
+                  <div><i style="width:${barPercent(balance, maxFlow)}%"></i></div>
+                  <strong>${escapeHtml(money(balance))}</strong>
+                </div>
+              </div>`
+            : `<div class="fn-chart-empty"><strong>Sem movimento neste periodo</strong><span>Ajuste o periodo ou registre um lancamento para iniciar a leitura do fluxo.</span></div>`
+        }
       </article>
 
       <article class="fn-chart-card">
@@ -239,7 +244,7 @@ function renderFinancialCharts(transactions = [], cashFlow = {}) {
                     `,
                   )
                   .join("")
-              : `<p class="fn-chart-empty">Os graficos aparecem automaticamente quando houver lancamentos no recorte.</p>`
+              : `<div class="fn-chart-empty"><strong>Nenhuma origem registrada</strong><span>As origens aparecem quando o periodo possui lancamentos.</span></div>`
           }
         </div>
       </article>
@@ -282,8 +287,11 @@ function renderTransactionRow(item = {}) {
   const expense = isExpense(item);
   const productItemsSummary = formatProductItemsSummary(item);
   return `
-    <article class="fn-row ${expense ? "fn-row-expense" : "fn-row-income"}">
-      <div class="fn-row-main" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}">
+    <article class="fn-row ${expense ? "fn-row-expense" : "fn-row-income"}"
+             data-record-surface="financial" data-record-tone="${expense ? "expense" : "income"}">
+      <div class="fn-row-main" data-financial-action="detail" data-financial-transaction-id="${escapeHtml(item.id)}"
+           data-record-interactive="true" role="button" tabindex="0"
+           aria-label="Abrir lancamento ${escapeHtml(item.description || originLabel(item))}">
         <div class="fn-row-date">
           <strong>${escapeHtml(formatDateShort(item.date))}</strong>
           <span>${escapeHtml(typeLabel(item.type))}</span>
@@ -412,14 +420,16 @@ export function renderFinancialData(elements, payload) {
         money(balance),
         balance >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
         `${money(incoming)} entradas − ${money(outgoing)} saidas`,
+        "balance",
       ),
-      renderCard("Receitas", money(incoming), "fn-kpi-positive", incomingSubtitle),
-      renderCard("Saidas", money(outgoing), "fn-kpi-negative", outgoingSubtitle),
+      renderCard("Receitas", money(incoming), "fn-kpi-positive", incomingSubtitle, "incoming"),
+      renderCard("Saidas", money(outgoing), "fn-kpi-negative", outgoingSubtitle, "outgoing"),
       renderCard(
         "Resultado projetado",
         money(projected),
         projected >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
         projectedSubtitle,
+        "projection",
       ),
     ].join("");
   }

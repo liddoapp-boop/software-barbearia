@@ -1,0 +1,164 @@
+/*
+ * Shared operational header geometry.
+ * Loaded last so older module-specific header rules cannot reserve columns.
+ */
+
+#appContent .op-page-header,
+#appContent .settings-page-head.op-page-header {
+  display: grid !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  min-height: 138px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid rgba(238, 232, 222, 0.08) !important;
+  border-radius: 16px 16px 16px 5px !important;
+  background:
+    linear-gradient(112deg, var(--header-accent-soft), transparent 28%),
+    linear-gradient(180deg, rgba(22, 26, 27, 0.985), rgba(13, 16, 17, 0.995)) !important;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.035),
+    inset 1px 0 rgba(255, 255, 255, 0.014),
+    0 18px 44px rgba(0, 0, 0, 0.2) !important;
+  box-sizing: border-box;
+}
+
+#appContent .op-header-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(0, max-content) !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+#appContent .op-header-layout:not(:has(.op-page-action)) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, max-content) !important;
+}
+
+#appContent .op-page-header-main,
+#appContent .op-header-title-lockup,
+#appContent .op-header-focus,
+#appContent .op-page-action {
+  min-width: 0 !important;
+}
+
+#appContent .op-page-header-main {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+#appContent .op-page-title,
+#appContent .settings-page-title.op-page-title {
+  min-width: 0 !important;
+  margin: 0 !important;
+  color: #f0eae1 !important;
+  font-family: Georgia, "Times New Roman", serif !important;
+  font-size: clamp(27px, 2.25vw, 35px) !important;
+  font-weight: 400 !important;
+  line-height: 1.02 !important;
+  letter-spacing: -0.03em !important;
+  overflow-wrap: anywhere;
+}
+
+#appContent .op-page-subtitle,
+#appContent .settings-page-subtitle.op-page-subtitle {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 8px 0 0 !important;
+  color: #aaa9a2 !important;
+  font-size: 13px !important;
+  font-weight: 470 !important;
+  line-height: 1.5 !important;
+  overflow-wrap: anywhere;
+}
+
+#appContent .op-header-focus {
+  width: fit-content !important;
+  max-width: 320px !important;
+  align-items: flex-end !important;
+  text-align: right !important;
+}
+
+#appContent .op-header-focus small {
+  justify-content: flex-end;
+}
+
+#appContent .op-page-action {
+  width: max-content !important;
+  max-width: 100% !important;
+  justify-content: flex-end !important;
+}
+
+#appContent .op-header-link-rail,
+#appContent .op-page-header::after,
+#appContent .op-header-focus::after {
+  display: none !important;
+}
+
+#appContent .op-page-header-pdv .op-page-action {
+  min-width: 0 !important;
+}
+
+@media (max-width: 1100px) {
+  #appContent .op-header-layout,
+  #appContent .op-header-layout:has(.op-page-action),
+  #appContent .op-header-layout:not(:has(.op-page-action)) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, max-content) !important;
+  }
+
+  #appContent .op-page-action {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
+
+@media (max-width: 1279px) {
+  #appContent .op-page-header,
+  #appContent .settings-page-head.op-page-header {
+    min-height: 128px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  #appContent .op-page-header,
+  #appContent .settings-page-head.op-page-header {
+    min-height: 0 !important;
+    border-radius: 12px 12px 12px 4px !important;
+  }
+
+  #appContent .op-header-layout,
+  #appContent .op-header-layout:has(.op-page-action),
+  #appContent .op-header-layout:not(:has(.op-page-action)) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #appContent .op-page-title,
+  #appContent .settings-page-title.op-page-title {
+    font-size: clamp(23px, 7vw, 28px) !important;
+  }
+
+  #appContent .op-page-subtitle,
+  #appContent .settings-page-subtitle.op-page-subtitle {
+    margin-top: 6px !important;
+    font-size: 10px !important;
+    line-height: 1.42 !important;
+  }
+
+  #appContent .op-header-focus {
+    width: 100% !important;
+    max-width: none !important;
+    align-items: initial !important;
+    text-align: left !important;
+  }
+
+  #appContent .op-header-focus small {
+    justify-content: flex-start;
+  }
+
+  #appContent .op-page-action {
+    grid-column: 1 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+}

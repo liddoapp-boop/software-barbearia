@@ -188,11 +188,11 @@ function renderNotice(message) {
 
 function renderKpis(items = []) {
   return `
-    <section class="reports-kpi-grid">
+    <section class="reports-kpi-grid liddo-instruments liddo-instruments-relatorios">
       ${items
         .map(
           (item) => `
-            <article class="ux-kpi reports-kpi">
+            <article class="ux-kpi liddo-kpi reports-kpi" data-kpi-kind="report">
               <div class="ux-label">${escapeHtml(item.label)}</div>
               <div class="ux-value-sm ${escapeHtml(item.tone || "")}">${escapeHtml(item.value)}</div>
               ${item.hint ? `<div class="ux-hint">${escapeHtml(item.hint)}</div>` : ""}

@@ -72,6 +72,15 @@ function getDisplayStatus(product = {}) {
   return "IN_STOCK";
 }
 
+function statusLabel(status) {
+  return {
+    OUT_OF_STOCK: "Sem estoque",
+    CRITICAL: "Crítico",
+    LOW_STOCK: "Estoque baixo",
+    IN_STOCK: "Em estoque",
+  }[status] || "Status indisponível";
+}
+
 function statusWeight(status) {
   return {
     OUT_OF_STOCK: 5,
@@ -168,6 +177,7 @@ function renderSummaryCards(container, products = [], payload = {}) {
   const estimatedValue = toNumber(payload.summary?.estimatedStockValue);
 
   const cards = [
+    { title: "Produtos", value: products.length, hint: "Itens monitorados", tone: "" },
     { title: "Sem estoque", value: outOfStock, hint: "Produtos indisponíveis", tone: outOfStock ? "ds-kpi-tone-danger" : "" },
     { title: "Críticos", value: critical, hint: "Precisam de ação", tone: critical ? "ds-kpi-tone-danger" : "" },
     { title: "Estoque baixo", value: lowStock, hint: "Abaixo do mínimo", tone: lowStock ? "ds-kpi-tone-warning" : "" },
@@ -178,7 +188,13 @@ function renderSummaryCards(container, products = [], payload = {}) {
   container.innerHTML = cards
     .map(
       (card) => `
-        <article class="ux-kpi inventory-attention-card">
+        <article class="ux-kpi liddo-kpi inventory-attention-card" data-kpi-kind="${
+          card.title === "Valor estimado"
+            ? "monetary"
+            : card.tone
+              ? "attention"
+              : "availability"
+        }">
           <p class="ux-label">${escapeHtml(card.title)}</p>
           <p class="ux-value-sm ${card.tone}">${escapeHtml(card.value)}</p>
           <p class="ux-hint">${escapeHtml(card.hint)}</p>
@@ -190,7 +206,7 @@ function renderSummaryCards(container, products = [], payload = {}) {
 
 function renderDesktopRows() { /* lista unificada substituiu a tabela */ }
 
-function renderProductList(container, products = []) {
+function renderProductList(container, products = [], payload = {}) {
   if (!container) return;
   container.innerHTML = products
     .map((item) => {
@@ -209,18 +225,30 @@ function renderProductList(container, products = []) {
           ? "inv-chip-warn"
           : "inv-chip-ok";
       const suggestion = getActionSuggestion(item);
+      const replenishment = suggestionForProduct(payload, item.id);
+      const estimatedValue = Number.isFinite(Number(item.estimatedValue))
+        ? Number(item.estimatedValue)
+        : toNumber(item.quantity) * toNumber(item.salePrice);
       return `
-        <article class="inv-row inv-row-${statusClass}">
+        <article class="inv-row inv-row-${statusClass}" data-motion-item
+                 data-record-surface="inventory" data-record-tone="${escapeHtml(statusClass)}">
           <div class="inv-row-main"
                data-inventory-action="detail"
-               data-product-id="${escapeHtml(item.id)}">
+               data-product-id="${escapeHtml(item.id)}"
+               data-record-interactive="true" role="button" tabindex="0"
+               aria-label="Abrir produto ${escapeHtml(item.name)}">
             <div class="inv-avatar">${escapeHtml(initials)}</div>
             <div class="inv-copy">
               <strong>${escapeHtml(item.name)}</strong>
               <span>${escapeHtml(item.category || "Sem categoria")}</span>
               <div class="inv-chips">
-                <span class="inv-chip ${chipClass}">${escapeHtml(displayStatus.replace(/_/g, " "))}</span>
+                <span class="inv-chip ${chipClass}">${escapeHtml(statusLabel(displayStatus))}</span>
                 ${suggestion ? `<span class="inv-chip">${escapeHtml(suggestion)}</span>` : ""}
+                ${
+                  replenishment
+                    ? `<span class="inv-chip inv-chip-warn">Comprar ${toNumber(replenishment.recommendedPurchaseQty)} · ruptura em ${toNumber(replenishment.estimatedDaysToRupture)} dia(s)</span>`
+                    : ""
+                }
               </div>
             </div>
             <div class="inv-metric">
@@ -232,8 +260,16 @@ function renderProductList(container, products = []) {
               <span>Mínimo</span>
             </div>
             <div class="inv-metric">
+              <strong>${toNumber(item.costPrice) > 0 ? money(item.costPrice) : "—"}</strong>
+              <span>Custo</span>
+            </div>
+            <div class="inv-metric">
               <strong>${money(item.salePrice)}</strong>
               <span>Venda</span>
+            </div>
+            <div class="inv-metric inv-metric-emphasis">
+              <strong>${money(estimatedValue)}</strong>
+              <span>Valor em estoque</span>
             </div>
           </div>
           <div class="inv-row-actions">
@@ -322,7 +358,7 @@ export function renderStockData(elements, payload = {}) {
   }
 
   renderDesktopRows();
-  renderProductList(elements.mobileList, products);
+  renderProductList(elements.mobileList, products, payload);
 }
 
 export function renderStockProductDrawer(elements, payload = {}, productId) {
@@ -341,23 +377,20 @@ export function renderStockProductDrawer(elements, payload = {}, productId) {
       <div><dt>Estoque minimo</dt><dd>${toNumber(product.minimumStock)}</dd></div>
       <div><dt>Preco de venda</dt><dd>${money(product.salePrice)}</dd></div>
       <div><dt>Custo</dt><dd>${toNumber(product.costPrice) > 0 ? money(product.costPrice) : "-"}</dd></div>
-      <div><dt>Valor em estoque</dt><dd>${money(product.estimatedValue)}</dd></div>
+      <div><dt>Valor em estoque</dt><dd>${money(Number.isFinite(Number(product.estimatedValue)) ? product.estimatedValue : toNumber(product.quantity) * toNumber(product.salePrice))}</dd></div>
       <div><dt>Sugestao</dt><dd>${escapeHtml(getActionSuggestion(product))}</dd></div>
     </dl>
   `;
 
-  const details = `
+  const actions = `
     <div class="inventory-drawer-actions">
       <button type="button" data-inventory-action="add" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-success">Registrar entrada</button>
       <button type="button" data-inventory-action="remove" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-muted">Registrar saida</button>
+      <button type="button" data-inventory-action="internal-use" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-muted">Uso interno</button>
+      <button type="button" data-inventory-action="loss" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-danger">Registrar perda</button>
       <button type="button" data-inventory-action="edit" data-product-id="${escapeHtml(product.id)}" class="ux-btn ux-btn-muted">Editar produto</button>
       <button type="button" data-inventory-action="delete" data-product-id="${escapeHtml(product.id)}" data-product-name="${escapeHtml(product.name)}" class="ux-btn ux-btn-danger">Inativar produto</button>
     </div>
-    ${
-      suggestion
-        ? `<p class="inventory-drawer-note">Reposicao sugerida: comprar ${toNumber(suggestion.recommendedPurchaseQty)} unidade(s). Estimativa de ruptura: ${toNumber(suggestion.estimatedDaysToRupture)} dia(s).</p>`
-        : `<p class="inventory-drawer-note">Sem reposicao urgente sugerida agora.</p>`
-    }
   `;
 
   const history = movements.length
@@ -393,8 +426,8 @@ export function renderStockProductDrawer(elements, payload = {}, productId) {
     status: displayStatus,
     open: true,
     summary,
-    details,
     history,
+    actions,
   });
   bindEntityDrawers(elements.drawerHost);
 }
