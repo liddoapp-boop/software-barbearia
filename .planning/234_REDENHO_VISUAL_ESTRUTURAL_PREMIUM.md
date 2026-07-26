@@ -355,3 +355,157 @@ HEAD inicial: 7e42c7f7252e90924a20fe4499184445e4836dcf
 - Banco local principal `barbearia` nao esta pronto para smoke sem aplicar migrations pendentes; isso deve ser tratado na etapa de preparacao controlada do ambiente/piloto, nao por `db push` ad hoc.
 - Ha dados locais de teste/smoke/seed visiveis; a limpeza real deve ser dry-run e revisada por dependencias antes de qualquer exclusao.
 - O arquivo `booking.html` ainda tem mojibake legado em comentarios/textos internos; nao foi corrigido amplamente por congelamento visual e risco de churn.
+
+## Fase 247 - Redesign operacional real com Design System e Motion System
+
+Data: 2026-07-24.
+
+### Decisão
+
+`APROVADO COM RESSALVAS`.
+
+A implementação e os gates automatizados foram aprovados. A ressalva é exclusivamente de evidência visual: o navegador integrado não estava disponível para gerar novas capturas desta fase. A validação headless existente, com Chrome/Edge por CDP, passou nos três viewports obrigatórios e cobriu overflow, shell, navegação, RBAC e fluxos operacionais.
+
+### Estado inicial
+
+- Branch: `main`.
+- HEAD: `06dd01c953fb81356bd578ac4cad14543fdabcff`.
+- `git status --short`: limpo.
+- Divergência de `main` para `origin/main`: `0 0`.
+- `git diff --check`: passou.
+- Frontend real: HTML, CSS e JavaScript vanilla em `public/`; nenhuma pasta `prototype/` ativa.
+
+### Escopo e telas migradas
+
+- Shell global: sidebar, navegação desktop/mobile, estado ativo, foco, área de conteúdo e overlays.
+- Agenda: acabamento do calendário/lista, transições já existentes de semana e entrada coordenada do módulo.
+- Clientes: filtros, indicadores, linhas e drawer sob a fundação compartilhada.
+- Financeiro: KPIs, filtros, lançamentos, modal/drawer e feedbacks sob a fundação compartilhada.
+- Estoque: restauração informacional e ações operacionais, além do acabamento compartilhado.
+- Configurações: navegação interna, formulários, painéis e feedbacks, agora sem dependência externa de animação.
+- Serviços: catálogo, filtros, criação/edição e modal sob os mesmos tokens e movimentos.
+- Auditoria e demais módulos existentes: componentes, listas, tabelas, feedbacks e overlays cobertos pela camada global.
+
+### Arquivos alterados
+
+- `.planning/234_REDENHO_VISUAL_ESTRUTURAL_PREMIUM.md`
+- `public/app.js`
+- `public/components/operational-ui.js`
+- `public/components/sidebar.js`
+- `public/index.html`
+- `public/modules/estoque.js`
+- `public/modules/motion-effects.js`
+- `public/styles/design-system.css`
+
+### Design System aplicado
+
+- Tokens centralizados de cor, superfície, borda, texto, raio, sombra, foco, z-index, duração, easing e distância.
+- Identidade grafite/preto fosco, off-white, bronze envelhecido, verde para sucesso e vermelho restrito a perigo.
+- Estados compartilhados para botões, inputs, selects, textareas, KPIs, cards, listas, tabelas, badges, filtros, modais, drawers, skeletons, loading, empty/error/success e disabled.
+- Touch targets e reorganização responsiva, incluindo Estoque em duas colunas de métricas no mobile.
+
+### Motion System aplicado
+
+- Removida a importação CDN de `motion@12.23.24`; não há dependência nova.
+- Entrada inicial do shell em até 520 ms.
+- Troca de módulo com conteúdo de saída temporariamente `inert`, entrada por transform/opacity e composição limitada a 12 itens.
+- Indicador ativo da sidebar com deslocamento entre opções; hover e pressed compartilhados.
+- Sidebar mobile com transição, backdrop, bloqueio do conteúdo atrás, foco inicial e retorno ao acionador.
+- Conteúdo dinâmico de KPIs, linhas e cards recebe entrada curta e escalonada, inclusive após filtros/atualizações.
+- Botões suportam estados disabled, loading, success e pressed sem delay artificial.
+- Campos têm foco, estado inválido e feedback mínimo de erro.
+- Drawers e modais têm backdrop, entrada/saída curta, foco preso, Escape, fundo inerte e retorno do foco.
+- Skeletons e spinners possuem número finito de iterações; não há loop visual infinito.
+- Toasts/feedbacks entram de forma controlada após a resposta já tratada pelos fluxos existentes.
+
+### Informações restauradas no Estoque
+
+- Total de produtos, sem estoque, críticos, abaixo do mínimo, reposições sugeridas e valor estimado.
+- Nome, categoria, quantidade atual, estoque mínimo, custo, preço de venda e valor estimado por produto.
+- Status em linguagem humana, sugestão de ação, quantidade de compra e previsão de ruptura quando presentes no payload.
+- Entrada, saída, ajuste, uso interno e perda.
+- Uso interno e perda reutilizam o endpoint existente `/stock/movements/manual`, com idempotência, responsável, autor e referência interna.
+- Drawer preserva detalhes, edição/inativação, histórico, origem, referência e movimentações.
+- Busca e filtros existentes foram preservados.
+
+### Contratos preservados
+
+- IDs, atributos `data-*`, mounts, seletores, eventos e assinaturas públicas dos renderizadores foram mantidos.
+- Autenticação, sessão, renovação, logout, RBAC e fallbacks de navegação não foram alterados.
+- Agenda, checkout, PDV, Clientes, Financeiro, Estoque, Serviços, Configurações, Auditoria, 403, 429 e 503 permaneceram cobertos.
+- Nenhum endpoint, payload existente, regra de negócio ou permissão foi removido.
+- A regra de preço de venda permanece no sistema administrativo; WhatsApp não recebeu capacidade nova.
+
+### Responsividade e evidências
+
+- `390x844`: Agenda mobile, navegação, perfis owner/recepção/profissional, lista/calendário e ausência de overflow global validados em navegador headless.
+- `900x1024`: shell tablet, Operação e Clientes, RBAC e ausência de overflow global validados em navegador headless.
+- `1440x900`: Financeiro, fallbacks por perfil, RBAC e ausência de overflow global validados em navegador headless.
+- O teste também validou login, sessão, logout, ciclo operacional, checkout, venda, estoque, financeiro, auditoria e respostas 403/429/503.
+- Não houve abertura de navegador visível.
+- Novas capturas não foram geradas porque a conexão do navegador integrado retornou lista vazia de navegadores disponíveis. Não foi usado um controlador visual alternativo.
+
+### Acessibilidade
+
+- Foco visível compartilhado e contraste preservado.
+- Drawer/modal com `role="dialog"`, `aria-modal`, Escape, trap de foco e retorno ao acionador.
+- Conteúdo atrás de overlays fica `inert`.
+- Sidebar mobile atualiza `aria-expanded`, `aria-label` e `aria-hidden`.
+- Estados continuam textuais, sem depender apenas de cor.
+- `prefers-reduced-motion: reduce` reduz animações/transições a 1 ms, remove deslocamentos e desativa stagger/contadores via JavaScript.
+
+### Performance
+
+- Nenhuma biblioteca ou dependência foi adicionada.
+- A remoção da CDN elimina uma requisição externa e o custo de baixar/executar a biblioteca Motion.
+- O acréscimo central é de aproximadamente 16 KB não comprimidos: 6,4 KB no módulo de movimento e 9,9 KB no CSS.
+- Animações usam prioritariamente `transform` e `opacity`, têm iterações finitas e limitam o stagger aos 12 primeiros elementos.
+- O `MutationObserver` compartilhado observa mudanças de interface para overlays e novos itens, sem polling.
+
+### Testes executados
+
+- `npm run build`: passou.
+- Todos os testes `tests/frontend-*.spec.ts`: 16 arquivos, 147 testes, todos passaram.
+- `tests/frontend-mobile-overflow.spec.ts`: 8/8 passaram isoladamente.
+- `tests/macro-233-owner-operations.spec.ts`, `tests/stock-alerts.spec.ts` e `tests/frontend-financeiro-products.spec.ts`: 3 arquivos, 48 testes, todos passaram.
+- `git diff --check`: passou; somente avisos informativos de LF/CRLF no Windows.
+- Uma primeira execução paralela do teste headless encontrou três logins recusados porque duas instâncias disputaram as mesmas portas. Após o encerramento normal da primeira instância, a repetição isolada passou 8/8; não era regressão de código.
+
+### Testes não executados
+
+- `npm run test:db` e a suíte completa de integração Prisma não foram executados: o escopo proíbe alteração de banco e os gates frontend/serviços relevantes usam backend em memória isolado.
+- Não houve teste contra dados reais, piloto ou VPS.
+- Não houve auditoria visual por novas screenshots pela indisponibilidade do navegador integrado.
+
+### Problemas e riscos restantes
+
+- Não há P0, P1 ou P2 conhecido após os gates executados.
+- Risco residual baixo: a avaliação visual desta fase depende das medições headless, sem novas capturas manuais.
+- O CSS legado continua extenso e recebe overrides pela camada do Design System; uma limpeza destrutiva permanece fora do escopo.
+- O `MutationObserver` central deve ser acompanhado se módulos futuros passarem a inserir milhares de nós por operação.
+
+### Rollback
+
+- Rollback é possível por arquivo somente sobre os oito arquivos desta fase.
+- Reverter primeiro `public/modules/motion-effects.js`, `public/styles/design-system.css` e os ganchos correspondentes em `public/app.js`.
+- Reverter separadamente a riqueza do Estoque em `public/modules/estoque.js`, `public/index.html` e os handlers de `public/app.js`.
+- Não é necessário rollback de backend, banco ou infraestrutura.
+
+### Confirmações operacionais
+
+- Nenhuma landing page, moodboard, comparação A/B/C, tela fictícia ou protótipo conceitual foi criado.
+- `prototype/` não foi criado nem recriado.
+- Não houve alteração de backend, banco, Prisma, migration, seed, WhatsApp, Evolution, Whisper, infraestrutura, deploy ou VPS.
+- `barbearia_pilot` não foi acessado.
+- Não houve commit, push ou tag.
+
+## Fechamento do redesign premium
+
+Data: 2026-07-26.
+
+- Regressão sem banco: `npm test` aprovou 1.115 testes; os 54 skips são preexistentes.
+- PostgreSQL: `npm run test:db` aprovou 53/53 testes exclusivamente no banco local isolado `barbearia_redesign_test`.
+- Prisma: as 27 migrations foram aplicadas e reconhecidas nesse banco isolado; `prisma validate` e `prisma generate` foram aprovados.
+- Produto: build e `git diff --check` aprovados; login, sessão, Agenda, Financeiro, Estoque, Serviços, PDV, overlays e overflow mobile foram revalidados.
+- Safari físico validado, inclusive o contrato de rolagem dos overlays mobile.
+- Segurança: nenhuma operação ocorreu em `barbearia`, `barbearia_pilot` ou `barbearia_test`; não houve seed, `db push` ou migration em base operacional.
