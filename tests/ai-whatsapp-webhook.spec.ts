@@ -550,7 +550,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(preview.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentWhatsAppTexts(fetchMock)).toHaveLength(1);
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Cliente: nao vinculado");
-    expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Produto: Pomada Matte");
+    expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Produto: Pomada");
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Quantidade: 1");
     expect(sentWhatsAppTexts(fetchMock)[0]).toContain("Pagamento: Pix");
     expect(sentWhatsAppTexts(fetchMock)[0]).not.toContain("confirmar cliente");
@@ -611,13 +611,13 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(entries.statusCode).toBe(200);
     expect(entries.json().entries).toContainEqual(expect.objectContaining({
       source: "PRODUCT",
-      amount: 59,
+      amount: 25,
       paymentMethod: expectedPaymentMethod,
     }));
     expect(store.productSales).toHaveLength(1);
     expect(store.financialEntries).toHaveLength(1);
     expect(store.financialEntries[0]?.paymentMethod).toBe(expectedPaymentMethod);
-    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(14);
+    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(9);
     expect(store.stockMovements).toHaveLength(1);
     expect(store.stockAlerts).toHaveLength(0);
   });
@@ -626,16 +626,6 @@ describe("Atendente IA WhatsApp-first", () => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
-    store.products.push({
-      id: "prd-gel",
-      name: "Gel",
-      category: "Finalizacao",
-      salePrice: 35,
-      costPrice: 12,
-      stockQty: 10,
-      minStockAlert: 2,
-      active: true,
-    });
     const app = createApp({ memoryStore: store });
 
     const response = await postWebhook(app, evolutionPayload("Vender 2 Gel no Pix"));
@@ -754,20 +744,20 @@ describe("Atendente IA WhatsApp-first", () => {
     const financialBefore = store.financialEntries.length;
     const alertsBefore = store.stockAlerts.length;
 
-    const question = await postWebhook(app, evolutionPayload("Vendi 11 pomadas Matte por 649."));
+    const question = await postWebhook(app, evolutionPayload("Vendi 2 pomadas Matte por 50."));
     expect(question.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toBe("Qual é a forma de pagamento?");
 
     const completed = await postWebhook(app, evolutionPayload(reply));
     expect(completed.json()).toMatchObject({ mode: "preview_only", intent: "sell_product", executed: false });
     const preview = sentWhatsAppTexts(fetchMock).at(-1) ?? "";
-    expect(preview).toContain("Produto: Pomada Matte");
-    expect(preview).toContain("Quantidade: 11");
-    expect(preview).toContain("Valor unitário: R$ 59,00");
-    expect(preview).toContain("Valor total: R$ 649,00");
+    expect(preview).toContain("Produto: Pomada");
+    expect(preview).toContain("Quantidade: 2");
+    expect(preview).toContain("Valor unitário: R$ 25,00");
+    expect(preview).toContain("Valor total: R$ 50,00");
     expect(preview).toContain(`Pagamento: ${expectedPayment}`);
-    expect(preview).toContain("Estoque atual: 15");
-    expect(preview).toContain("Estoque após a venda: 4");
+    expect(preview).toContain("Estoque atual: 10");
+    expect(preview).toContain("Estoque após a venda: 8");
     expect(preview).toContain("CONFIRMAR");
     expect(preview).toContain("CANCELAR");
     expect(product.stockQty).toBe(stockBefore);
@@ -796,13 +786,13 @@ describe("Atendente IA WhatsApp-first", () => {
     store.businessPaymentMethods.forEach((method) => { method.isDefault = false; });
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
 
-    await postWebhook(app, evolutionPayload("Vendi 11 pomadas Matte por 649."));
+    await postWebhook(app, evolutionPayload("Vendi 2 pomadas Matte por 50."));
     const cancellation = await postWebhook(app, evolutionPayload("CANCELAR"));
     const isolatedReply = await postWebhook(app, evolutionPayload("pix"));
 
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
     expect(isolatedReply.json()).toMatchObject({ ok: true, executed: false, unavailable: true });
-    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(15);
+    expect(store.products.find((item) => item.id === "prd-pomada")?.stockQty).toBe(10);
     expect(store.productSales).toHaveLength(0);
     expect(store.financialEntries).toHaveLength(0);
     expect(store.stockAlerts).toHaveLength(0);
@@ -885,7 +875,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos."));
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
-    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(1);
+    expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/message/sendText/")).length).toBe(0);
     expectPreviewWithoutVisibleCode(fetchMock);
   });
 
@@ -900,7 +890,11 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(response.json()).toMatchObject({ ok: true, intent: "sell_product", executed: false });
     expect(lastConfirmationCode(fetchMock)).toBe("");
     const events = await auditEvents(app, token);
-    expect(events.some((event) => event.action === "AI_WHATSAPP_PARSER_OBSERVED" && event.afterJson?.strategy === "deterministic_after_gemini_failure" && event.afterJson?.status === "TIMEOUT")).toBe(true);
+    expect(events.some((event) =>
+      event.action === "AI_WHATSAPP_PARSER_OBSERVED"
+      && event.afterJson?.strategy === "deterministic"
+      && event.afterJson?.status === "PARSED_COMPLETE"
+    )).toBe(true);
   });
 
   it("delimita fala natural sem associar cliente parcial nem criar previa executavel", async () => {
@@ -938,7 +932,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const response = await postWebhook(app, evolutionPayload("Vendi uma pomada para Joao Santos, ele pagou no Pix."));
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
-    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Produto: Pomada Matte");
+    expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Produto: Pomada");
     expectPreviewWithoutVisibleCode(fetchMock);
     await expect(countCommercialState(app, token)).resolves.toEqual({
       ...before,
@@ -1633,19 +1627,19 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it.each([
-    ["O nome correto é Carlos Silva", ["Cliente: Carlos Silva", "Servico: Corte Premium", "Data: 2026-12-15", "Horario: 11:00"]],
+    ["O nome correto é Carlos Silva", ["Cliente: Carlos Silva", "Servico: Corte", "Data: 2026-12-15", "Horario: 11:00"]],
     ["Muda para dia 16/12/2026", ["Cliente: Joao Santos", "Data: 2026-12-16", "Horario: 11:00"]],
     ["Não é dia 16, é dia 17", ["Cliente: Joao Santos", "Data: 2026-12-17", "Horario: 11:00"]],
     ["É às doze da tarde", ["Cliente: Joao Santos", "Data: 2026-12-15", "Horario: 12:00"]],
-    ["Troca Corte Premium por Barba Terapia", ["Cliente: Joao Santos", "Servico: Barba Terapia", "Horario: 11:00"]],
-    ["Na verdade é dia 17/12/2026 às uma da tarde", ["Data: 2026-12-17", "Horario: 13:00", "Servico: Corte Premium"]],
+    ["Troca Corte por Barba", ["Cliente: Joao Santos", "Servico: Barba", "Horario: 11:00"]],
+    ["Na verdade é dia 17/12/2026 às uma da tarde", ["Data: 2026-12-17", "Horario: 13:00", "Servico: Corte"]],
   ])("corrige agendamento preservando campos nao mencionados: %s", async (correction, expectedLines) => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
 
-    const initial = await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    const initial = await postWebhook(app, evolutionPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
     const updated = await postWebhook(app, evolutionPayload(correction));
 
     expect(initial.json()).toMatchObject({ mode: "preview_only", executed: false });
@@ -1663,7 +1657,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const store = new InMemoryStore();
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
 
-    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    await postWebhook(app, evolutionPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
     store.professionals.push({ id: "pro-02", businessId: "unit-01", name: "Outro Barbeiro", active: true, commissionRules: [] });
     store.serviceProfessionalAssignments.push({ serviceId: "svc-corte", professionalId: "pro-02" });
     const eligible = await postWebhook(app, evolutionPayload("Coloca com o Outro Barbeiro"));
@@ -1689,7 +1683,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const store = new InMemoryStore();
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
 
-    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    await postWebhook(app, evolutionPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
     const rejected = await postWebhook(app, evolutionPayload("Na verdade é hoje às dez da manhã"));
     expect(rejected.json()).toMatchObject({ corrected: false, executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("horario nao esta disponivel");
@@ -1711,7 +1705,7 @@ describe("Atendente IA WhatsApp-first", () => {
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
     const clientsBefore = store.clients.length;
 
-    await postWebhook(app, evolutionPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
+    await postWebhook(app, evolutionPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges"));
     const updated = await postWebhook(app, evolutionPayload("O nome correto é Carlos Henrique"));
     expect(updated.json()).toMatchObject({ corrected: true, executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("Cliente novo");
@@ -1723,15 +1717,14 @@ describe("Atendente IA WhatsApp-first", () => {
   });
 
   it.each([
-    ["O produto é Gel", ["Produto: Gel", "Quantidade: 1", "Pagamento: Pix", "Valor total: R$ 25,00"]],
-    ["São duas pomadas, não uma", ["Produto: Pomada Matte", "Quantidade: 2", "Valor total: R$ 118,00"]],
-    ["O pagamento é Dinheiro", ["Produto: Pomada Matte", "Quantidade: 1", "Pagamento: Dinheiro"]],
-    ["Vincula ao cliente Carlos Silva", ["Cliente: Carlos Silva", "Produto: Pomada Matte"]],
+    ["O produto é Gel", ["Produto: Gel", "Quantidade: 1", "Pagamento: Pix", "Valor total: R$ 10,00"]],
+    ["São duas pomadas, não uma", ["Produto: Pomada", "Quantidade: 2", "Valor total: R$ 50,00"]],
+    ["O pagamento é Dinheiro", ["Produto: Pomada", "Quantidade: 1", "Pagamento: Dinheiro"]],
+    ["Vincula ao cliente Carlos Silva", ["Cliente: Carlos Silva", "Produto: Pomada"]],
   ])("corrige venda e recalcula sem mutacao: %s", async (correction, expectedLines) => {
     const fetchMock = mockGeminiInvalidJsonAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
-    store.products.push({ ...store.products[0], id: "prd-gel", name: "Gel", salePrice: 25, stockQty: 8 });
     const app = createApp({ memoryStore: store, ownerCommandParser: null });
     const stockBefore = store.products.find((item) => item.id === "prd-pomada")?.stockQty;
 
@@ -1824,7 +1817,7 @@ describe("Atendente IA WhatsApp-first", () => {
     expect(ambiguous.json()).toMatchObject({ ambiguous: true, executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("produto, a quantidade ou o pagamento");
 
-    const other = await postWebhook(app, evolutionPayload("Agendar Corte Premium para Carlos Silva dia 16/12/2026 as 10:00 com Geovane Borges"));
+    const other = await postWebhook(app, evolutionPayload("Agendar Corte para Carlos Silva dia 16/12/2026 as 10:00 com Geovane Borges"));
     expect(other.json()).toMatchObject({ pendingPreserved: true, executed: false });
     expect(sentWhatsAppTexts(fetchMock).at(-1)).toContain("CANCELAR a prévia atual");
 

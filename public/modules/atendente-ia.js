@@ -1,4 +1,5 @@
 import { escapeHtml } from "./sanitize.js";
+import { renderPageHeader } from "../components/operational-ui.js";
 
 export const AI_QUICK_SUGGESTIONS = [
   "Fiz corte no Joao e ele pagou no Pix.",
@@ -101,12 +102,13 @@ function renderSalePreview(payload = {}) {
 export function renderAtendenteIaShell() {
   return `
     <div class="ai-owner-workbench">
-      <header class="op-page-header">
-        <div class="op-page-header-main">
-          <h1 class="op-page-title">Atendente IA</h1>
-          <p class="op-page-subtitle">Interprete comandos do dono e prepare uma previa antes de qualquer acao.</p>
-        </div>
-      </header>
+      ${renderPageHeader({
+        variant: "atendente-ia",
+        context: "Operação assistida",
+        breadcrumb: "Liddo System / Atendente IA",
+        title: "Atendente IA",
+        subtitle: "Interprete comandos do dono e prepare uma previa antes de qualquer acao.",
+      })}
 
       <section class="ux-card ai-owner-panel">
         <div class="ai-owner-fixed-warning">

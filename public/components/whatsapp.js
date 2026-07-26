@@ -4,10 +4,12 @@
    - Templates editáveis de confirmação e lembrete persistidos no localStorage
 ───────────────────────────────────────────────────────────────────────── */
 
+import { renderPageHeader } from "./operational-ui.js";
+
 const DEFAULT_TPL_CONFIRM =
 `Olá {{nome}}! ✂️
 
-Seu agendamento na *Liddo Barber* foi confirmado!
+Seu agendamento na *Liddo System* foi confirmado!
 
 📋 Serviço: {{servico}}
 💰 Valor: {{preco}}
@@ -21,7 +23,7 @@ Até logo 🤙`;
 const DEFAULT_TPL_REMINDER =
 `Olá {{nome}}! 👋
 
-Lembrando do seu agendamento *hoje* às *{{hora}}* na Liddo Barber.
+Lembrando do seu agendamento *hoje* às *{{hora}}* na Liddo System.
 
 📋 Serviço: {{servico}}
 
@@ -44,17 +46,14 @@ export async function renderWhatsAppSection(container, { getToken }) {
     <div class="wz-page">
 
       <!-- ── Page header ──────────────────────────────────────────── -->
-      <header class="op-page-header">
-        <div class="op-page-header-main">
-          <h1 class="op-page-title">WhatsApp</h1>
-          <p class="op-page-subtitle">
-            Conecte o número que envia confirmações e lembretes automáticos para os clientes.
-          </p>
-        </div>
-        <div class="op-page-action">
-          <div id="wzStatusBadge" class="op-status-chip wz-chip-pending">Verificando...</div>
-        </div>
-      </header>
+      ${renderPageHeader({
+        variant: "whatsapp",
+        context: "Canal operacional",
+        breadcrumb: "Liddo System / WhatsApp",
+        title: "WhatsApp",
+        subtitle: "Conecte o número que envia confirmações e lembretes automáticos para os clientes.",
+        action: '<div id="wzStatusBadge" class="op-status-chip wz-chip-pending">Verificando...</div>',
+      })}
 
       <!-- ── Loading ──────────────────────────────────────────────── -->
       <div id="wzLoadingPanel" class="wz-loading">

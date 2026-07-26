@@ -267,6 +267,7 @@ export function canonicalizeAudioTranscript(transcript: string, vocabulary: Barb
   for (let index = 0; index < words.length;) {
     let accepted: Candidate | undefined;
     let acceptedPhrase = "";
+    let groundedAccepted: { candidate: Candidate; phrase: string } | undefined;
     let ambiguous: Candidate | undefined;
     for (let size = Math.min(4, words.length - index); size >= 1; size -= 1) {
       const phrase = normalizeAudioVocabularyText(words.slice(index, index + size).join(" "));
@@ -289,11 +290,22 @@ export function canonicalizeAudioTranscript(transcript: string, vocabulary: Barb
       if (!first) continue;
       const margin = first.score - (second?.score ?? 0);
       if (first.score >= threshold(first.term.category, phrase) && (first.exact || first.alias || margin >= 0.12)) {
-        accepted = { ...first, tokenLength: size };
-        acceptedPhrase = phrase;
-        break;
+        const candidate = { ...first, tokenLength: size };
+        if (first.exact || first.alias) {
+          accepted = candidate;
+          acceptedPhrase = phrase;
+          break;
+        }
+        if (!groundedAccepted || candidate.score > groundedAccepted.candidate.score) {
+          groundedAccepted = { candidate, phrase };
+        }
       }
       if (first.score >= 0.65 && (!ambiguous || first.score > ambiguous.score)) ambiguous = { ...first, tokenLength: size };
+    }
+
+    if (!accepted && groundedAccepted) {
+      accepted = groundedAccepted.candidate;
+      acceptedPhrase = groundedAccepted.phrase;
     }
 
     if (accepted) {

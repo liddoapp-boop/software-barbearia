@@ -1180,7 +1180,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
     const clientsBefore = store.clients.length;
 
-    await postWebhook(app, textPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-client-preview"));
+    await postWebhook(app, textPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-client-preview"));
     const correction = await postWebhook(app, audioPayload({ data: {
       key: { id: "audio-correction-client", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
       message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
@@ -1206,7 +1206,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     const store = new InMemoryStore();
     const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
 
-    await postWebhook(app, textPayload("Agendar Corte Premium para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-time-preview"));
+    await postWebhook(app, textPayload("Agendar Corte para Joao Santos dia 15/12/2026 as 11:00 com Geovane Borges", "audio-correction-time-preview"));
     const correction = await postWebhook(app, audioPayload({ data: {
       key: { id: "audio-correction-time", remoteJid: `${ownerPhone}@s.whatsapp.net`, fromMe: false },
       message: { audioMessage: { mimetype: "audio/ogg", fileLength: 4, seconds: 2 } },
@@ -1559,17 +1559,17 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     expect(response.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentTexts(fetchMock)[0]).toContain("Produto: Pomada");
-    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 59,00");
-    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 59,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 25,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 25,00");
     expect(cancellation.json()).toMatchObject({ ok: true, cancelled: true });
-    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(transcribe).toHaveBeenCalledTimes(2);
     expect(transcribe.mock.calls[0]?.[0]).toMatchObject({ pass: 1, timeoutMs: 45_000 });
     expect(String(transcribe.mock.calls[0]?.[0]?.initialPrompt).length).toBeLessThanOrEqual(1_500);
     expect(fetchMock.mock.calls.some(([url]) => /generativelanguage|llama/i.test(String(url)))).toBe(false);
     const events = await audits(app, token);
     expect(events.find((event) => event.action === "AI_WHATSAPP_AUDIO_FIELD_VALIDATION")?.afterJson)
-      .toMatchObject({ passCount: 1, fields: expect.arrayContaining([
-        { field: "productName", status: "GROUNDED" },
+      .toMatchObject({ passCount: 2, fields: expect.arrayContaining([
+        { field: "productName", status: "AMBIGUOUS" },
         { field: "paymentMethod", status: "GROUNDED" },
       ]) });
     const after = await app.inject({
@@ -1583,7 +1583,7 @@ describe("audio do atendente IA via WhatsApp", () => {
   it("usa o mesmo núcleo para o áudio real de venda com total, sem efeito antes de CONFIRMAR", async () => {
     process.env.ASR_PROVIDER = "local_whisper";
     delete process.env.AI_AUDIO_TRANSCRIPTION_PROVIDER;
-    const transcript = "Vendi 11 pomadas Matte por 649.";
+    const transcript = "Vendi 10 pomadas Matte por 250.";
     const transcribe = vi.fn(async (): Promise<AudioTranscriptionResult> => ({
       transcript,
       provider: "local_whisper:ggml-large-v3-turbo-q5_0.bin",
@@ -1599,6 +1599,8 @@ describe("audio do atendente IA via WhatsApp", () => {
       ownerCommandParser: null,
       stockAlertSend: async (_phone, text) => { stockAlerts.push(text); },
     });
+    const product = store.products.find((item) => item.id === "prd-pomada");
+    expect(product).toBeDefined();
     const beforeSales = store.productSales.length;
 
     const preview = await postWebhook(app, audioPayload({ data: {
@@ -1608,36 +1610,36 @@ describe("audio do atendente IA via WhatsApp", () => {
 
     expect(preview.json()).toMatchObject({ ok: true, mode: "preview_only", intent: "sell_product", executed: false });
     expect(sentTexts(fetchMock)[0]).toContain("Venda de produto");
-    expect(sentTexts(fetchMock)[0]).toContain("Produto: Pomada Matte");
-    expect(sentTexts(fetchMock)[0]).toContain("Quantidade: 11");
-    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 59,00");
-    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 649,00");
-    expect(sentTexts(fetchMock)[0]).toContain("Estoque atual: 15");
-    expect(sentTexts(fetchMock)[0]).toContain("Estoque após a venda: 4");
-    expect(store.products[0].stockQty).toBe(15);
+    expect(sentTexts(fetchMock)[0]).toContain("Produto: Pomada");
+    expect(sentTexts(fetchMock)[0]).toContain("Quantidade: 10");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor unitário: R$ 25,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Valor total: R$ 250,00");
+    expect(sentTexts(fetchMock)[0]).toContain("Estoque atual: 10");
+    expect(sentTexts(fetchMock)[0]).toContain("Estoque após a venda: 0");
+    expect(product?.stockQty).toBe(10);
     expect(store.productSales).toHaveLength(beforeSales);
     expect(store.stockAlerts).toHaveLength(0);
 
     const confirmed = await postWebhook(app, textPayload("CONFIRMAR", "semantic-sale-confirm-001"));
     expect(confirmed.json()).toMatchObject({ ok: true, executed: true });
-    expect(store.products[0].stockQty).toBe(4);
+    expect(product?.stockQty).toBe(0);
     expect(store.productSales).toHaveLength(beforeSales + 1);
     expect(store.stockAlerts).toHaveLength(1);
-    expect(store.stockAlerts[0]).toMatchObject({ alertType: "LOW_STOCK", quantity: 4 });
+    expect(store.stockAlerts[0]).toMatchObject({ alertType: "OUT_OF_STOCK", quantity: 0 });
     expect(stockAlerts).toHaveLength(1);
 
     await postWebhook(app, textPayload("CONFIRMAR", "semantic-sale-confirm-002"));
-    expect(store.products[0].stockQty).toBe(4);
+    expect(product?.stockQty).toBe(0);
     expect(store.productSales).toHaveLength(beforeSales + 1);
     expect(store.stockAlerts).toHaveLength(1);
   });
 
   it.each([
-    ["sale-01", "Saíram três Pomadas Matte, deu cento e setenta e sete reais.", "sell_product", 3],
-    ["sale-02", "O cliente levou duas Pomadas Matte, ficou cento e dezoito reais.", "sell_product", 2],
-    ["sale-03", "Vendi quatro unidades de Pomada Matte a cinquenta e nove cada.", "sell_product", 4],
-    ["sale-04", "Passei cinco Pomadas Matte, total duzentos e noventa e cinco reais.", "sell_product", 5],
-    ["sale-05", "Foram seis Pomadas Matte vendidas, tudo trezentos e cinquenta e quatro reais.", "sell_product", 6],
+    ["sale-01", "Saíram três Pomadas Matte, deu setenta e cinco reais.", "sell_product", 3],
+    ["sale-02", "O cliente levou duas Pomadas Matte, ficou cinquenta reais.", "sell_product", 2],
+    ["sale-03", "Vendi quatro unidades de Pomada Matte a vinte e cinco cada.", "sell_product", 4],
+    ["sale-04", "Passei cinco Pomadas Matte, total cento e vinte e cinco reais.", "sell_product", 5],
+    ["sale-05", "Foram seis Pomadas Matte vendidas, tudo cento e cinquenta reais.", "sell_product", 6],
     ["stock-01", "Entraram sete Pomadas Matte no estoque, paguei setenta reais no total.", "stock_entry", 7],
     ["stock-02", "Chegaram oito Pomadas Matte no estoque, paguei oitenta reais no total.", "stock_entry", 8],
     ["stock-03", "Recebi nove Pomadas Matte no estoque, paguei noventa reais no total.", "stock_entry", 9],
@@ -1655,7 +1657,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     vi.stubGlobal("fetch", fetchMock);
     const store = new InMemoryStore();
     const app = createApp({ memoryStore: store, audioTranscriptionService: { transcribe }, ownerCommandParser: null });
-    const stockBefore = store.products.find((product) => product.name === "Pomada Matte")?.stockQty;
+    const stockBefore = store.products.find((product) => product.name === "Pomada")?.stockQty;
     const salesBefore = store.productSales.length;
     const movementsBefore = store.stockMovements.length;
 
@@ -1670,7 +1672,7 @@ describe("audio do atendente IA via WhatsApp", () => {
     } else {
       expect(sentTexts(fetchMock)[0]).toContain(`Quantidade: ${quantity}`);
     }
-    expect(store.products.find((product) => product.name === "Pomada Matte")?.stockQty).toBe(stockBefore);
+    expect(store.products.find((product) => product.name === "Pomada")?.stockQty).toBe(stockBefore);
     expect(store.productSales).toHaveLength(salesBefore);
     expect(store.stockMovements).toHaveLength(movementsBefore);
     expect(transcribe).toHaveBeenCalledTimes(1);

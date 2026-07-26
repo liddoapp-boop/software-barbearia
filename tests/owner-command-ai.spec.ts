@@ -754,11 +754,11 @@ describe("Atendente IA owner-only", () => {
       sale: {
         clientName: "Lucas",
         productId: "prd-pomada",
-        productName: "Pomada Matte",
+        productName: "Pomada",
         quantity: 1,
         paymentMethod: "Pix",
-        unitPrice: 59,
-        total: 59,
+        unitPrice: 25,
+        total: 25,
       },
       confirmationMessage: "Confirmar venda de produto?",
     });
@@ -785,11 +785,11 @@ describe("Atendente IA owner-only", () => {
       message: "Venda de produto registrada com sucesso.",
       sale: {
         unitId: "unit-01",
-        grossAmount: 59,
-        items: [{ productId: "prd-pomada", quantity: 1, unitPrice: 59 }],
+        grossAmount: 25,
+        items: [{ productId: "prd-pomada", quantity: 1, unitPrice: 25 }],
       },
       revenue: {
-        amount: 59,
+        amount: 25,
         paymentMethod: "Pix",
         referenceType: "PRODUCT_SALE",
       },
@@ -836,7 +836,7 @@ describe("Atendente IA owner-only", () => {
       },
       sale: {
         productId: "prd-pomada",
-        productName: "Pomada Matte",
+        productName: "Pomada",
         quantity: 1,
         paymentMethod: "Pix",
       },
@@ -960,7 +960,7 @@ describe("Atendente IA owner-only", () => {
     expect(preview.statusCode).toBe(200);
     expect(preview.json().allowedNextActions).toEqual(["confirm_execute"]);
     expect(preview.json().warnings.join(" ")).toContain("preco oficial");
-    expect(preview.json().sale.total).toBe(59);
+    expect(preview.json().sale.total).toBe(25);
   });
 
   it("duplo clique na confirmacao de venda nao duplica venda, estoque, financeiro ou auditoria", async () => {

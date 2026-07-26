@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createApp } from "../src/http/app";
+import { InMemoryStore } from "../src/infrastructure/in-memory-store";
 
 const originalEnv = { ...process.env };
 const ownerPhone = "5511999999999";
@@ -189,7 +190,14 @@ describe("orquestracao semantica real do WhatsApp", () => {
     expect(cases.length).toBeGreaterThanOrEqual(50);
     const fetchMock = mockGeminiAndWhatsapp();
     vi.stubGlobal("fetch", fetchMock);
-    const app = createApp();
+    const store = new InMemoryStore();
+    store.businessHours = store.businessHours.map((item) => ({
+      ...item,
+      opensAt: "00:00",
+      closesAt: "23:59",
+      isClosed: false,
+    }));
+    const app = createApp({ memoryStore: store });
     const token = await loginOwner(app);
     const before = await app.inject({ method: "GET", url: "/appointments?unitId=unit-01", headers: { authorization: `Bearer ${token}` } });
 

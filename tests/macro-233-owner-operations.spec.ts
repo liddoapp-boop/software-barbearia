@@ -125,7 +125,7 @@ describe("Macro 233 owner-only operations", () => {
       notes: "Atendimento sem agendamento",
     });
     expect(created.json().appointment.startsAt).toBe("2026-04-22T12:00:00.000Z");
-    expect(created.json().appointment.endsAt).toBe("2026-04-22T12:45:00.000Z");
+    expect(created.json().appointment.endsAt).toBe("2026-04-22T12:30:00.000Z");
 
     const replay = await app.inject({
       method: "POST",
@@ -176,7 +176,7 @@ describe("Macro 233 owner-only operations", () => {
     expect(pastPayload.statusCode).toBe(200);
     expect(pastPayload.json().appointment).toMatchObject({
       startsAt: "2026-04-22T12:00:00.250Z",
-      endsAt: "2026-04-22T12:45:00.250Z",
+      endsAt: "2026-04-22T12:30:00.250Z",
       status: "IN_SERVICE",
     });
 
@@ -200,7 +200,7 @@ describe("Macro 233 owner-only operations", () => {
     expect(futurePayload.statusCode).toBe(200);
     expect(futurePayload.json().appointment).toMatchObject({
       startsAt: "2026-04-22T13:00:00.500Z",
-      endsAt: "2026-04-22T13:45:00.500Z",
+      endsAt: "2026-04-22T13:30:00.500Z",
       status: "IN_SERVICE",
     });
   });
@@ -265,7 +265,7 @@ describe("Macro 233 owner-only operations", () => {
     expect(confirmed.json().appointment).toMatchObject({
       status: "IN_SERVICE",
       startsAt: "2026-04-23T00:33:00.000Z",
-      endsAt: "2026-04-23T01:18:00.000Z",
+      endsAt: "2026-04-23T01:03:00.000Z",
     });
 
     const replay = await app.inject({
@@ -432,7 +432,7 @@ describe("Macro 233 owner-only operations", () => {
     expect(fittingPreview.statusCode).toBe(200);
     expect(fittingPreview.json()).toMatchObject({
       requiresConfirmation: true,
-      durationMin: 45,
+      durationMin: 30,
     });
     expect(fittingPreview.json().conflicts[0].appointmentId).toBe(existing.id);
 
@@ -479,7 +479,7 @@ describe("Macro 233 owner-only operations", () => {
       headers: { ...owner, "idempotency-key": "service-change-risk" },
       payload: {
         unitId: "unit-01",
-        serviceId: "svc-corte",
+        serviceId: "canon-svc-luzes",
         changedBy: "macro-233-test",
       },
     });
@@ -492,18 +492,18 @@ describe("Macro 233 owner-only operations", () => {
       headers: { ...owner, "idempotency-key": "service-change-confirmed" },
       payload: {
         unitId: "unit-01",
-        serviceId: "svc-corte",
+        serviceId: "canon-svc-luzes",
         confirmRisk: true,
         changedBy: "macro-233-test",
       },
     });
     expect(confirmedChange.statusCode).toBe(200);
     expect(confirmedChange.json().appointment).toMatchObject({
-      serviceId: "svc-corte",
-      totalPriceSnapshot: 75,
-      effectiveDurationMinSnapshot: 45,
+      serviceId: "canon-svc-luzes",
+      totalPriceSnapshot: 50,
+      effectiveDurationMinSnapshot: 60,
     });
-    expect(confirmedChange.json().appointment.endsAt).toBe("2026-04-22T18:45:00.000Z");
+    expect(confirmedChange.json().appointment.endsAt).toBe("2026-04-22T19:00:00.000Z");
   });
 
   it("processa checkout dividido/troco/falha, correcao administrativa e bloqueio comercial de refund", async () => {
@@ -521,7 +521,7 @@ describe("Macro 233 owner-only operations", () => {
         unitId: "unit-01",
         changedBy: "macro-233-test",
         completedAt: "2026-04-22T19:45:00.000Z",
-        payments: [{ method: "PIX", amount: 75, status: "FAILED", failureReason: "Pagamento recusado" }],
+        payments: [{ method: "PIX", amount: 30, status: "FAILED", failureReason: "Pagamento recusado" }],
       },
     });
     expect(failedCheckout.statusCode).toBe(200);
@@ -547,7 +547,7 @@ describe("Macro 233 owner-only operations", () => {
     expect([400, 409]).toContain(pendingClosing.statusCode);
     expect(pendingClosing.json().error).toMatch(/fechamento bloqueado|atendimento.*andamento|checkout.*aberto|pagamento.*pendente/i);
 
-    const paidAppointment = await createAppointment(app, owner, "2026-04-22T20:00:00.000Z");
+    const paidAppointment = await createAppointment(app, owner, "2026-04-22T17:00:00.000Z");
     await setStatus(app, owner, paidAppointment.id, "CONFIRMED");
     await setStatus(app, owner, paidAppointment.id, "IN_SERVICE");
     const paidCheckout = await app.inject({
@@ -557,10 +557,10 @@ describe("Macro 233 owner-only operations", () => {
       payload: {
         unitId: "unit-01",
         changedBy: "macro-233-test",
-        completedAt: "2026-04-22T20:45:00.000Z",
+        completedAt: "2026-04-22T17:30:00.000Z",
         payments: [
-          { method: "dinheiro", amount: 20, receivedAmount: 20, responsible: "Geovane" },
-          { method: "PIX", amount: 55, responsible: "Geovane", reference: "pix-abc" },
+          { method: "dinheiro", amount: 10, receivedAmount: 10, responsible: "Geovane" },
+          { method: "PIX", amount: 20, responsible: "Geovane", reference: "pix-abc" },
         ],
       },
     });
@@ -577,10 +577,10 @@ describe("Macro 233 owner-only operations", () => {
       payload: {
         unitId: "unit-01",
         changedBy: "macro-233-test",
-        completedAt: "2026-04-22T20:45:00.000Z",
+        completedAt: "2026-04-22T17:30:00.000Z",
         payments: [
-          { method: "dinheiro", amount: 20, receivedAmount: 20, responsible: "Geovane" },
-          { method: "PIX", amount: 55, responsible: "Geovane", reference: "pix-abc" },
+          { method: "dinheiro", amount: 10, receivedAmount: 10, responsible: "Geovane" },
+          { method: "PIX", amount: 20, responsible: "Geovane", reference: "pix-abc" },
         ],
       },
     });
@@ -592,7 +592,7 @@ describe("Macro 233 owner-only operations", () => {
     );
     expect(paidCheckoutReplay.json().serviceRevenue.id).toBe(paidCheckout.json().serviceRevenue.id);
 
-    const cashAppointment = await createAppointment(app, owner, "2026-04-22T21:00:00.000Z");
+    const cashAppointment = await createAppointment(app, owner, "2026-04-22T18:00:00.000Z");
     await setStatus(app, owner, cashAppointment.id, "CONFIRMED");
     await setStatus(app, owner, cashAppointment.id, "IN_SERVICE");
     const cashCheckout = await app.inject({
@@ -602,13 +602,13 @@ describe("Macro 233 owner-only operations", () => {
       payload: {
         unitId: "unit-01",
         changedBy: "macro-233-test",
-        completedAt: "2026-04-22T21:45:00.000Z",
-        payments: [{ method: "dinheiro", amount: 75, receivedAmount: 100, responsible: "Geovane" }],
+        completedAt: "2026-04-22T18:30:00.000Z",
+        payments: [{ method: "dinheiro", amount: 30, receivedAmount: 50, responsible: "Geovane" }],
       },
     });
     expect(cashCheckout.statusCode).toBe(200);
-    expect(cashCheckout.json().checkout).toMatchObject({ paidAmount: 75, changeAmount: 25 });
-    expect(cashCheckout.json().serviceRevenue.amount).toBe(75);
+    expect(cashCheckout.json().checkout).toMatchObject({ paidAmount: 30, changeAmount: 20 });
+    expect(cashCheckout.json().serviceRevenue.amount).toBe(30);
 
     const correction = await app.inject({
       method: "POST",
@@ -629,7 +629,7 @@ describe("Macro 233 owner-only operations", () => {
     expect(correction.json().financialEntry).toMatchObject({
       kind: "EXPENSE",
       category: "CORRECAO_ADMINISTRATIVA",
-      amount: 20,
+      amount: 10,
     });
 
     const refund = await app.inject({
@@ -666,7 +666,7 @@ describe("Macro 233 owner-only operations", () => {
       },
     });
     expect(manual.statusCode).toBe(200);
-    expect(manual.json().product.stockQty).toBe(17);
+    expect(manual.json().product.stockQty).toBe(12);
 
     const manualReplay = await app.inject({
       method: "POST",
@@ -685,7 +685,7 @@ describe("Macro 233 owner-only operations", () => {
     });
     expect(manualReplay.statusCode).toBe(200);
     expect(manualReplay.json().movement.id).toBe(manual.json().movement.id);
-    expect(manualReplay.json().product.stockQty).toBe(17);
+    expect(manualReplay.json().product.stockQty).toBe(12);
 
     const count = await app.inject({
       method: "POST",
@@ -694,7 +694,7 @@ describe("Macro 233 owner-only operations", () => {
       payload: {
         unitId: "unit-01",
         productId: "prd-pomada",
-        countedQty: 16,
+        countedQty: 11,
         reason: "Conferencia fisica",
         responsible: "Geovane",
         countedAt: "2026-04-22T13:00:00.000Z",
@@ -702,8 +702,8 @@ describe("Macro 233 owner-only operations", () => {
     });
     expect(count.statusCode).toBe(200);
     expect(count.json().count).toMatchObject({
-      expectedQty: 17,
-      countedQty: 16,
+      expectedQty: 12,
+      countedQty: 11,
       differenceQty: -1,
       status: "APPLIED",
     });

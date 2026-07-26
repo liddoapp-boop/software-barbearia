@@ -765,6 +765,12 @@ function findServiceName(message: string, context: OwnerCommandContext) {
       .some((word) => messageRoots.has(word.slice(0, 4))),
   );
   if (rootedServices.length === 1) return rootedServices[0].name;
+  if (rootedServices.length > 1) {
+    const singleNameMatches = rootedServices.filter((service) =>
+      normalizeMatchText(service.name).split(" ").filter(Boolean).length === 1
+    );
+    if (singleNameMatches.length === 1) return singleNameMatches[0].name;
+  }
   return undefined;
 }
 
@@ -1037,10 +1043,15 @@ function deterministicScheduleParse(input: OwnerCommandParseInput): OwnerCommand
   const date = parseDeterministicDate(input.message, input.context.now, input.context.timezone || "America/Sao_Paulo");
   const timeRecognition = recognizeDeterministicTime(input.message);
   const time = timeRecognition?.time ?? "";
-  const matchingServices = serviceName
+  const exactServices = serviceName
     ? input.context.services.filter((item) =>
-        normalizeMatchText(item.name) === normalizeMatchText(serviceName) || hasServiceRoot(item.name, serviceName))
+        normalizeMatchText(item.name) === normalizeMatchText(serviceName))
     : [];
+  const matchingServices = exactServices.length
+    ? exactServices
+    : serviceName
+      ? input.context.services.filter((item) => hasServiceRoot(item.name, serviceName))
+      : [];
   const service = matchingServices.length === 1 ? matchingServices[0] : undefined;
   const configuredProfessionalIds = service?.enabledProfessionalIds;
   const eligibleProfessionals = serviceName

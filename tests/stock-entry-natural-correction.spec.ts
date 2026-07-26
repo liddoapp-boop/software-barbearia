@@ -159,14 +159,14 @@ describe("regressão texto, áudio e fluxo misto da correção natural", () => {
     expect(initial.json()).toMatchObject({
       intent: "stock_entry",
       executed: false,
-      preview: { productName: "Pomada Matte", quantity: 2, unitCost: 5, totalCost: 10, salePrice: 59 },
+      preview: { productName: "Pomada", quantity: 2, unitCost: 5, totalCost: 10, salePrice: 25 },
     });
     expect(corrected.json()).toMatchObject({
       intent: "stock_entry",
       corrected: true,
       executed: false,
       audio: scenario.correctionAudio,
-      preview: { productName: "Pomada Matte", quantity: 3, unitCost: 5, totalCost: 15, salePrice: 59 },
+      preview: { productName: "Pomada", quantity: 3, unitCost: 5, totalCost: 15, salePrice: 25 },
     });
     expect(product).toMatchObject(before);
     expect(store.stockMovements).toHaveLength(0);
@@ -175,7 +175,7 @@ describe("regressão texto, áudio e fluxo misto da correção natural", () => {
       .toMatchObject({
         changedFields: ["quantity"],
         semanticProviderInvoked: false,
-        canonicalDraft: { productId: "prd-pomada", quantity: 3, unitCost: 5, totalCost: 15, salePrice: 59 },
+        canonicalDraft: { productId: "prd-pomada", quantity: 3, unitCost: 5, totalCost: 15, salePrice: 25 },
       });
     expect(fetchMock.mock.calls.some(([url]) => /gemini|openai|qwen|11435/i.test(String(url)))).toBe(false);
     expect(transcriber.transcribe).toHaveBeenCalledTimes(Number(scenario.initialAudio) + Number(scenario.correctionAudio));
@@ -221,11 +221,11 @@ describe("regressão texto, áudio e fluxo misto da correção natural", () => {
       executed: false,
       preview: {
         productId: "prd-pomada",
-        productName: "Pomada Matte",
+        productName: "Pomada",
         quantity: 2,
         unitCost: 5,
         totalCost: 10,
-        salePrice: 59,
+        salePrice: 25,
       },
     });
     expect(replay.json()).toMatchObject({ replay: true, deduplicated: true, executed: false });

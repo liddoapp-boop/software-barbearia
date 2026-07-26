@@ -24,7 +24,7 @@ describe("notificacoes WhatsApp", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { sendWhatsAppMessage } = await import("../src/notifications/index.js");
-    const text = "Teste interno Liddo Barber: integração, confirmação, horário e serviço.";
+    const text = "Teste interno Liddo System: integração, confirmação, horário e serviço.";
 
     await sendWhatsAppMessage("11999998888", text, {
       attemptId: "attempt-stable-01",

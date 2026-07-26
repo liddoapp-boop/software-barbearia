@@ -675,17 +675,17 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       intent: "stock_entry",
       executed: false,
       preview: {
-        productName: "Pomada Matte",
+        productName: "Pomada",
         quantity: 2,
         unitCost: 5,
         totalCost: 10,
-        salePrice: 59,
+        salePrice: 25,
       },
     });
     expect(realistic.json().preview).not.toHaveProperty("registerExpense");
     expect(sentTexts(fetchMock).at(-1)).toMatch(/Custo unitário de compra: R\$\s*5,00/);
     expect(sentTexts(fetchMock).at(-1)).toMatch(/Custo total: R\$\s*10,00/);
-    expect(sentTexts(fetchMock).at(-1)).toMatch(/Preço de venda atual: R\$\s*59,00/);
+    expect(sentTexts(fetchMock).at(-1)).toMatch(/Preço de venda atual: R\$\s*25,00/);
     expect(sentTexts(fetchMock).at(-1)).not.toMatch(/financeir|despesa/i);
     expect(product).toMatchObject(before);
     expect(store.stockMovements).toHaveLength(0);
@@ -750,14 +750,14 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
         quantity: 2,
         unitCost: 7,
         totalCost: 14,
-        salePrice: 39,
+        salePrice: 35,
       },
     });
     expect(audioResult.body).toMatchObject({ intent: "stock_entry", executed: false, audio: true });
     for (const outgoing of [textResult.outgoing, audioResult.outgoing]) {
       expect(outgoing).toMatch(/Custo unitário de compra: R\$\s*7,00/);
       expect(outgoing).toMatch(/Custo total: R\$\s*14,00/);
-      expect(outgoing).toMatch(/Preço de venda atual: R\$\s*39,00/);
+      expect(outgoing).toMatch(/Preço de venda atual: R\$\s*35,00/);
       expect(outgoing).not.toContain("não correspondem ao preço cadastrado");
     }
   });
@@ -778,14 +778,14 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       executed: false,
       preview: {
         items: [
-          { productId: "prd-pomada", quantity: 2, unitCost: 5, totalCost: 10, salePrice: 59 },
-          { productId: "prd-oleo-barba", quantity: 3, unitCost: 8, totalCost: 24, salePrice: 39 },
+          { productId: "prd-pomada", quantity: 2, unitCost: 5, totalCost: 10, salePrice: 25 },
+          { productId: "prd-oleo-barba", quantity: 3, unitCost: 8, totalCost: 24, salePrice: 35 },
         ],
         totalCost: 34,
       },
     });
     expect(sentTexts(fetchMock).at(-1)).toMatch(/Total geral: R\$\s*34,00/);
-    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.products.map((product) => product.stockQty)).toEqual([30, 10, 3, 4, 10, 10, 10]);
     expect(store.stockMovements).toHaveLength(0);
 
     const quantity = await webhook(app, evolutionTextPayload("Na verdade, são 4 óleos.", "stock-batch-correction-qty-001"));
@@ -798,18 +798,15 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       corrected: true,
       preview: { items: [{ quantity: 2, unitCost: 6, totalCost: 12 }, { quantity: 4, unitCost: 8, totalCost: 32 }], totalCost: 44 },
     });
-    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.products.map((product) => product.stockQty)).toEqual([30, 10, 3, 4, 10, 10, 10]);
     expect(store.financialEntries).toHaveLength(0);
 
     const confirmed = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-batch-confirm-001"));
     const replay = await webhook(app, evolutionTextPayload("CONFIRMAR", "stock-batch-confirm-002"));
     expect(confirmed.json()).toMatchObject({ executed: true, replay: false });
     expect(replay.json()).toMatchObject({ executed: true, replay: true });
-    expect(store.products.map((product) => product.stockQty)).toEqual([17, 16]);
-    expect(store.products.map((product) => product.salePrice)).toEqual([
-      before.get("prd-pomada")?.salePrice,
-      before.get("prd-oleo-barba")?.salePrice,
-    ]);
+    expect(store.products.map((product) => product.stockQty)).toEqual([30, 12, 3, 8, 10, 10, 10]);
+    expect(store.products.map((product) => product.salePrice)).toEqual([10, 25, 25, 35, 25, 25, 30]);
     expect(store.stockMovements).toHaveLength(2);
     expect(store.financialEntries).toHaveLength(0);
     expect(store.auditEvents.filter((event) => event.action === "STOCK_ENTRY_CONFIRMED")).toHaveLength(1);
@@ -831,12 +828,12 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       audio: true,
       preview: { items: [{ productId: "prd-pomada" }, { productId: "prd-oleo-barba" }], totalCost: 34 },
     });
-    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.products.map((product) => product.stockQty)).toEqual([30, 10, 3, 4, 10, 10, 10]);
     expect(store.stockMovements).toHaveLength(0);
 
     const cancelled = await webhook(app, evolutionTextPayload("CANCELAR", "stock-batch-cancel-001"));
     expect(cancelled.json()).toMatchObject({ intent: "stock_entry", cancelled: true });
-    expect(store.products.map((product) => product.stockQty)).toEqual([15, 12]);
+    expect(store.products.map((product) => product.stockQty)).toEqual([30, 10, 3, 4, 10, 10, 10]);
     expect(store.stockMovements).toHaveLength(0);
     expect(store.financialEntries).toHaveLength(0);
     await app.close();
@@ -863,7 +860,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(corrected.json()).toMatchObject({
       intent: "stock_entry",
       corrected: true,
-      preview: { quantity: 2, unitCost: 6, totalCost: 12, salePrice: 59 },
+      preview: { quantity: 2, unitCost: 6, totalCost: 12, salePrice: 25 },
     });
     expect(corrected.json().previewId).not.toBe(originalPreviewId);
     expect(sentTexts(fetchMock).at(-1)).toContain("Entrada de estoque atualizada");
@@ -999,7 +996,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     expect(audioResult.preview).toEqual(textResult.preview);
     expect(textResult).toMatchObject({ intent: "stock_entry", audio: false, executed: false });
     expect(audioResult).toMatchObject({ intent: "stock_entry", audio: true, executed: false });
-    expect(audioResult.preview).toMatchObject({ productName: "Pomada Matte", quantity: 1, unitCost: 6, totalCost: 6, salePrice: 59 });
+    expect(audioResult.preview).toMatchObject({ productName: "Pomada", quantity: 1, unitCost: 6, totalCost: 6, salePrice: 25 });
   });
 
   it("cancela a versão atualizada sem mutação", async () => {
@@ -1207,7 +1204,7 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
     const stored = [...store.aiWhatsappStockEntryPreviews.values()][0] as { preview: StockEntryPreview };
     expect(stored.preview).toMatchObject({
       id: originalBody.previewId,
-      draft: { quantity: 2, unitCost: 5, totalCost: 10, salePrice: 59 },
+      draft: { quantity: 2, unitCost: 5, totalCost: 10, salePrice: 25 },
     });
     expect(product.stockQty).toBe(stockBefore);
     expect(store.stockMovements).toHaveLength(0);
@@ -1271,11 +1268,11 @@ describe("orquestrador único de texto e áudio no WhatsApp", () => {
       id: original.json().previewId,
       draft: {
         productId: "prd-pomada",
-        productName: "Pomada Matte",
+        productName: "Pomada",
         quantity: 3,
         unitCost: 5,
         totalCost: 15,
-        salePrice: 59,
+        salePrice: 25,
       },
     });
     expect(pomada.stockQty).toBe(stockBefore.pomada);
