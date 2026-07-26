@@ -10988,6 +10988,14 @@ function renderWeekCalendar(options = {}) {
       </div>
     </div>`;
 
+  const bodyScroll = container.querySelector(".wc-body-scroll");
+  const scrollbarGutter = bodyScroll
+    ? Math.max(0, bodyScroll.offsetWidth - bodyScroll.clientWidth)
+    : 0;
+  if (container.style?.setProperty) {
+    container.style.setProperty("--wc-scrollbar-gutter", `${scrollbarGutter}px`);
+  }
+
   animateWeekCalendarTransition(container, Number(options.direction || 0));
   const scheduleScroll = window.requestAnimationFrame || ((callback) => callback());
   if (typeof scrollWeekCalendarToCurrentTime === "function") {

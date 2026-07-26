@@ -11,11 +11,11 @@
   --agenda-bronze: #c29a67;
   --agenda-bronze-soft: rgba(194, 154, 103, 0.16);
   --agenda-emerald: #4f8f78;
-  --agenda-line: rgba(232, 226, 211, 0.105);
-  --agenda-line-strong: rgba(232, 226, 211, 0.18);
+  --agenda-line: rgba(232, 226, 211, 0.14);
+  --agenda-line-strong: rgba(232, 226, 211, 0.22);
   --agenda-panel: #101415;
-  --agenda-panel-deep: #0b0f10;
-  --agenda-panel-raised: #171b1b;
+  --agenda-panel-deep: #101415;
+  --agenda-panel-raised: #181d1e;
   --agenda-row-hover: rgba(232, 226, 211, 0.035);
   color-scheme: dark;
 }
@@ -227,6 +227,11 @@
 
 /* Calendar chassis: one continuous mechanical surface. */
 #agendaSection .wc-outer {
+  --wc-time-column: 62px;
+  --wc-day-min: 116px;
+  --wc-grid-template: var(--wc-time-column) repeat(7, minmax(var(--wc-day-min), 1fr));
+  --wc-grid-min-width: 920px;
+  --wc-scrollbar-gutter: 0px;
   position: relative !important;
   width: 100% !important;
   overflow-x: auto !important;
@@ -256,12 +261,15 @@
 
 #agendaSection .wc-header-row,
 #agendaSection .wc-body-scroll {
-  min-width: 920px !important;
+  min-width: var(--wc-grid-min-width) !important;
+  box-sizing: border-box;
 }
 
 #agendaSection .wc-header-row {
   z-index: 20;
-  grid-template-columns: 62px repeat(7, minmax(116px, 1fr)) !important;
+  grid-template-columns: var(--wc-grid-template) !important;
+  box-sizing: border-box;
+  padding-inline-end: var(--wc-scrollbar-gutter);
   border-bottom: 1px solid var(--agenda-line-strong) !important;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
@@ -339,20 +347,22 @@
 }
 
 #agendaSection .wc-body-inner {
-  grid-template-columns: 62px repeat(7, minmax(116px, 1fr)) !important;
+  grid-template-columns: var(--wc-grid-template) !important;
+  min-width: var(--wc-grid-min-width);
+  box-sizing: border-box;
   background: var(--agenda-panel-deep) !important;
 }
 
 #agendaSection .wc-times-col {
   z-index: 8;
   border-right: 1px solid var(--agenda-line-strong) !important;
-  background: #0d1112;
+  background: #0e1314;
 }
 
 #agendaSection .wc-time-slot {
   justify-content: flex-end !important;
   padding: 0 10px 0 4px !important;
-  color: #70736f !important;
+  color: #a9ada6 !important;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 8px !important;
   font-variant-numeric: tabular-nums;
@@ -362,11 +372,12 @@
 #agendaSection .wc-day-col {
   border-right: 1px solid var(--agenda-line) !important;
   background: var(--agenda-panel-deep) !important;
+  box-sizing: border-box;
 }
 
 #agendaSection .wc-day-col.is-today {
   background:
-    linear-gradient(180deg, rgba(194, 154, 103, 0.04), transparent 32%),
+    linear-gradient(180deg, rgba(194, 154, 103, 0.055), transparent 32%),
     var(--agenda-panel-deep) !important;
 }
 
@@ -376,7 +387,7 @@
 }
 
 #agendaSection .wc-hline-half {
-  background: rgba(232, 226, 211, 0.045) !important;
+  background: rgba(232, 226, 211, 0.07) !important;
 }
 
 /* Proprietary "working window": useful empty time remains visible. */
@@ -417,6 +428,8 @@
   height: 1px !important;
   background: linear-gradient(90deg, var(--agenda-bronze), rgba(194, 154, 103, 0.42)) !important;
   box-shadow: 0 0 8px rgba(194, 154, 103, 0.12);
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 #agendaSection .wc-now-line::before {
@@ -1092,6 +1105,11 @@ body.theme-light #agendaSection .wc-appt:hover {
 }
 
 @media (max-width: 760px) {
+  #agendaSection .wc-outer {
+    --wc-time-column: 56px;
+    --wc-grid-min-width: 876px;
+  }
+
   #agendaSection .agenda-next-strip {
     grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(0, 0.78fr)) !important;
     overflow: hidden;
@@ -1157,11 +1175,11 @@ body.theme-light #agendaSection .wc-appt:hover {
 
   #agendaSection .wc-header-row,
   #agendaSection .wc-body-inner {
-    grid-template-columns: 56px repeat(7, minmax(116px, 1fr)) !important;
+    grid-template-columns: var(--wc-grid-template) !important;
   }
 
   #agendaSection .wc-outer::before {
-    width: 56px;
+    width: var(--wc-time-column);
   }
 
   #agendaSection .wc-body-scroll {

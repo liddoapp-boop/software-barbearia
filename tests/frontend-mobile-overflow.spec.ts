@@ -2706,6 +2706,8 @@ describe("frontend mobile overflow", () => {
       await measureModule(cdp, session, "agenda", false, { width: 1920, height: 1080, mobile: false }),
       await measureModule(cdp, session, "agenda", false, { width: 1440, height: 900, mobile: false }),
       await measureModule(cdp, session, "agenda", false, { width: 1366, height: 768, mobile: false }),
+      await measureModule(cdp, session, "agenda", false, { width: 1280, height: 720, mobile: false }),
+      await measureModule(cdp, session, "agenda", false, { width: 1024, height: 768, mobile: false }),
       await measureModule(cdp, session, "agenda", true, { width: 900, height: 1024, mobile: false }),
       await measureModule(cdp, session, "agenda", true, { width: 768, height: 1024, mobile: false }),
       await measureModule(cdp, session, "agenda", true, { width: 390, height: 844, mobile: true }),

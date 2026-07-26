@@ -54,6 +54,18 @@ describe("superficie operacional da Agenda", () => {
     expect(agendaCss).toMatch(/\.wc-outer\s*\{[\s\S]*?overflow-x: auto !important/);
   });
 
+  it("compartilha a geometria semanal entre cabecalho e corpo sem tratar domingo como coluna especial", () => {
+    expect(agendaCss).toContain("--wc-grid-template: var(--wc-time-column) repeat(7, minmax(var(--wc-day-min), 1fr))");
+    expect(agendaCss).toMatch(/\.wc-header-row\s*\{[\s\S]*?grid-template-columns:\s*var\(--wc-grid-template\)/);
+    expect(agendaCss).toMatch(/\.wc-body-inner\s*\{[\s\S]*?grid-template-columns:\s*var\(--wc-grid-template\)/);
+    expect(agendaCss).toContain("padding-inline-end: var(--wc-scrollbar-gutter)");
+    expect(appSource).toContain("bodyScroll.offsetWidth - bodyScroll.clientWidth");
+    expect(appSource).toContain('container.style.setProperty("--wc-scrollbar-gutter"');
+    expect(appSource).toContain('class="wc-day-col${isToday ? " is-today" : ""}"');
+    expect(appSource).toContain('class="wc-day-closed-mask"><span>Fechado</span>');
+    expect(appSource).toContain("${gridLines}${openWindow}${dayClosedMask}${nowLine}${appts}");
+  });
+
   it("reposiciona para o horario atual com reduced motion respeitado", () => {
     expect(appSource).toContain("function scrollWeekCalendarToCurrentTime");
     expect(appSource).toContain('behavior: reducedMotion ? "auto" : "smooth"');
