@@ -4,6 +4,13 @@ import {
   CANONICAL_REAL_SERVICES,
   buildCanonicalProvisionPlan,
 } from "../src/application/canonical-catalog";
+import {
+  CANONICAL_DEMO_PRODUCTS,
+  CANONICAL_DEMO_PRODUCT_IDS,
+  CANONICAL_DEMO_SERVICES,
+  CANONICAL_DEMO_SERVICE_IDS,
+  LEGACY_MANUAL_CUT_SERVICE_ID,
+} from "../src/infrastructure/canonical-demo-catalog";
 
 describe("provisionamento de canonicos reais", () => {
   it("define somente os servicos e produtos canonicos reais aprovados", () => {
@@ -86,5 +93,36 @@ describe("provisionamento de canonicos reais", () => {
     expect(plan.servicesToUpdate).toEqual([{ id: corte.id, data: corte }]);
     expect(plan.productsToCreate).toHaveLength(0);
     expect(plan.errors).toEqual(["canon-prd-gel.stockQty esperado=30 encontrado=999"]);
+  });
+
+  it("reutiliza o catalogo real no ambiente isolado sem as fixtures antigas", () => {
+    const activeServices = CANONICAL_DEMO_SERVICES.filter((item) => item.active);
+    expect(activeServices).toHaveLength(6);
+    expect(activeServices.map((item) => item.name)).toEqual([
+      "Corte",
+      "Barba",
+      "Hidratação",
+      "Luzes",
+      "Pigmentação",
+      "Corte + Barba",
+    ]);
+    expect(activeServices.map((item) => item.id)).toContain(CANONICAL_DEMO_SERVICE_IDS.corte);
+    expect(activeServices.map((item) => item.id)).toContain(CANONICAL_DEMO_SERVICE_IDS.barba);
+    expect(activeServices.map((item) => item.name)).not.toEqual(
+      expect.arrayContaining(["Corte Premium", "Barba Terapia"]),
+    );
+    expect(CANONICAL_DEMO_SERVICES.find((item) => item.id === LEGACY_MANUAL_CUT_SERVICE_ID)).toMatchObject({
+      name: "Corte Manual 232A",
+      active: false,
+    });
+    expect(CANONICAL_DEMO_PRODUCTS).toHaveLength(7);
+    expect(CANONICAL_DEMO_PRODUCTS.map((item) => item.name)).toEqual(
+      CANONICAL_REAL_PRODUCTS.map((item) => item.name),
+    );
+    expect(CANONICAL_DEMO_PRODUCTS.find((item) => item.id === CANONICAL_DEMO_PRODUCT_IDS.pomada))
+      .toMatchObject({ name: "Pomada", salePrice: 25, costPrice: 7.5, stockQty: 10 });
+    expect(CANONICAL_DEMO_PRODUCTS.find((item) => item.id === CANONICAL_DEMO_PRODUCT_IDS.oleoBarba))
+      .toMatchObject({ name: "Oleo para Barba", salePrice: 35, costPrice: 13, stockQty: 4 });
+    expect(CANONICAL_DEMO_PRODUCTS.map((item) => item.name)).not.toContain("Pomada Matte");
   });
 });

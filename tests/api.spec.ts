@@ -4,6 +4,10 @@ import type { FastifyInstance } from "fastify";
 import { createApp, hasPublicIdTestMarker } from "../src/http/app";
 import { OperationsService } from "../src/application/operations-service";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
+import {
+  CANONICAL_DEMO_PRODUCTS,
+  CANONICAL_DEMO_PRODUCT_IDS,
+} from "../src/infrastructure/canonical-demo-catalog";
 import type { Product, Service } from "../src/domain/types";
 import {
   computeBillingWebhookSignature,
@@ -19,13 +23,13 @@ const CANONICAL_SERVICE_FIXTURE_IDS = {
 } as const;
 
 const CANONICAL_PRODUCT_FIXTURE_IDS = {
-  gel: "fixture-canonico-produto-gel",
-  pomada: "fixture-canonico-produto-pomada",
-  buchaNudread: "fixture-canonico-produto-bucha-nudread",
-  oleoBarba: "fixture-canonico-produto-oleo-barba",
-  shampoo: "fixture-canonico-produto-shampoo",
-  condicionador: "fixture-canonico-produto-condicionador",
-  mascaraHidratacao: "fixture-canonico-produto-mascara-hidratacao",
+  gel: "canon-prd-gel",
+  pomada: CANONICAL_DEMO_PRODUCT_IDS.pomada,
+  buchaNudread: "canon-prd-bucha-nudread",
+  oleoBarba: CANONICAL_DEMO_PRODUCT_IDS.oleoBarba,
+  shampoo: "canon-prd-shampoo",
+  condicionador: "canon-prd-condicionador",
+  mascaraHidratacao: "canon-prd-mascara-hidratacao",
 } as const;
 
 const CANONICAL_REAL_SERVICE_FIXTURES: Service[] = [
@@ -106,84 +110,13 @@ const CANONICAL_REAL_SERVICE_FIXTURES: Service[] = [
   },
 ];
 
-const CANONICAL_REAL_PRODUCT_FIXTURES: Product[] = [
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.gel,
-    name: "Gel",
-    category: "Finalizacao",
-    salePrice: 10,
-    costPrice: 5.5,
-    stockQty: 30,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.pomada,
-    name: "Pomada",
-    category: "Finalizacao",
-    salePrice: 25,
-    costPrice: 7.5,
-    stockQty: 10,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.buchaNudread,
-    name: "Bucha Nudread",
-    category: "Dread",
-    salePrice: 25,
-    costPrice: 12.5,
-    stockQty: 3,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.oleoBarba,
-    name: "Oleo para Barba",
-    category: "Barba",
-    salePrice: 35,
-    costPrice: 13,
-    stockQty: 4,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.shampoo,
-    name: "Shampoo",
-    category: "Cabelo",
-    salePrice: 25,
-    costPrice: 7.5,
-    stockQty: 10,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.condicionador,
-    name: "Condicionador",
-    category: "Cabelo",
-    salePrice: 25,
-    costPrice: 7.5,
-    stockQty: 10,
-    minStockAlert: 0,
-    active: true,
-  },
-  {
-    id: CANONICAL_PRODUCT_FIXTURE_IDS.mascaraHidratacao,
-    name: "Mascara de Hidratacao",
-    category: "Tratamento",
-    salePrice: 30,
-    costPrice: 7.5,
-    stockQty: 10,
-    minStockAlert: 0,
-    active: true,
-  },
-];
+const CANONICAL_REAL_PRODUCT_FIXTURES: Product[] =
+  CANONICAL_DEMO_PRODUCTS.map((product) => ({ ...product }));
 
 function installCanonicalRealFixtures(store: InMemoryStore) {
   const settings = store.businessSettings.find((item) => item.unitId === "unit-01");
   if (settings) settings.bufferBetweenAppointmentsMinutes = 0;
   store.services.push(...CANONICAL_REAL_SERVICE_FIXTURES.map((item) => ({ ...item })));
-  store.products.push(...CANONICAL_REAL_PRODUCT_FIXTURES.map((item) => ({ ...item })));
   store.serviceProfessionalAssignments.push(
     ...CANONICAL_REAL_SERVICE_FIXTURES.map((service) => ({
       serviceId: service.id,
@@ -251,6 +184,66 @@ async function setBarbaProfessionals(app: FastifyInstance, professionalIds: stri
   });
   expect(response.statusCode).toBe(200);
   return response.json();
+}
+
+const OPERATIONAL_TIME_ZONE = "America/Sao_Paulo";
+const OPERATIONAL_HOURS: Record<number, { opensAt: number; closesAt: number } | undefined> = {
+  1: { opensAt: 8, closesAt: 20 },
+  2: { opensAt: 8, closesAt: 20 },
+  3: { opensAt: 8, closesAt: 20 },
+  4: { opensAt: 8, closesAt: 20 },
+  5: { opensAt: 8, closesAt: 20 },
+  6: { opensAt: 8, closesAt: 14 },
+};
+
+function localDateWeekday(localDate: string) {
+  return new Date(`${localDate}T12:00:00-03:00`).getDay();
+}
+
+function addLocalDays(localDate: string, days: number) {
+  const date = new Date(`${localDate}T12:00:00-03:00`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Retorna o proximo dia em que a unidade opera, sem depender do relogio do host. */
+function nextBusinessDay(localDate: string) {
+  let candidate = localDate;
+  while (!OPERATIONAL_HOURS[localDateWeekday(candidate)]) candidate = addLocalDays(candidate, 1);
+  return candidate;
+}
+
+/** Converte uma data/hora operacional de Sao Paulo para UTC de forma deterministica. */
+function operationalLocalToUtc(localDate: string, hour: number, minute = 0) {
+  const hours = OPERATIONAL_HOURS[localDateWeekday(localDate)];
+  if (!hours || hour < hours.opensAt || hour > hours.closesAt || (hour === hours.closesAt && minute > 0)) {
+    throw new Error(`Horario fora do expediente para ${OPERATIONAL_TIME_ZONE}: ${localDate} ${hour}:${minute}`);
+  }
+  return new Date(`${localDate}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00-03:00`).toISOString();
+}
+
+/** Intervalo valido para booking/agenda, incluindo a verificacao do fim dentro do expediente. */
+function validBookingInterval(localDate: string, hour: number, minute: number, durationMin: number) {
+  const startsAt = operationalLocalToUtc(localDate, hour, minute);
+  const endsAtDate = new Date(new Date(startsAt).getTime() + durationMin * 60_000);
+  const endsAtLocal = new Intl.DateTimeFormat("en-CA", {
+    timeZone: OPERATIONAL_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(endsAtDate).reduce<Record<string, string>>((parts, part) => {
+    if (part.type !== "literal") parts[part.type] = part.value;
+    return parts;
+  }, {});
+  operationalLocalToUtc(
+    `${endsAtLocal.year}-${endsAtLocal.month}-${endsAtLocal.day}`,
+    Number(endsAtLocal.hour),
+    Number(endsAtLocal.minute),
+  );
+  return { startsAt, endsAt: endsAtDate.toISOString() };
 }
 
 describe("API MVP", () => {
@@ -331,7 +324,7 @@ describe("API MVP", () => {
     );
     expect(completeResponse.statusCode).toBe(200);
     const completed = completeResponse.json();
-    expect(completed.serviceRevenue.amount).toBe(75);
+    expect(completed.serviceRevenue.amount).toBe(30);
     expect(completed.appointment.status).toBe("COMPLETED");
   });
 
@@ -347,7 +340,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -392,7 +385,7 @@ describe("API MVP", () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
 
-    await app.inject({
+    const first = await app.inject({
       method: "POST",
       url: "/appointments",
       payload: {
@@ -400,10 +393,11 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
+    expect(first.statusCode).toBe(200);
 
     const response = await app.inject({
       method: "POST",
@@ -413,7 +407,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-barba",
-        startsAt: "2026-04-22T10:55:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 11, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -433,7 +427,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -446,7 +440,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-barba",
-        startsAt: "2026-04-22T09:15:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 9, 30, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -549,7 +543,7 @@ describe("API MVP", () => {
     expect(response.statusCode).toBe(200);
   });
 
-  it("permite horario livre no mesmo dia sem sobreposicao real (23:06 vs 05:13)", async () => {
+  it("permite horario livre no mesmo dia sem sobreposicao real dentro do expediente", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
 
@@ -561,7 +555,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T23:06:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 16, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -575,7 +569,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T05:13:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 9, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -595,7 +589,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -608,7 +602,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-23T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-23", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -713,19 +707,19 @@ describe("API MVP", () => {
     }
   });
 
-  it("sinaliza horarios vazios e retorna sugestoes acionaveis no dashboard", async () => {
+  it("retorna sugestao acionavel para horarios vazios respeitando o limiar do catalogo canonico", async () => {
     process.env.DATA_BACKEND = "memory";
     const app = createApp();
 
     const response = await app.inject({
       method: "GET",
-      url: "/dashboard?unitId=unit-01&date=2026-04-23T00:00:00.000Z",
+      url: `/dashboard?unitId=unit-01&date=${encodeURIComponent(operationalLocalToUtc("2026-04-23", 10))}`,
     });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.smartAlerts.some((alert: { type: string }) => alert.type === "IDLE_WINDOW")).toBe(
-      true,
+      false,
     );
     expect(
       body.actionSuggestions.some(
@@ -857,7 +851,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -871,7 +865,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-22T11:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 11, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -883,7 +877,7 @@ describe("API MVP", () => {
       url: `/appointments/${secondId}/reschedule`,
       headers: { "idempotency-key": "reschedule-api-001" },
       payload: {
-        startsAt: "2026-04-22T10:20:00.000Z",
+        startsAt: validBookingInterval("2026-04-22", 10, 20, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -903,7 +897,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-07-10T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-07-10", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -923,7 +917,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-07-10T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-07-10", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -937,7 +931,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-07-10T12:00:00.000Z",
+        startsAt: validBookingInterval("2026-07-10", 12, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -949,12 +943,12 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/reschedule`,
       headers: { "idempotency-key": "reschedule-api-002" },
       payload: {
-        startsAt: "2026-07-10T13:00:00.000Z",
+        startsAt: validBookingInterval("2026-07-10", 13, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
     expect(rescheduled.statusCode).toBe(200);
-    expect(rescheduled.json().appointment.endsAt).toBe("2026-07-10T13:45:00.000Z");
+    expect(rescheduled.json().appointment.endsAt).toBe("2026-07-10T16:30:00.000Z");
 
     const confirmed = await app.inject({
       method: "PATCH",
@@ -1010,25 +1004,25 @@ describe("API MVP", () => {
         ),
       ),
     );
-    expect(catalog.services.some((item) => item.name === "Corte + Barba")).toBe(false);
+    expect(catalog.services).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Corte + Barba", price: 50, durationMin: 45, active: true }),
+      ]),
+    );
 
     for (const fixtureId of fixtureServiceIds) {
       expect(["svc-corte", "svc-barba", "demo-svc-hidratacao", "demo-svc-combo"]).not.toContain(
         fixtureId,
       );
     }
-    for (const fixtureId of fixtureProductIds) {
-      expect(["prd-pomada", "prd-oleo-barba", "demo-prd-shampoo", "demo-prd-cond"]).not.toContain(
-        fixtureId,
-      );
-    }
+    expect(fixtureProductIds.size).toBe(7);
 
     const cancelled = operations.schedule({
       unitId: "unit-01",
       clientId: "cli-01",
       professionalId: "pro-01",
       serviceId: CANONICAL_SERVICE_FIXTURE_IDS.corte,
-      startsAt: new Date("2026-07-11T10:00:00.000Z"),
+      startsAt: new Date(validBookingInterval("2026-07-11", 10, 0, 30).startsAt),
       changedBy: "owner",
     });
     operations.updateStatus({
@@ -1043,20 +1037,20 @@ describe("API MVP", () => {
       clientId: "cli-02",
       professionalId: "pro-01",
       serviceId: CANONICAL_SERVICE_FIXTURE_IDS.barba,
-      startsAt: new Date("2026-07-11T10:00:00.000Z"),
+      startsAt: new Date(validBookingInterval("2026-07-11", 10, 0, 30).startsAt),
       changedBy: "owner",
     });
-    expect(reusedSlot.startsAt.toISOString()).toBe("2026-07-11T10:00:00.000Z");
+    expect(reusedSlot.startsAt.toISOString()).toBe("2026-07-11T13:00:00.000Z");
 
     const appointment = operations.schedule({
       unitId: "unit-01",
       clientId: "cli-01",
       professionalId: "pro-01",
       serviceId: CANONICAL_SERVICE_FIXTURE_IDS.corte,
-      startsAt: new Date("2026-07-11T12:00:00.000Z"),
+      startsAt: new Date(validBookingInterval("2026-07-11", 12, 0, 30).startsAt),
       changedBy: "owner",
     });
-    expect(appointment.endsAt.toISOString()).toBe("2026-07-11T12:30:00.000Z");
+    expect(appointment.endsAt.toISOString()).toBe("2026-07-11T15:30:00.000Z");
     expect(appointment.serviceNameSnapshot).toBe("Corte");
     expect(appointment.servicePriceSnapshot).toBe(30);
     expect(appointment.serviceDurationMinSnapshot).toBe(30);
@@ -1067,7 +1061,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: CANONICAL_SERVICE_FIXTURE_IDS.barba,
-        startsAt: new Date("2026-07-11T12:15:00.000Z"),
+        startsAt: new Date(validBookingInterval("2026-07-11", 12, 15, 30).startsAt),
         changedBy: "owner",
       }),
     ).toThrow("Conflito de horario detectado");
@@ -1091,10 +1085,10 @@ describe("API MVP", () => {
     const rescheduled = operations.reschedule({
       appointmentId: appointment.id,
       unitId: "unit-01",
-      startsAt: new Date("2026-07-11T13:00:00.000Z"),
+      startsAt: new Date(validBookingInterval("2026-07-11", 13, 0, 30).startsAt),
       changedBy: "owner",
     });
-    expect(rescheduled.endsAt.toISOString()).toBe("2026-07-11T13:30:00.000Z");
+    expect(rescheduled.endsAt.toISOString()).toBe("2026-07-11T16:30:00.000Z");
 
     const confirmed = operations.updateStatus({
       appointmentId: appointment.id,
@@ -1178,7 +1172,7 @@ describe("API MVP", () => {
     );
 
     expect(product).toMatchObject({
-      id: "fixture-canonico-produto-bucha-nudread",
+      id: "canon-prd-bucha-nudread",
       name: "Bucha Nudread",
       salePrice: 25,
       costPrice: 12.5,
@@ -1332,7 +1326,7 @@ describe("API MVP", () => {
     expect(saleResponse.statusCode).toBe(200);
     const body = saleResponse.json();
     expect(body.sale.items).toHaveLength(2);
-    expect(body.revenue.amount).toBe(157);
+    expect(body.revenue.amount).toBe(85);
     expect(body.stockMovements).toHaveLength(2);
 
     const stockResponse = await app.inject({
@@ -1359,7 +1353,7 @@ describe("API MVP", () => {
     });
     expect(productEntry.productItems).toEqual(
       expect.arrayContaining([
-        { productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 },
+        { productId: "prd-pomada", productName: "Pomada", quantity: 2 },
         { productId: "prd-oleo-barba", productName: "Oleo para Barba", quantity: 1 },
       ]),
     );
@@ -1378,7 +1372,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-23T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-23", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -1403,7 +1397,7 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "checkout-unified-success" },
       payload: {
         changedBy: "owner",
-        completedAt: "2026-04-23T10:50:00.000Z",
+        completedAt: validBookingInterval("2026-04-23", 10, 30, 1).startsAt,
         paymentMethod: "PIX",
         notes: "Checkout unificado",
         products: [{ productId: "prd-pomada", quantity: 1 }],
@@ -1500,7 +1494,7 @@ describe("API MVP", () => {
     });
     expect(transactions.statusCode).toBe(200);
     expect(transactions.json().transactions).toHaveLength(1);
-    expect(transactions.json().transactions[0]).toMatchObject({ source: "SERVICE", amount: 134 });
+    expect(transactions.json().transactions[0]).toMatchObject({ source: "SERVICE", amount: 55 });
 
     const commissions = await app.inject({
       method: "GET",
@@ -1520,7 +1514,7 @@ describe("API MVP", () => {
           item.productId === "prd-pomada" && item.referenceType === "PRODUCT_SALE",
       );
     expect(productMovements).toHaveLength(1);
-    expect(stock.json().totals.totalStockQty).toBe(25);
+    expect(stock.json().totals.totalStockQty).toBe(75);
 
     const audit = await app.inject({
       method: "GET",
@@ -1673,7 +1667,7 @@ describe("API MVP", () => {
     expect(productSaleEntries[0]).toMatchObject({
       productSaleId: sale.json().sale.id,
       paymentMethod: "PIX",
-      productItems: [{ productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 }],
+      productItems: [{ productId: "prd-pomada", productName: "Pomada", quantity: 2 }],
     });
     expect(manualEntries[0].productItems).toEqual([]);
   });
@@ -1736,7 +1730,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-27T09:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-27", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -1759,7 +1753,7 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "checkout-refund-service-001" },
       payload: {
         changedBy: "owner",
-        completedAt: "2026-04-27T09:50:00.000Z",
+        completedAt: validBookingInterval("2026-04-27", 10, 30, 1).startsAt,
         paymentMethod: "PIX",
       },
     });
@@ -1769,7 +1763,7 @@ describe("API MVP", () => {
       unitId: "unit-01",
       changedBy: "owner",
       reason: "Cliente solicitou estorno",
-      refundedAt: "2026-04-27T10:00:00.000Z",
+      refundedAt: operationalLocalToUtc("2026-04-27", 11),
     };
     const refund = await app.inject({
       method: "POST",
@@ -1807,7 +1801,7 @@ describe("API MVP", () => {
     const missingKey = await app.inject({
       method: "POST",
       url: `/appointments/${appointmentId}/refund`,
-      payload: { ...payload, refundedAt: "2026-04-27T11:00:00.000Z" },
+      payload: { ...payload, refundedAt: operationalLocalToUtc("2026-04-27", 12) },
     });
     expect(missingKey.statusCode).toBe(400);
 
@@ -1822,7 +1816,7 @@ describe("API MVP", () => {
     }>;
     expect(rows.filter((item) => item.type === "INCOME" && item.source === "SERVICE")).toHaveLength(1);
     expect(rows.filter((item) => item.type === "EXPENSE" && item.source === "REFUND")).toHaveLength(1);
-    expect(transactions.json().summary.expense).toBe(75);
+    expect(transactions.json().summary.expense).toBe(30);
 
     const entries = await app.inject({
       method: "GET",
@@ -1835,9 +1829,9 @@ describe("API MVP", () => {
       method: "GET",
       url: "/financial/summary?unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z",
     });
-    expect(summary.json().summary.grossRevenue).toBe(75);
-    expect(summary.json().summary.expenses).toBe(75);
-    expect(summary.json().summary.refundsTotal).toBe(75);
+    expect(summary.json().summary.grossRevenue).toBe(30);
+    expect(summary.json().summary.expenses).toBe(30);
+    expect(summary.json().summary.refundsTotal).toBe(30);
     expect(summary.json().summary.paidCommissionsTotal).toBe(0);
     expect(summary.json().summary.operationalExpenses).toBe(0);
     expect(summary.json().cashFlow.balance).toBe(0);
@@ -1887,7 +1881,7 @@ describe("API MVP", () => {
       method: "GET",
       url: "/inventory?unitId=unit-01&search=Pomada",
     });
-    expect(stockAfterSale.json().products[0].quantity).toBe(13);
+    expect(stockAfterSale.json().products[0].quantity).toBe(8);
 
     const payload = {
       unitId: "unit-01",
@@ -1908,7 +1902,7 @@ describe("API MVP", () => {
       kind: "EXPENSE",
       source: "REFUND",
       category: "DEVOLUCAO_PRODUTO",
-      amount: 59,
+      amount: 25,
       referenceType: "PRODUCT_SALE_REFUND",
     });
     expect(refund.json().financialEntry.referenceId).toBe(refund.json().refund.id);
@@ -1932,7 +1926,7 @@ describe("API MVP", () => {
       method: "GET",
       url: "/inventory?unitId=unit-01&search=Pomada",
     });
-    expect(stockAfterRefund.json().products[0].quantity).toBe(14);
+    expect(stockAfterRefund.json().products[0].quantity).toBe(9);
 
     const conflict = await app.inject({
       method: "POST",
@@ -1972,14 +1966,14 @@ describe("API MVP", () => {
     expect(productRows).toHaveLength(1);
     expect(refundRows).toHaveLength(1);
     expect(productRows[0].productItems).toEqual([
-      { productId: "prd-pomada", productName: "Pomada Matte", quantity: 2 },
+      { productId: "prd-pomada", productName: "Pomada", quantity: 2 },
     ]);
     expect(refundRows[0]).toMatchObject({
       referenceType: "PRODUCT_SALE_REFUND",
       productItems: [],
     });
-    expect(transactions.json().summary.income).toBe(118);
-    expect(transactions.json().summary.expense).toBe(59);
+    expect(transactions.json().summary.income).toBe(50);
+    expect(transactions.json().summary.expense).toBe(25);
 
     const stock = await app.inject({
       method: "GET",
@@ -2122,7 +2116,7 @@ describe("API MVP", () => {
         changedBy: "owner",
         completedAt: "2026-04-30T14:45:00.000Z",
         paymentMethod: "PIX",
-        expectedTotal: 55,
+        expectedTotal: 20,
       },
     });
     expect(checkout.statusCode).toBe(200);
@@ -2244,7 +2238,7 @@ describe("API MVP", () => {
         changedBy: "owner",
         completedAt: "2026-04-30T16:45:00.000Z",
         paymentMethod: "PIX",
-        expectedTotal: 55,
+        expectedTotal: 20,
       },
     });
     expect(checkout.statusCode).toBe(200);
@@ -2412,7 +2406,7 @@ describe("API MVP", () => {
     expect(rows[0].status).toBe("NOT_REFUNDED");
     expect(rows[0].items[0]).toMatchObject({
       productId: "prd-pomada",
-      productName: "Pomada Matte",
+      productName: "Pomada",
       refundedQuantity: 0,
     });
   });
@@ -2473,7 +2467,7 @@ describe("API MVP", () => {
       url: `/sales/products?unitId=unit-01&status=REFUNDED&search=${historicalSale.id}`,
     });
     expect(updatedHistory.statusCode).toBe(200);
-    expect(updatedHistory.json().sales[0].totalRefundedAmount).toBe(59);
+    expect(updatedHistory.json().sales[0].totalRefundedAmount).toBe(25);
     expect(updatedHistory.json().sales[0].items[0].refundedQuantity).toBe(1);
 
     const audit = await app.inject({
@@ -2662,7 +2656,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-28T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-28", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -2679,7 +2673,7 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "status-api-022" },
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await checkoutForTest(app, appointmentId, "2026-04-28T10:50:00.000Z", "checkout-commission-expense-source");
+    await checkoutForTest(app, appointmentId, validBookingInterval("2026-04-28", 10, 30, 1).startsAt, "checkout-commission-expense-source");
 
     const commissions = await app.inject({
       method: "GET",
@@ -2796,7 +2790,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-29T10:00:00.000Z",
+        startsAt: validBookingInterval("2026-04-29", 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -2822,7 +2816,7 @@ describe("API MVP", () => {
       },
       payload: {
         changedBy: "owner",
-        completedAt: "2026-04-29T10:50:00.000Z",
+        completedAt: validBookingInterval("2026-04-29", 10, 30, 1).startsAt,
         paymentMethod: "PIX",
       },
     });
@@ -3088,7 +3082,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-26T10:00:00.000Z",
+        startsAt: validBookingInterval(nextBusinessDay("2026-04-26"), 10, 0, 30).startsAt,
         changedBy: "owner",
       },
     });
@@ -3111,7 +3105,7 @@ describe("API MVP", () => {
       url: `/appointments/${appointmentId}/checkout`,
       payload: {
         changedBy: "owner",
-        completedAt: "2026-04-26T10:50:00.000Z",
+        completedAt: validBookingInterval(nextBusinessDay("2026-04-26"), 10, 30, 1).startsAt,
         paymentMethod: "PIX",
       },
     });
@@ -3204,7 +3198,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-27T10:00:00.000Z",
+        startsAt: operationalLocalToUtc("2026-04-27", 13),
         changedBy: "owner",
       },
     });
@@ -3224,7 +3218,7 @@ describe("API MVP", () => {
     await checkoutForTest(
       app,
       commissionAppointmentId,
-      "2026-04-27T10:50:00.000Z",
+      operationalLocalToUtc("2026-04-27", 13, 30),
       "checkout-missing-key-commission-setup",
     );
     const commissions = await app.inject({
@@ -3508,12 +3502,12 @@ describe("API MVP", () => {
         changedBy: "owner",
         completedAt: "2026-04-23T12:50:00.000Z",
         paymentMethod: "PIX",
-        expectedTotal: 75,
+        expectedTotal: 30,
       },
     });
     expect(retry.statusCode).toBe(200);
     expect(retry.json().appointment.status).toBe("COMPLETED");
-    expect(retry.json().serviceRevenue.amount).toBe(75);
+    expect(retry.json().serviceRevenue.amount).toBe(30);
   });
 
   it("bloqueia venda quando estoque e insuficiente", async () => {
@@ -3635,7 +3629,7 @@ describe("API MVP", () => {
     expect(movementResponse.statusCode).toBe(200);
     const body = movementResponse.json();
     expect(body.movement.movementType).toBe("IN");
-    expect(body.product.stockQty).toBeGreaterThanOrEqual(18);
+    expect(body.product.stockQty).toBe(13);
 
     const replayResponse = await app.inject({
       method: "POST",
@@ -3989,8 +3983,8 @@ describe("API MVP", () => {
       await checkoutForTest(app, appointmentId, completedAt, `checkout-management-overview-${appointmentId}`);
     };
 
-    await createAndComplete("2026-04-10T10:00:00.000Z", "2026-04-10T11:00:00.000Z");
-    await createAndComplete("2026-04-11T10:00:00.000Z", "2026-04-11T11:00:00.000Z");
+    await createAndComplete(operationalLocalToUtc("2026-04-10", 10), operationalLocalToUtc("2026-04-10", 11));
+    await createAndComplete(operationalLocalToUtc("2026-04-11", 10), operationalLocalToUtc("2026-04-11", 11));
     await app.inject({
       method: "POST",
       url: "/sales/products",
@@ -4262,11 +4256,11 @@ describe("API MVP", () => {
       await checkoutForTest(app, appointmentId, completedAt, `checkout-clients-overview-${appointmentId}`);
     };
 
-    await createAndComplete("cli-01", "2026-04-02T10:00:00.000Z", "2026-04-02T11:00:00.000Z");
-    await createAndComplete("cli-01", "2026-04-10T10:00:00.000Z", "2026-04-10T11:00:00.000Z");
-    await createAndComplete("cli-01", "2026-04-20T10:00:00.000Z", "2026-04-20T11:00:00.000Z");
-    await createAndComplete("cli-02", "2026-03-01T10:00:00.000Z", "2026-03-01T11:00:00.000Z");
-    await createAndComplete("cli-02", "2026-03-10T10:00:00.000Z", "2026-03-10T11:00:00.000Z");
+    await createAndComplete("cli-01", operationalLocalToUtc("2026-04-02", 10), operationalLocalToUtc("2026-04-02", 11));
+    await createAndComplete("cli-01", operationalLocalToUtc("2026-04-10", 10), operationalLocalToUtc("2026-04-10", 11));
+    await createAndComplete("cli-01", operationalLocalToUtc("2026-04-20", 10), operationalLocalToUtc("2026-04-20", 11));
+    await createAndComplete("cli-02", operationalLocalToUtc("2026-03-02", 10), operationalLocalToUtc("2026-03-02", 11));
+    await createAndComplete("cli-02", operationalLocalToUtc("2026-03-10", 10), operationalLocalToUtc("2026-03-10", 11));
 
     const response = await app.inject({
       method: "GET",
@@ -4746,7 +4740,7 @@ describe("API MVP", () => {
         clientId: "cli-02",
         professionalId: "pro-01",
         serviceId: "svc-barba",
-        startsAt: "2026-01-01T10:00:00.000Z",
+        startsAt: operationalLocalToUtc("2026-01-01", 10),
         changedBy: "owner",
       },
     });
@@ -4763,7 +4757,7 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "status-api-045" },
       payload: { status: "IN_SERVICE", changedBy: "owner" },
     });
-    await checkoutForTest(app, appointmentId, "2026-01-01T11:00:00.000Z", "checkout-retention-history");
+    await checkoutForTest(app, appointmentId, operationalLocalToUtc("2026-01-01", 11), "checkout-retention-history");
 
     vi.setSystemTime(new Date("2026-04-23T00:00:00.000Z"));
     const retention = await app.inject({
@@ -5212,7 +5206,7 @@ describe("API MVP", () => {
         clientName: "Cliente Publico",
         clientPhone: "(11) 97777-6666",
         serviceId: "svc-barba",
-        startsAt: "2026-06-07T13:00:00.000Z",
+        startsAt: operationalLocalToUtc(nextBusinessDay("2026-06-07"), 10),
       },
     });
 
@@ -5323,8 +5317,8 @@ describe("API MVP", () => {
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
 
-    expect(publicNames).toContain("Barba Terapia");
-    expect(publicNames).toContain("Corte Premium");
+    expect(publicNames).toContain("Barba");
+    expect(publicNames).toContain("Corte");
     expect(publicNames).not.toContain("Servico Teste Comissao TG");
     expect(publicNames).not.toContain("Corte demo");
     expect(publicNames).not.toContain("Servico db importado");
@@ -5395,7 +5389,7 @@ describe("API MVP", () => {
     expect(professionals.statusCode).toBe(200);
     expect(professionals.json().service).toEqual({
       id: "svc-barba",
-      name: "Barba Terapia",
+      name: "Barba",
     });
     expect(professionals.json().professionals).toEqual([
       { id: "pro-01", name: "Geovane Borges", displayName: "Geovane Borges" },
@@ -5587,7 +5581,7 @@ describe("API MVP", () => {
       origin: "public_booking",
       appointmentId: booking.json().id,
       serviceId: "svc-barba",
-      serviceName: "Barba Terapia",
+      serviceName: "Barba",
       professionalId: "pro-01",
       professionalName: "Geovane Borges",
       startsAt: "2026-06-05T21:00:00.000Z",
@@ -5852,7 +5846,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-26T10:00:00.000Z",
+        startsAt: operationalLocalToUtc(nextBusinessDay("2026-04-26"), 10),
       },
     });
     expect(appointment.statusCode).toBe(200);
@@ -5986,7 +5980,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-25T10:00:00.000Z",
+        startsAt: operationalLocalToUtc("2026-04-25", 10),
         changedBy: "owner",
       },
     });
@@ -6033,7 +6027,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-28T10:00:00.000Z",
+        startsAt: operationalLocalToUtc("2026-04-28", 10),
         changedBy: "owner",
       },
     });
@@ -6055,9 +6049,9 @@ describe("API MVP", () => {
 
     const detail = await app.inject({ method: "GET", url: `/appointments/${appointmentId}` });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json().appointment.service).toBe("Corte Premium");
-    expect(detail.json().appointment.servicePrice).toBe(75);
-    expect(detail.json().appointment.serviceDurationMin).toBe(45);
+    expect(detail.json().appointment.service).toBe("Corte");
+    expect(detail.json().appointment.servicePrice).toBe(30);
+    expect(detail.json().appointment.serviceDurationMin).toBe(30);
 
     const base = "unitId=unit-01&start=2026-04-28T00:00:00.000Z&end=2026-04-28T23:59:59.999Z";
     const appointmentsReport = await app.inject({
@@ -6065,9 +6059,9 @@ describe("API MVP", () => {
       url: `/reports/management/appointments?${base}`,
     });
     expect(appointmentsReport.statusCode).toBe(200);
-    expect(appointmentsReport.json().summary.estimatedRevenue).toBe(75);
-    expect(appointmentsReport.json().appointments[0].serviceName).toBe("Corte Premium");
-    expect(appointmentsReport.json().appointments[0].price).toBe(75);
+    expect(appointmentsReport.json().summary.estimatedRevenue).toBe(30);
+    expect(appointmentsReport.json().appointments[0].serviceName).toBe("Corte");
+    expect(appointmentsReport.json().appointments[0].price).toBe(30);
 
     await app.inject({
       method: "PATCH",
@@ -6087,15 +6081,15 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "service-snapshot-checkout" },
       payload: {
         unitId: "unit-01",
-        completedAt: "2026-04-28T10:45:00.000Z",
+        completedAt: operationalLocalToUtc("2026-04-28", 10, 30),
         paymentMethod: "PIX",
-        expectedTotal: 75,
+        expectedTotal: 30,
         changedBy: "owner",
       },
     });
     expect(checkout.statusCode).toBe(200);
-    expect(checkout.json().serviceRevenue.amount).toBe(75);
-    expect(checkout.json().serviceRevenue.description).toContain("Corte Premium");
+    expect(checkout.json().serviceRevenue.amount).toBe(30);
+    expect(checkout.json().serviceRevenue.description).toContain("Corte");
   });
 
   it("mantem fallback legado para agendamento sem snapshot de servico", async () => {
@@ -6125,9 +6119,9 @@ describe("API MVP", () => {
       unitId: "unit-01",
     });
 
-    expect(appointment.service).toBe("Corte Premium");
-    expect(appointment.servicePrice).toBe(75);
-    expect(appointment.serviceDurationMin).toBe(45);
+    expect(appointment.service).toBe("Corte");
+    expect(appointment.servicePrice).toBe(30);
+    expect(appointment.serviceDurationMin).toBe(30);
   });
 
   it("mantem dual-write memory de item unico e leitura compativel", () => {
@@ -6141,7 +6135,7 @@ describe("API MVP", () => {
       clientId: "cli-01",
       professionalId: "pro-01",
       serviceId: "svc-corte",
-      startsAt: new Date("2026-07-12T12:00:00.000Z"),
+      startsAt: new Date(operationalLocalToUtc(nextBusinessDay("2026-07-12"), 10)),
       changedBy: "test",
     });
 
@@ -6161,7 +6155,7 @@ describe("API MVP", () => {
     expect(updated.serviceItems?.[0]).toMatchObject({
       serviceId: "svc-barba",
       position: 0,
-      serviceNameSnapshot: "Barba Terapia",
+      serviceNameSnapshot: "Barba",
     });
     expect(store.appointmentServiceItems.filter((item) => item.appointmentId === created.id)).toHaveLength(1);
   });
@@ -6186,7 +6180,7 @@ describe("API MVP", () => {
     const appointment = created.json().appointment;
     expect(appointment.serviceId).toBe("svc-corte");
     expect(appointment.serviceItems).toHaveLength(2);
-    expect(appointment.totalPriceSnapshot).toBe(130);
+    expect(appointment.totalPriceSnapshot).toBe(50);
     expect(appointment.effectiveDurationMinSnapshot).toBe(45);
     expect(appointment.durationCalculationMode).toBe("COMBINATION_RULE");
     expect(new Date(appointment.endsAt).toISOString()).toBe("2026-07-13T12:45:00.000Z");
@@ -6230,16 +6224,16 @@ describe("API MVP", () => {
       startsAt: new Date("2026-07-20T13:00:00.000Z"),
       changedBy: "owner",
     });
-    expect(firstZero.endsAt.toISOString()).toBe("2026-07-20T13:45:00.000Z");
+    expect(firstZero.endsAt.toISOString()).toBe("2026-07-20T13:30:00.000Z");
     const adjacentZero = zeroOperations.schedule({
       unitId: "unit-01",
       clientId: "cli-02",
       professionalId: "pro-01",
       serviceId: "svc-corte",
-      startsAt: new Date("2026-07-20T13:45:00.000Z"),
+      startsAt: new Date("2026-07-20T13:30:00.000Z"),
       changedBy: "owner",
     });
-    expect(adjacentZero.startsAt.toISOString()).toBe("2026-07-20T13:45:00.000Z");
+    expect(adjacentZero.startsAt.toISOString()).toBe("2026-07-20T13:30:00.000Z");
 
     const bufferedStore = new InMemoryStore();
     const bufferedSettings = bufferedStore.businessSettings.find((item) => item.unitId === "unit-01");
@@ -6399,14 +6393,14 @@ describe("API MVP", () => {
       changedBy: "owner",
       completedAt: new Date("2026-07-14T12:45:00.000Z"),
       paymentMethod: "PIX",
-      expectedTotal: 130,
+      expectedTotal: 50,
       idempotencyKey: "checkout-multi-service-success",
     });
 
     const afterAppointment = store.appointments.find((item) => item.id === appointment.id);
     expect(afterAppointment?.status).toBe("COMPLETED");
     expect(checkout.appointment).toMatchObject({ id: appointment.id, status: "COMPLETED" });
-    expect(checkout.serviceRevenue).toMatchObject({ referenceId: appointment.id, amount: 130 });
+    expect(checkout.serviceRevenue).toMatchObject({ referenceId: appointment.id, amount: 50 });
     expect(checkout.commissions).toHaveLength(0);
     expect(
       (operations as unknown as { idempotencyRecords: Map<string, unknown> }).idempotencyRecords.size,
@@ -6448,13 +6442,13 @@ describe("API MVP", () => {
         changedBy: "owner",
         completedAt: "2026-07-15T12:45:00.000Z",
         paymentMethod: "PIX",
-        expectedTotal: 130,
+        expectedTotal: 50,
       },
     });
     expect(checkout.statusCode).toBe(200);
     expect(checkout.json()).toMatchObject({
       appointment: { id: appointmentId, status: "COMPLETED" },
-      serviceRevenue: { amount: 130 },
+      serviceRevenue: { amount: 50 },
     });
     expect(checkout.json().commissions).toHaveLength(0);
   });
@@ -6471,7 +6465,7 @@ describe("API MVP", () => {
         clientId: "cli-01",
         professionalId: "pro-01",
         serviceId: "svc-corte",
-        startsAt: "2026-04-27T10:00:00.000Z",
+        startsAt: operationalLocalToUtc("2026-04-27", 10),
         changedBy: "owner",
       },
     });
@@ -6495,14 +6489,14 @@ describe("API MVP", () => {
       headers: { "idempotency-key": "reports-management-checkout" },
       payload: {
         unitId: "unit-01",
-        completedAt: "2026-04-27T10:45:00.000Z",
+        completedAt: operationalLocalToUtc("2026-04-27", 10, 30),
         paymentMethod: "PIX",
         changedBy: "owner",
         products: [{ productId: "prd-pomada", quantity: 1 }],
       },
     });
     expect(checkout.statusCode).toBe(200);
-    expect(checkout.json().serviceRevenue.amount).toBe(134);
+    expect(checkout.json().serviceRevenue.amount).toBe(55);
 
     const servicePriceChange = await app.inject({
       method: "PATCH",
@@ -6519,14 +6513,14 @@ describe("API MVP", () => {
     const base = "unitId=unit-01&start=2026-04-27T00:00:00.000Z&end=2026-04-27T23:59:59.999Z";
     const financial = await app.inject({ method: "GET", url: `/reports/management/financial?${base}` });
     expect(financial.statusCode).toBe(200);
-    expect(financial.json().summary.serviceRevenue).toBe(134);
+    expect(financial.json().summary.serviceRevenue).toBe(55);
     expect(financial.json().breakdown.byOrigin[0].label).toBeTruthy();
 
     const appointments = await app.inject({ method: "GET", url: `/reports/management/appointments?${base}` });
     expect(appointments.statusCode).toBe(200);
     expect(appointments.json().summary.completed).toBe(1);
-    expect(appointments.json().summary.realizedRevenue).toBe(134);
-    expect(appointments.json().appointments[0].price).toBe(134);
+    expect(appointments.json().summary.realizedRevenue).toBe(55);
+    expect(appointments.json().appointments[0].price).toBe(55);
 
     const productSales = await app.inject({ method: "GET", url: `/reports/management/product-sales?${base}` });
     expect(productSales.statusCode).toBe(200);
@@ -6539,7 +6533,7 @@ describe("API MVP", () => {
     const professionals = await app.inject({ method: "GET", url: `/reports/management/professionals?${base}` });
     expect(professionals.statusCode, professionals.body).toBe(200);
     expect(professionals.json().professionals[0].professionalName).toBeTruthy();
-    expect(professionals.json().summary.serviceRevenue).toBe(134);
+    expect(professionals.json().summary.serviceRevenue).toBe(55);
 
     const summary = await app.inject({ method: "GET", url: `/reports/management/summary?${base}` });
     expect(summary.statusCode).toBe(200);
@@ -6553,7 +6547,7 @@ describe("API MVP", () => {
     const cortePerformance = performanceServices
       .json()
       .services.find((item: { serviceId: string }) => item.serviceId === "svc-corte");
-    expect(cortePerformance.revenue).toBe(75);
+    expect(cortePerformance.revenue).toBe(30);
   });
 
   it("exporta CSV gerencial com cabecalhos humanos", async () => {

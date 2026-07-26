@@ -46,49 +46,23 @@ import type {
   ReactivationRecipientAuditRecord,
   ReactivationRecipientRecord,
 } from "../application/reactivation-campaign";
-import { buildServiceSetKey } from "../domain/appointment-services";
+import {
+  CANONICAL_DEMO_PRODUCTS,
+  CANONICAL_DEMO_PRODUCT_IDS,
+  CANONICAL_DEMO_SERVICE_COMBINATION_RULES,
+  CANONICAL_DEMO_SERVICES,
+  CANONICAL_DEMO_SERVICE_IDS,
+  CANONICAL_DEMO_SERVICE_PROFESSIONAL_ASSIGNMENTS,
+} from "./canonical-demo-catalog";
 
 export class InMemoryStore {
   units: Array<{ id: UUID; name: string; timezone: string }> = [
     { id: "unit-01", name: "Barbearia Premium - Centro", timezone: "America/Sao_Paulo" },
     { id: "unit-02", name: "Barbearia Premium - Zona Sul", timezone: "America/Sao_Paulo" },
   ];
-  services: Service[] = [
-    {
-      id: "svc-corte",
-      businessId: "unit-01",
-      name: "Corte Premium",
-      description: "Corte com acabamento premium e finalizacao personalizada.",
-      category: "CORTE",
-      price: 75,
-      durationMin: 45,
-      defaultCommissionRate: 0,
-      costEstimate: 12,
-      notes: "",
-      active: true,
-      createdAt: new Date("2026-04-22T00:00:00.000Z"),
-      updatedAt: new Date("2026-04-26T00:00:00.000Z"),
-    },
-    {
-      id: "svc-barba",
-      businessId: "unit-01",
-      name: "Barba Terapia",
-      description: "Modelagem e hidratacao de barba com toalha quente.",
-      category: "BARBA",
-      price: 55,
-      durationMin: 35,
-      defaultCommissionRate: 0,
-      costEstimate: 10,
-      notes: "",
-      active: true,
-      createdAt: new Date("2026-04-22T00:00:00.000Z"),
-      updatedAt: new Date("2026-04-26T00:00:00.000Z"),
-    },
-  ];
-  serviceProfessionalAssignments: ServiceProfessionalAssignment[] = [
-    { serviceId: "svc-corte", professionalId: "pro-01" },
-    { serviceId: "svc-barba", professionalId: "pro-01" },
-  ];
+  services: Service[] = CANONICAL_DEMO_SERVICES.map((service) => ({ ...service }));
+  serviceProfessionalAssignments: ServiceProfessionalAssignment[] =
+    CANONICAL_DEMO_SERVICE_PROFESSIONAL_ASSIGNMENTS.map((assignment) => ({ ...assignment }));
   professionals: Professional[] = [
     {
       id: "pro-01",
@@ -143,13 +117,13 @@ export class InMemoryStore {
     },
   ];
   businessHours: BusinessHour[] = [
-    { id: "bh-unit-01-0", unitId: "unit-01", dayOfWeek: 0, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-1", unitId: "unit-01", dayOfWeek: 1, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-2", unitId: "unit-01", dayOfWeek: 2, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-3", unitId: "unit-01", dayOfWeek: 3, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-4", unitId: "unit-01", dayOfWeek: 4, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-5", unitId: "unit-01", dayOfWeek: 5, opensAt: "00:00", closesAt: "23:59", isClosed: false },
-    { id: "bh-unit-01-6", unitId: "unit-01", dayOfWeek: 6, opensAt: "00:00", closesAt: "23:59", isClosed: false },
+    { id: "bh-unit-01-0", unitId: "unit-01", dayOfWeek: 0, opensAt: "", closesAt: "", isClosed: true },
+    { id: "bh-unit-01-1", unitId: "unit-01", dayOfWeek: 1, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    { id: "bh-unit-01-2", unitId: "unit-01", dayOfWeek: 2, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    { id: "bh-unit-01-3", unitId: "unit-01", dayOfWeek: 3, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    { id: "bh-unit-01-4", unitId: "unit-01", dayOfWeek: 4, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    { id: "bh-unit-01-5", unitId: "unit-01", dayOfWeek: 5, opensAt: "08:00", closesAt: "20:00", isClosed: false },
+    { id: "bh-unit-01-6", unitId: "unit-01", dayOfWeek: 6, opensAt: "08:00", closesAt: "14:00", isClosed: false },
   ];
   businessPaymentMethods: BusinessPaymentMethod[] = [
     { id: "pay-unit-01-cash", unitId: "unit-01", name: "Dinheiro", isActive: true, isDefault: false },
@@ -187,61 +161,16 @@ export class InMemoryStore {
       tags: ["NEW"],
     },
   ];
-  products: Product[] = [
-    {
-      id: "prd-pomada",
-      name: "Pomada Matte",
-      category: "Finalizacao",
-      salePrice: 59,
-      costPrice: 24,
-      stockQty: 15,
-      minStockAlert: 4,
-      active: true,
-    },
-    {
-      id: "prd-oleo-barba",
-      name: "Oleo para Barba",
-      category: "Barba",
-      salePrice: 39,
-      costPrice: 14,
-      stockQty: 12,
-      minStockAlert: 3,
-      active: true,
-    },
-  ];
+  products: Product[] = CANONICAL_DEMO_PRODUCTS.map((product) => ({ ...product }));
   appointments: Appointment[] = [];
   appointmentBlocks: AppointmentBlock[] = [];
   appointmentCheckouts: AppointmentCheckout[] = [];
   checkoutPayments: CheckoutPayment[] = [];
   appointmentServiceItems: AppointmentServiceItem[] = [];
-  serviceCombinationRules: ServiceCombinationRule[] = [
-    {
-      id: "rule-unit-01-corte-barba-45",
-      unitId: "unit-01",
-      serviceSetKey: buildServiceSetKey(["svc-corte", "svc-barba"]),
-      label: "Corte + Barba - 45 min",
-      effectiveDurationMin: 45,
-      active: true,
-      items: [
-        {
-          id: "rule-item-unit-01-corte-barba-45-corte",
-          ruleId: "rule-unit-01-corte-barba-45",
-          serviceId: "svc-corte",
-          position: 0,
-          createdAt: new Date("2026-07-02T00:00:00.000Z"),
-        },
-        {
-          id: "rule-item-unit-01-corte-barba-45-barba",
-          ruleId: "rule-unit-01-corte-barba-45",
-          serviceId: "svc-barba",
-          position: 1,
-          createdAt: new Date("2026-07-02T00:00:00.000Z"),
-        },
-      ],
-      createdAt: new Date("2026-07-02T00:00:00.000Z"),
-      updatedAt: new Date("2026-07-02T00:00:00.000Z"),
-    },
-  ];
+  serviceCombinationRules: ServiceCombinationRule[] = CANONICAL_DEMO_SERVICE_COMBINATION_RULES.map((rule) => ({
+    ...rule,
+    items: rule.items.map((item) => ({ ...item })),
+  }));
   financialEntries: FinancialEntry[] = [];
   commissionEntries: CommissionEntry[] = [];
   productSales: ProductSale[] = [];
@@ -259,11 +188,11 @@ export class InMemoryStore {
   serviceStockConsumptionProfiles: ServiceStockConsumptionProfile[] = [
     {
       unitId: "unit-01",
-      serviceId: "svc-corte",
+      serviceId: CANONICAL_DEMO_SERVICE_IDS.corte,
       updatedAt: new Date("2026-04-26T00:00:00.000Z"),
       items: [
         {
-          productId: "prd-pomada",
+          productId: CANONICAL_DEMO_PRODUCT_IDS.pomada,
           quantityPerService: 0.2,
           wastePct: 5,
           isCritical: true,
@@ -272,11 +201,11 @@ export class InMemoryStore {
     },
     {
       unitId: "unit-01",
-      serviceId: "svc-barba",
+      serviceId: CANONICAL_DEMO_SERVICE_IDS.barba,
       updatedAt: new Date("2026-04-26T00:00:00.000Z"),
       items: [
         {
-          productId: "prd-oleo-barba",
+          productId: CANONICAL_DEMO_PRODUCT_IDS.oleoBarba,
           quantityPerService: 0.15,
           wastePct: 4,
           isCritical: true,
@@ -302,7 +231,7 @@ export class InMemoryStore {
       name: "Pacote Corte 4 sessoes",
       price: 260,
       sessionsTotal: 4,
-      sessionsByService: { "svc-corte": 4 },
+      sessionsByService: { [CANONICAL_DEMO_SERVICE_IDS.corte]: 4 },
       validityDays: 90,
       isActive: true,
     },
@@ -312,7 +241,7 @@ export class InMemoryStore {
       name: "Pacote Barba 4 sessoes",
       price: 190,
       sessionsTotal: 4,
-      sessionsByService: { "svc-barba": 4 },
+      sessionsByService: { [CANONICAL_DEMO_SERVICE_IDS.barba]: 4 },
       validityDays: 90,
       isActive: true,
     },

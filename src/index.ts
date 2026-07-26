@@ -1,5 +1,9 @@
 import { BarbershopEngine } from "./application/barbershop-engine";
 import { Appointment, Product, ProductSale, Professional, Service } from "./domain/types";
+import {
+  CANONICAL_DEMO_PRODUCTS,
+  CANONICAL_DEMO_PRODUCT_IDS,
+} from "./infrastructure/canonical-demo-catalog";
 
 function bootstrapDemo(): void {
   const engine = new BarbershopEngine();
@@ -70,18 +74,9 @@ function bootstrapDemo(): void {
     completedAt: new Date("2026-04-22T14:00:00"),
   });
 
-  const products: Product[] = [
-    {
-      id: "prd-pomada",
-      name: "Pomada Matte",
-      category: "Finalizacao",
-      salePrice: 59,
-      costPrice: 21,
-      stockQty: 15,
-      minStockAlert: 3,
-      active: true,
-    },
-  ];
+  const products: Product[] = CANONICAL_DEMO_PRODUCTS.map((product) => ({ ...product }));
+  const pomada = products.find((product) => product.id === CANONICAL_DEMO_PRODUCT_IDS.pomada);
+  if (!pomada) throw new Error("Produto canonico Pomada indisponivel");
 
   const sale: ProductSale = {
     id: "sale-01",
@@ -90,10 +85,10 @@ function bootstrapDemo(): void {
     professionalId: professional.id,
     items: [
       {
-        productId: "prd-pomada",
+        productId: pomada.id,
         quantity: 1,
-        unitPrice: 59,
-        unitCost: 21,
+        unitPrice: pomada.salePrice,
+        unitCost: pomada.costPrice,
       },
     ],
     grossAmount: 0,
