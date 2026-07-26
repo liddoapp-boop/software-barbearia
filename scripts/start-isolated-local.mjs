@@ -101,9 +101,20 @@ export function isLocalSemanticConfigReady(env) {
 }
 
 export function buildIsolatedChildEnv(localEnv, baseEnv = process.env, requestedPort = Number(baseEnv.PORT || 3334)) {
-  const isolatedIntegrationEnv = pickConfiguredEnv(isolatedIntegrationKeys, localEnv, baseEnv);
-  const isolatedLocalWhisperEnv = pickConfiguredEnv(isolatedLocalWhisperKeys, localEnv, baseEnv);
+  const integrationsDisabled =
+    String(baseEnv.ISOLATED_DISABLE_INTEGRATIONS ?? "").trim().toLowerCase() === "true";
+  const isolatedIntegrationEnv = integrationsDisabled
+    ? Object.fromEntries(isolatedIntegrationKeys.map((key) => [key, ""]))
+    : pickConfiguredEnv(isolatedIntegrationKeys, localEnv, baseEnv);
+  const isolatedLocalWhisperEnv = integrationsDisabled
+    ? Object.fromEntries(isolatedLocalWhisperKeys.map((key) => [key, ""]))
+    : pickConfiguredEnv(isolatedLocalWhisperKeys, localEnv, baseEnv);
   const isolatedWhatsappOutboundEnv = resolveIsolatedWhatsappOutboundEnv(baseEnv);
+  const lanHost =
+    String(baseEnv.ALLOW_LAN_SERVER ?? "").trim().toLowerCase() === "true"
+    && String(baseEnv.HOST ?? "").trim() === "0.0.0.0"
+      ? "0.0.0.0"
+      : "127.0.0.1";
   return {
     ...baseEnv,
     ...Object.fromEntries(disabledRemoteAiKeys.map((key) => [key, ""])),
@@ -117,7 +128,7 @@ export function buildIsolatedChildEnv(localEnv, baseEnv = process.env, requested
     DATA_BACKEND: "memory",
     DATABASE_URL: "postgresql://isolated:isolated@127.0.0.1:1/barbearia_isolated_not_used",
     AI_WHATSAPP_UNIT_ID: "unit-01",
-    HOST: "127.0.0.1",
+    HOST: lanHost,
     PORT: String(requestedPort),
   };
 }
@@ -151,7 +162,7 @@ export function startIsolatedLocal() {
   const localSemanticReady = isLocalSemanticConfigReady(childEnv);
 
   console.log(
-    `Modo isolado: backend em memoria, host 127.0.0.1, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, saida WhatsApp ${childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}, semantico local ${localSemanticReady ? "configurado" : "desabilitado"}.`,
+    `Modo isolado: backend em memoria, host ${childEnv.HOST}, porta ${requestedPort}, WhatsApp local ${whatsappIntegrationReady ? "habilitado" : "desabilitado"}, saida WhatsApp ${childEnv.ISOLATED_WHATSAPP_OUTBOUND_MODE}, Whisper local ${localWhisperReady ? "configurado" : "desabilitado"}, semantico local ${localSemanticReady ? "configurado" : "desabilitado"}.`,
   );
 
   if (whatsappIntegrationReady && !runEvolutionBootstrapCheck({ env: childEnv })) {

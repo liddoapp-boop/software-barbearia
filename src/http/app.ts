@@ -311,7 +311,7 @@ function hasDuplicateQueryParameter(url: string) {
 
 function getContentSecurityPolicy() {
   const inlineScriptHashes = getInlineScriptHashes();
-  return [
+  const directives = [
     "default-src 'self'",
     `script-src 'self' ${inlineScriptHashes} https://www.gstatic.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
@@ -322,8 +322,11 @@ function getContentSecurityPolicy() {
     "base-uri 'self'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    "upgrade-insecure-requests",
-  ].join("; ");
+  ];
+  if (process.env.NODE_ENV === "production") {
+    directives.push("upgrade-insecure-requests");
+  }
+  return directives.join("; ");
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number) {
@@ -1053,6 +1056,12 @@ export function createApp(options: {
     revokedAccessTokens.set(accessTokenFingerprint(token), Number.isFinite(expiry) ? expiry : Date.now() + 30 * 60_000);
   };
   const contentSecurityPolicy = getContentSecurityPolicy();
+  const htmlEntryPaths = new Set(["/", "/login", "/agendamento", "/login.html", "/booking.html"]);
+  const resolveContentSecurityPolicy = (requestUrl: string) => {
+    if (process.env.NODE_ENV === "production") return contentSecurityPolicy;
+    const pathname = requestUrl.split("?", 1)[0];
+    return htmlEntryPaths.has(pathname) ? getContentSecurityPolicy() : contentSecurityPolicy;
+  };
 
   const buildAppointmentBlockEvents = (blocks: Array<{
     id: string;
@@ -3586,8 +3595,8 @@ export function createApp(options: {
     prefix: "/",
   });
 
-  app.addHook("onRequest", async (_request, reply) => {
-    reply.header("Content-Security-Policy", contentSecurityPolicy);
+  app.addHook("onRequest", async (request, reply) => {
+    reply.header("Content-Security-Policy", resolveContentSecurityPolicy(request.url));
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");

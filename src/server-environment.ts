@@ -9,7 +9,7 @@ type ServerMode = "pilot" | "isolated" | "test";
 export type SafeServerEnvironment = {
   mode: ServerMode;
   port: number;
-  host: "127.0.0.1";
+  host: "127.0.0.1" | "0.0.0.0";
   dataBackend: "memory" | "prisma";
 };
 
@@ -58,16 +58,19 @@ export function assertSafeServerEnvironment(
   }
 
   const explicitlyAllowed = String(env.ALLOW_NON_PILOT_SERVER ?? "").trim().toLowerCase() === "true";
-  if (!explicitlyAllowed || host !== "127.0.0.1" || nodeEnv !== "development") {
+  if (!explicitlyAllowed || nodeEnv !== "development") {
     throw new Error(ISOLATED_STARTUP_BLOCKED_MESSAGE);
   }
 
-  if (mode === "isolated" && dataBackend === "memory") {
+  const lanExplicitlyAllowed = String(env.ALLOW_LAN_SERVER ?? "").trim().toLowerCase() === "true";
+  const validIsolatedHost = host === "127.0.0.1" || (host === "0.0.0.0" && lanExplicitlyAllowed);
+  if (mode === "isolated" && dataBackend === "memory" && validIsolatedHost) {
     return { mode: "isolated", port, host, dataBackend: "memory" };
   }
 
   const validTestDatabase =
     mode === "test" &&
+    host === "127.0.0.1" &&
     dataBackend === "prisma" &&
     Boolean(databaseTarget) &&
     /test/i.test(databaseTarget?.database ?? "") &&

@@ -60,6 +60,27 @@ describe("server environment guard", () => {
     })).toThrow(ISOLATED_STARTUP_BLOCKED_MESSAGE);
   });
 
+  it("aceita bind LAN somente no modo isolado com autorizacao explicita", () => {
+    expect(assertSafeServerEnvironment({
+      NODE_ENV: "development",
+      SERVER_MODE: "isolated",
+      ALLOW_NON_PILOT_SERVER: "true",
+      ALLOW_LAN_SERVER: "true",
+      PORT: "3334",
+      HOST: "0.0.0.0",
+      DATA_BACKEND: "memory",
+    })).toMatchObject({ mode: "isolated", port: 3334, host: "0.0.0.0", dataBackend: "memory" });
+
+    expect(() => assertSafeServerEnvironment({
+      NODE_ENV: "development",
+      SERVER_MODE: "isolated",
+      ALLOW_NON_PILOT_SERVER: "true",
+      PORT: "3334",
+      HOST: "0.0.0.0",
+      DATA_BACKEND: "memory",
+    })).toThrow(ISOLATED_STARTUP_BLOCKED_MESSAGE);
+  });
+
   it("aceita Prisma tecnico apenas com banco local marcado como teste", () => {
     expect(assertSafeServerEnvironment({
       NODE_ENV: "development",
@@ -153,6 +174,46 @@ describe("server environment guard", () => {
     expect(childEnv.AI_AUDIO_TRANSCRIPTION_MODEL).toBe("");
     expect(childEnv.GEMINI_API_KEY).toBe("");
     expect(childEnv.SEMANTIC_PROVIDER).toBe("local_llama");
+  });
+
+  it("propaga bind LAN ao launcher isolado somente com opt-in duplo", async () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts", "start-isolated-local.mjs")).href;
+    const launcher = await import(moduleUrl) as {
+      buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
+    };
+    const lanEnv = launcher.buildIsolatedChildEnv({}, {
+      HOST: "0.0.0.0",
+      ALLOW_LAN_SERVER: "true",
+    }, 3334);
+    const protectedEnv = launcher.buildIsolatedChildEnv({}, {
+      HOST: "0.0.0.0",
+    }, 3334);
+
+    expect(lanEnv.HOST).toBe("0.0.0.0");
+    expect(protectedEnv.HOST).toBe("127.0.0.1");
+  });
+
+  it("permite iniciar o teste LAN sem depender das integracoes locais", async () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts", "start-isolated-local.mjs")).href;
+    const launcher = await import(moduleUrl) as {
+      buildIsolatedChildEnv: (localEnv: Record<string, string>, baseEnv: Record<string, string>, port: number) => Record<string, string>;
+    };
+    const childEnv = launcher.buildIsolatedChildEnv({
+      AI_WHATSAPP_ENABLED: "true",
+      EVOLUTION_API_URL: "http://127.0.0.1:8080",
+      ASR_PROVIDER: "local_whisper",
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+    }, {
+      HOST: "0.0.0.0",
+      ALLOW_LAN_SERVER: "true",
+      ISOLATED_DISABLE_INTEGRATIONS: "true",
+    }, 3334);
+
+    expect(childEnv.HOST).toBe("0.0.0.0");
+    expect(childEnv.AI_WHATSAPP_ENABLED).toBe("");
+    expect(childEnv.EVOLUTION_API_URL).toBe("");
+    expect(childEnv.ASR_PROVIDER).toBe("");
+    expect(childEnv.AI_WHATSAPP_AUDIO_ENABLED).toBe("");
   });
 
   it("habilita allowlist isolada somente pelo ambiente explicito e normaliza os numeros", async () => {
