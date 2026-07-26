@@ -6731,17 +6731,24 @@ export class PrismaOperationsService {
     });
 
     const summarize = async (start: Date, end: Date) => {
+      const toCents = (value: Prisma.Decimal | number | null | undefined) =>
+        Math.round(asNumber(value) * 100);
       const [
-        incomeAgg,
+        incomeRows,
         expenseAgg,
         commissionsPendingAgg,
         paidCommissionsExpenseAgg,
         refundsExpenseAgg,
-        completedCount,
+        movementsCount,
       ] = await Promise.all([
-        this.prisma.financialEntry.aggregate({
+        this.prisma.financialEntry.findMany({
           where: { unitId: input.unitId, kind: "INCOME", occurredAt: { gte: start, lte: end } },
-          _sum: { amount: true },
+          select: {
+            amount: true,
+            source: true,
+            referenceType: true,
+            referenceId: true,
+          },
         }),
         this.prisma.financialEntry.aggregate({
           where: { unitId: input.unitId, kind: "EXPENSE", occurredAt: { gte: start, lte: end } },
@@ -6773,20 +6780,95 @@ export class PrismaOperationsService {
           },
           _sum: { amount: true },
         }),
-        this.prisma.appointment.count({
+        this.prisma.financialEntry.count({
           where: {
             unitId: input.unitId,
-            status: "COMPLETED",
-            startsAt: { gte: start, lte: end },
+            occurredAt: { gte: start, lte: end },
           },
         }),
       ]);
-      const income = asNumber(incomeAgg._sum.amount);
-      const expenses = asNumber(expenseAgg._sum.amount);
+      const appointmentIds = Array.from(
+        new Set(
+          incomeRows
+            .filter(
+              (item) =>
+                item.referenceType === "APPOINTMENT" ||
+                item.source === "SERVICE",
+            )
+            .map((item) => item.referenceId)
+            .filter((item): item is string => Boolean(item)),
+        ),
+      );
+      const checkoutRows = await this.prisma.appointmentCheckout.findMany({
+        where: {
+          unitId: input.unitId,
+          status: "PAID",
+          OR: [
+            { paidAt: { gte: start, lte: end } },
+            ...(appointmentIds.length ? [{ appointmentId: { in: appointmentIds } }] : []),
+          ],
+        },
+        select: {
+          appointmentId: true,
+          paidAt: true,
+          totalAmount: true,
+          paidAmount: true,
+          serviceAmount: true,
+          productAmount: true,
+        },
+      });
+      const paidCheckouts = checkoutRows.filter(
+        (item) => item.paidAt && item.paidAt >= start && item.paidAt <= end,
+      );
+      const checkoutByAppointment = new Map(
+        checkoutRows.map((item) => [item.appointmentId, item]),
+      );
+      const incomeCents = incomeRows.reduce((acc, item) => acc + toCents(item.amount), 0);
+      const expenseCents = toCents(expenseAgg._sum.amount);
+      const income = incomeCents / 100;
+      const expenses = expenseCents / 100;
       const pendingCommissions = asNumber(commissionsPendingAgg._sum.commissionAmount);
       const paidCommissionsTotal = asNumber(paidCommissionsExpenseAgg._sum.amount);
       const refundsTotal = asNumber(refundsExpenseAgg._sum.amount);
       const operationalExpenses = expenses - paidCommissionsTotal - refundsTotal;
+      const revenueOrigins = {
+        services: 0,
+        products: 0,
+        manual: 0,
+        other: 0,
+      };
+      for (const item of incomeRows) {
+        const amountCents = Math.max(0, toCents(item.amount));
+        if (item.referenceType === "APPOINTMENT" || item.source === "SERVICE") {
+          const checkout = item.referenceId
+            ? checkoutByAppointment.get(item.referenceId)
+            : undefined;
+          if (checkout) {
+            const productCents = Math.min(
+              amountCents,
+              Math.max(0, toCents(checkout.productAmount)),
+            );
+            revenueOrigins.services += amountCents - productCents;
+            revenueOrigins.products += productCents;
+          } else {
+            revenueOrigins.services += amountCents;
+          }
+          continue;
+        }
+        if (item.referenceType === "PRODUCT_SALE" || item.source === "PRODUCT") {
+          revenueOrigins.products += amountCents;
+          continue;
+        }
+        if (item.referenceType === "MANUAL" || item.source == null) {
+          revenueOrigins.manual += amountCents;
+          continue;
+        }
+        revenueOrigins.other += amountCents;
+      }
+      const paidCheckoutsTotalCents = paidCheckouts.reduce(
+        (acc, item) => acc + toCents(item.paidAmount),
+        0,
+      );
       const net = income - expenses;
       return {
         income: Number(income.toFixed(2)),
@@ -6797,7 +6879,21 @@ export class PrismaOperationsService {
         paidCommissionsTotal: Number(paidCommissionsTotal.toFixed(2)),
         refundsTotal: Number(refundsTotal.toFixed(2)),
         operationalExpenses: Number(operationalExpenses.toFixed(2)),
-        ticketAverage: Number((completedCount > 0 ? income / completedCount : 0).toFixed(2)),
+        ticketAverage: Number(
+          (
+            paidCheckouts.length > 0
+              ? paidCheckoutsTotalCents / 100 / paidCheckouts.length
+              : 0
+          ).toFixed(2),
+        ),
+        paidCheckoutsCount: paidCheckouts.length,
+        movementsCount,
+        revenueOrigins: {
+          services: revenueOrigins.services / 100,
+          products: revenueOrigins.products / 100,
+          manual: revenueOrigins.manual / 100,
+          other: revenueOrigins.other / 100,
+        },
       };
     };
 
@@ -6823,7 +6919,10 @@ export class PrismaOperationsService {
         refundsTotal: current.refundsTotal,
         operationalExpenses: current.operationalExpenses,
         ticketAverage: current.ticketAverage,
+        paidCheckoutsCount: current.paidCheckoutsCount,
+        movementsCount: current.movementsCount,
       },
+      revenueOrigins: current.revenueOrigins,
       cashFlow: {
         incoming: current.income,
         outgoing: current.expenses,
@@ -6834,6 +6933,8 @@ export class PrismaOperationsService {
         expensesDelta: Number((current.expenses - previous.expenses).toFixed(2)),
         estimatedProfitDelta: Number((current.estimatedProfit - previous.estimatedProfit).toFixed(2)),
         netBalanceDelta: Number((current.net - previous.net).toFixed(2)),
+        ticketAverageDelta: Number((current.ticketAverage - previous.ticketAverage).toFixed(2)),
+        movementsDelta: current.movementsCount - previous.movementsCount,
       },
     };
   }

@@ -4190,16 +4190,19 @@ export class OperationsService {
     });
 
     const sumForRange = (start: Date, end: Date) => {
+      const toCents = (value: unknown) => Math.round(Number(value ?? 0) * 100);
       const transactions = this.store.financialEntries.filter(
         (item) =>
           item.unitId === input.unitId && item.occurredAt >= start && item.occurredAt <= end,
       );
-      const income = transactions
+      const incomeCents = transactions
         .filter((item) => item.kind === "INCOME")
-        .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
-      const expenses = transactions
+        .reduce((acc, item) => acc + toCents(item.amount), 0);
+      const expenseCents = transactions
         .filter((item) => item.kind === "EXPENSE")
-        .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
+        .reduce((acc, item) => acc + toCents(item.amount), 0);
+      const income = incomeCents / 100;
+      const expenses = expenseCents / 100;
       const paidCommissionsTotal = transactions
         .filter((item) => item.kind === "EXPENSE" && item.source === "COMMISSION")
         .reduce((acc, item) => acc + Number(item.amount ?? 0), 0);
@@ -4216,14 +4219,59 @@ export class OperationsService {
             (item.status ?? "PENDING") === "PENDING",
         )
         .reduce((acc, item) => acc + Number(item.commissionAmount ?? 0), 0);
-      const appointmentsCount = this.store.appointments.filter(
+      const paidCheckouts = this.store.appointmentCheckouts.filter(
         (item) =>
           item.unitId === input.unitId &&
-          item.status === "COMPLETED" &&
-          item.startsAt >= start &&
-          item.startsAt <= end,
-      ).length;
-      const ticketAverage = appointmentsCount > 0 ? income / appointmentsCount : 0;
+          item.status === "PAID" &&
+          item.paidAt instanceof Date &&
+          item.paidAt >= start &&
+          item.paidAt <= end,
+      );
+      const paidCheckoutsTotalCents = paidCheckouts.reduce(
+        (acc, item) => acc + toCents(item.paidAmount),
+        0,
+      );
+      const ticketAverage =
+        paidCheckouts.length > 0 ? paidCheckoutsTotalCents / 100 / paidCheckouts.length : 0;
+      const revenueOrigins = {
+        services: 0,
+        products: 0,
+        manual: 0,
+        other: 0,
+      };
+      transactions
+        .filter((item) => item.kind === "INCOME")
+        .forEach((item) => {
+          const amountCents = Math.max(0, toCents(item.amount));
+          if (item.referenceType === "APPOINTMENT" || item.source === "SERVICE") {
+            const checkout = this.store.appointmentCheckouts.find(
+              (row) =>
+                row.unitId === input.unitId &&
+                row.appointmentId === item.referenceId &&
+                row.status === "PAID",
+            );
+            if (checkout) {
+              const productCents = Math.min(
+                amountCents,
+                Math.max(0, toCents(checkout.productAmount)),
+              );
+              revenueOrigins.services += amountCents - productCents;
+              revenueOrigins.products += productCents;
+            } else {
+              revenueOrigins.services += amountCents;
+            }
+            return;
+          }
+          if (item.referenceType === "PRODUCT_SALE" || item.source === "PRODUCT") {
+            revenueOrigins.products += amountCents;
+            return;
+          }
+          if (item.referenceType === "MANUAL" || item.source == null) {
+            revenueOrigins.manual += amountCents;
+            return;
+          }
+          revenueOrigins.other += amountCents;
+        });
       const net = income - expenses;
       const estimatedProfit = income - expenses - commissions;
       return {
@@ -4236,6 +4284,14 @@ export class OperationsService {
         refundsTotal: Number(refundsTotal.toFixed(2)),
         operationalExpenses: Number(operationalExpenses.toFixed(2)),
         ticketAverage: Number(ticketAverage.toFixed(2)),
+        paidCheckoutsCount: paidCheckouts.length,
+        movementsCount: transactions.length,
+        revenueOrigins: {
+          services: revenueOrigins.services / 100,
+          products: revenueOrigins.products / 100,
+          manual: revenueOrigins.manual / 100,
+          other: revenueOrigins.other / 100,
+        },
       };
     };
 
@@ -4259,7 +4315,10 @@ export class OperationsService {
         refundsTotal: current.refundsTotal,
         operationalExpenses: current.operationalExpenses,
         ticketAverage: current.ticketAverage,
+        paidCheckoutsCount: current.paidCheckoutsCount,
+        movementsCount: current.movementsCount,
       },
+      revenueOrigins: current.revenueOrigins,
       cashFlow: {
         incoming: current.income,
         outgoing: current.expenses,
@@ -4270,6 +4329,8 @@ export class OperationsService {
         expensesDelta: Number((current.expenses - previous.expenses).toFixed(2)),
         estimatedProfitDelta: Number((current.estimatedProfit - previous.estimatedProfit).toFixed(2)),
         netBalanceDelta: Number((current.net - previous.net).toFixed(2)),
+        ticketAverageDelta: Number((current.ticketAverage - previous.ticketAverage).toFixed(2)),
+        movementsDelta: current.movementsCount - previous.movementsCount,
       },
     };
   }

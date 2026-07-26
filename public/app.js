@@ -87,6 +87,7 @@ import {
   renderFinancialData,
   renderFinancialEntryDrawer,
   renderFinancialError,
+  renderFinancialHeader,
   renderFinancialLoading,
 } from "./modules/financeiro.js";
 import {
@@ -351,12 +352,7 @@ function renderOperationalChrome() {
 
   const financialHeaderMount = document.getElementById("financialHeaderMount");
   if (financialHeaderMount) {
-    financialHeaderMount.innerHTML = renderPageHeader({
-      breadcrumb: "Barbearia Geovane Borges / Financeiro",
-      eyebrow: "Caixa e fechamento",
-      title: "Financeiro",
-      subtitle: "Resultado do periodo, formas de pagamento e lancamentos sem competir com o checkout.",
-    });
+    financialHeaderMount.innerHTML = renderFinancialHeader();
   }
 
   const financialFilterMount = document.getElementById("financialFilterMount");
@@ -766,6 +762,7 @@ const reportsFeedback = document.getElementById("reportsFeedback");
 const reportsPeriod = document.getElementById("reportsPeriod");
 const reportsCustomStart = document.getElementById("reportsCustomStart");
 const reportsCustomEnd = document.getElementById("reportsCustomEnd");
+const financialHeader = document.getElementById("financialHeaderMount");
 const financialSummary = document.getElementById("financialSummary");
 const financialToolbarMount = document.getElementById("financialToolbarMount");
 const financialCashflow = document.getElementById("financialCashflow");
@@ -1107,6 +1104,7 @@ const scheduleAssistElements = {
 };
 
 const financialElements = {
+  header: financialHeader,
   summary: financialSummary,
   toolbar: financialToolbarMount,
   cashflow: financialCashflow,
@@ -6421,6 +6419,14 @@ async function loadFinancialEntries() {
       netBalance: 0,
       pendingCommissions: 0,
       ticketAverage: 0,
+      paidCheckoutsCount: 0,
+      movementsCount: 0,
+    },
+    revenueOrigins: {
+      services: 0,
+      products: 0,
+      manual: 0,
+      other: 0,
     },
     cashFlow: {
       incoming: 0,
@@ -6432,6 +6438,8 @@ async function loadFinancialEntries() {
       expensesDelta: 0,
       estimatedProfitDelta: 0,
       netBalanceDelta: 0,
+      ticketAverageDelta: 0,
+      movementsDelta: 0,
     },
   };
   const emptyTransactions = {

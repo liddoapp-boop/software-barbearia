@@ -76,7 +76,9 @@ describe("detalhes de produtos no financeiro", () => {
       date: "2026-07-13T12:00:00.000Z",
     });
 
-    expect(html).toContain("Lancamento manual · AJUSTE");
+    expect(html).toContain("Lancamento manual");
+    expect(html).toContain("AJUSTE");
+    expect(html).toContain("Pagamento");
     expect(html).not.toContain("qtd.");
   });
 });

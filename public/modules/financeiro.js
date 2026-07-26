@@ -100,154 +100,196 @@ function impactMessage(item = {}) {
   return "Este lancamento compoe o resultado operacional do periodo.";
 }
 
-function originRank(item = {}) {
-  const referenceType = String(item.referenceType ?? "").toUpperCase();
-  const source = String(item.source ?? "").toUpperCase();
-  if (referenceType.includes("REFUND") || source === "REFUND") return 4;
-  if (source === "COMMISSION" || referenceType === "COMMISSION") return 3;
-  if (source === "SERVICE" || referenceType === "APPOINTMENT") return 2;
-  if (source === "PRODUCT" || referenceType === "PRODUCT_SALE") return 1;
-  return 0;
-}
-
-function summarizeOrigins(transactions = []) {
-  const grouped = new Map();
-  transactions.forEach((item) => {
-    const label = originLabel(item);
-    const current = grouped.get(label) || { label, amount: 0, count: 0, rank: originRank(item) };
-    current.amount += toNumber(item.amount);
-    current.count += 1;
-    current.rank = Math.max(current.rank, originRank(item));
-    grouped.set(label, current);
+function formatPeriodDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
   });
-  return Array.from(grouped.values())
-    .sort((a, b) => b.rank - a.rank || b.amount - a.amount)
-    .slice(0, 4);
 }
 
-function renderCard(title, value, tone = "", subtitle = "", kind = "monetary") {
+function formatPeriodRange(period = {}) {
+  const start = formatPeriodDate(period.start);
+  const end = formatPeriodDate(period.end);
+  return start && end ? `${start} a ${end}` : "Período selecionado";
+}
+
+function formatPreviousPeriod(period = {}) {
+  const start = formatPeriodDate(period.compareStart);
+  const end = formatPeriodDate(period.compareEnd);
+  return start && end ? `${start} a ${end}` : "período anterior equivalente";
+}
+
+function signedMoney(value) {
+  const numeric = toNumber(value);
+  if (Math.abs(numeric) < 0.005) return money(0);
+  return `${numeric > 0 ? "+" : "−"} ${money(Math.abs(numeric))}`;
+}
+
+function signedPercent(value) {
+  const numeric = toNumber(value);
+  const formatted = Math.abs(numeric).toLocaleString("pt-BR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+  if (Math.abs(numeric) < 0.05) return "0,0%";
+  return `${numeric > 0 ? "+" : "−"}${formatted}%`;
+}
+
+function comparisonDetails(currentValue, deltaValue, period = {}, options = {}) {
+  if (deltaValue == null || !Number.isFinite(Number(deltaValue))) {
+    return { hasBase: false, text: "Sem base de comparação" };
+  }
+  const current = toNumber(currentValue);
+  const delta = toNumber(deltaValue);
+  const previous = current - delta;
+  if (Math.abs(previous) < 0.005) {
+    return { hasBase: false, text: "Sem base de comparação" };
+  }
+  const percent = (delta / Math.abs(previous)) * 100;
+  const deltaText = options.integer
+    ? `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${Math.abs(Math.round(delta))} mov.`
+    : signedMoney(delta);
+  return {
+    hasBase: true,
+    text: `${signedPercent(percent)} · ${deltaText} vs. ${formatPreviousPeriod(period)}`,
+  };
+}
+
+function renderCard(title, value, tone = "", comparison = {}, kind = "monetary", context = "") {
   return `
     <article class="fn-kpi liddo-kpi ${tone}" data-kpi-kind="${escapeHtml(kind)}">
-      <span>${escapeHtml(title)}</span>
-      <strong>${escapeHtml(value)}</strong>
-      ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}
+      <div class="fn-kpi-heading">
+        <span>${escapeHtml(title)}</span>
+        ${kind === "result" ? '<i aria-hidden="true"></i>' : ""}
+      </div>
+      <strong class="fn-kpi-value">${escapeHtml(value)}</strong>
+      ${context ? `<small class="fn-kpi-context">${escapeHtml(context)}</small>` : ""}
+      <p class="fn-kpi-comparison ${comparison.hasBase ? "has-base" : "no-base"}">${escapeHtml(
+        comparison.text || "Sem base de comparação",
+      )}</p>
     </article>
   `;
 }
 
-function renderFinancialToolbar(transactions = [], cashFlow = {}) {
-  const movement = toNumber(cashFlow.incoming) + toNumber(cashFlow.outgoing);
-  const count = transactions.length;
+export function renderFinancialHeader(payload = {}) {
+  const summary = payload?.summary?.summary ?? {};
+  const transactions = Array.isArray(payload?.transactions?.transactions)
+    ? payload.transactions.transactions
+    : [];
+  const count = Number.isFinite(Number(summary.movementsCount))
+    ? Number(summary.movementsCount)
+    : transactions.length;
+  const period = payload?.summary?.period ?? {};
+  return `
+    <header class="op-page-header op-page-header-financeiro fn-page-header" data-header-module="financeiro" data-motion-item>
+      <span class="fn-header-accent" aria-hidden="true"></span>
+      <div class="fn-header-title">
+        <span>Análise do período</span>
+        <h1>Financeiro</h1>
+      </div>
+      <div class="fn-header-facts" data-header-context aria-label="Recorte financeiro atual">
+        <div class="fn-header-period">
+          <span>Período analisado</span>
+          <strong>${escapeHtml(formatPeriodRange(period))}</strong>
+        </div>
+        <div class="fn-header-count">
+          <strong>${count}</strong>
+          <span>${count === 1 ? "movimentação" : "movimentações"}</span>
+        </div>
+      </div>
+    </header>
+  `;
+}
+
+function renderFinancialToolbar() {
   return `
     <div class="fn-toolbar">
-      <div>
-        <span class="fn-toolbar-label">${count} ${count === 1 ? "lancamento" : "lancamentos"}</span>
-        <strong>Movimento ${escapeHtml(money(movement))}</strong>
-      </div>
       <button type="button" id="financialAddTransactionBtn" class="fn-add-btn">
-        <span aria-hidden="true">+</span>
-        Novo lancamento
+        <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16">
+          <path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        Novo lançamento
       </button>
     </div>
   `;
 }
 
-function renderOriginStrip(transactions = []) {
-  const origins = summarizeOrigins(transactions);
-  if (!origins.length) return "";
+function renderRevenueOrigins(revenueOrigins = {}) {
+  const rows = [
+    { key: "services", label: "Serviços", amount: toNumber(revenueOrigins.services) },
+    { key: "products", label: "Produtos", amount: toNumber(revenueOrigins.products) },
+    { key: "manual", label: "Lançamentos manuais", amount: toNumber(revenueOrigins.manual) },
+    { key: "other", label: "Outros", amount: toNumber(revenueOrigins.other) },
+  ].filter((item) => item.amount > 0.005);
+  const total = rows.reduce((acc, item) => acc + item.amount, 0);
+  if (!rows.length || total <= 0) return "";
+  const normalizedRows = rows.map((item) => ({
+    ...item,
+    percent: (item.amount / total) * 100,
+  }));
   return `
-    <article class="fn-origin-strip">
-      <div>
-        <p>Principais origens</p>
-        <strong>De onde veio o movimento do periodo</strong>
+    <section class="fn-revenue-origin" aria-label="Origem das receitas">
+      <div class="fn-chart-head">
+        <div>
+          <span>Composição da receita</span>
+          <strong>Origem das receitas</strong>
+        </div>
+        <strong>${escapeHtml(money(total))}</strong>
       </div>
-      <div class="fn-origin-list">
-        ${origins
+      <div class="fn-origin-composition" role="img" aria-label="Distribuição proporcional das receitas">
+        ${normalizedRows
           .map(
             (item) => `
-              <span>
-                <strong>${escapeHtml(item.label)}</strong>
-                ${escapeHtml(money(item.amount))} · ${item.count} lanc.
-              </span>
+              <span
+                data-origin="${escapeHtml(item.key)}"
+                style="--origin-share:${Math.min(100, Math.max(0, item.percent))}%"
+                title="${escapeHtml(item.label)}: ${escapeHtml(money(item.amount))}"
+              ></span>
             `,
           )
           .join("")}
       </div>
-    </article>
+      <div class="fn-revenue-origin-list" role="list">
+        ${normalizedRows
+          .map((item) => {
+            const percentLabel = item.percent.toLocaleString("pt-BR", {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            });
+            return `
+              <div class="fn-revenue-origin-row" data-origin="${escapeHtml(item.key)}" role="listitem">
+                <span class="fn-origin-dot" aria-hidden="true"></span>
+                <span>${escapeHtml(item.label)}</span>
+                <strong>${escapeHtml(money(item.amount))}</strong>
+                <small>${escapeHtml(percentLabel)}%</small>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
   `;
 }
 
-function barPercent(value, max) {
-  const numeric = Math.abs(toNumber(value));
-  const limit = Math.max(Math.abs(toNumber(max)), 1);
-  if (numeric <= 0) return 0;
-  return Math.max(4, Math.min(100, Math.round((numeric / limit) * 100)));
-}
-
-function renderFinancialCharts(transactions = [], cashFlow = {}) {
-  const incoming = toNumber(cashFlow.incoming);
-  const outgoing = toNumber(cashFlow.outgoing);
-  const balance = toNumber(cashFlow.balance);
-  const hasFlow = transactions.length > 0 || incoming !== 0 || outgoing !== 0 || balance !== 0;
-  const maxFlow = Math.max(Math.abs(incoming), Math.abs(outgoing), Math.abs(balance), 1);
-  const origins = summarizeOrigins(transactions);
-  const maxOrigin = Math.max(...origins.map((item) => Math.abs(toNumber(item.amount))), 1);
-
+function renderPeriodEmptyState() {
   return `
-    <section class="fn-visual-grid" aria-label="Visualizacao financeira">
-      <article class="fn-chart-card">
-        <div class="fn-chart-head">
-          <span>Fluxo de caixa</span>
-          <strong>Entradas, saidas e saldo</strong>
-        </div>
-        ${
-          hasFlow
-            ? `<div class="fn-flow-bars">
-                <div class="fn-flow-row fn-flow-income">
-                  <span>Entradas</span>
-                  <div><i style="width:${barPercent(incoming, maxFlow)}%"></i></div>
-                  <strong>${escapeHtml(money(incoming))}</strong>
-                </div>
-                <div class="fn-flow-row fn-flow-expense">
-                  <span>Saidas</span>
-                  <div><i style="width:${barPercent(outgoing, maxFlow)}%"></i></div>
-                  <strong>${escapeHtml(money(outgoing))}</strong>
-                </div>
-                <div class="fn-flow-row ${balance >= 0 ? "fn-flow-income" : "fn-flow-expense"}">
-                  <span>Saldo</span>
-                  <div><i style="width:${barPercent(balance, maxFlow)}%"></i></div>
-                  <strong>${escapeHtml(money(balance))}</strong>
-                </div>
-              </div>`
-            : `<div class="fn-chart-empty"><strong>Sem movimento neste periodo</strong><span>Ajuste o periodo ou registre um lancamento para iniciar a leitura do fluxo.</span></div>`
-        }
-      </article>
-
-      <article class="fn-chart-card">
-        <div class="fn-chart-head">
-          <span>Origem do movimento</span>
-          <strong>${origins.length ? "Principais fontes do periodo" : "Sem origem registrada"}</strong>
-        </div>
-        <div class="fn-origin-bars">
-          ${
-            origins.length
-              ? origins
-                  .map(
-                    (item) => `
-                      <div class="fn-origin-bar">
-                        <div>
-                          <span>${escapeHtml(item.label)}</span>
-                          <strong>${escapeHtml(money(item.amount))}</strong>
-                        </div>
-                        <b><i style="width:${barPercent(item.amount, maxOrigin)}%"></i></b>
-                      </div>
-                    `,
-                  )
-                  .join("")
-              : `<div class="fn-chart-empty"><strong>Nenhuma origem registrada</strong><span>As origens aparecem quando o periodo possui lancamentos.</span></div>`
-          }
-        </div>
-      </article>
+    <section class="fn-empty-period" data-empty="period" aria-labelledby="financialEmptyTitle">
+      <div class="fn-empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 96 96" role="presentation">
+          <rect x="31" y="13" width="34" height="70" rx="17"></rect>
+          <path d="M34 63 61 36M33 47l22-22M42 79l22-22"></path>
+          <path d="M25 84h46M25 12h46"></path>
+        </svg>
+      </div>
+      <div class="fn-empty-copy">
+        <span>Período sem atividade</span>
+        <h2 id="financialEmptyTitle">Nenhuma movimentação neste período.</h2>
+        <p>Checkouts pagos e lançamentos manuais alimentam este painel automaticamente.</p>
+      </div>
     </section>
   `;
 }
@@ -298,16 +340,16 @@ function renderTransactionRow(item = {}) {
         </div>
         <div class="fn-row-copy">
           <strong>${escapeHtml(item.description || originLabel(item))}</strong>
-          <span>${
-            productItemsSummary
-              ? escapeHtml(productItemsSummary)
-              : `${escapeHtml(originLabel(item))} · ${escapeHtml(item.category || "Sem categoria")}`
-          }</span>
-          <small>${escapeHtml(item.paymentMethod || "Metodo nao informado")}</small>
+          ${productItemsSummary ? `<p>${escapeHtml(productItemsSummary)}</p>` : ""}
+          <div class="fn-row-meta">
+            <span><small>Origem</small>${escapeHtml(originLabel(item))}</span>
+            <span><small>Categoria</small>${escapeHtml(item.category || "Sem categoria")}</span>
+            <span><small>Pagamento</small>${escapeHtml(item.paymentMethod || "Não informado")}</span>
+          </div>
         </div>
         <div class="fn-row-value">
           <strong>${expense ? "-" : "+"} ${escapeHtml(money(item.amount))}</strong>
-          <span>${escapeHtml(formatDateTime(item.date))}</span>
+          <span>${escapeHtml(typeLabel(item.type))}</span>
         </div>
       </div>
       <div class="fn-row-actions">${renderTransactionActions(item)}</div>
@@ -373,6 +415,8 @@ export function renderFinancialData(elements, payload) {
     refundsTotal: 0,
     operationalExpenses: 0,
     ticketAverage: 0,
+    paidCheckoutsCount: 0,
+    movementsCount: 0,
   };
   const cashFlow = payload?.summary?.cashFlow ?? {
     incoming: 0,
@@ -382,72 +426,91 @@ export function renderFinancialData(elements, payload) {
   const transactions = Array.isArray(payload?.transactions?.transactions)
     ? payload.transactions.transactions
     : [];
+  const comparison = payload?.summary?.comparison ?? {};
+  const period = payload?.summary?.period ?? {};
+  const revenueOrigins = payload?.summary?.revenueOrigins ?? {};
+  const movementsCount = Number.isFinite(Number(summary.movementsCount))
+    ? Number(summary.movementsCount)
+    : transactions.length;
+  const hasMovements = movementsCount > 0;
+
+  if (elements.header) {
+    elements.header.innerHTML = renderFinancialHeader(payload);
+  }
 
   if (elements.summary) {
-    const balance = toNumber(cashFlow.balance);
     const incoming = toNumber(cashFlow.incoming);
     const outgoing = toNumber(cashFlow.outgoing);
+    const result = incoming - outgoing;
     const ticketAverage = toNumber(summary.ticketAverage);
-    const pendingCommissions = toNumber(summary.pendingCommissions);
-    const paidCommissions = toNumber(summary.paidCommissionsTotal);
-    const refunds = toNumber(summary.refundsTotal);
-    const operational = toNumber(
-      summary.operationalExpenses != null
-        ? summary.operationalExpenses
-        : outgoing - paidCommissions - refunds,
-    );
-    const projected = toNumber(summary.estimatedProfit ?? balance - pendingCommissions);
-
-    const outgoingParts = [];
-    if (operational > 0) outgoingParts.push(`${money(operational)} operacional`);
-    if (paidCommissions > 0 && pendingCommissions > 0) outgoingParts.push(`${money(paidCommissions)} comissoes`);
-    if (refunds > 0) outgoingParts.push(`${money(refunds)} estornos`);
-    const outgoingSubtitle = outgoingParts.length
-      ? outgoingParts.join(" · ")
-      : "Sem saidas no recorte";
-
-    const projectedSubtitle = pendingCommissions > 0
-      ? `Apos ${money(pendingCommissions)} de comissoes a pagar`
-      : "Receitas menos saidas";
-
-    const incomingSubtitle = ticketAverage > 0
-      ? `Ticket medio ${money(ticketAverage)}`
-      : "Receitas no recorte";
+    const paidCheckoutsCount = toNumber(summary.paidCheckoutsCount);
+    const useTicketAverage = paidCheckoutsCount > 0;
 
     elements.summary.innerHTML = [
+      `
+        <div class="fn-summary-caption">
+          <span>Resumo financeiro</span>
+          <small>Comparação com o período anterior equivalente</small>
+        </div>
+      `,
       renderCard(
-        "Saldo de caixa",
-        money(balance),
-        balance >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
-        `${money(incoming)} entradas − ${money(outgoing)} saidas`,
-        "balance",
+        "Resultado líquido",
+        money(result),
+        result >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
+        comparisonDetails(result, comparison.netBalanceDelta, period),
+        "result",
+        "Receitas − despesas",
       ),
-      renderCard("Receitas", money(incoming), "fn-kpi-positive", incomingSubtitle, "incoming"),
-      renderCard("Saidas", money(outgoing), "fn-kpi-negative", outgoingSubtitle, "outgoing"),
       renderCard(
-        "Resultado projetado",
-        money(projected),
-        projected >= 0 ? "fn-kpi-positive" : "fn-kpi-negative",
-        projectedSubtitle,
-        "projection",
+        "Receita do período",
+        money(incoming),
+        "fn-kpi-positive",
+        comparisonDetails(incoming, comparison.grossRevenueDelta, period),
+        "incoming",
       ),
+      renderCard(
+        "Despesas do período",
+        money(outgoing),
+        "fn-kpi-negative",
+        comparisonDetails(outgoing, comparison.expensesDelta, period),
+        "outgoing",
+      ),
+      useTicketAverage
+        ? renderCard(
+            "Ticket médio pago",
+            money(ticketAverage),
+            "",
+            comparisonDetails(ticketAverage, comparison.ticketAverageDelta, period),
+            "ticket",
+            `${paidCheckoutsCount} ${paidCheckoutsCount === 1 ? "checkout pago" : "checkouts pagos"}`,
+          )
+        : renderCard(
+            "Movimentações",
+            String(movementsCount),
+            "",
+            comparisonDetails(movementsCount, comparison.movementsDelta, period, { integer: true }),
+            "movements",
+            "Entradas e saídas do período",
+          ),
     ].join("");
   }
 
   if (elements.toolbar) {
-    elements.toolbar.innerHTML = renderFinancialToolbar(transactions, cashFlow);
+    elements.toolbar.innerHTML = renderFinancialToolbar();
   }
 
   if (elements.cashflow) {
-    elements.cashflow.innerHTML = renderFinancialCharts(transactions, cashFlow);
+    elements.cashflow.innerHTML = hasMovements ? renderRevenueOrigins(revenueOrigins) : "";
   }
 
   if (elements.list) {
     if (!transactions.length) {
-      elements.list.innerHTML = renderEmptyState({
-        title: "Nenhum lancamento financeiro encontrado.",
-        description: "Ajuste o periodo ou registre um lancamento manual para compor o caixa.",
-      });
+      elements.list.innerHTML = hasMovements
+        ? renderEmptyState({
+            title: "Nenhum lançamento corresponde aos filtros.",
+            description: "Revise a busca ou o tipo de lançamento selecionado.",
+          })
+        : renderPeriodEmptyState();
     } else {
       const PAGE_SIZE = 10;
       let visibleCount = Math.min(PAGE_SIZE, transactions.length);
@@ -455,7 +518,7 @@ export function renderFinancialData(elements, payload) {
 
       elements.list.innerHTML = `
         <div class="fn-list-head">
-          <span>Lancamentos no recorte</span>
+          <span>Movimentações no recorte</span>
           <strong>${transactions.length} ${transactions.length === 1 ? "registro" : "registros"}</strong>
         </div>
         <div class="fn-list" id="fnTransactionsList">

@@ -352,7 +352,7 @@ async function createAppointment(app: FastifyInstance, scenario: DbScenario, sta
   const confirmed = await app.inject({
     method: "PATCH",
     url: `/appointments/${appointmentId}/status`,
-    headers: { "idempotency-key": "status-db-001" },
+    headers: { "idempotency-key": uniqueId("status-db-confirmed") },
     payload: { status: "CONFIRMED", changedBy: "db-test" },
   });
   expect(confirmed.statusCode).toBe(200);
@@ -360,7 +360,7 @@ async function createAppointment(app: FastifyInstance, scenario: DbScenario, sta
   const inService = await app.inject({
     method: "PATCH",
     url: `/appointments/${appointmentId}/status`,
-    headers: { "idempotency-key": "status-db-002" },
+    headers: { "idempotency-key": uniqueId("status-db-in-service") },
     payload: { status: "IN_SERVICE", changedBy: "db-test" },
   });
   expect(inService.statusCode).toBe(200);
@@ -912,6 +912,114 @@ suite("DB integration (Prisma/PostgreSQL robustness)", () => {
         { productId: scenario.productId, productName: "Pomada DB", quantity: 1 },
       ],
     });
+  });
+
+  it("reconcilia metricas e origens no Prisma com a mesma semantica operacional", async () => {
+    const app = createApp();
+    const scenario = await createScenario();
+    await prisma.product.update({
+      where: { id: scenario.productId },
+      data: { stockQty: 2 },
+    });
+
+    const serviceOnlyAppointment = await createAppointment(
+      app,
+      scenario,
+      "2026-05-10T13:00:00.000Z",
+    );
+    const serviceOnly = await checkoutAppointment(
+      app,
+      serviceOnlyAppointment,
+      uniqueId("summary-service-only"),
+    );
+    expect(serviceOnly.statusCode).toBe(200);
+
+    const productAppointment = await createAppointment(
+      app,
+      scenario,
+      "2026-05-10T16:00:00.000Z",
+    );
+    const serviceWithProduct = await app.inject({
+      method: "POST",
+      url: `/appointments/${productAppointment}/checkout`,
+      headers: { "idempotency-key": uniqueId("summary-service-product") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-10T16:45:00.000Z",
+        paymentMethod: "PIX",
+        expectedTotal: 125,
+        products: [{ productId: scenario.productId, quantity: 1 }],
+      },
+    });
+    expect(serviceWithProduct.statusCode).toBe(200);
+
+    await createProductSale(app, scenario, uniqueId("summary-standalone-product"));
+    for (const entry of [
+      { kind: "INCOME", amount: 25.44, description: "Receita manual DB" },
+      { kind: "EXPENSE", amount: 40.55, description: "Despesa manual DB" },
+    ] as const) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/financial/manual-entry",
+        headers: { "idempotency-key": uniqueId(`summary-${entry.kind.toLowerCase()}`) },
+        payload: {
+          unitId: scenario.unitId,
+          ...entry,
+          occurredAt: "2026-05-10T17:00:00.000Z",
+          changedBy: "db-test",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const unpaidAppointment = await createAppointment(
+      app,
+      scenario,
+      "2026-05-10T18:00:00.000Z",
+    );
+    const unpaid = await app.inject({
+      method: "POST",
+      url: `/appointments/${unpaidAppointment}/checkout`,
+      headers: { "idempotency-key": uniqueId("summary-unpaid") },
+      payload: {
+        changedBy: "db-test",
+        completedAt: "2026-05-10T18:45:00.000Z",
+        paymentMethod: "PIX",
+        payments: [{ method: "PIX", amount: 20, responsible: "db-test" }],
+      },
+    });
+    expect(unpaid.statusCode).toBe(200);
+    expect(unpaid.json().checkout).toMatchObject({ status: "OPEN", paidAmount: 20 });
+
+    const service = new PrismaOperationsService(prisma);
+    const result = await service.getFinancialSummary({
+      unitId: scenario.unitId,
+      start: new Date("2026-05-10T00:00:00.000Z"),
+      end: new Date("2026-05-10T23:59:59.999Z"),
+    });
+
+    expect(result.summary).toMatchObject({
+      grossRevenue: 275.44,
+      expenses: 40.55,
+      netBalance: 234.89,
+      ticketAverage: 100,
+      paidCheckoutsCount: 2,
+      movementsCount: 5,
+    });
+    expect(result.revenueOrigins).toEqual({
+      services: 150,
+      products: 100,
+      manual: 25.44,
+      other: 0,
+    });
+    expect(
+      Object.values(result.revenueOrigins).reduce(
+        (sum, value) => sum + Math.round(value * 100),
+        0,
+      ),
+    ).toBe(Math.round(result.summary.grossRevenue * 100));
+    expect(Object.values(result.revenueOrigins).every((value) => value >= 0)).toBe(true);
+    await app.close();
   });
 
   it("grava AppointmentServiceItem no dual-write Prisma de criacao", async () => {

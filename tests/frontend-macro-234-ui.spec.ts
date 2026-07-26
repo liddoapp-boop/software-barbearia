@@ -226,8 +226,10 @@ describe("Macro 234 - release candidate owner-only", () => {
     expect(agenda).toContain('data-kpi-kind="next"');
     expect(clients).toContain('data-kpi-kind="relationship"');
     expect(inventory).toContain('card.title === "Valor estimado"');
-    expect(financial).toContain('"balance"');
-    expect(financial).toContain('"projection"');
+    expect(financial).toContain('"incoming"');
+    expect(financial).toContain('"result"');
+    expect(financial).toContain('"ticket"');
+    expect(financial).toContain('"movements"');
     expect(services).toContain('data-kpi-kind="${escapeHtml(kind)}"');
     expect(professionals).toContain('data-kpi-kind="${escapeHtml(kind)}"');
     expect(css).toContain("Liddo Operational Instruments");

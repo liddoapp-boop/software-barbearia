@@ -1783,6 +1783,16 @@ async function measureModule(
           .map((card) => card.querySelector(".ux-value, .ux-value-sm, strong, .pdv-total-value"))
           .filter(Boolean)
           .map((value) => Number.parseFloat(getComputedStyle(value).fontSize) || 0);
+        const kpiValues = kpiCards
+          .map((card) => card.querySelector(".ux-value, .ux-value-sm, strong, .pdv-total-value"))
+          .filter(Boolean);
+        const financeAddButton = visibleSection?.querySelector("#financialAddTransactionBtn");
+        const financeAddButtonRect = financeAddButton?.getBoundingClientRect();
+        const financeFilters = Array.from(
+          visibleSection?.querySelectorAll(
+            "#financialPeriod, #financialTypeFilter, #financialSearch, #financialCustomApply",
+          ) || [],
+        ).filter((element) => element.offsetParent !== null);
         const htmlStyle = getComputedStyle(document.documentElement);
         const bodyStyle = getComputedStyle(document.body);
         const appMainStyle = getComputedStyle(appMain);
@@ -1827,7 +1837,7 @@ async function measureModule(
           footerRole: document.querySelector("#appSidebar .sb-user-subtitle")?.textContent?.trim() || "",
           activeSidebarModule: document.querySelector(".sb-item.is-active")?.getAttribute("data-sidebar-module") || null,
           headerModule: operationalHeader?.getAttribute("data-header-module") || null,
-          headerTitle: operationalHeader?.querySelector(".op-page-title")?.textContent?.trim() || "",
+          headerTitle: operationalHeader?.querySelector(".op-page-title, .fn-header-title h1")?.textContent?.trim() || "",
           headerHasCoordinate: Boolean(operationalHeader?.querySelector(".op-header-coordinate")),
           headerHasContext: Boolean(operationalHeader?.querySelector("[data-header-context]")),
           headerLeft: headerRect?.left ?? null,
@@ -1839,7 +1849,21 @@ async function measureModule(
             (largest, group) => Math.max(largest, group.scrollWidth - group.clientWidth),
             0,
           ),
+          kpiValueOverflow: kpiValues.some(
+            (value) => value.scrollWidth > value.clientWidth + 1,
+          ),
           kpiMinValueSize: kpiValueSizes.length ? Math.min(...kpiValueSizes) : 0,
+          financeAddButtonVisible: Boolean(
+            financeAddButtonRect
+            && financeAddButtonRect.width > 0
+            && financeAddButtonRect.height > 0
+            && financeAddButtonRect.left >= -1
+            && financeAddButtonRect.right <= window.innerWidth + 1
+          ),
+          financeFiltersOverflow: financeFilters.some((element) => {
+            const rect = element.getBoundingClientRect();
+            return rect.left < -1 || rect.right > window.innerWidth + 1;
+          }),
           activeIndicatorAligned: (() => {
             const active = document.querySelector(".sb-item.is-active");
             const indicator = document.querySelector(".sb-active-indicator");
@@ -2713,6 +2737,12 @@ describe("frontend mobile overflow", () => {
       await measureModule(cdp, session, "agenda", true, { width: 390, height: 844, mobile: true }),
       await measureModule(cdp, session, "agenda", false, { width: 430, height: 932, mobile: true }),
       await measureModule(cdp, session, "financeiro", false, { width: 390, height: 844, mobile: true }),
+      await measureModule(cdp, session, "financeiro", false, { width: 430, height: 932, mobile: true }),
+      await measureModule(cdp, session, "financeiro", false, { width: 768, height: 1024, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1280, height: 720, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1366, height: 768, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1440, height: 900, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1920, height: 1080, mobile: false }),
       await measureModule(cdp, session, "estoque", false, { width: 390, height: 844, mobile: true }),
       await measureModule(cdp, session, "estoque", false, { width: 430, height: 932, mobile: true }),
     ];
@@ -2729,10 +2759,15 @@ describe("frontend mobile overflow", () => {
       expect(check.kpiCount, `${check.activeModule} KPI count`).toBeGreaterThan(0);
       expect(check.kpiHasOverflow, `${check.activeModule} KPI viewport overflow`).toBe(false);
       expect(check.kpiGroupOverflow, `${check.activeModule} KPI group overflow`).toBeLessThanOrEqual(1);
+      expect(check.kpiValueOverflow, `${check.activeModule} KPI value overflow`).toBe(false);
       expect(check.kpiMinValueSize, `${check.activeModule} KPI value legibility`).toBeGreaterThanOrEqual(17);
       expect(check.sidebarWrapHeight, `${check.activeModule} sidebar viewport height`).toBeCloseTo(check.viewportHeight, 0);
       expect(check.sidebarFooterBottom, `${check.activeModule} sidebar footer bottom`).toBeCloseTo(check.viewportHeight, 0);
       expect(check.sidebarNavOverflowY, `${check.activeModule} sidebar nav overflow-y`).toMatch(/auto|scroll/);
+    }
+    for (const check of checks.filter((item) => item.activeModule === "financeiro")) {
+      expect(check.financeAddButtonVisible, "financeiro Novo lançamento acessível").toBe(true);
+      expect(check.financeFiltersOverflow, "financeiro filtros sem overflow").toBe(false);
     }
     for (const check of checks.filter((item) => !item.menuOpen && ["agenda", "financeiro"].includes(item.activeModule))) {
       expect(check.htmlOverflowY, `${check.activeModule} html overflow-y`).toBe("hidden");
@@ -2740,8 +2775,12 @@ describe("frontend mobile overflow", () => {
       expect(check.appMainOverflowY, `${check.activeModule} appMain overflow-y`).toMatch(/auto|scroll/);
       expect(check.appContentOverflowY, `${check.activeModule} appContent overflow-y`).not.toMatch(/auto|scroll/);
       expect(check.windowScrollY, `${check.activeModule} window scrollY`).toBe(0);
-      expect(check.mainScrollHeight, `${check.activeModule} main scrollHeight`).toBeGreaterThan(check.mainClientHeight);
-      expect(check.afterMainScrollTop, `${check.activeModule} appMain scrollTop`).toBeGreaterThan(check.beforeMainScrollTop);
+      expect(check.mainScrollHeight, `${check.activeModule} main scrollHeight`).toBeGreaterThanOrEqual(check.mainClientHeight);
+      if (check.mainScrollHeight > check.mainClientHeight) {
+        expect(check.afterMainScrollTop, `${check.activeModule} appMain scrollTop`).toBeGreaterThan(check.beforeMainScrollTop);
+      } else {
+        expect(check.afterMainScrollTop, `${check.activeModule} appMain scrollTop compacto`).toBe(check.beforeMainScrollTop);
+      }
       expect(check.sidebarTopAfter, `${check.activeModule} sidebar top`).toBeCloseTo(check.sidebarTopBefore, 0);
       expect(check.sidebarBottomAfter, `${check.activeModule} sidebar bottom`).toBeCloseTo(check.sidebarBottomBefore, 0);
     }
