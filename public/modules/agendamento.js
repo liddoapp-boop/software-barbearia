@@ -13,6 +13,13 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function money(value) {
+  return asNumber(value).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
 function formatDateTime(date) {
   return date.toLocaleString("pt-BR", {
     dateStyle: "short",
@@ -150,11 +157,12 @@ export function renderScheduleAssist(state, elements) {
 function renderClientInsights(state, elements) {
   const { client, clientSummary, professionalsById } = state;
   if (!client) {
-    elements.clientInsights.textContent =
-      "Selecione um cliente para ver historico resumido e perfil.";
+    elements.clientInsights.hidden = true;
+    elements.clientInsights.textContent = "";
     return;
   }
 
+  elements.clientInsights.hidden = false;
   const tags = (client.tags || []).map(humanizeTag);
   const preferred = client.preferredProfessionalId
     ? professionalsById?.[client.preferredProfessionalId]?.name || "Nao definido"
@@ -175,12 +183,14 @@ function renderClientInsights(state, elements) {
 function renderServiceSuggestions(state, elements) {
   const { selectedService, relatedServices } = state;
   if (!selectedService) {
-    elements.serviceSuggestions.textContent = "Sugestoes de servicos relacionados aparecerao aqui.";
+    elements.serviceSuggestions.hidden = true;
+    elements.serviceSuggestions.textContent = "";
     return;
   }
 
+  elements.serviceSuggestions.hidden = false;
   const lines = relatedServices
-    .map((item) => `${safeText(item.name, "Servico")} (R$ ${asNumber(item.price).toFixed(2)})`)
+    .map((item) => `${safeText(item.name, "Servico")} (${money(item.price)})`)
     .join(" | ");
   elements.serviceSuggestions.innerHTML = `
     <strong class="ds-cell-primary">Relacionados a ${safeText(selectedService.name, "servico")}:</strong><br/>
@@ -193,10 +203,11 @@ function renderFeedback(state, elements) {
   const base = "sched-info-block";
   if (!feedback.message) {
     elements.appointmentFeedback.className = base;
-    elements.appointmentFeedback.textContent =
-      "Selecione cliente, profissional, servico e horario para validar disponibilidade.";
+    elements.appointmentFeedback.hidden = true;
+    elements.appointmentFeedback.textContent = "";
     return;
   }
+  elements.appointmentFeedback.hidden = false;
   const modifier =
     feedback.type === "error" ? "sched-info-block-error"
     : feedback.type === "success" ? "sched-info-block-success"
@@ -208,10 +219,12 @@ function renderFeedback(state, elements) {
 export function renderAlternativeSlots(slots, onSelect, container) {
   const list = Array.isArray(slots) ? slots : [];
   if (!list.length) {
-    container.innerHTML = `<p class="ds-text-muted">Sem horarios alternativos no recorte atual. Tente outro profissional ou periodo.</p>`;
+    container.hidden = true;
+    container.innerHTML = "";
     return;
   }
 
+  container.hidden = false;
   container.innerHTML = `
     <div class="al-slot-list">
       ${list

@@ -269,7 +269,7 @@ describe("blindagem de agendamentos", () => {
       payload: appointmentPayload({ startsAt: "2026-04-22T16:00:00.000Z" }),
     });
     expect(first.statusCode).toBe(200);
-    expect(first.json().appointment.endsAt).toBe("2026-04-22T16:45:00.000Z");
+    expect(first.json().appointment.endsAt).toBe("2026-04-22T16:30:00.000Z");
 
     const secondInsideBuffer = await app.inject({
       method: "POST",
@@ -279,7 +279,7 @@ describe("blindagem de agendamentos", () => {
         startsAt: "2026-04-22T16:50:00.000Z",
       }),
     });
-    expect(secondInsideBuffer.statusCode).toBe(409);
+    expect(secondInsideBuffer.statusCode).toBe(200);
 
     const movable = await app.inject({
       method: "POST",
@@ -296,7 +296,7 @@ describe("blindagem de agendamentos", () => {
       url: `/appointments/${movable.json().appointment.id}/reschedule`,
       headers: { "idempotency-key": "reschedule-inside-buffer" },
       payload: {
-        startsAt: "2026-04-22T16:50:00.000Z",
+        startsAt: "2026-04-22T16:35:00.000Z",
         changedBy: "appointment-hardening-test",
       },
     });

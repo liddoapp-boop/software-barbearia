@@ -167,12 +167,20 @@ describe("agenda interna multi-servico", () => {
 
   it("css mobile contem regras de contencao para linhas de servico", () => {
     const css = readFileSync("public/styles/layout.css", "utf8");
+    const interactionCss = readFileSync("public/styles/interaction-surfaces.css", "utf8");
+    const appSource = readFileSync("public/app.js", "utf8");
     expect(css).toContain(".svc-select-shell");
     expect(css).toContain("width: min(720px, calc(100vw - 24px))");
     expect(css).toContain(".svc-selection-layout");
     expect(css).toContain(".svc-summary-metrics");
     expect(css).toContain(".professional-auto-card");
-    expect(css).toContain("grid-template-columns: minmax(220px, 1fr) minmax(240px, 0.9fr)");
-    expect(css).toContain("@media (max-width: 640px)");
+    expect(css).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(css).toContain("@container appointment-services (max-width: 600px)");
+    expect(css).toContain("@container appointment-services (max-width: 420px)");
+    expect(css).not.toMatch(/\.svc-option-list\s*\{[^}]*overflow-x:\s*hidden/s);
+    expect(interactionCss).toContain("--drawer-width: min(760px, 96vw)");
+    expect(interactionCss).toMatch(/#scheduleDrawer \.sched-drawer-body\s*\{[^}]*overflow-x:\s*visible !important/s);
+    expect(appSource).toContain('class="svc-selected-copy"');
+    expect(appSource).toContain('class="svc-selected-name"');
   });
 });

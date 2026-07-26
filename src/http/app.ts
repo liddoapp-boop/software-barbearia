@@ -10542,15 +10542,18 @@ export function createApp(options: {
     const bufferAfterMin = await resolvePublicBufferAfterMin(unitId);
 
     // Horários de funcionamento por dia da semana
-    let businessHours: Array<{
+    const workingHours = await resolveWorkingHoursForUnit(unitId, operations);
+    const businessHours: Array<{
       dayOfWeek: number;
       opensAt: string | null;
       closesAt: string | null;
       isClosed: boolean;
-    }> = [];
-    if (backend === "prisma") {
-      businessHours = await prisma.businessHour.findMany({ where: { unitId } });
-    }
+    }> = (workingHours.weekly || []).map((item) => ({
+      dayOfWeek: item.day,
+      opensAt: item.start || null,
+      closesAt: item.end || null,
+      isClosed: Boolean(item.isClosed),
+    }));
 
     // Agendamentos da semana
     const weekEnd = new Date(weekStartDate.getTime() + 7 * 24 * 3600_000);

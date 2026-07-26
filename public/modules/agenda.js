@@ -17,6 +17,13 @@ function safeText(value, fallback = "") {
   return fallback;
 }
 
+function money(value) {
+  return asNumber(value).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
 function nestedText(value, keys = [], fallback = "") {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (value && typeof value === "object") {
@@ -351,7 +358,7 @@ export function computeAgendaMetrics(items, now = new Date()) {
 }
 
 export function renderAgendaLoading(elements) {
-  elements.metricsGrid.innerHTML = Array.from({ length: 4 }, () => `<article class="ux-kpi agenda-kpi-loading"></article>`).join("");
+  elements.metricsGrid.innerHTML = Array.from({ length: 3 }, () => `<article class="ux-kpi liddo-kpi agenda-kpi-loading" data-kpi-loading="true"></article>`).join("");
   elements.list.innerHTML = `<p class="ds-text-muted">Carregando agenda...</p>`;
   elements.queue.innerHTML = `<p class="ds-text-muted">Carregando fila...</p>`;
 }
@@ -383,17 +390,17 @@ function renderAgendaMetrics(elements, metrics, items = []) {
     : "Sem proximo atendimento";
   const nextMeta = next ? `${next.service} com ${next.professional}` : "A agenda do dia esta livre no recorte atual.";
   elements.metricsGrid.innerHTML = `
-    <article class="ux-kpi agenda-next-card">
+    <article class="ux-kpi liddo-kpi agenda-next-card" data-kpi-kind="next">
       <div class="ux-label">Proximo atendimento</div>
       <div class="ux-value-sm">${nextLabel}</div>
       <div class="ux-hint">${nextMeta}</div>
     </article>
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="volume">
       <div class="ux-label">Agenda do dia</div>
       <div class="ux-value-sm">${metrics.totalCount}</div>
       <div class="ux-hint">Atendimentos no recorte</div>
     </article>
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="attention">
       <div class="ux-label">Atencao</div>
       <div class="ux-value-sm ${metrics.lateCount > 0 ? "ds-kpi-tone-warning" : ""}">${metrics.lateCount}</div>
       <div class="ux-hint">Atrasados agora</div>
@@ -491,7 +498,7 @@ function renderAgendaList(elements, list, handlers) {
           ${originLabel ? `<div class="ux-badge ux-badge-info">${originLabel}</div>` : ""}
           ${delayInfo?.minutes ? `<div class="ux-badge ux-badge-warning">Atraso: ${delayInfo.minutes} min</div>` : ""}
           <div class="agenda-card-facts">
-            <div><span>Valor</span> <strong>R$ ${item.servicePrice.toFixed(2)}</strong></div>
+            <div><span>Valor</span> <strong>${money(item.servicePrice)}</strong></div>
             <div><span>Sinal</span> <strong class="${late ? "ds-kpi-tone-warning" : ""}">${late ? "Atrasado" : item.isFitting ? "Encaixe" : "No prazo"}</strong></div>
           </div>
           ${
@@ -548,7 +555,7 @@ function renderAgendaGrid(elements, list) {
                         (item) => `
                     <div class="agenda-grid-event">
                       <div class="ds-cell-primary">${item.client}</div>
-                      <div class="ds-cell-secondary">${item.service} | R$ ${item.servicePrice.toFixed(2)}</div>
+                      <div class="ds-cell-secondary">${item.service} | ${money(item.servicePrice)}</div>
                       ${item.hasProductSale ? `<div class="ux-badge ux-badge-success">Produto vendido</div>` : ""}
                     </div>
                   `,

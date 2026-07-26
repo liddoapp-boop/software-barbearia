@@ -35,7 +35,7 @@ async function createCompletedAppointment(
       startsAt,
     },
   });
-  expect(created.statusCode).toBe(200);
+  expect(created.statusCode, JSON.stringify(created.json())).toBe(200);
   const appointmentId = created.json().appointment.id as string;
 
   for (const status of ["CONFIRMED", "IN_SERVICE"] as const) {
@@ -107,19 +107,19 @@ describe("Macro 245.1 - RBAC do estorno de atendimento", () => {
       app,
       ownerToken,
       "reception",
-      "2026-04-26T10:00:00.000Z",
+      "2026-04-27T14:00:00.000Z",
     );
     const ownerRefundId = await createCompletedAppointment(
       app,
       ownerToken,
       "owner",
-      "2026-04-26T12:00:00.000Z",
+      "2026-04-27T16:00:00.000Z",
     );
     const refundPayload = {
       unitId: "unit-01",
       changedBy: "ignored-by-auth-hook",
       reason: "Correcao financeira autorizada",
-      refundedAt: "2026-04-26T14:00:00.000Z",
+      refundedAt: "2026-04-27T18:00:00.000Z",
     };
 
     const professional = await app.inject({

@@ -341,7 +341,7 @@ export function normalizeAppointmentsPayload(payload) {
 }
 
 export function renderAppointmentsLoading(elements) {
-  elements.summary.innerHTML = Array.from({ length: 3 }, () => `<article class="ux-kpi agenda-kpi-loading"></article>`).join("");
+  elements.summary.innerHTML = Array.from({ length: 3 }, () => `<article class="ux-kpi liddo-kpi agenda-kpi-loading" data-kpi-loading="true"></article>`).join("");
   elements.tableBody.innerHTML = `<tr><td colspan="8" class="appts-td-loading">Carregando agendamentos...</td></tr>`;
   elements.mobileList.innerHTML = `<p class="ds-text-muted">Carregando agendamentos...</p>`;
   elements.periodSummary.textContent = "Filtrando agendamentos...";
@@ -383,17 +383,17 @@ export function renderAppointmentsData(elements, items, options = {}) {
 
   elements.periodSummary.textContent = `${periodLabel} | ${filterSummary}`;
   elements.summary.innerHTML = `
-    <article class="ux-kpi agenda-next-card">
+    <article class="ux-kpi liddo-kpi agenda-next-card" data-kpi-kind="next">
       <div class="ux-label">Proximo atendimento</div>
       <div class="ux-value-sm">${next ? `${formatTime(next.startsAt)} - ${escapeHtml(next.client)}` : "Sem proximo atendimento"}</div>
       <div class="ux-hint">${next ? `${escapeHtml(next.service)} com ${escapeHtml(next.professional)}` : "Nenhuma acao imediata no recorte."}</div>
     </article>
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="volume">
       <div class="ux-label">Agenda do periodo</div>
       <div class="ux-value-sm">${todayTotal || items.length}</div>
       <div class="ux-hint">${confirmed} confirmados, ${scheduled} aguardando confirmacao</div>
     </article>
-    <article class="ux-kpi">
+    <article class="ux-kpi liddo-kpi" data-kpi-kind="flow">
       <div class="ux-label">Fluxo atual</div>
       <div class="ux-value-sm">${inService}</div>
       <div class="ux-hint">${completed} concluidos, ${lateCount} atrasados</div>
@@ -430,7 +430,7 @@ export function renderAppointmentsData(elements, items, options = {}) {
       const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit, canNoShow });
       const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
-        <tr class="${late ? "appts-row-late" : ""}">
+        <tr class="${late ? "appts-row-late" : ""}" data-record-surface="appointment" data-record-tone="${late ? "late" : "scheduled"}">
           <td class="appts-td">${formatTime(item.startsAt)}</td>
           <td class="appts-td">
             <div class="ds-cell-primary">${escapeHtml(item.client)}</div>
@@ -466,7 +466,8 @@ export function renderAppointmentsData(elements, items, options = {}) {
       const actions = actionsForStatus(item.status, { canCheckout: itemCanCheckout, canEdit: options.canEdit, canNoShow });
       const primaryAction = primaryActionForStatus(item.status, { canCheckout: itemCanCheckout });
       return `
-        <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}">
+        <article class="ux-card appts-mobile-card ${late ? "appts-row-late" : ""}"
+                 data-record-surface="appointment" data-record-tone="${late ? "late" : "scheduled"}">
           <div class="appts-mobile-head">
             <div>
               <div class="ds-cell-primary">${formatTime(item.startsAt)} - ${escapeHtml(item.client)}</div>

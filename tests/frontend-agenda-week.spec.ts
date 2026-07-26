@@ -45,6 +45,7 @@ function loadAppAgendaHarness() {
     "getAgendaListFilteredItems",
     "assignWcColumns",
     "getWeekCalendarDensity",
+    "updateWcWeekLabel",
     "renderWeekCalendar",
   ];
   let containerTop = 120;
@@ -96,9 +97,10 @@ function loadAppAgendaHarness() {
     const clientsById = {};
     let filterPeriod = { value: "today" };
     const weekCalContainer = container;
+    const weekLabel = { textContent: "" };
     const document = {
       body: { classList: { contains: () => false } },
-      getElementById: (id) => id === "weekCalContainer" ? weekCalContainer : null,
+      getElementById: (id) => id === "weekCalContainer" ? weekCalContainer : id === "wcWeekLabel" ? weekLabel : null,
     };
     const window = {
       innerHeight: 900,
@@ -202,6 +204,23 @@ function cssBlocksFor(selector: string) {
 }
 
 describe("agenda semanal e carregamento inicial", () => {
+  it("mobile oferece Hoje e Ir para data nativos sem substituir Semana e Lista", () => {
+    const appSource = readFileSync("public/app.js", "utf8");
+    const indexSource = readFileSync("public/index.html", "utf8");
+    const agendaCss = readFileSync("public/styles/agenda-surface.css", "utf8");
+
+    expect(indexSource).toContain('id="wcTodayBtn"');
+    expect(indexSource).toContain('id="wcGoToDate" type="date"');
+    expect(indexSource).toContain('id="viewGridBtn"');
+    expect(indexSource).toContain('id="viewListBtn"');
+    expect(appSource).toContain("function goToWeekCalendarDate");
+    expect(appSource).toContain("wcWeekStart = getWeekMonday(selected)");
+    expect(appSource).toContain('document.getElementById("wcTodayBtn")?.addEventListener');
+    expect(appSource).toContain('document.getElementById("wcGoToDate")?.addEventListener("change"');
+    expect(agendaCss).toContain("#agendaSection .wc-mobile-date-nav");
+    expect(agendaCss).toContain('input[type="date"]');
+  });
+
   it("prepara Semana antes da primeira busca da Agenda", () => {
     const app = loadAppAgendaHarness();
     expect(app.getFilterPeriod()).toBe("today");
@@ -278,6 +297,35 @@ describe("agenda semanal e carregamento inicial", () => {
     ]);
     expect(app.container.innerHTML).toContain('data-wc-appt-id="appt-18"');
     expect(app.container.innerHTML).toContain('data-wc-appt-id="appt-1930"');
+  });
+
+  it("limites da grade acompanham outra configuracao de expediente sem fixar 20:00", () => {
+    const app = loadAppAgendaHarness();
+    app.updateWorkingHoursFromPayload({
+      timezone: "America/Sao_Paulo",
+      weekly: Array.from({ length: 7 }, (_item, day) => ({
+        day,
+        start: "09:30",
+        end: "18:30",
+        isClosed: false,
+      })),
+    });
+
+    expect(app.getWeekCalendarBounds()).toEqual({ startHour: 9, endHour: 19 });
+    app.renderWeekCalendar();
+    expect(extractHourLabels(app.container.innerHTML)).toEqual([
+      "09h",
+      "10h",
+      "11h",
+      "12h",
+      "13h",
+      "14h",
+      "15h",
+      "16h",
+      "17h",
+      "18h",
+      "19h",
+    ]);
   });
 
   it("ultima faixa da grade e renderizada com a mesma altura logica", () => {
@@ -520,24 +568,23 @@ describe("agenda semanal e carregamento inicial", () => {
     expect(outerBlocks.join("\n")).not.toMatch(/overflow-y:\s*(?:auto|hidden|scroll)/);
   });
 
-  it("ancestrais da Agenda nao cortam a rolagem vertical normal da pagina", () => {
-    const appMainBlocks = cssBlocksFor("#appMain");
-    const appContentBlocks = cssBlocksFor("#appContent");
+  it("shell mantem a Agenda rolando somente no conteudo principal", () => {
+    const css = readFileSync("public/styles/design-system.css", "utf8");
+    const contract = css.slice(css.indexOf("Viewport shell contract"));
 
-    expect(appMainBlocks.join("\n")).toContain("height: auto !important");
-    expect(appMainBlocks.join("\n")).toContain("overflow: visible !important");
-    expect(appContentBlocks.join("\n")).toContain("overflow-y: visible !important");
+    expect(contract).toContain("height: 100dvh !important");
+    expect(contract).toMatch(/#appMain,[\s\S]*overflow-y:\s*auto\s*!important/);
+    expect(contract).toMatch(/#appContent,[\s\S]*overflow:\s*visible\s*!important/);
   });
 
-  it("mobile mantem rolagem vertical da pagina e apenas eixo horizontal no calendario", () => {
-    const css = readFileSync("public/styles/layout.css", "utf8");
-    const mobileBlockStart = css.indexOf("@media (max-width: 767px)");
-    expect(mobileBlockStart).toBeGreaterThanOrEqual(0);
-    const mobileCss = css.slice(mobileBlockStart);
-    expect(mobileCss).not.toMatch(/#agendaSection \.wc-body-scroll\s*\{[^}]*max-height:\s*clamp/);
-    expect(mobileCss).not.toMatch(/#agendaSection \.wc-body-scroll\s*\{[^}]*overflow-y:\s*(?:auto|hidden|scroll)/);
-    expect(mobileCss).not.toMatch(/#agendaSection \.wc-outer\s*\{[^}]*overflow-y:\s*(?:auto|hidden|scroll)/);
-    expect(mobileCss).toMatch(/#agendaSection \.wc-outer\s*\{[^}]*overflow-x:\s*auto !important/);
+  it("mobile usa appMain no eixo vertical e mantem eixo horizontal no calendario", () => {
+    const designCss = readFileSync("public/styles/design-system.css", "utf8");
+    const layoutCss = readFileSync("public/styles/layout.css", "utf8");
+    const contract = designCss.slice(designCss.indexOf("Viewport shell contract"));
+
+    expect(contract).toMatch(/#appMain,[\s\S]*overflow-y:\s*auto\s*!important/);
+    expect(contract).toMatch(/#appSidebar \.sb-scroll,[\s\S]*overflow-y:\s*auto\s*!important/);
+    expect(layoutCss).toMatch(/#agendaSection \.wc-outer\s*\{[^}]*overflow-x:\s*auto !important/);
   });
 
   it("nao limita a grade semanal de forma fixa em 17:00", () => {
