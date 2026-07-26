@@ -29,6 +29,18 @@ describe("correcoes visuais estruturais", () => {
     expect(header).toContain("max-width: none !important");
     expect(header).toContain("#appContent .op-header-link-rail");
     expect(header).toContain("#appContent .op-header-focus::after");
+    expect(header).toContain("--op-header-menu-inset: 64px");
+    expect(header).toContain("@media (min-width: 768px) and (max-width: 1279px)");
+    expect(header).toContain(
+      ".op-page-header:has(> .mobile-sidebar-toggle) > .op-header-layout",
+    );
+    expect(header).toContain(
+      ".fn-page-header:has(> .mobile-sidebar-toggle) > .fn-header-title",
+    );
+    expect(header).toContain(
+      "grid-template-columns: minmax(180px, 1fr) minmax(340px, auto) !important",
+    );
+    expect(density).toContain("var(--op-header-menu-inset, 62px)");
     expect(index.indexOf('/styles/mobile-density.css')).toBeGreaterThan(index.indexOf('/styles/layout.css'));
     expect(effectiveMobileHeaderStyles).toMatch(
       /#appContent \.op-header-context-row\s*,\s*#appContent \.op-header-layout\s*\{\s*grid-column:\s*1 !important;/,

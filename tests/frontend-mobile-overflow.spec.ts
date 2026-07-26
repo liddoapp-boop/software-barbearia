@@ -1775,6 +1775,29 @@ async function measureModule(
           ".module-section:not(.hidden) .op-page-header, .settings-page-head.op-page-header",
         );
         const headerRect = operationalHeader?.getBoundingClientRect();
+        const menuToggle = operationalHeader?.querySelector(".mobile-sidebar-toggle");
+        const menuToggleRect = menuToggle?.getBoundingClientRect();
+        const headerTitle = operationalHeader?.querySelector(".op-page-title, .fn-header-title h1");
+        const headerTitleRect = headerTitle?.getBoundingClientRect();
+        const headerEyebrow = operationalHeader?.querySelector(".fn-header-title > span, .op-page-context");
+        const headerEyebrowRect = headerEyebrow?.getBoundingClientRect();
+        const headerTextNodes = Array.from(
+          operationalHeader?.querySelectorAll(
+            ".op-page-title, .op-page-context, .op-header-focus strong, .fn-header-title > span, .fn-header-title h1, .fn-header-period strong, .fn-header-count strong",
+          ) || [],
+        ).filter((element) => getComputedStyle(element).display !== "none");
+        const intersects = (first, second) => Boolean(
+          first
+          && second
+          && first.width > 0
+          && first.height > 0
+          && second.width > 0
+          && second.height > 0
+          && first.left < second.right
+          && first.right > second.left
+          && first.top < second.bottom
+          && first.bottom > second.top
+        );
         const visibleSection = document.querySelector(".module-section:not(.hidden)");
         const kpiCards = Array.from(visibleSection?.querySelectorAll(".liddo-kpi") || []);
         const kpiGroups = Array.from(visibleSection?.querySelectorAll(".liddo-instruments") || []);
@@ -1837,12 +1860,37 @@ async function measureModule(
           footerRole: document.querySelector("#appSidebar .sb-user-subtitle")?.textContent?.trim() || "",
           activeSidebarModule: document.querySelector(".sb-item.is-active")?.getAttribute("data-sidebar-module") || null,
           headerModule: operationalHeader?.getAttribute("data-header-module") || null,
-          headerTitle: operationalHeader?.querySelector(".op-page-title, .fn-header-title h1")?.textContent?.trim() || "",
+          headerTitle: headerTitle?.textContent?.trim() || "",
           headerHasCoordinate: Boolean(operationalHeader?.querySelector(".op-header-coordinate")),
           headerHasContext: Boolean(operationalHeader?.querySelector("[data-header-context]")),
           headerLeft: headerRect?.left ?? null,
           headerRight: headerRect?.right ?? null,
           headerWidth: headerRect?.width || 0,
+          menuToggleVisible: Boolean(
+            menuToggleRect
+            && menuToggleRect.width > 0
+            && menuToggleRect.height > 0
+            && getComputedStyle(menuToggle).display !== "none"
+          ),
+          headerMenuInset: Number.parseFloat(
+            getComputedStyle(operationalHeader).getPropertyValue("--op-header-menu-inset"),
+          ) || 0,
+          menuTitleOverlap: intersects(menuToggleRect, headerTitleRect),
+          menuEyebrowOverlap: intersects(menuToggleRect, headerEyebrowRect),
+          headerTitleClipped: Boolean(
+            headerTitle
+            && (
+              headerTitle.scrollWidth > headerTitle.clientWidth + 1
+              || headerTitleRect.left < headerRect.left - 1
+              || headerTitleRect.right > headerRect.right + 1
+            )
+          ),
+          headerTextClipped: headerTextNodes.some((element) => {
+            const rect = element.getBoundingClientRect();
+            return element.scrollWidth > element.clientWidth + 1
+              || rect.left < headerRect.left - 1
+              || rect.right > headerRect.right + 1;
+          }),
           kpiCount: kpiCards.length,
           kpiHasOverflow: kpiRects.some((rect) => rect.left < -1 || rect.right > window.innerWidth + 1),
           kpiGroupOverflow: kpiGroups.reduce(
@@ -2739,6 +2787,10 @@ describe("frontend mobile overflow", () => {
       await measureModule(cdp, session, "financeiro", false, { width: 390, height: 844, mobile: true }),
       await measureModule(cdp, session, "financeiro", false, { width: 430, height: 932, mobile: true }),
       await measureModule(cdp, session, "financeiro", false, { width: 768, height: 1024, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 900, height: 768, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1024, height: 768, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1100, height: 800, mobile: false }),
+      await measureModule(cdp, session, "financeiro", false, { width: 1180, height: 820, mobile: false }),
       await measureModule(cdp, session, "financeiro", false, { width: 1280, height: 720, mobile: false }),
       await measureModule(cdp, session, "financeiro", false, { width: 1366, height: 768, mobile: false }),
       await measureModule(cdp, session, "financeiro", false, { width: 1440, height: 900, mobile: false }),
@@ -2756,6 +2808,16 @@ describe("frontend mobile overflow", () => {
       expect(check.headerHasContext, `${check.activeModule} header context`).toBe(true);
       expect(check.headerLeft, `${check.activeModule} header left`).toBeGreaterThanOrEqual(0);
       expect(check.headerRight, `${check.activeModule} header right`).toBeLessThanOrEqual(check.viewport + 2);
+      expect(check.menuTitleOverlap, `${check.activeModule} menu sobre titulo`).toBe(false);
+      expect(check.menuEyebrowOverlap, `${check.activeModule} menu sobre eyebrow`).toBe(false);
+      expect(check.headerTitleClipped, `${check.activeModule} titulo cortado`).toBe(false);
+      expect(check.headerTextClipped, `${check.activeModule} texto do cabecalho cortado`).toBe(false);
+      if (check.viewport < 1280) {
+        expect(check.menuToggleVisible, `${check.activeModule} menu responsivo visivel`).toBe(true);
+        expect(check.headerMenuInset, `${check.activeModule} inset compartilhado`).toBe(64);
+      } else {
+        expect(check.menuToggleVisible, `${check.activeModule} menu desktop oculto`).toBe(false);
+      }
       expect(check.kpiCount, `${check.activeModule} KPI count`).toBeGreaterThan(0);
       expect(check.kpiHasOverflow, `${check.activeModule} KPI viewport overflow`).toBe(false);
       expect(check.kpiGroupOverflow, `${check.activeModule} KPI group overflow`).toBeLessThanOrEqual(1);
@@ -3564,7 +3626,8 @@ describe("frontend mobile overflow", () => {
     const reception = await loginRole("recepcao");
     const professional = await loginRole("profissional");
     const desktop = { width: 1440, height: 900, mobile: false };
-    const tablet = { width: 900, height: 1024, mobile: false };
+    const tablet = { width: 900, height: 768, mobile: false };
+    const intermediate = { width: 1100, height: 800, mobile: false };
     const mobile = { width: 390, height: 844, mobile: true };
 
     const checks = [
@@ -3577,10 +3640,10 @@ describe("frontend mobile overflow", () => {
       await measureModule(cdp, reception, "agenda", false, mobile),
       await measureModule(cdp, professional, "agenda", false, mobile),
       await measureModule(cdp, { session: owner.session, cookies: reception.cookies }, "financeiro", false, desktop),
-      await measureModule(cdp, owner, "auditoria", false, desktop),
-      await measureModule(cdp, owner, "estoque", false, desktop),
-      await measureModule(cdp, owner, "servicos", false, desktop),
-      await measureModule(cdp, owner, "configuracoes", false, desktop),
+      await measureModule(cdp, owner, "auditoria", false, intermediate),
+      await measureModule(cdp, owner, "estoque", false, intermediate),
+      await measureModule(cdp, owner, "servicos", false, intermediate),
+      await measureModule(cdp, owner, "configuracoes", false, intermediate),
       await measureModule(cdp, owner, "clientes", false, tablet),
       await measureModule(cdp, owner, "operacao", false, desktop),
       await measureModule(cdp, owner, "operacao", false, mobile),
@@ -3638,6 +3701,14 @@ describe("frontend mobile overflow", () => {
       expect(check.scrollWidth).toBeLessThanOrEqual(check.viewport + 2);
       expect(check.headerLeft).toBeGreaterThanOrEqual(0);
       expect(check.headerRight).toBeLessThanOrEqual(check.viewport + 2);
+      expect(check.menuTitleOverlap).toBe(false);
+      expect(check.menuEyebrowOverlap).toBe(false);
+      expect(check.headerTitleClipped).toBe(false);
+      expect(check.headerTextClipped).toBe(false);
+      if (check.viewport < 1280) {
+        expect(check.menuToggleVisible).toBe(true);
+        expect(check.headerMenuInset).toBe(64);
+      }
       if (check.kpiCount > 0) {
         expect(check.kpiHasOverflow).toBe(false);
         expect(check.kpiGroupOverflow).toBeLessThanOrEqual(1);

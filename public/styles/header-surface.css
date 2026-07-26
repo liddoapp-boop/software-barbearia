@@ -116,7 +116,27 @@
 @media (max-width: 1279px) {
   #appContent .op-page-header,
   #appContent .settings-page-head.op-page-header {
+    --op-header-menu-inset: 64px;
+    position: relative !important;
     min-height: 128px !important;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  #appShell #appContent .fn-page-header:has(> .mobile-sidebar-toggle) {
+    grid-template-columns: minmax(180px, 1fr) minmax(340px, auto) !important;
+    align-items: stretch !important;
+  }
+
+  #appShell #appContent .op-page-header:has(> .mobile-sidebar-toggle) > .op-header-context-row,
+  #appShell #appContent .op-page-header:has(> .mobile-sidebar-toggle) > .op-header-layout,
+  #appShell #appContent .settings-page-head:has(> .mobile-sidebar-toggle) > .op-header-context-row,
+  #appShell #appContent .settings-page-head:has(> .mobile-sidebar-toggle) > .op-header-layout,
+  #appShell #appContent .fn-page-header:has(> .mobile-sidebar-toggle) > .fn-header-title {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding-inline-start: var(--op-header-menu-inset) !important;
+    box-sizing: border-box !important;
   }
 }
 
@@ -160,5 +180,9 @@
     grid-column: 1 !important;
     width: 100% !important;
     max-width: none !important;
+  }
+
+  #appShell #appContent .fn-page-header:has(> .mobile-sidebar-toggle) > .fn-header-title {
+    padding-inline-start: var(--op-header-menu-inset) !important;
   }
 }

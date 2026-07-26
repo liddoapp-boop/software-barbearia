@@ -60,7 +60,7 @@
 
   #appContent .op-page-header-main {
     min-height: 58px;
-    padding: 12px 16px 10px 62px !important;
+    padding: 12px 16px 10px var(--op-header-menu-inset, 62px) !important;
     justify-content: center !important;
   }
 
