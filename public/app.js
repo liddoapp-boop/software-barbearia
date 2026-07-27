@@ -11050,6 +11050,7 @@ document.getElementById("wcNextWeekBtn")?.addEventListener("click", () => {
   changeWeekCalendar(1);
 });
 document.getElementById("wcTodayBtn")?.addEventListener("click", () => {
+  closeAgendaMoreOptionsMenu();
   const today = new Date();
   const goToDate = document.getElementById("wcGoToDate");
   if (goToDate) goToDate.value = asDateInputValue(today);

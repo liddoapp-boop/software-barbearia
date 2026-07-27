@@ -2015,10 +2015,13 @@ async function measureAgendaViewToggle(cdp: Cdp, authSession: any) {
     returnByValue: true,
     expression: `(() => {
       const date = document.querySelector('#wcGoToDate');
+      const today = document.querySelector('#wcTodayBtn');
+      const more = document.querySelector('#agendaMoreOptionsBtn');
       return {
         label: document.querySelector('#wcWeekLabel')?.textContent?.trim() || '',
-        todayVisible: getComputedStyle(document.querySelector('#wcTodayBtn')).display !== 'none',
-        dateVisible: getComputedStyle(date).display !== 'none',
+        todayVisible: Boolean(today?.getClientRects().length),
+        moreVisible: Boolean(more?.getClientRects().length),
+        dateVisible: Boolean(date?.getClientRects().length),
         dateType: date?.type || '',
         dateFontSize: parseFloat(getComputedStyle(date).fontSize),
       };
@@ -2107,6 +2110,26 @@ async function measureAgendaViewToggle(cdp: Cdp, authSession: any) {
     })`,
   }, sessionId);
   await cdp.send("Runtime.evaluate", {
+    expression: "document.querySelector('#agendaMoreOptionsBtn')?.click()",
+  }, sessionId);
+  await waitForExpression(
+    cdp,
+    sessionId,
+    "!document.querySelector('#agendaMoreOptionsMenu')?.classList.contains('hidden')",
+  );
+  const todayMenuState = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const today = document.querySelector('#wcTodayBtn');
+      const menu = document.querySelector('#agendaMoreOptionsMenu');
+      return {
+        insideMenu: today?.parentElement === menu,
+        visible: Boolean(today?.getClientRects().length),
+        menuVisible: Boolean(menu?.getClientRects().length),
+      };
+    })()`,
+  }, sessionId);
+  await cdp.send("Runtime.evaluate", {
     expression: "document.querySelector('#wcTodayBtn')?.click()",
   }, sessionId);
   await delay(180);
@@ -2158,8 +2181,216 @@ async function measureAgendaViewToggle(cdp: Cdp, authSession: any) {
     jumpedWeek: jumpedWeek.result.value,
     list: list.result.value,
     listAfterDateJump: listAfterDateJump.result.value,
+    todayMenuState: todayMenuState.result.value,
     todayWeek: todayWeek.result.value,
     calendarAgain: calendarAgain.result.value,
+  };
+}
+
+async function measureAgendaMobileComposition(
+  cdp: Cdp,
+  authSession: any,
+  viewport: { width: number; height: number; mobile: boolean },
+) {
+  const target = await cdp.send("Target.createTarget", { url: "about:blank" });
+  const attached = await cdp.send("Target.attachToTarget", {
+    targetId: target.targetId,
+    flatten: true,
+  });
+  const sessionId = attached.sessionId;
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    ...viewport,
+    deviceScaleFactor: viewport.mobile ? 2 : 1,
+  }, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Page.enable", {}, sessionId);
+  await installAuthCookies(cdp, sessionId, authSession);
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `${initScript(authSession, "agenda")}
+      window.localStorage.setItem("sb.agendaView", "cards");
+    `,
+  }, sessionId);
+  await cdp.send("Page.navigate", { url: `${baseUrl}/` }, sessionId);
+  await waitForComplete(cdp, sessionId);
+  await waitForExpression(
+    cdp,
+    sessionId,
+    "Boolean(document.querySelector('#agendaSection:not(.hidden) .op-page-header-agenda') && document.querySelector('#agendaSection .wc-header-row'))",
+  );
+  await waitForExpression(cdp, sessionId, "Boolean(document.querySelector('#wcWeekLabel')?.textContent?.trim())");
+  await delay(180);
+
+  const initial = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const rect = (selector) => {
+        const element = document.querySelector(selector);
+        const value = element?.getBoundingClientRect();
+        return value ? {
+          top: value.top,
+          right: value.right,
+          bottom: value.bottom,
+          left: value.left,
+          width: value.width,
+          height: value.height,
+        } : null;
+      };
+      const intersects = (first, second) => Boolean(
+        first
+        && second
+        && first.left < second.right
+        && first.right > second.left
+        && first.top < second.bottom
+        && first.bottom > second.top
+      );
+      const visible = (selector) => {
+        const element = document.querySelector(selector);
+        return Boolean(element?.getClientRects().length);
+      };
+      const header = rect('#agendaSection .op-page-header-agenda');
+      const menu = rect('#agendaSection .mobile-sidebar-toggle');
+      const title = rect('#agendaSection .op-page-title');
+      const focus = rect('#agendaSection .op-header-focus');
+      const focusPrimary = rect('#agendaSection .op-header-focus strong');
+      const focusSignal = rect('#agendaSection .op-header-focus small');
+      const next = rect('#agendaSection .agenda-next-card');
+      const nextValue = rect('#agendaSection .agenda-next-card .ux-value-sm');
+      const nextValueElement = document.querySelector('#agendaSection .agenda-next-card .ux-value-sm');
+      const nextElement = document.querySelector('#agendaSection .agenda-next-card');
+      const controls = rect('#agendaSection .wc-nav');
+      const period = rect('#agendaSection .wc-period-navigation');
+      const previous = rect('#wcPrevWeekBtn');
+      const label = rect('#wcWeekLabel');
+      const nextWeek = rect('#wcNextWeekBtn');
+      const view = rect('#agendaSection .wc-nav-right');
+      const add = rect('#agendaNewAppointmentBtn');
+      const date = rect('#agendaSection .wc-date-jump');
+      const more = rect('#agendaMoreOptionsBtn');
+      const calendar = rect('#agendaSection .wc-outer');
+      const weekLabel = document.querySelector('#wcWeekLabel');
+      const outer = document.querySelector('#agendaSection .wc-outer');
+      const headerElement = document.querySelector('#agendaSection .op-page-header-agenda');
+      const headerMain = document.querySelector('#agendaSection .op-page-header-agenda .op-page-header-main');
+      const headerFocus = document.querySelector('#agendaSection .op-page-header-agenda .op-header-focus');
+      return {
+        viewport: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        agendaMobileStyleLoaded: Array.from(document.styleSheets).some((sheet) => sheet.href?.includes('/styles/agenda-mobile.css')),
+        headerDebug: {
+          className: headerElement?.className || '',
+          minHeight: headerElement ? getComputedStyle(headerElement).minHeight : '',
+          gridRows: headerElement ? getComputedStyle(headerElement).gridTemplateRows : '',
+          layoutHeight: headerElement?.querySelector('.op-header-layout')?.getBoundingClientRect().height || 0,
+          mainMinHeight: headerMain ? getComputedStyle(headerMain).minHeight : '',
+          mainPadding: headerMain ? getComputedStyle(headerMain).padding : '',
+          mainHeight: headerMain?.getBoundingClientRect().height || 0,
+          focusMinHeight: headerFocus ? getComputedStyle(headerFocus).minHeight : '',
+          focusPadding: headerFocus ? getComputedStyle(headerFocus).padding : '',
+          focusHeight: headerFocus?.getBoundingClientRect().height || 0,
+          focusDisplay: headerFocus ? getComputedStyle(headerFocus).display : '',
+          focusDirection: headerFocus ? getComputedStyle(headerFocus).flexDirection : '',
+        },
+        headerHeight: header?.height || 0,
+        nextHeight: next?.height || 0,
+        nextDebug: {
+          display: nextElement ? getComputedStyle(nextElement).display : '',
+          columns: nextElement ? getComputedStyle(nextElement).gridTemplateColumns : '',
+          justifyItems: nextElement ? getComputedStyle(nextElement).justifyItems : '',
+          alignItems: nextElement ? getComputedStyle(nextElement).alignItems : '',
+          valueWidth: nextValue?.width || 0,
+          valueJustifySelf: nextValueElement ? getComputedStyle(nextValueElement).justifySelf : '',
+          valueGridColumn: nextValueElement ? getComputedStyle(nextValueElement).gridColumn : '',
+          valueTextAlign: nextValueElement ? getComputedStyle(nextValueElement).textAlign : '',
+          valueClientWidth: nextValueElement?.clientWidth || 0,
+          valueScrollWidth: nextValueElement?.scrollWidth || 0,
+          valueClientHeight: nextValueElement?.clientHeight || 0,
+          valueScrollHeight: nextValueElement?.scrollHeight || 0,
+        },
+        nextValueInset: next && nextValue ? nextValue.left - next.left : null,
+        nextValueClipped: Boolean(
+          nextValueElement
+          && (
+            nextValueElement.scrollWidth > nextValueElement.clientWidth + 1
+            || nextValueElement.scrollHeight > nextValueElement.clientHeight + 1
+          )
+        ),
+        controlsHeight: controls?.height || 0,
+        calendarTop: calendar?.top ?? null,
+        menuTitleOverlap: intersects(menu, title),
+        menuTitleCenterDelta: menu && title
+          ? Math.abs((menu.top + menu.height / 2) - (title.top + title.height / 2))
+          : null,
+        focusOneLine: Boolean(
+          focus
+          && focusPrimary
+          && focusSignal
+          && Math.abs((focusPrimary.top + focusPrimary.height / 2) - (focusSignal.top + focusSignal.height / 2)) <= 3
+        ),
+        focusOverlap: intersects(focusPrimary, focusSignal),
+        periodText: weekLabel?.textContent?.trim() || '',
+        periodComplete: Boolean(
+          weekLabel
+          && weekLabel.scrollWidth <= weekLabel.clientWidth + 1
+          && label
+          && period
+          && label.left >= period.left
+          && label.right <= period.right
+        ),
+        periodRowAligned: Boolean(
+          previous
+          && label
+          && nextWeek
+          && Math.abs((previous.top + previous.height / 2) - (label.top + label.height / 2)) <= 3
+          && Math.abs((nextWeek.top + nextWeek.height / 2) - (label.top + label.height / 2)) <= 3
+        ),
+        primaryRowAligned: Boolean(
+          view
+          && add
+          && Math.abs((view.top + view.height / 2) - (add.top + add.height / 2)) <= 3
+        ),
+        secondaryRowAligned: Boolean(
+          date
+          && more
+          && Math.abs((date.top + date.height / 2) - (more.top + more.height / 2)) <= 3
+        ),
+        primaryOverlap: intersects(view, add),
+        secondaryOverlap: intersects(date, more),
+        newVisible: visible('#agendaNewAppointmentBtn'),
+        dateVisible: visible('#wcGoToDate'),
+        moreVisible: visible('#agendaMoreOptionsBtn'),
+        todayVisibleOutsideMenu: visible('#wcTodayBtn'),
+        calendarClientWidth: outer?.clientWidth || 0,
+        calendarScrollWidth: outer?.scrollWidth || 0,
+        calendarOverflowX: outer ? getComputedStyle(outer).overflowX : '',
+      };
+    })()`,
+  }, sessionId);
+
+  await cdp.send("Runtime.evaluate", {
+    expression: "document.querySelector('#agendaSection .wc-outer').scrollLeft = 180",
+  }, sessionId);
+  await delay(80);
+  const sticky = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `(() => {
+      const outer = document.querySelector('#agendaSection .wc-outer')?.getBoundingClientRect();
+      const headerTime = document.querySelector('#agendaSection .wc-hdr-time')?.getBoundingClientRect();
+      const times = document.querySelector('#agendaSection .wc-times-col')?.getBoundingClientRect();
+      return {
+        scrollLeft: document.querySelector('#agendaSection .wc-outer')?.scrollLeft || 0,
+        headerOffset: outer && headerTime ? Math.abs(headerTime.left - outer.left) : null,
+        timesOffset: outer && times ? Math.abs(times.left - outer.left) : null,
+      };
+    })()`,
+  }, sessionId);
+
+  await cdp.send("Target.closeTarget", { targetId: target.targetId });
+  return {
+    ...initial.result.value,
+    sticky: sticky.result.value,
   };
 }
 
@@ -3452,7 +3683,12 @@ describe("frontend mobile overflow", () => {
     await configureWorkingHours(session, geovaneHours);
 
     let result;
+    let compositions;
     try {
+      compositions = [
+        await measureAgendaMobileComposition(cdp, session, { width: 390, height: 844, mobile: true }),
+        await measureAgendaMobileComposition(cdp, session, { width: 430, height: 932, mobile: true }),
+      ];
       result = await measureAgendaViewToggle(cdp, session);
     } finally {
       await configureWorkingHours(
@@ -3472,6 +3708,47 @@ describe("frontend mobile overflow", () => {
 
     cdp.close();
 
+    for (const composition of compositions) {
+      expect(composition.documentScrollWidth, `${composition.viewport}px document sem overflow`).toBeLessThanOrEqual(composition.viewport + 2);
+      expect(composition.bodyScrollWidth, `${composition.viewport}px body sem overflow`).toBeLessThanOrEqual(composition.viewport + 2);
+      expect(composition.agendaMobileStyleLoaded, `${composition.viewport}px CSS mobile carregado`).toBe(true);
+      expect(
+        composition.headerHeight,
+        `${composition.viewport}px cabecalho compacto ${JSON.stringify(composition.headerDebug)}`,
+      ).toBeLessThanOrEqual(82);
+      expect(composition.nextHeight, `${composition.viewport}px proximo atendimento compacto`).toBeLessThanOrEqual(64);
+      expect(
+        composition.nextValueInset,
+        `${composition.viewport}px proximo atendimento alinhado ${JSON.stringify(composition.nextDebug)}`,
+      ).toBeLessThanOrEqual(20);
+      expect(
+        composition.nextValueClipped,
+        `${composition.viewport}px proximo atendimento sem corte ${JSON.stringify(composition.nextDebug)}`,
+      ).toBe(false);
+      expect(composition.controlsHeight, `${composition.viewport}px controles compactos`).toBeLessThanOrEqual(122);
+      expect(composition.calendarTop, `${composition.viewport}px grade na primeira tela`).toBeLessThan(390);
+      expect(composition.menuTitleOverlap, `${composition.viewport}px menu sem cobrir titulo`).toBe(false);
+      expect(composition.menuTitleCenterDelta, `${composition.viewport}px menu alinhado ao titulo`).toBeLessThanOrEqual(5);
+      expect(composition.focusOneLine, `${composition.viewport}px leitura operacional em uma linha`).toBe(true);
+      expect(composition.focusOverlap, `${composition.viewport}px leitura operacional sem sobreposicao`).toBe(false);
+      expect(composition.periodText, `${composition.viewport}px periodo preenchido`).not.toBe("");
+      expect(composition.periodComplete, `${composition.viewport}px periodo completo`).toBe(true);
+      expect(composition.periodRowAligned, `${composition.viewport}px navegacao semanal alinhada`).toBe(true);
+      expect(composition.primaryRowAligned, `${composition.viewport}px Semana Lista e Novo alinhados`).toBe(true);
+      expect(composition.secondaryRowAligned, `${composition.viewport}px data e Mais opcoes alinhados`).toBe(true);
+      expect(composition.primaryOverlap, `${composition.viewport}px linha principal sem sobreposicao`).toBe(false);
+      expect(composition.secondaryOverlap, `${composition.viewport}px linha secundaria sem sobreposicao`).toBe(false);
+      expect(composition.newVisible, `${composition.viewport}px Novo acessivel`).toBe(true);
+      expect(composition.dateVisible, `${composition.viewport}px Ir para data acessivel`).toBe(true);
+      expect(composition.moreVisible, `${composition.viewport}px Mais opcoes acessivel`).toBe(true);
+      expect(composition.todayVisibleOutsideMenu, `${composition.viewport}px Hoje oculto fora do menu`).toBe(false);
+      expect(composition.calendarScrollWidth, `${composition.viewport}px grade horizontal interna`).toBeGreaterThan(composition.calendarClientWidth);
+      expect(composition.calendarOverflowX, `${composition.viewport}px overflow somente na grade`).toMatch(/auto|scroll/);
+      expect(composition.sticky.scrollLeft, `${composition.viewport}px grade rolada`).toBeGreaterThan(0);
+      expect(composition.sticky.headerOffset, `${composition.viewport}px cabecalho de horario fixo`).toBeLessThanOrEqual(2);
+      expect(composition.sticky.timesOffset, `${composition.viewport}px coluna de horarios fixa`).toBeLessThanOrEqual(2);
+    }
+
     expect(result.initialList.scrollWidth, "agenda lista inicial document scrollWidth").toBeLessThanOrEqual(result.initialList.viewport + 2);
     expect(result.initialList.bodyScrollWidth, "agenda lista inicial body scrollWidth").toBeLessThanOrEqual(result.initialList.viewport + 2);
     expect(result.initialList.calendarVisible).toBe(false);
@@ -3486,7 +3763,8 @@ describe("frontend mobile overflow", () => {
     expect(result.calendar.firstTimeLabel).toBe("08h");
     expect(result.calendar.lastTimeLabel).toBe("20h");
     expect(result.calendar.timeLabelCount).toBe(13);
-    expect(result.mobileNavInitial.todayVisible).toBe(true);
+    expect(result.mobileNavInitial.todayVisible).toBe(false);
+    expect(result.mobileNavInitial.moreVisible).toBe(true);
     expect(result.mobileNavInitial.dateVisible).toBe(true);
     expect(result.mobileNavInitial.dateType).toBe("date");
     expect(result.mobileNavInitial.dateFontSize).toBeGreaterThanOrEqual(16);
@@ -3505,6 +3783,9 @@ describe("frontend mobile overflow", () => {
     expect(result.listAfterDateJump.listActive).toBe(true);
     expect(result.listAfterDateJump.firstDay).toBe("7");
     expect(result.listAfterDateJump.selectedDate).toBe("2026-09-10");
+    expect(result.todayMenuState.insideMenu).toBe(true);
+    expect(result.todayMenuState.visible).toBe(true);
+    expect(result.todayMenuState.menuVisible).toBe(true);
     expect(result.todayWeek.firstDay).toBe(result.todayWeek.expectedFirstDay);
     expect(result.todayWeek.listActive).toBe(true);
 

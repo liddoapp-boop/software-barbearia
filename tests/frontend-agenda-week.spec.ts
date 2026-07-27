@@ -204,21 +204,28 @@ function cssBlocksFor(selector: string) {
 }
 
 describe("agenda semanal e carregamento inicial", () => {
-  it("mobile oferece Hoje e Ir para data nativos sem substituir Semana e Lista", () => {
+  it("mobile organiza Ir para data e Hoje dentro de Mais opcoes sem substituir Semana e Lista", () => {
     const appSource = readFileSync("public/app.js", "utf8");
     const indexSource = readFileSync("public/index.html", "utf8");
-    const agendaCss = readFileSync("public/styles/agenda-surface.css", "utf8");
+    const agendaMobileCss = readFileSync("public/styles/agenda-mobile.css", "utf8");
 
     expect(indexSource).toContain('id="wcTodayBtn"');
+    expect(indexSource).toContain('class="agenda-mobile-today-action"');
+    expect(indexSource.indexOf('id="wcTodayBtn"')).toBeGreaterThan(indexSource.indexOf('id="agendaMoreOptionsMenu"'));
     expect(indexSource).toContain('id="wcGoToDate" type="date"');
+    expect(indexSource).toContain('class="wc-period-navigation"');
     expect(indexSource).toContain('id="viewGridBtn"');
     expect(indexSource).toContain('id="viewListBtn"');
     expect(appSource).toContain("function goToWeekCalendarDate");
     expect(appSource).toContain("wcWeekStart = getWeekMonday(selected)");
     expect(appSource).toContain('document.getElementById("wcTodayBtn")?.addEventListener');
+    expect(appSource).toContain("closeAgendaMoreOptionsMenu();");
     expect(appSource).toContain('document.getElementById("wcGoToDate")?.addEventListener("change"');
-    expect(agendaCss).toContain("#agendaSection .wc-mobile-date-nav");
-    expect(agendaCss).toContain('input[type="date"]');
+    expect(agendaMobileCss).toContain("grid-template-rows: var(--agenda-mobile-control) 35px var(--agenda-mobile-control)");
+    expect(agendaMobileCss).toContain("#agendaSection .wc-nav.ds-mb .wc-period-navigation");
+    expect(agendaMobileCss).toContain("#agendaSection .wc-nav.ds-mb .wc-date-jump");
+    expect(agendaMobileCss).toContain('input[type="date"]');
+    expect(agendaMobileCss).toContain("position: sticky !important");
   });
 
   it("prepara Semana antes da primeira busca da Agenda", () => {

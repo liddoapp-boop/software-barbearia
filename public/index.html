@@ -28,6 +28,7 @@
     <link rel="stylesheet" href="/styles/finance-surface.css?v=20260726-finance-composition2" />
     <link rel="stylesheet" href="/styles/header-surface.css?v=20260726-header-inset2" />
     <link rel="stylesheet" href="/styles/mobile-density.css?v=20260726-header-inset2" />
+    <link rel="stylesheet" href="/styles/agenda-mobile.css?v=20260726-agenda-mobile3" />
     <link rel="stylesheet" href="/styles/interaction-surfaces.css?v=20260726-overlay-recovery1" />
   </head>
   <body class="overflow-x-hidden">
@@ -60,19 +61,21 @@
 
             <div class="wc-nav ds-mb">
               <div class="wc-nav-left">
-                <button id="wcPrevWeekBtn" type="button" class="wc-nav-btn" title="Semana anterior">&#8592;</button>
-                <span id="wcWeekLabel" class="wc-week-label"></span>
-                <button id="wcNextWeekBtn" type="button" class="wc-nav-btn" title="Proxima semana">&#8594;</button>
+                <div class="wc-period-navigation">
+                  <button id="wcPrevWeekBtn" type="button" class="wc-nav-btn" title="Semana anterior" aria-label="Semana anterior">&#8592;</button>
+                  <span id="wcWeekLabel" class="wc-week-label"></span>
+                  <button id="wcNextWeekBtn" type="button" class="wc-nav-btn" title="Proxima semana" aria-label="Proxima semana">&#8594;</button>
+                </div>
                 <div class="wc-nav-right c-button-group c-button-group-1" role="group" aria-label="Visualizacao da agenda">
                   <button id="viewGridBtn" type="button" class="wc-view-btn c-button-group-item is-active">Semana</button>
                   <button id="viewListBtn" type="button" class="wc-view-btn c-button-group-item">Lista</button>
                 </div>
               </div>
               <div class="wc-mobile-date-nav">
-                <button id="wcTodayBtn" type="button" class="wc-nav-btn wc-nav-today">Hoje</button>
                 <label class="wc-date-jump" for="wcGoToDate">
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
                   <span>Ir para data</span>
-                  <input id="wcGoToDate" type="date" />
+                  <input id="wcGoToDate" type="date" aria-label="Ir para data" />
                 </label>
               </div>
               <div class="agenda-owner-actions">
@@ -86,6 +89,7 @@
                     Mais opções
                   </button>
                   <div id="agendaMoreOptionsMenu" class="agenda-more-menu hidden" role="menu" aria-label="Mais opcoes da agenda">
+                    <button id="wcTodayBtn" type="button" role="menuitem" class="agenda-mobile-today-action">Hoje</button>
                     <button type="button" role="menuitem" data-owner-flow="walk-in">Atendimento sem agendamento</button>
                     <button type="button" role="menuitem" data-owner-flow="block-time">Bloquear horario</button>
                     <button type="button" role="menuitem" data-owner-flow="block-day">Bloquear dia</button>
@@ -1000,6 +1004,6 @@
 
     <nav id="appMobileTabs" aria-label="Navegacao mobile"></nav>
 
-    <script type="module" src="/app.js?v=20260726-finance-native-period1"></script>
+    <script type="module" src="/app.js?v=20260726-agenda-mobile1"></script>
   </body>
 </html>
