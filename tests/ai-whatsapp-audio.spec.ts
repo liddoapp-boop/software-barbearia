@@ -9,6 +9,7 @@ import {
   extractTranscript,
   GeminiAudioTranscriptionService,
   getGeminiAudioTranscriptionTimeoutMsFromEnv,
+  isAudioTranscriptionEnabledFromEnv,
 } from "../src/application/audio-transcription";
 import type { AudioTranscriptionInput, AudioTranscriptionResult } from "../src/application/audio-transcription";
 import { InMemoryStore } from "../src/infrastructure/in-memory-store";
@@ -51,6 +52,29 @@ describe("comando do owner para analise de reativacao", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     process.env = { ...originalEnv };
+  });
+
+  it("mantem transcricao desativada em producao ate o canario ser liberado explicitamente", () => {
+    process.env.NODE_ENV = "production";
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
+    delete process.env.AI_AUDIO_PRODUCTION_ENABLED;
+    expect(isAudioTranscriptionEnabledFromEnv()).toBe(false);
+
+    process.env.AI_AUDIO_PRODUCTION_ENABLED = "false";
+    expect(isAudioTranscriptionEnabledFromEnv()).toBe(false);
+
+    process.env.AI_AUDIO_PRODUCTION_ENABLED = "true";
+    expect(isAudioTranscriptionEnabledFromEnv()).toBe(true);
+  });
+
+  it("preserva a flag existente em teste e desenvolvimento", () => {
+    process.env.NODE_ENV = "test";
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "true";
+    delete process.env.AI_AUDIO_PRODUCTION_ENABLED;
+    expect(isAudioTranscriptionEnabledFromEnv()).toBe(true);
+
+    process.env.AI_AUDIO_TRANSCRIPTION_ENABLED = "false";
+    expect(isAudioTranscriptionEnabledFromEnv()).toBe(false);
   });
 
   it("texto e audio retornam o mesmo relatorio somente leitura sem campanha nem envio a cliente", async () => {

@@ -9,6 +9,7 @@ dist/
 .env*.local
 infra/evolution-local/.env
 infra/evolution-local/*.session
+infra/evolution-production/.env
 
 # IDE
 .vscode/

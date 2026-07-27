@@ -929,7 +929,11 @@ export class LocalWhisperAudioTranscriptionService implements AudioTranscription
 }
 
 export function isAudioTranscriptionEnabledFromEnv() {
-  return isEnabled(process.env.AI_AUDIO_TRANSCRIPTION_ENABLED);
+  if (!isEnabled(process.env.AI_AUDIO_TRANSCRIPTION_ENABLED)) return false;
+  if (process.env.NODE_ENV === "production") {
+    return isEnabled(process.env.AI_AUDIO_PRODUCTION_ENABLED);
+  }
+  return true;
 }
 
 export function createAudioTranscriptionServiceFromEnv(): AudioTranscriptionService | null {

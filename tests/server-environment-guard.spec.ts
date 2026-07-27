@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   ISOLATED_STARTUP_BLOCKED_MESSAGE,
   OPERATIONAL_STARTUP_BLOCKED_MESSAGE,
+  PRODUCTION_STARTUP_BLOCKED_MESSAGE,
   assertSafeServerEnvironment,
 } from "../src/server-environment";
 
@@ -18,7 +19,124 @@ const pilotEnv = {
   DATABASE_URL: "postgresql://hidden:hidden@localhost:5432/barbearia_pilot",
 };
 
+const productionEnv = {
+  NODE_ENV: "production",
+  SERVER_MODE: "production",
+  PORT: "3333",
+  HOST: "127.0.0.1",
+  DATA_BACKEND: "prisma",
+  DATABASE_URL: "postgresql://barbearia_runtime:strong-database-password@postgres.internal:5432/barbearia?schema=public",
+  AUTH_ENFORCED: "true",
+  AUTH_SECRET: "production-auth-secret-with-more-than-32-chars",
+  CORS_ORIGIN: "https://app.example.com",
+  PUBLIC_BOOKING_UNIT_ID: "unit-production",
+  PUBLIC_BOOKING_URL: "https://app.example.com/agendamento?unitId=unit-production",
+  AI_WHATSAPP_ENABLED: "false",
+  AI_AUDIO_PRODUCTION_ENABLED: "false",
+};
+
 describe("server environment guard", () => {
+  it("aceita o modo de producao somente com PostgreSQL, autenticacao e URLs seguras", () => {
+    expect(assertSafeServerEnvironment(productionEnv)).toEqual({
+      mode: "production",
+      port: 3333,
+      host: "127.0.0.1",
+      dataBackend: "prisma",
+    });
+  });
+
+  it.each([
+    ["NODE_ENV local", { NODE_ENV: "development" }],
+    ["backend em memoria", { DATA_BACKEND: "memory" }],
+    ["DATABASE_URL ausente", { DATABASE_URL: undefined }],
+    ["protocolo nao PostgreSQL", { DATABASE_URL: "mysql://runtime:strong-password@db.internal/barbearia" }],
+    ["credencial de banco incompleta", { DATABASE_URL: "postgresql://db.internal:5432/barbearia" }],
+    ["usuario superuser", { DATABASE_URL: "postgresql://postgres:strong-database-password@db.internal:5432/barbearia" }],
+    ["senha de banco fraca", { DATABASE_URL: "postgresql://runtime:curta@db.internal:5432/barbearia" }],
+    ["base de teste", { DATABASE_URL: "postgresql://runtime:strong-password@db.internal:5432/barbearia_redesign_test" }],
+    ["schema diferente de public", { DATABASE_URL: "postgresql://runtime:strong-password@db.internal:5432/barbearia?schema=tenant" }],
+    ["autenticacao desativada", { AUTH_ENFORCED: "false" }],
+    ["segredo curto", { AUTH_SECRET: "curto" }],
+    ["segredo de exemplo", { AUTH_SECRET: "uma-chave-aleatoria-e-segura-com-32-ou-mais-caracteres" }],
+    ["CORS aberto", { CORS_ORIGIN: "*" }],
+    ["CORS sem HTTPS", { CORS_ORIGIN: "http://app.example.com" }],
+    ["URL publica ausente", { PUBLIC_BOOKING_URL: undefined }],
+    ["unidade publica divergente", { PUBLIC_BOOKING_URL: "https://app.example.com/agendamento?unitId=outra-unidade" }],
+    ["bind publico direto", { HOST: "0.0.0.0" }],
+  ])("bloqueia producao com %s sem revelar configuracao", (_label, override) => {
+    expect(() => assertSafeServerEnvironment({ ...productionEnv, ...override })).toThrow(
+      PRODUCTION_STARTUP_BLOCKED_MESSAGE,
+    );
+    expect(PRODUCTION_STARTUP_BLOCKED_MESSAGE).not.toMatch(
+      /strong-database-password|production-auth-secret|postgresql:|DATABASE_URL|AUTH_SECRET/,
+    );
+  });
+
+  it("exige segredos da Evolution somente quando o WhatsApp estiver habilitado", () => {
+    expect(() => assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_WHATSAPP_ENABLED: "true",
+    })).toThrow(PRODUCTION_STARTUP_BLOCKED_MESSAGE);
+
+    expect(assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_WHATSAPP_ENABLED: "true",
+      EVOLUTION_API_URL: "http://127.0.0.1:8080",
+      EVOLUTION_API_KEY: "production-evolution-key-32-characters",
+      EVOLUTION_WEBHOOK_SECRET: "production-webhook-secret-32-characters",
+      EVOLUTION_INSTANCE_NAME: "barbearia-production",
+      AI_WHATSAPP_OWNER_PHONE: "5511999999999",
+      AI_WHATSAPP_UNIT_ID: "unit-production",
+    })).toMatchObject({ mode: "production" });
+
+    expect(() => assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_WHATSAPP_ENABLED: "true",
+      EVOLUTION_API_URL: "http://evolution.example.com",
+      EVOLUTION_API_KEY: "production-evolution-key-32-characters",
+      EVOLUTION_WEBHOOK_SECRET: "production-webhook-secret-32-characters",
+      EVOLUTION_INSTANCE_NAME: "barbearia-production",
+      AI_WHATSAPP_OWNER_PHONE: "5511999999999",
+      AI_WHATSAPP_UNIT_ID: "unit-production",
+    })).toThrow(PRODUCTION_STARTUP_BLOCKED_MESSAGE);
+  });
+
+  it("mantem o audio desligado por padrao e valida todo o canario antes de habilita-lo", () => {
+    expect(assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+      AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
+    })).toMatchObject({ mode: "production" });
+
+    expect(() => assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_AUDIO_PRODUCTION_ENABLED: "true",
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+      AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
+      ASR_PROVIDER: "local_whisper",
+    })).toThrow(PRODUCTION_STARTUP_BLOCKED_MESSAGE);
+
+    expect(assertSafeServerEnvironment({
+      ...productionEnv,
+      AI_WHATSAPP_ENABLED: "true",
+      EVOLUTION_API_URL: "http://127.0.0.1:8080",
+      EVOLUTION_API_KEY: "production-evolution-key-32-characters",
+      EVOLUTION_WEBHOOK_SECRET: "production-webhook-secret-32-characters",
+      EVOLUTION_INSTANCE_NAME: "barbearia-production",
+      AI_WHATSAPP_OWNER_PHONE: "5511999999999",
+      AI_WHATSAPP_UNIT_ID: "unit-production",
+      AI_AUDIO_PRODUCTION_ENABLED: "true",
+      AI_WHATSAPP_AUDIO_ENABLED: "true",
+      AI_AUDIO_TRANSCRIPTION_ENABLED: "true",
+      ASR_PROVIDER: "local_whisper",
+      LOCAL_WHISPER_GPU_ENABLED: "true",
+      LOCAL_WHISPER_FFMPEG_PATH: "/opt/whisper/bin/ffmpeg",
+      LOCAL_WHISPER_CLI_PATH: "/opt/whisper/bin/whisper-cli",
+      LOCAL_WHISPER_MODEL_PATH: "/opt/whisper/models/ggml-large-v3-turbo-q5_0.bin",
+      LOCAL_WHISPER_VAD_MODEL_PATH: "/opt/whisper/models/ggml-silero-v6.2.0.bin",
+    })).toMatchObject({ mode: "production" });
+  });
+
   it("aceita somente o piloto protegido na porta operacional", () => {
     expect(assertSafeServerEnvironment(pilotEnv)).toEqual({
       mode: "pilot",
